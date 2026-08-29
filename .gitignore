@@ -1,0 +1,63 @@
+# ============================================================
+# LJ-MathSlides — Reveal.js 所见即所得幻灯片编辑器
+# ============================================================
+
+# ---- Rust / Tauri 构建产物（8GB+，切勿入库）----
+src-tauri/target/
+src-tauri/gen/
+**/*.rs.bk
+**/*.pdb
+
+# ---- Node 依赖 ----
+node_modules/
+.npm-cache/
+.npm/
+
+# ---- 编辑器与系统 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+.vscode/
+.idea/
+*.swp
+
+# ---- 个人 / 本机配置（含 AI 工作笔记，不公开）----
+.workbuddy/
+.cargo/
+.env
+.env.*
+*.local
+
+# ---- 构建产物（安装包请走 GitHub Releases）----
+*.exe
+*.msi
+*.zip
+*.7z
+src-tauri/target/release/bundle/
+
+# ---- 根目录重复的第三方引擎副本 ----
+# 正规副本位于 dist/geogebra/ 与 dist/revealjs/，此处仅排除根目录的同名冗余目录
+/GeoGebra/
+/revealjs/
+
+# ---- 与本应用无关的目录 ----
+/frontend-slides-main/
+
+# ---- 历史备份 ----
+backup-v*/
+# ---- 引擎资源（运行时从 CDN/本地打包，或走 GitHub Releases；不入源码库）----
+dist/
+/assets/
+/ggb/
+/help-*.png
+/shot-*.png
+# ---- 内部/课件生成脚本（不发布）----
+_check_pii.js
+gen-set-courseware.js
+ppt2reveal.ps1
+gen-icon.ps1
+pack-icon.js
+make-icons.ps1
+web-embed-demo.html
+.statsbox.lock.json

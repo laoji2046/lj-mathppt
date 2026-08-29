@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>RevealSlidr</title>
+<style>
+  html,body{margin:0;height:100%;background:#1b1f27;color:#e8eaf0;font-family:"Microsoft YaHei",system-ui,sans-serif;display:flex;align-items:center;justify-content:center}
+  div{text-align:center}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#6ea8fe;margin:12px 4px;animation:b 1.2s infinite ease-in-out}
+  .dot:nth-child(2){animation-delay:.15s}.dot:nth-child(3){animation-delay:.3s}
+  @keyframes b{0%,80%,100%{transform:scale(.5);opacity:.4}40%{transform:scale(1);opacity:1}}
+</style>
+</head>
+<body>
+  <div>
+    <h2 style="margin:0 0 8px;font-weight:500">正在启动 RevealSlidr…</h2>
+    <p style="margin:0;color:#9aa3b2;font-size:13px">加载本地服务</p>
+    <div style="margin-top:10px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,344 @@
+% 编译：xelatex -interaction=nonstopmode LJ-PPT使用手册.tex  （跑两遍）
+\documentclass[12pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm,top=2.0cm,bottom=2.3cm]{geometry}
+\usepackage{graphicx}
+\usepackage{amssymb}
+\usepackage{tikz}
+\usetikzlibrary{positioning,shadows,calc}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{multicol}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fontspec}
+\setmainfont{Microsoft YaHei}
+\definecolor{ljpurple}{RGB}{138,43,226}
+\definecolor{ljpurple2}{RGB}{218,112,214}
+\definecolor{ljlight}{RGB}{240,234,255}
+\definecolor{grayline}{RGB}{220,220,228}
+\definecolor{panel}{RGB}{249,249,252}
+\definecolor{canvas}{RGB}{255,255,255}
+
+\titleformat{\section}{\Large\bfseries\color{ljpurple}}{\thesection}{0.8em}{}
+\titleformat{\subsection}{\large\bfseries\color{ljpurple!80!black}}{\thesubsection}{0.6em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries\color{ljpurple!70!black}}{\thesubsubsection}{0.5em}{}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{gray}LJ-PPT 使用手册}
+\fancyhead[R]{\small\color{gray}\thepage}
+\renewcommand{\headrulewidth}{0.6pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{ljpurple}\leaders\hrule height \headrulewidth\hfill}}
+
+\setlist[itemize]{itemsep=0pt,topsep=3pt,leftmargin=1.5em}
+\setlist[enumerate]{itemsep=0pt,topsep=3pt,leftmargin=1.6em}
+
+\newcommand{\key}[1]{\fcolorbox{grayline}{white}{\small\ttfamily #1}}
+\newcommand{\ftitle}[1]{\textbf{\color{ljpurple}#1}}
+
+\begin{document}
+
+% ============ 封面 ============
+\begin{titlepage}
+\centering
+\vspace*{2.6cm}
+{\color{ljpurple}\rule{\linewidth}{2.5pt}}
+\vspace{1.2cm}
+{\Huge\bfseries\color{ljpurple} LJ-PPT\par}
+\vspace{0.6cm}
+{\Large 使用手册\par}
+\vspace{0.4cm}
+{\color{ljpurple2}\rule{0.55\linewidth}{1pt}}
+\vspace{1cm}
+{\large 所见即所得 (WYSIWYG) Reveal.js 幻灯片编辑器\par}
+\vspace{0.3cm}
+{\normalsize\color{gray} 完整图文版 · 界面 / 工具条 / 菜单栏 逐项说明\par}
+\vspace{3.0cm}
+\begin{tikzpicture}
+\draw[rounded corners=18pt, fill=ljpurple, draw=none] (0,0) rectangle (3.2,3.2);
+\draw[rounded corners=18pt, fill=ljpurple2] (0.18,0.18) rectangle (3.02,3.02);
+\node[font=\bfseries\sffamily\Huge, white] at (1.6,2.0) {LTJ};
+\node[font=\sffamily\Large, white] at (1.6,0.75) {$\infty$};
+\end{tikzpicture}
+\vfill
+{\small\color{gray} 版权所有 \copyright\ 2026 LTJ Studio\par}
+{\footnotesize\color{gray} 版本 1.0.0\par}
+\end{titlepage}
+
+% ============ 目录 ============
+\tableofcontents
+\newpage
+
+% ============ 1 产品简介 ============
+\section{产品简介}
+LJ-PPT 是一款运行在 Windows 桌面端的\textbf{所见即所得（WYSIWYG）幻灯片编辑器}，基于 Reveal.js 引擎，用于制作课件、演示文稿与教学展示。
+
+\subsection{核心特点}
+\begin{itemize}
+  \item \textbf{所见即所得}：编辑界面即最终演示效果，无需代码，直接拖拽排版。
+  \item \textbf{丰富元素}：文本、形状、图片、图表、表格、数学公式、GeoGebra 动态演示、Desmos 计算器、图标、思维导图、在线嵌入等。
+  \item \textbf{教学支持}：内置基础布局、教学模板、专业模板，一键套用；支持版本历史、自动保存。
+  \item \textbf{多端呈现}：可直接在编辑器内演示（F5），也可导出为独立 HTML、PDF 或当前页 PNG。
+  \item \textbf{精简体积}：GeoGebra 与 Reveal.js 均走 CDN 加载，安装包小而功能完整。
+\end{itemize}
+
+\subsection{系统要求}
+\begin{itemize}
+  \item 操作系统：Windows 10 / 11（x64）。
+  \item 网络：首次加载及使用 GeoGebra / Desmos / 公式渲染时需联网（CDN）。
+  \item 内核：内置 WebView2，兼容现代浏览器。
+\end{itemize}
+
+% ============ 2 安装与启动 ============
+\section{安装与启动}
+\begin{enumerate}
+  \item 运行安装包 \texttt{LJ-PPT\_1.0.0\_x64-setup.exe}。
+  \item 按提示完成安装（默认当前用户安装，无需管理员权限）。
+  \item 通过桌面快捷方式或开始菜单启动 \textbf{LJ-PPT}。
+\end{enumerate}
+
+% ============ 3 界面布局 ============
+\section{界面布局}
+启动后进入编辑器主界面，整体分为六大区域。下图示意了各区域的相对位置：
+
+\begin{center}
+\begin{tikzpicture}[rounded corners=3pt]
+\draw[fill=ljlight, draw=ljpurple, thick] (0,0) rectangle (15.5,9.4);
+\node[font=\footnotesize\color{ljpurple}] at (7.75,9.15) {LJ-PPT 主界面布局示意图};
+\draw[fill=white, draw=grayline, thick] (0.15,8.0) rectangle (15.35,8.9);
+\node[font=\small\color{ljpurple}] at (0.5,8.45) {① 顶部标题栏};
+\node[font=\scriptsize\color{gray},align=center] at (7.8,8.45) {新建 打开 保存 导出 撤销 重做 主题 模板库 版本 演示 帮助};
+\draw[fill=white, draw=grayline, thick] (0.15,6.9) rectangle (15.35,7.9);
+\node[font=\small\color{ljpurple}] at (0.5,7.4) {② 水平工具栏};
+\node[font=\scriptsize\color{gray},align=center] at (8.2,7.4) {选择 文本 形状 图片 图表 表格 图标 思维导图 笔 线 箭头 嵌入 GeoGebra Desmos 公式};
+\draw[fill=panel, draw=grayline, thick] (0.15,0.15) rectangle (3.2,6.8);
+\node[font=\small\color{ljpurple}] at (0.4,6.55) {③ 幻灯片面板};
+\node[font=\scriptsize\color{gray},align=center] at (1.68,3.5) {缩略图列表\\添加与删除\\拖拽排序\\章节管理};
+\draw[fill=canvas, draw=grayline, thick] (3.35,0.15) rectangle (12.6,6.8);
+\node[font=\small\color{ljpurple}] at (3.6,6.55) {④ 编辑画布};
+\node[font=\scriptsize\color{gray},align=center] at (7.98,3.5) {1280x720\\所见即所得编辑区};
+\draw[fill=panel, draw=grayline, thick] (12.75,0.15) rectangle (15.35,6.8);
+\node[font=\small\color{ljpurple}] at (12.95,6.55) {⑤ 属性面板};
+\node[font=\scriptsize\color{gray},align=center] at (14.05,3.5) {选中元素\\位置大小\\颜色字体};
+\draw[fill=ljlight, draw=grayline, thick] (0.15,0.0) rectangle (15.35,0.15);
+\node[font=\scriptsize\color{gray}] at (0.5,0.08) {⑥ 底部状态栏　图层 · 页码 · 版权};
+\end{tikzpicture}
+\end{center}
+
+\subsection{各区域说明}
+\begin{center}\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}p{4.0cm}p{10.9cm}@{}}
+\toprule
+\textbf{区域} & \textbf{说明} \\
+\midrule
+① 顶部标题栏 & 左侧品牌标识与 \textbf{LJ-PPT}；中为 新建/打开/保存/导出 与 撤销/重做；右侧为 主题、模板库、版本、演示、\textbf{帮助}（含 使用帮助 / 关于）。见 \S4。 \\
+② 水平工具栏 & 插入各类元素的工具按钮：选择、文本、形状、图片、图表、表格、图标、思维导图、笔、线、箭头、嵌入、GeoGebra、Desmos、公式。见 \S5。 \\
+③ 幻灯片面板 & 左侧以缩略图列出全部幻灯片，可选中、拖拽排序、添加/删除、进入章节。 \\
+④ 编辑画布 & 中央 1280×720 设计画布，所有元素的绝对定位编辑区，即最终演示效果。 \\
+⑤ 属性面板 & 右侧显示并编辑当前选中元素的位置、大小、颜色、字体等属性。 \\
+⑥ 底部状态栏 & 图层管理、页码统计、版权标识（\copyright\ 2026 LTJ Studio）。 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ============ 4 菜单栏各功能项 ============
+\section{菜单栏各功能项}
+顶部标题栏的按钮即应用的主要操作菜单。逐项说明如下：
+
+\subsection{新建}
+\ftitle{功能}：新建一份演示文稿。默认包含一页标题页和一页内容页。
+\par\ftitle{快捷键}：\key{Ctrl+N}。
+
+\subsection{打开}
+\ftitle{功能}：打开已有的 \texttt{.revealslidr.json} 项目文件，或导出的 HTML / Markdown 文稿。
+\par\ftitle{快捷键}：\key{Ctrl+O}。
+
+\subsection{保存}
+\ftitle{功能}：将当前项目保存为 \texttt{.revealslidr.json}，可再次打开编辑。应用会自动保存进度于本地。
+\par\ftitle{快捷键}：\key{Ctrl+S}。
+
+\subsection{导出}
+\ftitle{功能}：弹出导出方式下拉菜单：
+\begin{itemize}
+  \item \textbf{HTML 文件}：导出为单文件 \texttt{.html}，可用浏览器直接打开演示。
+  \item \textbf{PDF}：通过打印另存为 PDF。
+  \item \textbf{当前页 PNG}：将当前选中幻灯片导出为图片。
+\end{itemize}
+\par\ftitle{快捷键}：\key{Ctrl+E}。
+
+\subsection{撤销 / 重做}
+\ftitle{功能}：撤销或重做最近一次编辑操作。\key{Ctrl+Z} / \key{Ctrl+Y}。
+
+\subsection{主题}
+弹出主题面板，一键切换整套配色与字体主题，应用于全部页面。
+
+\subsection{模板库}
+一键套用\textbf{基础布局}、\textbf{教学模板}、\textbf{专业模板}，快速搭建幻灯片结构。
+
+\subsection{版本}
+打开版本历史：保存快照、恢复或删除历史版本。
+
+\subsection{演示}
+进入全屏演示模式（\key{F5}），详见 \S7。
+
+\subsection{帮助}
+\label{sec:help}
+顶栏右侧新增的\textbf{帮助}菜单，为用户提供使用支持：
+\begin{itemize}
+  \item \textbf{使用帮助}：弹出内置的图文帮助面板，按 13 个功能区（主界面布局、顶部菜单栏、水平工具栏、幻灯片面板、新建/保存、文本编辑、形状/几何图形、数学公式、GeoGebra/Desmos、在线嵌入、模板库与主题、设置面板、演示模式）配真实界面截图速查。
+  \item \textbf{关于 LJ-PPT}：弹出"关于"对话框，展示应用名称、版本号、产品简介与版权信息（见 \S4.11）。
+\end{itemize}
+
+\subsection{关于}
+\label{sec:about}
+通过 \textbf{帮助 → 关于 LJ-PPT} 打开。对话框包含：
+\begin{itemize}
+  \item \textbf{应用图标}：喇叭花紫背景 + LTJ 字样 + 无穷符号 $\infty$。
+  \item \textbf{应用名称}：LJ-PPT。
+  \item \textbf{版本}：1.0.0。
+  \item \textbf{简介}：所见即所得（WYSIWYG）Reveal.js 幻灯片编辑器。
+  \item \textbf{版权}：版权所有 \copyright\ 2026 LTJ Studio。
+\end{itemize}
+
+% ============ 5 工具栏各工具 ============
+\section{工具栏各工具}
+水平工具栏用于插入各类元素到画布。逐项说明如下：
+
+\begin{center}\renewcommand{\arraystretch}{1.35}
+\begin{longtable}{@{}p{3.2cm}p{11.7cm}@{}}
+\toprule
+\textbf{工具} & \textbf{用途与操作} \\
+\midrule
+\endfirsthead
+选择 & 默认工具，点击选中、拖动、缩放已插入元素。快捷键 \key{V}。 \\
+文本 & 插入文本框，双击输入文字，支持字体、字号、颜色、加粗、对齐。快捷键 \key{T}。 \\
+形状 & 插入矩形、圆形、箭头、线条、自由形状等，可设填充色与描边。快捷键 \key{S}。 \\
+图片 & 插入本地图片，可缩放、旋转。 \\
+图表 & 插入柱状、折线、饼图等，双击编辑数据。 \\
+表格 & 插入行列，支持增删行列、编辑内容。 \\
+图标 & 打开内置图标库，选择插入。 \\
+思维导图 & 插入关系图 / 结构图节点。 \\
+笔 & 自由手绘线条。 \\
+线 & 插入直线。 \\
+箭头 & 插入带箭头的线。 \\
+嵌入 & 插入任意 URL / PDF 网页内容（iframe）。 \\
+GeoGebra & 插入可交互数学演示（绘图、几何、3D、科学、经典）。 \\
+Desmos & 插入在线计算器，现场输入表达式。 \\
+公式 & 以 LaTeX 语法输入数学公式，MathJax 渲染。 \\
+数学符号 & 图标面板新增\textbf{数学符号}分类（∈、∅、∪、∩、√、∞、∑、①、½ 等 60 个），点击插入。 \\
+数学图形 & 形状面板新增抛物线、正弦、余弦、指数、对数、坐标系、数轴、Venn 图、直角三角形、角、半圆等教学图形。 \\
+图片库 & 图片工具支持\textbf{在线图片库}（14 分类 + 关键词搜索 + 随机），点图插入当前页。 \\
+\bottomrule
+\end{longtable}
+\end{center}
+
+% ============ 6 版面与模板 ============
+\section{版面与模板}
+\subsection{模板库}
+点击顶栏 \textbf{模板库}，可一键套用\textbf{基础布局}、\textbf{教学模板}、\textbf{专业模板}、\textbf{高中数学讲义}，快速搭建幻灯片结构。
+
+\subsection{主题}
+点击顶栏 \textbf{主题}，在弹出的主题面板中切换整套配色与字体主题，一键应用于全部页面。
+
+\subsection{幻灯片管理}
+左侧幻灯片面板支持：添加（\key{Ctrl+Shift+N}）、拖拽排序、删除、复制、移动（上/下页）、设置自动动画。
+
+\subsection{动画版模板（fragment 渐显）}
+高中数学讲义分类下新增多套\textbf{动画版模板}，元素带\textbf{片段渐显}动画，演示时点击逐条出现：
+\begin{itemize}
+  \item \texttt{anim-derive} —— 公式推导（多行对齐 + 易错提示，逐行出现）。
+  \item \texttt{anim-example} —— 典型例题（题目 → 分析 → 解答，三步逐条出现）。
+  \item \texttt{anim-macro} —— 数学语言速查（常用集合与逻辑符号，逐组出现）。
+  \item \texttt{anim-summarize} —— 课堂小结（核心概念 / 关键方法 / 易错提醒，逐条收拢）。
+  \item \texttt{anim-compare} —— 知识对比（A/B 概念两栏对比 + 辨析要点，逐项出现）。
+\end{itemize}
+\textbf{提示}：编辑区始终显示全部元素（所见即所得）；仅\textbf{演示模式}下片段渐显动画生效。
+
+\subsection{数学公式与常用宏}
+公式输入支持 LaTeX 语法，并内置常用数学宏，让公式更简洁：
+\begin{center}\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}l l l l@{}}
+\toprule
+\textbf{宏} & \textbf{含义} & \textbf{宏} & \textbf{含义} \\
+\midrule
+\texttt{\textbackslash R} & 实数集 $\mathbb{R}$ & \texttt{\textbackslash set\{\}\{\}} & 集合 \\
+\texttt{\textbackslash N} & 自然数集 & \texttt{\textbackslash sum} & 求和 \\
+\texttt{\textbackslash Z} & 整数集 & \texttt{\textbackslash intg} & 积分 \\
+\texttt{\textbackslash Q} & 有理数集 & \texttt{\textbackslash dfrac} & 分式 \\
+\texttt{\textbackslash C} & 复数集 & \texttt{\textbackslash vec} & 向量 \\
+\bottomrule
+\end{tabular}
+\end{center}
+常用逻辑符号：∈、∉、⊂、∪、∩、∀、∃、⇒、⇔、∵、∴ 等，可直接用图标面板的「数学符号」插入。
+
+\subsection{在线图片库}
+点击 \textbf{图片} → \textbf{在线图片库}，打开图库：
+\begin{itemize}
+  \item \textbf{14 个分类}：背景、几何、数学、图表、自然、科技、校园、人物、城市、食物、运动、抽象、动物、色彩。
+  \item \textbf{关键词搜索}与\textbf{随机}按钮，快速获取合适的教学图片。
+  \item 点击图片即插入当前页；依赖在线图源，需联网。
+\end{itemize}
+
+% ============ 7 演示模式 ============
+\section{演示模式}
+点击顶栏 \textbf{演示}，或按 \key{F5}，进入全屏演示模式。
+\begin{itemize}
+  \item 左右方向键：上一页 / 下一页。
+  \item 上下方向键：章节内子页导航。
+  \item \key{Esc}：退出演示，返回编辑。
+  \item 底部控制条：上一页、下一页、计时器、备注、全屏开关。
+  \item GeoGebra / Desmos 在当前页可交互操作。
+\end{itemize}
+
+% ============ 8 设置 ============
+\section{设置}
+点击顶栏 \textbf{设置}，弹出设置面板，可配置：文稿标题、描述、语言、画布尺寸（960×700 / 1280×720 16:9 / 700×700 方形）、页边距、导航模式、自动播放间隔、是否循环、是否显示页码、GeoGebra 离线模式、Desmos API 密钥。
+
+\noindent\textbf{品牌标识（LJ-PPT / \copyright\ 2026 LTJ Studio）为内置固定值，不可在此修改。}
+
+% ============ 9 快捷键一览 ============
+\section{快捷键一览}
+\begin{center}\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}l l l l@{}}
+\toprule
+\textbf{按键} & \textbf{功能} & \textbf{按键} & \textbf{功能} \\
+\midrule
+\key{Ctrl+N} & 新建 & \key{F5} & 进入演示 \\
+\key{Ctrl+O} & 打开 & \key{Esc} & 退出演示 \\
+\key{Ctrl+S} & 保存 & \key{Delete} & 删除选中元素 \\
+\key{Ctrl+E} & 导出 HTML & \key{Ctrl+Z} & 撤销 \\
+\key{T} & 文本 & \key{Ctrl+Y} & 重做 \\
+\key{S} & 形状 & \key{Ctrl+G} & 组合 \\
+\key{V} & 选择 & \key{Ctrl+Shift+G} & 取消组合 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ============ 10 帮助与常见问题 ============
+\section{帮助与常见问题}
+\subsection{内置帮助与关于}
+顶栏 \textbf{帮助} 菜单提供\textbf{使用帮助}与\textbf{关于 LJ-PPT}，无需联网即可查看应用信息与常用操作速查。
+
+\subsection{GeoGebra / 公式 / Desmos 不显示}
+这些功能依赖在线 CDN 加载。请确认电脑已联网；若仍不显示，可稍候重试，或检查网络对 \texttt{geogebra.org}、\texttt{desmos.com}、\texttt{cdn.jsdelivr.net} 的访问。
+
+\subsection{如何离线使用}
+若需在无网环境使用，可将此前备份的 \texttt{geogebra/} 与 \texttt{revealjs/} 目录放回 \texttt{dist/}，重新打包使用本地引擎（详见交付说明）。默认安装版为在线 CDN 精简版。
+
+\subsection{导出 HTML 能否离线打开}
+导出的 HTML 中，幻灯片结构、文本、图片已内嵌，可离线打开查看；但 GeoGebra / Desmos / MathJax 公式渲染仍需联网。
+
+\subsection{如何恢复误删内容}
+应用开启\textbf{自动保存}，可通过顶栏\emph{版本历史}查看并恢复此前的快照。
+
+% ============ 版权 ============
+\vfill
+\begin{center}
+\color{gray}\small\textcopyright\ 2026 LTJ Studio · LJ-PPT 使用手册 \quad(版本 1.0.0)
+\end{center}
+
+\end{document}

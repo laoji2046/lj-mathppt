@@ -1,0 +1,2410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LJ-PPT — Reveal.js 所见即所得编辑器</title>
+  <link rel="icon" type="image/png" href="app-icon.png">
+
+  <!-- Preconnect to CDNs for faster first connection (and fallback hosts) -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+  <link rel="preconnect" href="https://www.desmos.com" crossorigin>
+  <link rel="preconnect" href="https://www.geogebra.org" crossorigin>
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <!-- 本地优先：Reveal.js 样式取自随包发布的 revealjs/，加载失败再回退 CDN（jsdelivr） -->
+  <link rel="stylesheet" href="revealjs/reveal.css" id="reveal-css">
+  <link rel="stylesheet" href="revealjs/theme/white.css" id="theme-link">
+  <link rel="stylesheet" href="revealjs/plugin/highlight/monokai.css" id="hljs-link">
+  <script>
+    (function () {
+      var CDN = 'https://cdn.jsdelivr.net/npm/reveal.js@5';
+      function fallback(linkId, cdnUrl) {
+        var link = document.getElementById(linkId);
+        if (!link) return;
+        // 一次性判定：本地文件确认可用后就摘掉监听，避免后续 applyTheme()
+        // 切换主题时把新主题误换回 white。
+        var settled = false;
+        var swap = function () {
+          if (settled) return;
+          settled = true;
+          link.removeEventListener('error', swap);
+          if (link.href.indexOf(cdnUrl) !== -1) return;
+          link.href = cdnUrl;
+        };
+        link.addEventListener('error', swap);
+        try {
+          fetch(link.getAttribute('href'), { method: 'HEAD' }).then(function (r) {
+            if (!r.ok) swap();
+            else { settled = true; link.removeEventListener('error', swap); }
+          }).catch(swap);
+        } catch (e) { /* fetch unavailable: rely on the error event */ }
+      }
+      fallback('reveal-css', CDN + '/dist/reveal.css');
+      fallback('theme-link', CDN + '/dist/theme/white.css');
+      fallback('hljs-link', CDN + '/plugin/highlight/monokai.min.css');
+    })();
+  </script>
+  <link rel="stylesheet" href="styles.css?v=70">
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\\(', '\\)'], ['$', '$']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        macros: {
+          R: '\\mathbb{R}', N: '\\mathbb{N}', Z: '\\mathbb{Z}', Q: '\\mathbb{Q}', C: '\\mathbb{C}', E: '\\mathbb{E}',
+          var: '\\operatorname{Var}', cv: '\\operatorname{Cov}'
+        }
+      },
+      startup: { typeset: false },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <!-- MathJax 本地优先（revealjs/math/tex-svg.js），失败再回退 CDN（jsdelivr -> cdnjs） -->
+  <script>
+    (function () {
+      var urls = [
+        'revealjs/math/tex-svg.js',
+        'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-svg.js'
+      ];
+      var i = 0;
+      (function next() {
+        if (i >= urls.length) { console.warn('MathJax 未能从本地或任何 CDN 加载，公式将显示为原始 LaTeX'); return; }
+        var s = document.createElement('script');
+        s.src = urls[i++]; s.async = true;
+        s.onload = function () {};
+        s.onerror = function () { s.remove(); next(); };
+        document.head.appendChild(s);
+      })();
+    })();
+  </script>
+  <!-- Desmos engine is loaded lazily on first use (see app.js loadDesmosAPI) to avoid a 3.9MB blocking download on every page load -->
+
+  <!-- 本地优先：Reveal.js 核心与插件先取随包发布的 revealjs/，全部失败才回退 CDN。
+       本地为扁平布局 revealjs/plugin/xxx.js，CDN 为嵌套布局 plugin/xxx/xxx.js。 -->
+  <script>
+  (function () {
+    function loadScript(urls, optional) {
+      return new Promise(function (resolve, reject) {
+        var i = 0;
+        (function next() {
+          if (i >= urls.length) {
+            if (optional) { resolve(null); return; }
+            reject(new Error('all sources failed: ' + urls.join(', ')));
+            return;
+          }
+          var u = urls[i++];
+          var s = document.createElement('script');
+          s.src = u;
+          s.onload = function () { resolve(u); };
+          s.onerror = function () { s.remove(); next(); };
+          document.head.appendChild(s);
+        })();
+      });
+    }
+    var CDNS = [
+      'https://cdn.jsdelivr.net/npm/reveal.js@5',
+      'https://unpkg.com/reveal.js@5',
+      'https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0'
+    ];
+    // local path + CDN path for each module (local layout is flat, CDN is nested)
+    var MODULES = {
+      core:      ['revealjs/reveal.js',               'dist/reveal.js'],
+      markdown:  ['revealjs/plugin/markdown.js',      'plugin/markdown/markdown.js'],
+      highlight: ['revealjs/plugin/highlight.js',     'plugin/highlight/highlight.js'],
+      notes:     ['revealjs/plugin/notes.js',         'plugin/notes/notes.js'],
+      search:    ['revealjs/plugin/search.js',        'plugin/search/search.js'],
+      zoom:      ['revealjs/plugin/zoom.js',          'plugin/zoom/zoom.js']
+    };
+    window.__revealSources = {};
+    function sources(key) {
+      var m = MODULES[key];
+      return [m[0]].concat(CDNS.map(function (c) { return c + '/' + m[1]; }));
+    }
+    function load(key, optional) {
+      return loadScript(sources(key), optional).then(function (used) {
+        window.__revealSources[key] = used || null;
+        return used;
+      });
+    }
+    load('core')
+      .then(function () {
+        // plugins are optional: a missing one degrades instead of killing the app
+        return Promise.all([
+          load('markdown', true), load('highlight', true), load('notes', true),
+          load('search', true), load('zoom', true)
+        ]);
+      })
+      .then(function () {
+        window.__revealReady = true;
+        window.__revealOffline = !!window.__revealSources.core &&
+          window.__revealSources.core.indexOf('http') !== 0;
+        window.dispatchEvent(new Event('revealslidr:reveal-ready'));
+      })
+      .catch(function (err) {
+        console.error('Reveal.js 加载失败：', err.message);
+        window.dispatchEvent(new Event('revealslidr:reveal-failed'));
+      });
+  })();
+  </script>
+
+</head>
+<body>
+  <div id="app">
+
+    <!-- ===== Minimal top bar ===== -->
+    <header id="topbar">
+      <div class="brand">
+        <span id="brand-logo" class="brand-logo" title="专属品牌标识（可在「设置 → 品牌标识」中修改）"></span>
+        <span class="brand-name" id="brand-name">LJ-PPT</span>
+      </div>
+
+      <div class="topbar-group">
+        <button class="btn btn-text" data-action="new" title="新建 (Ctrl+N)">新建</button>
+        <button class="btn btn-text" data-action="open" title="打开 (Ctrl+O)">打开</button>
+        <button class="btn btn-text" data-action="save" title="保存 (Ctrl+S)">保存</button>
+        <div class="export-wrap">
+          <button class="btn btn-text" data-action="export" title="导出 (Ctrl+E)">导出 ▾</button>
+          <div id="export-menu" class="context-menu hidden">
+            <span class="ctx-label">导出方式</span>
+            <button class="ctx-item" data-export="html">🌐 HTML 文件</button>
+            <button class="ctx-item" data-export="pdf">📄 PDF（打印另存）</button>
+            <button class="ctx-item" data-export="png">🖼 当前页 PNG 图片</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="topbar-undo-redo">
+        <button class="icon-btn" data-action="undo" title="撤销 (Ctrl+Z)" id="undo-btn" disabled>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7L3 8"/></svg>
+        </button>
+        <button class="icon-btn" data-action="redo" title="重做 (Ctrl+Y)" id="redo-btn" disabled>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6"/><path d="M21 13a9 9 0 1 1-3-7.7L21 8"/></svg>
+        </button>
+      </div>
+
+      <div class="topbar-spacer"></div>
+
+      <div class="topbar-group">
+        <button class="btn btn-text" data-action="theme-panel" title="主题与字体">主题</button>
+        <button class="btn btn-text" data-action="template-library" title="模板库：基础布局 / 教学模板 / 专业模板一键套用">模板库</button>
+        <button class="btn btn-text" data-action="versions" title="版本历史：保存快照、恢复或删除历史版本">版本</button>
+        <button class="btn btn-primary" data-action="present" title="进入演示模式 (F5)">▶ 演示</button>
+        <div class="export-wrap">
+          <button class="btn btn-text" data-action="help" title="帮助">帮助 ▾</button>
+          <div id="help-menu" class="context-menu hidden">
+            <span class="ctx-label">帮助</span>
+            <button class="ctx-item" data-help="usage">📖 使用帮助</button>
+            <button class="ctx-item" data-help="about">ℹ️ 关于 LJ-PPT</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- ===== Horizontal toolbar (insert / shape tools) ===== -->
+    <nav id="toolbar">
+      <div class="toolbar-group">
+        <button class="tool-btn active" data-tool="select" title="选择 (V)">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>
+          <span>选择</span>
+        </button>
+      </div>
+      <div class="toolbar-divider"></div>
+      <div class="toolbar-group">
+        <button class="tool-btn" data-tool="text" title="文本 (T)">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5h16v2M9 20h6M12 5v15"/></svg>
+          <span>文本</span>
+        </button>
+        <button class="tool-btn" data-tool="shape" title="图形 (S)">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+          <span>图形</span>
+        </button>
+        <button class="tool-btn" data-tool="image" title="图片">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          <span>图片</span>
+        </button>
+        <button class="tool-btn" data-tool="video" title="视频">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M10 9l5 3-5 3V9z"/></svg>
+          <span>视频</span>
+        </button>
+        <button class="tool-btn" data-tool="chart" title="图表">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+          <span>图表</span>
+        </button>
+        <button class="tool-btn" data-tool="table" title="表格">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+          <span>表格</span>
+        </button>
+        <button class="tool-btn" data-tool="icon" title="图标">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>
+          <span>图标</span>
+        </button>
+        <button class="tool-btn" data-tool="mathgraph" title="数学图形：坐标系 / 函数曲线 / 平面几何 / 几何">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l3-5 3 3 4-7"/><circle cx="19" cy="5" r="1"/></svg>
+          <span>数学图形</span>
+        </button>
+        <button class="tool-btn" data-action="smartart" title="SmartArt 图示：流程 / 矩阵 / 棱锥 / 循环 / 维恩>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="5" rx="1"/><rect x="4" y="16" width="6.5" height="5" rx="1"/><rect x="13.5" y="16" width="6.5" height="5" rx="1"/><path d="M12 8v3.5M12 13.5H8v2.5M12 13.5h4v2.5"/></svg>
+          <span>SmartArt</span>
+        </button>
+      </div>
+      <div class="toolbar-divider"></div>
+      <div class="toolbar-group">
+        <button class="tool-btn" data-tool="pen" title="画笔">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+          <span>画笔</span>
+        </button>
+        <button class="tool-btn" data-tool="line" title="直线">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="19" x2="19" y2="5"/></svg>
+          <span>直线</span>
+        </button>
+        <button class="tool-btn" data-tool="arrow" title="箭头">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          <span>箭头</span>
+        </button>
+      </div>
+      <div class="toolbar-divider"></div>
+      <div class="toolbar-group">
+        <button class="tool-btn" data-tool="iframe" title="嵌入 (Iframe)">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12h8M9 9l-3 3 3 3M15 9l3 3-3 3"/></svg>
+          <span>嵌入</span>
+        </button>
+        <button class="tool-btn" data-tool="geogebra" title="GeoGebra 小程序（iframe 嵌入）">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.3 4 5.6 4 9s-1.5 6.7-4 9c-2.5-2.3-4-5.6-4-9s1.5-6.7 4-9z"/></svg>
+          <span>GeoGebra</span>
+        </button>
+        <button class="tool-btn" data-tool="ggb-suite" title="GeoGebra 套件（作图 → 保存 .ggb / 插入页面）">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20 L9 8 L13 13 L20 4"/><path d="M3 21 h18"/><circle cx="9" cy="8" r="1.2"/><circle cx="13" cy="13" r="1.2"/><circle cx="20" cy="4" r="1.2"/></svg>
+          <span>GGb套件</span>
+        </button>
+        <button class="tool-btn" data-tool="desmos" title="Desmos 计算器（现场输入表达式）">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18 L9 9 L13 14 L20 4"/><path d="M4 20 h16"/></svg>
+          <span>Desmos</span>
+        </button>
+        <button class="tool-btn" data-tool="math" title="公式">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10M9 7l-2 5 2 5M15 7l2 5-2 5M6 12h12"/></svg>
+          <span>公式</span>
+        </button>
+        <button class="tool-btn" data-tool="combo-math" title="组合公式（文本框粘贴多段 LaTeX + 预览 + 颜色）">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h3M7 12h10M7 16h7"/><path d="M16 8l1 1 2-2"/></svg>
+          <span>组合公式</span>
+        </button>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <div class="toolbar-group">
+        <button class="tool-btn" data-action="settings" title="设置">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>设置</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- ===== Main workspace ===== -->
+    <div id="workspace">
+
+      <!-- Left of canvas: slide thumbnails (Bento-style narrow strip) -->
+      <aside id="slidepanel">
+        <div class="panel-header">
+          <span>幻灯片</span>
+          <span id="slide-counter" class="slide-counter">1 / 1</span>
+          <button class="icon-btn" data-action="add-slide" title="添加幻灯片">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
+        <div id="slide-list"></div>
+      </aside>
+
+      <!-- Center: canvas (the editor IS the presentation window) -->
+      <main id="canvas-area">
+        <div id="stage-transform">
+          <div class="reveal" id="reveal">
+            <div class="slides" id="slides-container"></div>
+          </div>
+        </div>
+        <!-- zoom / pan control bar -->
+        <div id="stage-zoom-bar" class="stage-zoom-bar">
+          <button class="icon-btn" data-zoom="out" title="缩小">−</button>
+          <span id="stage-zoom-pct" class="stage-zoom-pct">100%</span>
+          <button class="icon-btn" data-zoom="in" title="放大">+</button>
+          <button class="icon-btn" data-zoom="fit" title="适应窗口">⤢</button>
+          <button class="icon-btn" data-zoom="reset" title="重置 (100%)">⟲</button>
+        </div>
+        <!-- safe-area overlay (toggleable) -->
+        <div id="stage-safe-overlay" class="hidden">
+          <div class="stage-safe-inner"></div>
+          <span class="stage-label">演示窗口 · 安全区</span>
+        </div>
+        <button id="stage-frame-toggle" class="stage-toggle" title="显示/隐藏演示窗口安全区">
+          <span class="dot"></span>安全区
+        </button>
+        <div id="canvas-hint" class="canvas-hint">点击幻灯片内容直接编辑 · 所见即所得</div>
+
+        <!-- multi-select alignment floating bar -->
+        <div id="align-bar" class="align-bar">
+          <button class="ab-btn" data-align="left" title="左对齐">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 3v18M5 8h10M5 13h6M5 18h12"/></svg>
+          </button>
+          <button class="ab-btn" data-align="center" title="水平居中">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v18M4 8h16M6 13h12M8 18h8"/></svg>
+          </button>
+          <button class="ab-btn" data-align="right" title="右对齐">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 3v18M9 8h10M13 13h6M7 18h12"/></svg>
+          </button>
+          <button class="ab-btn" data-align="top" title="顶部对齐">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 5h18M8 5v10M13 5v6M18 5v14"/></svg>
+          </button>
+          <button class="ab-btn" data-align="middle" title="垂直居中">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h18M8 4v16M13 6v12M18 8v8"/></svg>
+          </button>
+          <button class="ab-btn" data-align="bottom" title="底部对齐">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 19h18M8 5v14M13 9v10M18 3v16"/></svg>
+          </button>
+          <span class="ab-sep"></span>
+          <button class="ab-btn" data-align="dist-h" title="水平等距分布">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M7 6v12M17 6v12M4 6v4M20 6v4"/></svg>
+          </button>
+          <button class="ab-btn" data-align="dist-v" title="垂直等距分布">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 3v18M6 7h12M6 17h12M6 4h4M6 20h4"/></svg>
+          </button>
+          <span class="ab-sep"></span>
+          <button class="ab-btn" data-action="el-group" title="编组 (G)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><path d="M10 6.5h3.5a.5.5 0 0 1 .5.5v3.5M14 17.5h-3.5a.5.5 0 0 1-.5-.5v-3.5"/></svg>
+          </button>
+          <button class="ab-btn" data-action="el-ungroup" title="取消编组 (Shift+G)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><path d="M6.5 10v3.5a.5.5 0 0 0 .5.5h3.5M17.5 14v-3.5a.5.5 0 0 0-.5-.5h-3.5"/></svg>
+          </button>
+        </div>
+
+        <!-- snapping guide lines (absolute overlay) -->
+        <div id="snap-guides" class="snap-guides"></div>
+      </main>
+
+      <!-- Right: properties panel -->
+      <aside id="props-panel">
+        <div class="panel-header">
+          <span id="props-title">幻灯片</span>
+        </div>
+        <div class="panel-tabs" id="props-tabs">
+          <button class="panel-tab active" data-ptab="props">属性</button>
+          <button class="panel-tab" data-ptab="layers">图层</button>
+        </div>
+        <div id="props-content" class="props-content">
+
+          <!-- Empty / slide-level properties -->
+          <div id="props-empty" class="props-section active">
+            <div class="prop-block">
+              <label class="prop-label">标题</label>
+              <input type="text" id="deck-title" class="prop-input prop-input-full" placeholder="未命名演示">
+            </div>
+            <div class="prop-block">
+              <label class="prop-label">描述</label>
+              <textarea id="deck-desc" class="prop-textarea" rows="2" placeholder="演示文稿描述"></textarea>
+            </div>
+
+            <div class="prop-divider"></div>
+
+            <div class="prop-block">
+              <label class="prop-label">主题</label>
+              <select id="theme-select" class="prop-select prop-select-full">
+                <option value="black">Black</option>
+                <option value="white">White</option>
+                <option value="league">League</option>
+                <option value="beige">Beige</option>
+                <option value="sky">Sky</option>
+                <option value="night">Night</option>
+                <option value="serif">Serif</option>
+                <option value="simple">Simple</option>
+                <option value="solarized">Solarized</option>
+                <option value="blood">Blood</option>
+                <option value="moon">Moon</option>
+                <option value="dracula">Dracula</option>
+              </select>
+            </div>
+
+            <div class="prop-block">
+              <label class="prop-label">字体</label>
+              <select id="font-select" class="prop-select prop-select-full">
+                <option value="">默认</option>
+                <option value="Montserrat">Montserrat</option>
+                <option value="Open Sans">Open Sans</option>
+                <option value="Lato">Lato</option>
+                <option value="Roboto">Roboto</option>
+                <option value="Source Han Sans SC">思源黑体</option>
+              </select>
+            </div>
+
+            <div class="prop-block">
+              <label class="prop-label">过渡动画</label>
+              <select id="transition-select" class="prop-select prop-select-full">
+                <option value="slide">Slide</option>
+                <option value="none">None</option>
+                <option value="fade">Fade</option>
+                <option value="convex">Convex</option>
+                <option value="concave">Concave</option>
+                <option value="zoom">Zoom</option>
+              </select>
+            </div>
+
+            <div class="prop-block">
+              <label class="prop-label">切换速度</label>
+              <select id="transition-speed-select" class="prop-select prop-select-full" title="全局页面切换速度；右键幻灯片可单独设置某一页的速度">
+                <option value="default">默认</option>
+                <option value="fast">快速</option>
+                <option value="slow">慢速</option>
+              </select>
+            </div>
+
+            <div class="prop-divider"></div>
+
+            <div class="prop-block">
+              <label class="prop-label">幻灯片尺寸</label>
+              <select id="size-select" class="prop-select prop-select-full">
+                <option value="default">默认 960×700</option>
+                <option value="wide">宽屏 1280×720 (16:9)</option>
+                <option value="square">方形 700×700</option>
+                <option value="a4">A4 横向 1123×794</option>
+              </select>
+            </div>
+
+            <div class="prop-block">
+              <label class="prop-label">幻灯片背景</label>
+              <div class="bg-controls">
+                <input type="color" id="bg-color" value="#ffffff" title="背景颜色">
+                <button class="btn btn-sm" data-action="bg-gradient">渐变</button>
+                <button class="btn btn-sm" data-action="bg-clear">清除</button>
+              </div>
+            </div>
+
+            <div class="prop-divider"></div>
+
+            <div class="prop-block">
+              <label class="prop-check">
+                <input type="checkbox" id="slide-auto-animate">
+                <span>本页自动动画（Auto-Animate）</span>
+              </label>
+              <p class="insp-hint">与上一页之间平滑变形相同元素。复制本页后修改内容，即可得到 Bento 式 Morph 效果。</p>
+            </div>
+
+            <div class="prop-divider"></div>
+
+            <div class="prop-block">
+              <label class="prop-label">演讲者备注</label>
+              <textarea id="notes-area" class="prop-textarea" rows="3" placeholder="在此输入备注..."></textarea>
+            </div>
+          </div>
+
+          <!-- Text properties -->
+          <div id="props-text" class="props-section">
+            <div class="prop-block">
+              <label class="prop-label">文本排版</label>
+              <div class="align-group">
+                <div class="layout-options align-row">
+                  <button class="layout-opt" data-text-layout="left" title="左对齐"><svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><rect x="2" y="3" width="14" height="2.4"/><rect x="2" y="8" width="11" height="2.4"/><rect x="2" y="13" width="13" height="2.4"/></svg></button>
+                  <button class="layout-opt" data-text-layout="center" title="居中"><svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><rect x="3" y="3" width="14" height="2.4"/><rect x="5" y="8" width="10" height="2.4"/><rect x="4" y="13" width="12" height="2.4"/></svg></button>
+                  <button class="layout-opt" data-text-layout="right" title="右对齐"><svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><rect x="4" y="3" width="14" height="2.4"/><rect x="7" y="8" width="11" height="2.4"/><rect x="5" y="13" width="13" height="2.4"/></svg></button>
+                  <button class="layout-opt" data-text-layout="justify" title="两端对齐"><svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><rect x="4" y="3" width="14" height="2.4"/><rect x="4" y="8" width="14" height="2.4"/><rect x="4" y="13" width="14" height="2.4"/></svg></button>
+                </div>
+              </div>
+              <label class="prop-label" style="margin-top:8px;">垂直对齐</label>
+              <div class="align-group">
+                <div class="layout-options align-row" id="el-valign">
+                  <button class="layout-opt valign-opt" data-valign="top" title="顶部对齐"><svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><rect x="3" y="3" width="14" height="2.4"/><rect x="5" y="9" width="10" height="2.2"/></svg></button>
+                  <button class="layout-opt valign-opt" data-valign="center" title="垂直居中"><svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><rect x="3" y="5" width="14" height="2.2"/><rect x="3" y="9" width="14" height="2.4"/></svg></button>
+                  <button class="layout-opt valign-opt" data-valign="bottom" title="底部对齐"><svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><rect x="5" y="9" width="10" height="2.2"/><rect x="3" y="15" width="14" height="2.4"/></svg></button>
+                </div>
+              </div>
+            </div>
+
+            <div class="prop-block">
+              <label class="prop-label">字体</label>
+              <select id="el-font-family" class="prop-select prop-select-full">
+                <option value="">默认（继承主题）</option>
+                <optgroup label="无衬线">
+                  <option value="system-ui, sans-serif">系统字体</option>
+                  <option value="Arial, sans-serif">Arial</option>
+                  <option value="Helvetica, Arial, sans-serif">Helvetica</option>
+                  <option value="'Microsoft YaHei', sans-serif">微软雅黑</option>
+                  <option value="'PingFang SC', sans-serif">苹方</option>
+                  <option value="'Source Han Sans SC', sans-serif">思源黑体</option>
+                  <option value="Roboto, sans-serif">Roboto</option>
+                  <option value="Open Sans, sans-serif">Open Sans</option>
+                  <option value="Lato, sans-serif">Lato</option>
+                  <option value="Montserrat, sans-serif">Montserrat</option>
+                  <option value="Inter, sans-serif">Inter</option>
+                </optgroup>
+                <optgroup label="衬线">
+                  <option value="Georgia, serif">Georgia</option>
+                  <option value="'Times New Roman', serif">Times New Roman</option>
+                  <option value="'Source Han Serif SC', serif">思源宋体</option>
+                  <option value="'STSong', serif">宋体</option>
+                  <option value="'STKaiti', serif">楷体</option>
+                  <option value="Playfair Display, serif">Playfair Display</option>
+                </optgroup>
+                <optgroup label="等宽">
+                  <option value="'Courier New', monospace">Courier New</option>
+                  <option value="'JetBrains Mono', monospace">JetBrains Mono</option>
+                  <option value="'Fira Code', monospace">Fira Code</option>
+                  <option value="Consolas, monospace">Consolas</option>
+                </optgroup>
+                <optgroup label="数学/手写">
+                  <option value="'STIX Two Text', serif">STIX Two</option>
+                  <option value="'Latin Modern Math', serif">Latin Modern</option>
+                  <option value="cursive">手写体</option>
+                </optgroup>
+              </select>
+            </div>
+
+            <div class="prop-row">
+              <label class="prop-mini">字号</label>
+              <input type="number" class="prop-input" id="el-font-size" value="36" min="8" max="200">
+              <span class="prop-unit">px</span>
+            </div>
+            <div class="prop-row">
+              <label class="prop-mini">字重</label>
+              <select id="el-font-weight" class="prop-select prop-select-full">
+                <option value="">默认</option>
+                <option value="300">细体 (Light)</option>
+                <option value="400">常规 (Regular)</option>
+                <option value="500">中等 (Medium)</option>
+                <option value="600">半粗 (SemiBold)</option>
+                <option value="700">加粗 (Bold)</option>
+                <option value="800">特粗 (ExtraBold)</option>
+                <option value="900">黑体 (Black)</option>
+              </select>
+            </div>
+            <div class="prop-row">
+              <label class="prop-mini">行高</label>
+              <input type="number" class="prop-input" id="el-line-height" value="1.5" min="0.5" max="3" step="0.1">
+              <span class="prop-unit">×</span>
+            </div>
+            <div class="prop-row">
+              <label class="prop-mini">字距</label>
+              <input type="number" class="prop-input" id="el-letter-spacing" value="0" min="-5" max="20">
+              <span class="prop-unit">px</span>
+            </div>
+
+            <div class="prop-block">
+              <label class="prop-label">文字颜色</label>
+              <div class="color-row">
+                <input type="color" class="prop-color" id="el-text-color" value="#000000">
+              </div>
+              <div class="color-swatches" id="text-color-swatches"></div>
+            </div>
+
+            <div class="prop-block">
+              <label class="prop-label">背景颜色</label>
+              <div class="color-row">
+                <input type="color" class="prop-color" id="el-bg-color" value="#ffffff">
+                <button class="btn btn-sm" id="el-bg-clear">清除</button>
+              </div>
+            </div>
+
+            <div class="prop-block">
+              <label class="prop-check">
+                <input type="checkbox" id="el-countup">
+                <span>数字滚动动画</span>
+              </label>
+              <p class="insp-hint">演示时文本中的数字从 0 滚动到目标值（如 "98%"）。</p>
+            </div>
+
+            <div class="prop-block">
+              <label class="prop-label">文本特效</label>
+
+              <label class="prop-check">
+                <input type="checkbox" id="el-hl">
+                <span>高亮标记</span>
+              </label>
+              <div class="fx-row" data-fx="hl">
+                <input type="color" class="prop-color" id="el-hl-color" value="#FFF3A3">
+                <span class="prop-unit">高亮色</span>
+              </div>
+
+              <label class="prop-check">
+                <input type="checkbox" id="el-grad">
+                <span>渐变文字</span>
+              </label>
+              <div class="fx-row" data-fx="grad">
+                <input type="color" class="prop-color" id="el-grad-from" value="#534AB7">
+                <input type="color" class="prop-color" id="el-grad-to" value="#FF6B9A">
+                <span class="prop-unit">起 · 止</span>
+              </div>
+
+              <div class="prop-row">
+                <label class="prop-mini">文字阴影</label>
+                <select id="el-tshadow" class="prop-select">
+                  <option value="none">无</option>
+                  <option value="soft">柔和</option>
+                  <option value="strong">强烈</option>
+                  <option value="neon">霓虹发光</option>
+                  <option value="custom">自定义…</option>
+                </select>
+              </div>
+
+              <div id="el-tshadow-params" style="display:none;">
+                <div class="prop-row">
+                  <label class="prop-mini">阴影颜色</label>
+                  <input type="color" class="prop-color" id="el-tshadow-color" value="#000000">
+                </div>
+                <div class="prop-row">
+                  <label class="prop-mini">阴影层次</label>
+                  <select class="prop-select" id="el-tshadow-depth">
+                    <option value="1">浅</option>
+                    <option value="2">标准</option>
+                    <option value="3">深</option>
+                    <option value="4">更深</option>
+                  </select>
+                </div>
+                <div class="prop-row">
+                  <label class="prop-mini">阴影角度</label>
+                  <input type="range" class="prop-range" id="el-tshadow-angle" min="0" max="360" value="45">
+                  <span class="prop-val" id="el-tshadow-angle-val">45°</span>
+                </div>
+              </div>
+
+              <label class="prop-check">
+                <input type="checkbox" id="el-tstroke">
+                <span>描边（镂空字）</span>
+              </label>
+              <div class="fx-row" data-fx="stroke">
+                <input type="color" class="prop-color" id="el-tstroke-color" value="#ffffff">
+                <input type="number" class="prop-input fx-w" id="el-tstroke-w" value="2" min="1" max="12">
+                <span class="prop-unit">px</span>
+              </div>
+
+              <label class="prop-check">
+                <input type="checkbox" id="el-dropcap">
+                <span>首字下沉</span>
+              </label>
+
+              <div class="prop-block">
+                <label class="prop-label">字型（Reveal 排版）</label>
+                <div class="fx-chips">
+                  <button class="fx-chip" data-tfx="bold" title="加粗"><b>B</b></button>
+                  <button class="fx-chip" data-tfx="italic" title="斜体（h6 风格）"><i>I</i></button>
+                  <button class="fx-chip" data-tfx="underline" title="下划线"><u>U</u></button>
+                  <button class="fx-chip" data-tfx="strike" title="删除线"><s>S</s></button>
+                  <button class="fx-chip" data-tfx="uppercase" title="全部大写">A<sup>A</sup></button>
+                  <button class="fx-chip" data-tfx="smallcaps" title="小型大写（h4 风格）">a<sub>A</sub></button>
+                </div>
+              </div>
+
+              <div class="prop-row">
+                <label class="prop-mini">出现动画色</label>
+                <select id="el-enter-hl" class="prop-select">
+                  <option value="">无</option>
+                  <option value="red">高亮红</option>
+                  <option value="green">高亮绿</option>
+                  <option value="blue">高亮蓝</option>
+                </select>
+                <p class="insp-hint">演示时文字淡入约 1 秒后变为该颜色（源自 Reveal 的 fragment 高亮动画）。</p>
+              </div>
+
+              <label class="prop-check">
+                <input type="checkbox" id="el-rfit">
+                <span>自动适配字号（填满文本框）</span>
+              </label>
+              <p class="insp-hint">源自 Reveal 的 r-fit-text：文字超出文本框时自动缩小到正好容纳。</p>
+            </div>
+
+            <div class="common-props"></div>
+          </div>
+
+          <!-- Shape properties -->
+          <div id="props-shape" class="props-section">
+            <div class="prop-block">
+              <label class="prop-label">形状</label>
+              <div class="shape-preview" id="shape-preview">Rectangle</div>
+              <div class="shape-type-switch" id="shape-type-switch" title="点击切换图形类型（保留位置与尺寸）">
+                <button class="st-btn" data-shape-type="rect" title="矩形"><svg viewBox="0 0 40 30"><rect x="3" y="3" width="34" height="24" rx="2" fill="currentColor"/></svg></button>
+                <button class="st-btn" data-shape-type="ellipse" title="椭圆"><svg viewBox="0 0 40 30"><ellipse cx="20" cy="15" rx="17" ry="12" fill="currentColor"/></svg></button>
+                <button class="st-btn" data-shape-type="triangle" title="三角形"><svg viewBox="0 0 40 30"><polygon points="20,3 37,27 3,27" fill="currentColor"/></svg></button>
+                <button class="st-btn" data-shape-type="diamond" title="菱形"><svg viewBox="0 0 40 30"><polygon points="20,3 37,15 20,27 3,15" fill="currentColor"/></svg></button>
+                <button class="st-btn" data-shape-type="star" title="五角星"><svg viewBox="0 0 40 30"><polygon points="20,2 24,11 34,11 26,17 29,26 20,21 11,26 14,17 6,11 16,11" fill="currentColor"/></svg></button>
+                <button class="st-btn" data-shape-type="polygon" title="多边形"><svg viewBox="0 0 40 30"><polygon points="20,3 33,12 28,26 12,26 7,12" fill="currentColor"/></svg></button>
+                <button class="st-btn" data-shape-type="line" title="直线"><svg viewBox="0 0 40 30"><line x1="5" y1="15" x2="35" y2="15" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></button>
+                <button class="st-btn" data-shape-type="arrow" title="箭头"><svg viewBox="0 0 40 30"><line x1="5" y1="15" x2="25" y2="15" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><polygon points="25,9 34,15 25,21" fill="currentColor"/></svg></button>
+                <button class="st-btn" data-shape-type="curve" title="曲线"><svg viewBox="0 0 40 30"><path d="M4 24 C 12 4, 28 26, 36 6" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round"/></svg></button>
+              </div>
+            </div>
+
+            <div class="prop-row">
+              <label class="prop-mini">填充</label>
+              <select class="prop-select" id="el-fill-type">
+                <option value="solid">纯色</option>
+                <option value="gradient">渐变</option>
+                <option value="hatch">斜线</option>
+                <option value="grid">网格</option>
+                <option value="image">图像</option>
+              </select>
+            </div>
+
+            <div class="prop-block">
+              <label class="prop-label">填充颜色</label>
+              <div class="color-row">
+                <input type="color" class="prop-color" id="el-fill" value="#534AB7">
+              </div>
+              <div class="color-swatches" id="fill-color-swatches"></div>
+            </div>
+
+            <div class="prop-row" id="el-fill-none-block" style="display:none;">
+              <label class="prop-check">
+                <input type="checkbox" id="el-fill-none">
+                <span>无填充（仅描边）</span>
+              </label>
+            </div>
+
+            <div class="prop-block" id="el-fill-2-block" style="display:none;">
+              <label class="prop-label">第二颜色 / 线条</label>
+              <div class="color-row">
+                <input type="color" class="prop-color" id="el-fill-2" value="#0EA5E9">
+              </div>
+              <div class="color-swatches" id="fill2-color-swatches"></div>
+            </div>
+
+            <div class="prop-row" id="el-fill-angle-block" style="display:none;">
+              <label class="prop-mini">角度</label>
+              <input type="range" class="prop-range" id="el-fill-angle" min="0" max="360" value="45">
+              <span class="prop-val" id="el-fill-angle-val">45°</span>
+            </div>
+
+            <div class="prop-row" id="el-fill-spacing-block" style="display:none;">
+              <label class="prop-mini">间距</label>
+              <input type="number" class="prop-input" id="el-fill-spacing" value="12" min="3" max="100">
+              <span class="prop-unit">px</span>
+            </div>
+
+            <div class="prop-block" id="el-fill-img-block" style="display:none;">
+              <label class="prop-label">填充图像</label>
+              <button class="btn btn-sm btn-block" id="el-fill-img-btn" type="button">选择图像填充</button>
+            </div>
+
+            <div class="prop-block">
+              <label class="prop-label">描边颜色</label>
+              <div class="color-row">
+                <input type="color" class="prop-color" id="el-stroke" value="#000000">
+              </div>
+              <div class="color-swatches" id="stroke-color-swatches"></div>
+            </div>
+
+            <div class="prop-row">
+              <label class="prop-mini">描边宽</label>
+              <input type="number" class="prop-input" id="el-stroke-w" value="0" min="0" max="20">
+              <span class="prop-unit">px</span>
+            </div>
+
+            <div class="prop-row" id="el-stroke-on-block" style="display:none;">
+              <label class="prop-mini">显示描边</label>
+              <input type="checkbox" id="el-stroke-on" checked>
+            </div>
+
+            <div class="prop-row">
+              <label class="prop-mini">线型</label>
+              <select class="prop-select" id="el-dash">
+                <option value="solid">实线</option>
+                <option value="dashed">虚线</option>
+                <option value="dotted">点线</option>
+                <option value="dashdot">点划线</option>
+              </select>
+            </div>
+
+            <div class="prop-row" id="el-arrow-block" style="display:none;">
+              <label class="prop-mini">箭头</label>
+              <select class="prop-select" id="el-arrow">
+                <option value="none">无</option>
+                <option value="end">末端三角</option>
+                <option value="start">起点三角</option>
+                <option value="both">双向三角</option>
+                <option value="dot">圆点</option>
+                <option value="diamond">菱形</option>
+              </select>
+            </div>
+
+            <div class="prop-row" id="el-arrow-size-block" style="display:none;">
+              <label class="prop-mini">箭头大小</label>
+              <input type="range" class="prop-range" id="el-arrow-size" min="50" max="200" value="100">
+              <span class="prop-val" id="el-arrow-size-val">100%</span>
+            </div>
+
+            <div class="prop-row">
+              <label class="prop-mini">圆角</label>
+              <input type="number" class="prop-input" id="el-radius" value="0" min="0" max="50">
+              <span class="prop-unit">px</span>
+            </div>
+
+            <div class="prop-row">
+              <label class="prop-mini">阴影</label>
+              <select class="prop-select" id="el-shadow">
+                <option value="none">无</option>
+                <option value="soft">柔和</option>
+                <option value="medium">清晰</option>
+                <option value="strong">强烈</option>
+                <option value="custom">自定义…</option>
+              </select>
+            </div>
+
+            <div class="prop-block" id="el-shadow-params" style="display:none;">
+              <label class="prop-label">阴影细节</label>
+              <div class="prop-row">
+                <label class="prop-mini">阴影颜色</label>
+                <input type="color" class="prop-color" id="el-shadow-color" value="#000000">
+              </div>
+              <div class="prop-row">
+                <label class="prop-mini">阴影层次</label>
+                <select class="prop-select" id="el-shadow-depth">
+                  <option value="1">浅</option>
+                  <option value="2">标准</option>
+                  <option value="3">深</option>
+                  <option value="4">更深</option>
+                </select>
+              </div>
+              <div class="prop-row">
+                <label class="prop-mini">阴影角度</label>
+                <input type="range" class="prop-range" id="el-shadow-angle" min="0" max="360" value="45">
+                <span class="prop-val" id="el-shadow-angle-val">45°</span>
+              </div>
+            </div>
+
+            <div class="prop-row">
+              <label class="prop-mini">翻转</label>
+              <button class="btn btn-sm flip-btn" id="el-flip-h" type="button" title="水平翻转">⇋ 水平</button>
+              <button class="btn btn-sm flip-btn" id="el-flip-v" type="button" title="垂直翻转">⇵ 垂直</button>
+            </div>
+
+            <div class="prop-row" id="el-sides-block" style="display:none;">
+              <label class="prop-mini">边数</label>
+              <input type="number" class="prop-input" id="el-sides" value="5" min="3" max="12">
+            </div>
+
+            <div class="prop-block" id="el-edit-vertices" style="display:none;">
+              <button class="btn btn-sm btn-block" id="el-edit-vertices-btn" type="button">编辑顶点</button>
+              <p class="insp-hint">拖动顶点调整 · 双击边加顶点 · 双击顶点删除 · Esc 完成</p>
+            </div>
+
+            <div class="common-props"></div>
+          </div>
+
+          <!-- Image properties -->
+          <div id="props-image" class="props-section">
+            <div class="prop-block">
+              <label class="prop-label">图片</label>
+              <button class="btn btn-sm btn-block" data-action="el-change-image">更换图片</button>
+            </div>
+            <div class="prop-block">
+              <label class="prop-label">提示</label>
+              <p class="insp-hint">双击图片也可更换</p>
+            </div>
+            <div class="prop-row">
+              <label class="prop-mini">适应</label>
+              <select class="prop-select" id="el-img-fit">
+                <option value="cover">填充</option>
+                <option value="contain">包含</option>
+                <option value="fill">拉伸</option>
+              </select>
+            </div>
+            <div class="prop-row">
+              <label class="prop-mini">动效</label>
+              <select class="prop-select" id="el-img-anim">
+                <option value="">无</option>
+                <option value="kenburns">Ken Burns（缓慢缩放）</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Embed properties -->
+          <div id="props-embed" class="props-section">
+            <div class="prop-block">
+              <label class="prop-label">嵌入内容</label>
+              <p class="insp-hint">选中时可拖拽调整大小。双击嵌入区域可交互浏览网页内容。</p>
+            </div>
+            <div class="prop-block" id="ggb-edit-block" style="display:none;">
+              <label class="prop-label">GeoGebra 小程序</label>
+              <button class="btn btn-sm btn-block" data-action="el-edit-geogebra">编辑小程序</button>
+              <p class="insp-hint" id="ggb-edit-hint"></p>
+            </div>
+          </div>
+
+          <!-- Chart properties -->
+          <div id="props-chart" class="props-section">
+            <div class="prop-block">
+              <label class="prop-label">图表</label>
+              <button class="btn btn-sm btn-block" data-action="el-edit-chart">编辑图表数据</button>
+              <p class="insp-hint" id="chart-edit-hint"></p>
+            </div>
+            <div class="prop-block">
+              <label class="prop-label">提示</label>
+              <p class="insp-hint">双击图表也可打开编辑器。图表为静态 SVG，导出后无需联网即可显示。</p>
+            </div>
+          </div>
+
+          <!-- Table properties -->
+          <div id="props-table" class="props-section">
+            <div class="prop-block">
+              <label class="prop-label">表格</label>
+              <button class="btn btn-sm btn-block" data-action="el-edit-table" id="el-edit-table" type="button">编辑表格（样式 / 行列</button>
+              <p class="insp-hint">双击单元格可编辑文字。可整表缩放大小。双击嵌入区域可交互浏览网页内容。</p>
+            </div>
+            <div class="prop-block">
+              <label class="prop-label">操作</label>
+              <button class="btn btn-sm btn-block" data-action="table-add-row" type="button">编辑顶点</button>
+              <button class="btn btn-sm btn-block" data-action="table-add-col" type="button">编辑顶点</button>
+              <button class="btn btn-sm btn-block" data-action="table-del-row" type="button">🗑 删除末行</button>
+              <button class="btn btn-sm btn-block" data-action="table-del-col" type="button">🗑 删除末列</button>
+            </div>
+          </div>
+
+          <!-- Common element properties (shown alongside text/shape) -->
+          <div id="props-common" class="props-section">
+            <div class="prop-divider"></div>
+            <div class="prop-row">
+              <label class="prop-mini">X</label>
+              <input type="number" class="prop-input" id="el-x" step="1">
+              <label class="prop-mini">Y</label>
+              <input type="number" class="prop-input" id="el-y" step="1">
+            </div>
+            <div class="prop-row">
+              <label class="prop-mini">W</label>
+              <input type="number" class="prop-input" id="el-w" step="1" min="10">
+              <label class="prop-mini">H</label>
+              <input type="number" class="prop-input" id="el-h" step="1" min="10">
+            </div>
+            <div class="prop-divider"></div>
+            <div class="props-group">
+              <div class="props-group-title">通用</div>
+              <div class="props-rowline">
+                <span class="pn">锁定</span>
+                <span class="pv"><span class="props-toggle-label" id="el-lock-label">不可移动</span><span class="props-switch" id="el-lock" role="switch" tabindex="0" title="锁定/解锁元素"></span></span>
+              </div>
+              <div class="props-rowline">
+                <span class="pn">旋转</span>
+                <span class="pv"><input type="range" class="prop-range" id="el-rotate" min="0" max="360" value="0"><span class="prop-unit" id="el-rotate-val">0°</span></span>
+              </div>
+              <div class="props-rowline">
+                <span class="pn">透明度</span>
+                <span class="pv"><input type="range" class="prop-range" id="el-opacity" min="0" max="100" value="100"><span class="prop-unit" id="el-opacity-val">100%</span></span>
+              </div>
+            </div>
+            <div class="prop-divider"></div>
+            <label class="prop-label">动作与动画</label>
+            <div class="prop-row">
+              <label class="prop-mini">入场</label>
+              <select class="prop-select" id="el-entrance">
+                <option value="none">无</option>
+                <option value="fade-in">淡入</option>
+                <option value="slide-in">滑入</option>
+                <option value="zoom-in">缩放</option>
+                <option value="drop-in">下落</option>
+                <option value="bounce-in">弹跳</option>
+                <option value="grow">放大</option>
+                <option value="shrink">缩小</option>
+                <option value="spin-in">旋转</option>
+                <option value="trajectory">轨迹</option>
+                <option value="scroll">滚动</option>
+              </select>
+            </div>
+            <div class="prop-row">
+              <label class="prop-mini">轨迹</label>
+              <input type="number" class="prop-input" id="el-anim-x" value="0" step="10" title="水平位移 px（轨迹）">
+              <label class="prop-mini">Y</label>
+              <input type="number" class="prop-input" id="el-anim-y" value="0" step="10" title="垂直位移 px（轨迹）">
+            </div>
+            <div class="prop-row">
+              <label class="prop-mini">参数</label>
+              <input type="range" class="prop-range" id="el-anim-scale" min="0.2" max="3" step="0.05" value="1" title="缩放幅度">
+              <span class="prop-val" id="el-anim-scale-val">1×</span>
+              <select class="prop-select" id="el-anim-dir" title="滚动/滑动方向" style="width:80px;">
+                <option value="left">→</option>
+                <option value="right">←</option>
+                <option value="up">↓</option>
+                <option value="down">↑</option>
+              </select>
+            </div>
+            <div class="prop-row">
+              <label class="prop-mini">片段</label>
+              <button class="btn btn-sm" data-action="el-toggle-fragment" id="el-fragment-btn">+ 添加片段</button>
+            </div>
+            <div class="prop-row">
+              <label class="prop-mini">跳转</label>
+              <select class="prop-select" id="el-link">
+                <option value="">无</option>
+              </select>
+            </div>
+            <div class="prop-divider"></div>
+            <div class="prop-row prop-actions">
+              <button class="btn btn-sm" data-action="el-duplicate" title="复制元素">📋 复制</button>
+              <button class="btn btn-sm" data-action="el-front" title="置于顶层">⬆ 顶层</button>
+              <button class="btn btn-sm" data-action="el-back" title="置于底层">⬇ 底层</button>
+            </div>
+            <div class="prop-row prop-actions">
+              <button class="btn btn-danger btn-block" data-action="delete-element">🗑 删除元素</button>
+            </div>
+          </div>
+
+          <!-- Multi-select properties -->
+          <div id="props-multi" class="props-section">
+            <div class="prop-block">
+              <p class="insp-hint" id="multi-count">已选择多个元素</p>
+            </div>
+            <div class="prop-row prop-actions">
+              <button class="btn btn-sm btn-primary" data-action="el-group">⧉ 编组</button>
+              <button class="btn btn-sm" data-action="el-ungroup">取消编组</button>
+            </div>
+            <div class="prop-divider"></div>
+            <div class="prop-block">
+              <label class="prop-label">对齐</label>
+              <div class="align-grid">
+                <button class="align-btn" data-align="left" title="左对齐">⬅</button>
+                <button class="align-btn" data-align="center" title="水平居中">⬌</button>
+                <button class="align-btn" data-align="right" title="右对齐">➡</button>
+                <button class="align-btn" data-align="top" title="顶部对齐">⬆</button>
+                <button class="align-btn" data-align="middle" title="垂直居中">⬍</button>
+                <button class="align-btn" data-align="bottom" title="底部对齐">⬇</button>
+              </div>
+            </div>
+            <div class="prop-block">
+              <label class="prop-label">分布</label>
+              <div class="align-grid align-grid-2">
+                <button class="align-btn" data-align="dist-h" title="水平等距分布">≡ 水平分布</button>
+                <button class="align-btn" data-align="dist-v" title="垂直等距分布">≡ 垂直分布</button>
+              </div>
+            </div>
+            <div class="prop-divider"></div>
+            <div class="prop-row prop-actions">
+              <button class="btn btn-sm" data-action="el-front" title="置于顶层">⬆ 顶层</button>
+              <button class="btn btn-sm" data-action="el-back" title="置于底层">⬇ 底层</button>
+            </div>
+            <div class="prop-row prop-actions">
+              <button class="btn btn-danger btn-block" data-action="delete">🗑 删除所选</button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Layers panel (right tab) -->
+        <div id="layers-panel" class="props-content layers-panel hidden">
+          <div class="layer-toolbar">
+            <span id="layer-hint">当前页元素</span>
+          </div>
+          <div id="layer-list"></div>
+        </div>
+      </aside>
+
+    </div>
+
+    <!-- ===== Status bar ===== -->
+    <footer id="status-bar">
+      <span class="status-item"><span class="status-dot" id="save-dot"></span><span id="save-text">已保存</span></span>
+      <span class="status-item" id="status-elements">0 个元素</span>
+      <span class="status-spacer"></span>
+      <span class="status-item" id="status-layout">16:9</span>
+      <span class="status-item" id="status-theme-name">White</span>
+      <span class="status-item status-copyright" id="status-copyright" title="版权标识（可在「设置 → 品牌标识」中修改）"></span>
+    </footer>
+  </div>
+
+  <!-- ===== Present overlay (fullscreen) ===== -->
+  <div id="present-overlay" class="hidden">
+    <div class="reveal present-reveal" id="present-reveal">
+      <div class="slides" id="present-slides"></div>
+    </div>
+    <canvas id="present-annot" class="present-annot hidden"></canvas>
+    <span id="present-copyright" class="present-copyright hidden"></span>
+
+    <!-- ===== Present-mode control bar (powered by Reveal.js APIs) ===== -->
+    <div id="present-controls" class="present-controls">
+      <button class="pc-btn" data-pc="prev" title="上一页 (←)">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <button class="pc-btn" data-pc="next" title="下一页 (→)">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
+      <span class="pc-sep"></span>
+      <button class="pc-btn" data-pc="overview" title="概览视图 (O)">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      </button>
+      <button class="pc-btn" data-pc="autoplay" title="自动播放 (A)">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5.5v13l11-6.5-11-6.5z"/></svg>
+      </button>
+      <button class="pc-btn" data-pc="loop" title="循环播放">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+      </button>
+      <button class="pc-btn" data-pc="pause" title="暂停 / 黑屏 (B)">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+      </button>
+      <button class="pc-btn" data-pc="fullscreen" title="全屏 (F)">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+      </button>
+      <button class="pc-btn" data-pc="jump" title="跳转到页码">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/></svg>
+      </button>
+      <button class="pc-btn" data-pc="help" title="帮助 (?)">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.3c-.8.3-1.4 1-1.4 1.9v.3"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg>
+      </button>
+      <button class="pc-btn" data-pc="search" title="搜索内容 (Ctrl+F)">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+      </button>
+      <button class="pc-btn" data-pc="notes" title="备注面板">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg>
+      </button>
+      <button class="pc-btn" data-pc="speaker" title="演讲者窗口 (S)">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      </button>
+      <button class="pc-btn" data-pc="annot" title="画笔批注 (P)">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+      </button>
+      <div class="pc-annot-group hidden" id="pc-annot">
+        <button class="pc-btn annot-tool active" data-annot-tool="pen" title="画笔">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>
+        </button>
+        <button class="pc-btn annot-tool" data-annot-tool="laser" title="激光笔">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M12 12 L19 5"/></svg>
+        </button>
+        <span class="pc-sep"></span>
+        <button class="annot-color" data-annot-color="#e11d48" title="红" style="background:#e11d48"></button>
+        <button class="annot-color" data-annot-color="#f59e0b" title="橙" style="background:#f59e0b"></button>
+        <button class="annot-color" data-annot-color="#10b981" title="绿" style="background:#10b981"></button>
+        <button class="annot-color" data-annot-color="#3b82f6" title="蓝" style="background:#3b82f6"></button>
+        <span class="pc-sep"></span>
+        <button class="pc-btn annot-width active" data-annot-width="2" title="细">—</button>
+        <button class="pc-btn annot-width" data-annot-width="5" title="中">━</button>
+        <button class="pc-btn annot-width" data-annot-width="9" title="粗">▬</button>
+        <span class="pc-sep"></span>
+        <button class="pc-btn" data-annot-clear title="清除批注">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h12M4 7h16M7 7l1-3h8l1 3"/><path d="M6 17l-2 4M10 17l-2 4M14 17l-2 4M18 17l-2 4"/></svg>
+        </button>
+      </div>
+      <button class="pc-btn" data-pc="annot-clear" title="清除批注">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h12M4 7h16M7 7l1-3h8l1 3"/><path d="M6 17l-2 4M10 17l-2 4M14 17l-2 4M18 17l-2 4"/></svg>
+      </button>
+      <span class="pc-sep"></span>
+      <button class="pc-btn pc-danger" data-pc="exit" title="退出演示 (Esc)">✕</button>
+      <div id="pc-jump-box" class="pc-jump hidden">
+        <input id="pc-jump-input" type="text" placeholder="输入页码，回车跳转">
+      </div>
+    </div>
+
+    <!-- On-screen speaker notes panel (演讲者备注，随页切换) -->
+    <div id="present-notes" class="present-notes hidden">
+      <div class="present-notes-head">
+        <span>📋 演讲者备注</span>
+        <span class="present-timer" id="present-timer" title="演讲计时">
+          <span id="present-timer-val">00:00</span>
+          <button class="timer-btn" id="present-timer-toggle" title="暂停 / 继续">⏸</button>
+          <button class="timer-btn" id="present-timer-reset" title="重置计时">↺</button>
+        </span>
+        <button class="present-notes-close" id="present-notes-close" title="关闭备注面板">✕</button>
+      </div>
+      <div id="present-next-preview" class="present-next-preview hidden"></div>
+      <div id="present-notes-body" class="present-notes-body"></div>
+    </div>
+
+    <!-- ===== 中文快捷键帮助弹层 ===== -->
+    <div id="present-help" class="present-help hidden"></div>
+  </div>
+
+  <!-- ===== Toast ===== -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- ===== Floating text format bar ===== -->
+  <div id="format-bar" class="format-bar hidden">
+    <button class="fb-btn" data-cmd="bold" title="加粗 (Ctrl+B)"><b>B</b></button>
+    <button class="fb-btn" data-cmd="italic" title="斜体 (Ctrl+I)"><i>I</i></button>
+    <button class="fb-btn" data-cmd="underline" title="下划线 (Ctrl+U)"><u>U</u></button>
+    <button class="fb-btn" data-cmd="strikeThrough" title="删除线"><s>S</s></button>
+    <span class="fb-sep"></span>
+    <button class="fb-btn" data-cmd="insertUnorderedList" title="无序列表">•</button>
+    <button class="fb-btn" data-cmd="insertOrderedList" title="有序列表">1.</button>
+    <span class="fb-sep"></span>
+    <select class="fb-select" data-cmd="formatBlock">
+      <option value="">正文</option>
+      <option value="h1">标题1</option>
+      <option value="h2">标题2</option>
+      <option value="h3">标题3</option>
+      <option value="blockquote">引用</option>
+      <option value="pre">代码块</option>
+    </select>
+    <span class="fb-sep"></span>
+    <input type="color" class="fb-color" data-cmd="foreColor" title="文字颜色" value="#333333">
+    <button class="fb-btn" data-cmd="createLink" title="链接">🔗</button>
+  </div>
+
+  <!-- ===== Shapes popover ===== -->
+  <div id="shapes-popover" class="popover hidden">
+    <div class="popover-title">选择图形</div>
+    <div class="shapes-grid">
+      <button class="shape-btn" data-shape="rect" title="矩形">
+        <svg viewBox="0 0 40 30" width="32" height="24"><rect x="3" y="3" width="34" height="24" rx="2" fill="currentColor"/></svg>
+        <span>矩形</span>
+      </button>
+      <button class="shape-btn" data-shape="ellipse" title="椭圆">
+        <svg viewBox="0 0 40 30" width="32" height="24"><ellipse cx="20" cy="15" rx="17" ry="12" fill="currentColor"/></svg>
+        <span>椭圆</span>
+      </button>
+      <button class="shape-btn" data-shape="triangle" title="三角形">
+        <svg viewBox="0 0 40 30" width="32" height="24"><polygon points="20,3 37,27 3,27" fill="currentColor"/></svg>
+        <span>三角</span>
+      </button>
+      <button class="shape-btn" data-shape="line" title="直线">
+        <svg viewBox="0 0 40 30" width="32" height="24"><line x1="5" y1="15" x2="35" y2="15" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+        <span>直线</span>
+      </button>
+      <button class="shape-btn" data-shape="arrow" title="箭头">
+        <svg viewBox="0 0 40 30" width="32" height="24"><line x1="5" y1="15" x2="25" y2="15" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><polygon points="25,9 34,15 25,21" fill="currentColor"/></svg>
+        <span>箭头</span>
+      </button>
+      <button class="shape-btn" data-shape="polygon" title="多边形">
+        <svg viewBox="0 0 40 30" width="32" height="24"><polygon points="20,3 33,12 28,26 12,26 7,12" fill="currentColor"/></svg>
+        <span>多边形</span>
+      </button>
+      <button class="shape-btn" data-shape="freeform" title="任意多边形（单击加顶点，双击闭合）">
+        <svg viewBox="0 0 40 30" width="32" height="24"><polygon points="6,24 12,6 24,8 34,18 22,26" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><circle cx="6" cy="24" r="2" fill="currentColor"/><circle cx="12" cy="6" r="2" fill="currentColor"/><circle cx="24" cy="8" r="2" fill="currentColor"/><circle cx="34" cy="18" r="2" fill="currentColor"/><circle cx="22" cy="26" r="2" fill="currentColor"/></svg>
+        <span>任意多边形</span>
+      </button>
+      <button class="shape-btn" data-shape="diamond" title="菱形">
+        <svg viewBox="0 0 40 30" width="32" height="24"><polygon points="20,3 37,15 20,27 3,15" fill="currentColor"/></svg>
+        <span>菱形</span>
+      </button>
+      <button class="shape-btn" data-shape="star" title="五角星">
+        <svg viewBox="0 0 40 30" width="32" height="24"><polygon points="20,2 24,11 34,11 26,17 29,26 20,21 11,26 14,17 6,11 16,11" fill="currentColor"/></svg>
+        <span>星形</span>
+      </button>
+      <button class="shape-btn" data-shape="righttri" title="直角三角形">
+        <svg viewBox="0 0 40 30" width="32" height="24"><polygon points="6,6 6,26 34,26" fill="currentColor"/><rect x="6" y="21" width="5" height="5" fill="none" stroke="#fff" stroke-width="1"/></svg>
+        <span>直角△</span>
+      </button>
+      <button class="shape-btn" data-shape="angle" title="角（角符号）">
+        <svg viewBox="0 0 40 30" width="32" height="24"><line x1="5" y1="26" x2="35" y2="26" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="5" y1="26" x2="26" y2="6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M11 22 A 8 8 0 0 1 20 18" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+        <span>角</span>
+      </button>
+      <button class="shape-btn" data-shape="semicircle" title="半圆">
+        <svg viewBox="0 0 40 30" width="32" height="24"><path d="M5 25 A 15 15 0 0 1 35 25 Z" fill="currentColor"/></svg>
+        <span>半圆</span>
+      </button>
+      <button class="shape-btn" data-shape="dihedral" title="二面角">
+        <svg viewBox="0 0 40 30" width="32" height="24"><line x1="18" y1="6" x2="18" y2="28" stroke="currentColor" stroke-width="1.5"/><line x1="18" y1="6" x2="4" y2="12" stroke="currentColor" stroke-width="1.2"/><line x1="18" y1="28" x2="4" y2="28" stroke="currentColor" stroke-width="1.2"/><line x1="4" y1="12" x2="4" y2="28" stroke="currentColor" stroke-width="1.2"/><line x1="18" y1="6" x2="32" y2="12" stroke="currentColor" stroke-width="1.2"/><line x1="18" y1="28" x2="32" y2="28" stroke="currentColor" stroke-width="1.2"/><line x1="32" y1="12" x2="32" y2="28" stroke="currentColor" stroke-width="1.2"/><path d="M13 15 A 6 6 0 0 1 23 15" fill="none" stroke="#e11d48" stroke-width="1.4"/></svg>
+        <span>二面角</span>
+      </button>
+      <button class="shape-btn" data-shape="linePlane" title="线面角">
+        <svg viewBox="0 0 40 30" width="32" height="24"><polygon points="5,21 20,17 35,21 20,25" fill="currentColor" fill-opacity="0.15" stroke="currentColor" stroke-width="1.2"/><line x1="20" y1="22" x2="13" y2="6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M15 22 A 5 5 0 0 1 18 19" fill="none" stroke="#e11d48" stroke-width="1.4"/></svg>
+        <span>线面角</span>
+      </button>
+      <button class="shape-btn" data-shape="skewAngle" title="异面直线夹角">
+        <svg viewBox="0 0 40 30" width="32" height="24"><line x1="5" y1="24" x2="27" y2="8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="12" y1="26" x2="34" y2="12" stroke="currentColor" stroke-width="1.4" stroke-dasharray="3 2" stroke-linecap="round"/><path d="M14 20 A 5 5 0 0 1 19 17" fill="none" stroke="#e11d48" stroke-width="1.4"/></svg>
+        <span>异面直线夹角</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== Image popover (本地图片 / 在线图片库) ===== -->
+  <div id="image-popover" class="popover hidden">
+    <div class="popover-title">插入图片</div>
+    <div class="popover-menu">
+      <button class="popover-item" data-img-act="local" title="从本地选择图片">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+        <span>本地图片</span>
+      </button>
+      <button class="popover-item" data-img-act="gallery" title="打开在线图片库">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 15l5-4 4 3 4-4 5 5"/></svg>
+        <span>在线图片库</span>
+      </button>
+      <button class="popover-item" data-img-act="screenshot" title="截取屏幕区域并插入">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"/><rect x="4" y="4" width="16" height="16" rx="4" fill="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/></svg>
+        <span>截图</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== Embed modal ===== -->
+  <div id="embed-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-embed"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <span>嵌入内容</span>
+        <button class="icon-btn" data-action="close-embed">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="tabs">
+          <button class="tab active" data-tab="url">URL 链接</button>
+          <button class="tab" data-tab="code">HTML 代码</button>
+          <button class="tab" data-tab="file">本地文件</button>
+          <button class="tab" data-tab="pdf">PDF 文档</button>
+        </div>
+        <div class="tab-content" data-tab-content="url">
+          <input type="text" id="embed-url" placeholder="https://desmos.com" class="modal-input">
+          <p class="insp-hint">将以 iframe 形式嵌入网页内容。</p>
+        </div>
+        <div class="tab-content hidden" data-tab-content="code">
+          <textarea id="embed-code" placeholder="<div>自定义 HTML 内容</div>" class="modal-textarea"></textarea>
+        </div>
+        <div class="tab-content hidden" data-tab-content="file">
+          <input type="file" id="embed-file" accept=".html,.htm" class="modal-file">
+          <p class="insp-hint">选择本地 .html 文件，内容将嵌入幻灯片。</p>
+        </div>
+        <div class="tab-content hidden" data-tab-content="pdf">
+          <label class="prop-mini">方式一：PDF 链接</label>
+          <input type="text" id="embed-pdf-url" placeholder="https://example.com/file.pdf" class="modal-input">
+          <p class="insp-hint">远程 PDF 将以 iframe 形式嵌入，可在线翻页浏览。</p>
+          <div class="divider-text">或</div>
+          <label class="prop-mini">方式二：上传本地 PDF</label>
+          <input type="file" id="embed-pdf-file" accept=".pdf,application/pdf" class="modal-file">
+          <p class="insp-hint">选择本地 .pdf 文件，将，将/p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="close-embed">取消</button>
+        <button class="btn btn-primary" data-action="confirm-embed">嵌入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== GeoGebra modal ===== -->
+  <div id="geogebra-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-geogebra"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <span>插入 GeoGebra 小程序</span>
+        <button class="icon-btn" data-action="close-geogebra">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="tabs">
+          <button class="tab active" data-ggb-tab="material">素材链接 / ID</button>
+          <button class="tab" data-ggb-tab="app">空白计算器</button>
+          <button class="tab" data-ggb-tab="file">本地 .ggb</button>
+        </div>
+        <div class="tab-content" data-ggb-tab-content="material">
+          <label class="prop-mini">素材链接或 ID</label>
+          <input type="text" id="geogebra-input" placeholder="https://www.geogebra.org/m/xxxxxx 或直接粘贴 ID" class="modal-input">
+          <p class="insp-hint">将以官方 iframe 方式嵌入，播放演示时需联网加载。双击画布上的小程序可重新编辑。</p>
+          <p class="ggb-net-warn">⚠ 国内网络常无法连接 geogebra.org 的素材服务，按链接嵌入的公开素材很可能加载失败。稳定方案：用「空白计算器」或「本地 .ggb」。</p>
+        </div>
+        <div class="tab-content hidden" data-ggb-tab-content="app">
+          <p class="insp-hint">无需素材，直接嵌入空白计算器，适合当堂演示即时输入。使用本地引擎渲染，断网也能用（素材链接仍需联网）。</p>
+          <div class="ggb-app-grid">
+            <button type="button" class="ggb-app-btn" data-ggb-app="graphing">📈 图形计算器</button>
+            <button type="button" class="ggb-app-btn" data-ggb-app="geometry">📐 几何</button>
+            <button type="button" class="ggb-app-btn" data-ggb-app="3d">🧊 3D 计算器</button>
+            <button type="button" class="ggb-app-btn" data-ggb-app="scientific">🔢 科学计算器</button>
+            <button type="button" class="ggb-app-btn" data-ggb-app="classic">🧩 经典套件</button>
+          </div>
+        </div>
+        <div class="tab-content hidden" data-ggb-tab-content="file">
+          <label class="prop-mini">选择本地 .ggb 文件</label>
+          <input type="file" id="geogebra-file" accept=".ggb" class="modal-file">
+          <p class="ggb-file-name" id="geogebra-file-name"></p>
+          <p class="insp-hint">选择文件后自动转码为 base64 并内嵌，无需上传。本地引擎已安装（geogebra/5.0/web3d/），插入后即可完全离线运行。</p>
+        </div>
+        <div class="prop-row">
+          <label class="prop-check">
+            <input type="checkbox" id="ggb-toolbar" checked>
+            <span>显示工具栏</span>
+          </label>
+          <label class="prop-check">
+            <input type="checkbox" id="ggb-zoom" checked>
+            <span>可缩放 / 拖拽</span>
+          </label>
+          <label class="prop-check">
+            <input type="checkbox" id="ggb-file-algebra">
+            <span>显示代数区</span>
+          </label>
+          <label class="prop-check">
+            <input type="checkbox" id="ggb-reseticon" checked>
+            <span>显示重置按钮</span>
+          </label>
+        </div>
+        <div class="prop-row">
+          <label class="prop-check">
+            <input type="checkbox" id="ggb-menubar">
+            <span>显示菜单栏</span>
+          </label>
+          <label class="prop-check">
+            <input type="checkbox" id="ggb-algebra">
+            <span>显示代数输入区</span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="close-geogebra">取消</button>
+        <button class="btn btn-primary" data-action="confirm-geogebra">插入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== GeoGebra 套件作图器（作图 → 保存 .ggb / 插入页面） ===== -->
+  <div id="ggb-suite-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-ggb-suite"></div>
+    <div class="modal-content modal-wide">
+      <div class="modal-header">
+        <span>GeoGebra 套件 · 作图器</span>
+        <button class="icon-btn" data-action="close-ggb-suite">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="insp-hint">直接在下方作图，完成后可「保存为 .ggb」到本地，或「插入当前页」作为幻灯片中的可交互动画。</p>
+        <div class="ggb-suite-appbar">
+          <select id="ggb-suite-app" class="prop-select">
+            <option value="classic">🧩 经典套件（全功能）</option>
+            <option value="graphing">📈 图形计算器</option>
+            <option value="geometry">📐 几何</option>
+            <option value="scientific">🔢 科学计算器</option>
+            <option value="3d">🧊 3D 计算器</option>
+          </select>
+          <label class="prop-check"><input type="checkbox" id="ggb-suite-toolbar" checked><span>工具栏</span></label>
+          <label class="prop-check"><input type="checkbox" id="ggb-suite-menubar"><span>菜单栏</span></label>
+          <label class="prop-check"><input type="checkbox" id="ggb-suite-algebra"><span>代数区</span></label>
+          <label class="prop-check"><input type="checkbox" id="ggb-suite-zoom" checked><span>缩放拖动</span></label>
+        </div>
+        <div class="ggb-suite-canvas">
+          <div class="ggb-suite-host"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="close-ggb-suite">关闭</button>
+        <button class="btn" data-action="ggb-suite-save">💾 保存为 .ggb</button>
+        <button class="btn btn-primary" data-action="ggb-suite-insert">插入当前页</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Chart modal ===== -->
+  <div id="chart-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-chart"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <span>插入图表</span>
+        <button class="icon-btn" data-action="close-chart">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="prop-row">
+          <label class="prop-mini">类型</label>
+          <select id="chart-type" class="prop-select">
+            <option value="bar">柱状图</option>
+            <option value="line">折线图</option>
+            <option value="pie">饼图</option>
+            <option value="doughnut">环形图</option>
+          </select>
+          <label class="prop-mini">配色</label>
+          <select id="chart-palette" class="prop-select">
+            <option value="default">默认</option>
+            <option value="warm">暖色</option>
+            <option value="cool">冷色</option>
+            <option value="mono">单色紫</option>
+          </select>
+        </div>
+        <label class="prop-mini">标题（可选）</label>
+        <input type="text" id="chart-title" placeholder="季度销售额" class="modal-input">
+        <label class="prop-mini">标签（逗号分隔）</label>
+        <input type="text" id="chart-labels" placeholder="Q1, Q2, Q3, Q4" class="modal-input">
+        <label class="prop-mini">数值（逗号分隔）</label>
+        <input type="text" id="chart-values" placeholder="120, 190, 150, 240" class="modal-input">
+        <label class="prop-mini">预览</label>
+        <div id="chart-preview"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="close-chart">取消</button>
+        <button class="btn btn-primary" data-action="confirm-chart">插入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Table config modal ===== -->
+  <div id="table-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-table"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <span id="table-modal-title">插入表格</span>
+        <button class="icon-btn" data-action="close-table">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="prop-row">
+          <label class="prop-mini">列数</label>
+          <input type="number" id="table-cols" class="modal-input" value="3" min="1" max="8">
+          <label class="prop-mini">行数</label>
+          <input type="number" id="table-rows" class="modal-input" value="3" min="2" max="10">
+        </div>
+        <div class="prop-row">
+          <label class="prop-mini">样式</label>
+          <select id="table-style" class="prop-select">
+            <option value="plain">简洁白</option>
+            <option value="striped" selected>条纹样式</option>
+            <option value="bordered">边框样式</option>
+            <option value="dark">深色</option>
+            <option value="grid">网格样式</option>
+            <option value="soft">柔和</option>
+            <option value="accent">强调样式</option>
+          </select>
+          <label class="prop-mini">首行标题</label>
+          <select id="table-header" class="prop-select">
+            <option value="1">显示</option>
+            <option value="0">隐藏</option>
+          </select>
+        </div>
+        <label class="prop-mini">预览</label>
+        <div id="table-preview"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="close-table">取消</button>
+        <button class="btn btn-primary" data-action="confirm-table">插入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Icon picker modal ===== -->
+  <div id="icon-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-icon"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <span>插入图标</span>
+        <button class="icon-btn" data-action="close-icon">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="insp-hint">点击一个图标即可插入当前页。可像其它元素一样拖动、缩放、改颜色。/p>
+        <div id="icon-grid" class="icon-grid"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="close-icon">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Math graph modal ===== -->
+  <div id="mathgraph-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-mathgraph"></div>
+    <div class="modal-content modal-wide">
+      <div class="modal-header">
+        <span>插入数学图形</span>
+        <button class="icon-btn" data-action="close-mathgraph">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="tabs mathgraph-tabs" id="mathgraph-tabs"></div>
+        <div id="mathgraph-grid" class="smartart-grid"></div>
+        <p class="insp-hint" id="mathgraph-hint">点击插入当前页 —— 图形为 SVG，整体拖动、缩放、可导出</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="close-mathgraph">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Video modal ===== -->
+  <div id="video-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-video"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <span>插入视频</span>
+        <button class="icon-btn" data-action="close-video">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="prop-block">
+          <label class="prop-label">本地视频（mp4 / webm / ogv / mov 等，离线嵌入内容</label>
+          <div class="video-file-row">
+            <input type="file" id="video-file" accept="video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo,video/mpeg,.mp4,.webm,.ogv,.mov,.m4v,.avi,.mkv" class="modal-input">
+            <span class="insp-hint" id="video-file-name">未选择文件</span>
+          </div>
+          <p class="insp-hint">本地视频以内嵌数据保存，适合较小文件，内容将嵌入幻灯片。</p>
+        </div>
+        <div class="prop-divider"></div>
+        <div class="prop-block">
+          <label class="prop-label">在线视频 URL 或嵌入代码</label>
+          <textarea id="video-url" class="modal-textarea" rows="3" placeholder="https://www.youtube.com/embed/... 或https://.../video.mp4"></textarea>
+          <p class="insp-hint">支持 YouTube / bilibili / 腾讯视频等嵌入地址，或任意 .mp4 / .webm 直链地址/p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="close-video">取消</button>
+        <button class="btn btn-primary" data-action="confirm-video">插入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SmartArt modal ===== -->
+  <div id="smartart-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-smartart"></div>
+    <div class="modal-content modal-wide">
+      <div class="modal-header">
+        <span>SmartArt 图示</span>
+        <button class="icon-btn" data-action="close-smartart">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="tabs smartart-tabs">
+          <button class="tab active" data-sa-cat="all">全部</button>
+          <button class="tab" data-sa-cat="process">流程</button>
+          <button class="tab" data-sa-cat="hierarchy">层次</button>
+          <button class="tab" data-sa-cat="matrix">矩阵</button>
+          <button class="tab" data-sa-cat="pyramid">棱锥</button>
+          <button class="tab" data-sa-cat="cycle">循环</button>
+          <button class="tab" data-sa-cat="venn">维恩</button>
+          <button class="tab" data-sa-cat="list">列表</button>
+          <button class="tab" data-sa-cat="radial">放射</button>
+        </div>
+        <div id="smartart-grid" class="smartart-grid"></div>
+      </div>
+      <div class="modal-footer">
+        <span class="insp-hint" id="smartart-hint">点击图示插入当前页 —— 所有元素均可单独拖动、编辑文字、更换颜色</span>
+        <button class="btn" data-action="close-smartart">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== About modal ===== -->
+  <div id="about-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-about"></div>
+    <div class="modal-content about-content">
+      <div class="modal-header">
+        <h2 class="modal-title">关于 LJ-PPT</h2>
+        <button class="icon-btn" data-action="close-about">✕</button>
+      </div>
+      <div class="modal-body about-body">
+        <div class="about-logo"><img src="app-icon.png" alt="LJ-PPT"></div>
+        <div class="about-info">
+          <div class="about-name">LJ-PPT</div>
+          <div class="about-version">版本 1.0.0</div>
+          <div class="about-desc">所见即所得（WYSIWYG）Reveal.js 幻灯片编辑器</div>
+          <div class="about-copyright">版权所有 © 2026 LTJ Studio</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="close-about">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Usage help modal ===== -->
+  <div id="help-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-help"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title">使用帮助</h2>
+        <button class="icon-btn" data-action="close-help">✕</button>
+      </div>
+      <div class="modal-body help-body">
+        <div class="help-section">
+          <h4>① 主界面布局</h4>
+          <img class="help-shot" src="help-main.png" alt="主界面">
+          <p>顶栏为菜单栏；下方为水平工具栏；左侧为幻灯片缩略面板、中央为 1280×720 编辑画布、右侧为属性面板；底部为状态栏。</p>
+        </div>
+        <div class="help-section">
+          <h4>② 顶部菜单栏</h4>
+          <img class="help-shot" src="help-menu.png" alt="菜单栏">
+          <p><b>新建</b>（Ctrl+N）、<b>打开</b>（Ctrl+O）、<b>保存</b>（Ctrl+S）、<b>导出</b>（Ctrl+E，HTML / PDF / PNG）、撤销重做、主题、模板库、版本、演示、<b>帮助</b>。</p>
+        </div>
+        <div class="help-section">
+          <h4>③ 水平工具栏（插入元素）</h4>
+          <img class="help-shot" src="help-toolbar.png" alt="工具栏">
+          <p>选择、文本（T）、形状（S）、图片、图表、表格、图标、思维导图、笔、线、箭头、嵌入、GeoGebra、Desmos、数学公式。点击后在画布上放置并编辑。</p>
+        </div>
+        <div class="help-section">
+          <h4>④ 幻灯片面板 / 缩略条</h4>
+          <img class="help-shot" src="help-slides.png" alt="幻灯片面板">
+          <p>左侧缩略图列出全部幻灯片，可选中、拖拽排序、添加/删除、进入章节与子页。</p>
+        </div>
+        <div class="help-section">
+          <h4>⑤ 新建 / 保存</h4>
+          <img class="help-shot" src="help-new.png" alt="新建">
+          <img class="help-shot" src="help-save.png" alt="保存">
+          <p>新建一份演示文稿；保存为 <code>.revealslidr.json</code> 项目文件，支持系统原生另存为对话框。</p>
+        </div>
+        <div class="help-section">
+          <h4>⑥ 文本编辑</h4>
+          <img class="help-shot" src="help-text.png" alt="文本编辑">
+          <p>双击文本框输入文字；选中后右侧属性面板可调字体、字号、颜色、对齐、旋转与大小。</p>
+        </div>
+        <div class="help-section">
+          <h4>⑦ 形状 / 几何图形</h4>
+          <img class="help-shot" src="help-shape.png" alt="形状">
+          <p>插入矩形、椭圆、三角形、直线、箭头、多边形、五角星，以及抛物线、正弦、坐标系、Venn 图等教学图形。</p>
+        </div>
+        <div class="help-section">
+          <h4>⑧ 数学公式</h4>
+          <img class="help-shot" src="help-math.png" alt="公式">
+          <p>用 LaTeX 语法输入公式（<code>x^2</code>、<code>\frac{1}{2}</code>、<code>\R</code>实数集、<code>\set{}{}</code>集合），MathJax 实时渲染。</p>
+        </div>
+        <div class="help-section">
+          <h4>⑨ GeoGebra / Desmos 互动</h4>
+          <img class="help-shot" src="help-geogebra.png" alt="GeoGebra">
+          <img class="help-shot" src="help-desmos.png" alt="Desmos">
+          <p>插入可交互数学演示（绘图、几何、3D 等）或 Desmos 计算器，需联网加载 CDN 引擎。</p>
+        </div>
+        <div class="help-section">
+          <h4>⑩ 在线嵌入（HTML / 代码 / 网页）</h4>
+          <img class="help-shot" src="help-embed.png" alt="嵌入">
+          <p>嵌入任意 URL、网页、PDF 或代码块内容（iframe），可在演示中交互。</p>
+        </div>
+        <div class="help-section">
+          <h4>⑪ 模板库与主题</h4>
+          <img class="help-shot" src="help-template.png" alt="模板库">
+          <img class="help-shot" src="help-theme.png" alt="主题">
+          <p><b>模板库</b>一键套用基础布局 / 教学模板 / 专业模板 / 高中数学讲义；<b>主题</b>切换整套配色与字体。</p>
+        </div>
+        <div class="help-section">
+          <h4>⑫ 设置面板</h4>
+          <img class="help-shot" src="help-config.png" alt="设置">
+          <img class="help-shot" src="help-bg.png" alt="背景色">
+          <p>配置标题、描述、画布尺寸、边距、导航、自动播放、页码、GeoGebra 离线、Desmos 密钥；可修改页面背景色。</p>
+        </div>
+        <div class="help-section">
+          <h4>⑬ 演示模式</h4>
+          <img class="help-shot" src="help-present.png" alt="演示">
+          <p>F5 或顶栏 <b>演示</b> 进入全屏，方向键翻页、Esc 退出；底部控制条含上一页/下一页、概览、自动播放、循环、暂停、全屏、计时器、备注与演讲者视图。</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <span class="insp-hint">更多操作详见随附《LJ-PPT 使用手册》</span>
+        <button class="btn" data-action="close-help">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Image gallery modal ===== -->
+  <div id="gallery-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-gallery"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title">在线图片库</h2>
+        <button class="icon-btn" data-action="close-gallery">✕</button>
+      </div>
+      <div class="modal-body gallery-body">
+        <div class="gallery-toolbar">
+          <input type="text" id="gallery-search" class="prop-input" placeholder="搜索图片（如：数学 几何 背景 自然 图表）">
+          <button class="btn primary" id="gallery-search-btn" type="button">搜索</button>
+          <button class="btn" id="gallery-random" type="button">随机</button>
+        </div>
+        <div id="gallery-cats" class="gallery-cats">
+          <button class="gallery-cat active" data-cat="background">背景</button>
+          <button class="gallery-cat" data-cat="geometry">几何</button>
+          <button class="gallery-cat" data-cat="math">数学</button>
+          <button class="gallery-cat" data-cat="chart">图表</button>
+          <button class="gallery-cat" data-cat="nature">自然</button>
+          <button class="gallery-cat" data-cat="tech">科技</button>
+          <button class="gallery-cat" data-cat="school">校园</button>
+          <button class="gallery-cat" data-cat="people">人物</button>
+          <button class="gallery-cat" data-cat="city">城市</button>
+          <button class="gallery-cat" data-cat="food">食物</button>
+          <button class="gallery-cat" data-cat="sport">运动</button>
+          <button class="gallery-cat" data-cat="abstract">抽象</button>
+          <button class="gallery-cat" data-cat="animal">动物</button>
+          <button class="gallery-cat" data-cat="color">色彩</button>
+        </div>
+        <div id="gallery-grid" class="gallery-grid"></div>
+        <div id="gallery-status" class="gallery-status">点击图片插入当前页；图片来自在线素材源，需联网。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Settings modal ===== -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-settings"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <span>设置</span>
+        <button class="icon-btn" data-action="close-settings">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="prop-block">
+          <label class="prop-label">标题</label>
+          <input type="text" id="setting-title" class="prop-input prop-input-full" placeholder="未命名演示">
+        </div>
+        <div class="prop-block">
+          <label class="prop-label">描述</label>
+          <textarea id="setting-desc" class="prop-textarea" rows="2" placeholder="描述将显示在演示旁边"></textarea>
+        </div>
+        <div class="prop-row">
+          <label class="prop-mini">尺寸</label>
+          <select class="prop-select" id="setting-size">
+            <option value="default">960×700</option>
+            <option value="wide">1280×720 — 16:9</option>
+            <option value="square">700×700</option>
+            <option value="a4">1123×794 — A4 横向</option>
+          </select>
+        </div>
+        <div class="prop-row">
+          <label class="prop-mini">边距</label>
+          <select class="prop-select" id="setting-margin">
+            <option value="0">0%</option>
+            <option value="0.05" selected>5%</option>
+            <option value="0.1">10%</option>
+            <option value="0.15">15%</option>
+          </select>
+        </div>
+        <div class="prop-row">
+          <label class="prop-mini">语言</label>
+          <select class="prop-select" id="setting-lang">
+            <option value="zh-CN">简体中文</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+        <div class="prop-row">
+          <label class="prop-mini">导航</label>
+          <select class="prop-select" id="setting-nav">
+            <option value="default">默认 — 方向键翻页</option>
+            <option value="linear">线性</option>
+          </select>
+        </div>
+        <div class="prop-row">
+          <label class="prop-mini">自动播放</label>
+          <select class="prop-select" id="setting-autoplay">
+            <option value="0">关闭</option>
+            <option value="3000">3 秒 / 页</option>
+            <option value="5000">5 秒 / 页</option>
+            <option value="10000">10 秒 / 页</option>
+            <option value="30000">30 秒 / 页</option>
+          </select>
+        </div>
+        <div class="prop-row">
+          <label class="prop-check">
+            <input type="checkbox" id="setting-loop">
+            <span>循环播放（最后一页回到第一页）</span>
+          </label>
+        </div>
+        <div class="prop-row">
+          <label class="prop-check">
+            <input type="checkbox" id="setting-slide-numbers">
+            <span>显示幻灯片编号</span>
+          </label>
+        </div>
+        <div class="prop-row">
+          <label class="prop-check">
+            <input type="checkbox" id="setting-ggb-offline">
+            <span>GeoGebra 离线引擎</span>
+          </label>
+          <p class="insp-hint">编辑器会自动检测本地引擎 <code>geogebra/5.0/web3d/</code>（现已随项目安装），检测到即离线运行、不依赖网络。勾选此项表示导出 HTML 时强制使用本地引擎 —— 导出的文件需与 <code>geogebra/</code> 文件夹放在同一目录。加载器始终优先使用本地 <code>geogebra/deployggb.js</code>，不走 CDN。</p>
+        </div>
+        <div class="prop-block">
+          <label class="prop-label">行内公式垂直微调</label>
+          <div class="prop-range-row">
+            <input type="range" id="setting-math-shift" class="prop-range" min="-0.40" max="0.20" step="0.01" value="-0.18">
+            <span id="math-shift-val" class="prop-val">-0.18em</span>
+          </div>
+          <p class="insp-hint">调节行内公式（如 <code>$x^2$</code>）相对同一行中文文字的上下位置：<b>数值越小越靠下</b>，越大越靠上。拖动即时预览，保存后随项目生效，导出的 HTML 也会带上该设置。</p>
+        </div>
+        <div class="prop-block">
+          <label class="prop-label">Desmos API Key</label>
+          <input type="text" id="setting-desmos-key" class="prop-input prop-input-full" placeholder="留空则使用内置 Demo Key">
+          <p class="insp-hint">Desmos 计算器需要 API Key。默认内置公开 Demo Key（仅供测试，带品牌水印）。正式用途请HTML 也会带上你的 Key，水印将自动消失（合规）。</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="close-settings">取消</button>
+        <button class="btn btn-primary" data-action="save-settings">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Version history modal ===== -->
+  <div id="versions-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-versions"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <span>版本历史</span>
+        <button class="icon-btn" data-action="close-versions">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="prop-block">
+          <button class="btn btn-primary btn-block" id="version-save" type="button">＋ 保存当前版本</button>
+          <p class="insp-hint">保存当前演示为快照。新建/p>
+        </div>
+        <div id="versions-list" class="version-list"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="close-versions">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Theme panel modal ===== -->
+  <div id="theme-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-theme"></div>
+    <div class="modal-content modal-wide">
+      <div class="modal-header">
+        <span>主题与字体</span>
+        <button class="icon-btn" data-action="close-theme">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="prop-block">
+          <label class="prop-label">配色方案</label>
+          <div class="palette-grid" id="palette-grid">
+            <!-- generated by JS -->
+          </div>
+        </div>
+        <div class="prop-block">
+          <label class="prop-label">字体</label>
+          <div class="font-grid" id="font-grid">
+            <button class="font-card" data-font="">默认</button>
+            <button class="font-card" data-font="Montserrat">Montserrat</button>
+            <button class="font-card" data-font="Open Sans">Open Sans</button>
+            <button class="font-card" data-font="Lato">Lato</button>
+            <button class="font-card" data-font="Roboto">Roboto</button>
+            <button class="font-card" data-font="Source Han Sans SC">思源黑体</button>
+          </div>
+        </div>
+        <div class="prop-block">
+          <label class="prop-label">Reveal.js 主题</label>
+          <select id="theme-select-modal" class="prop-select prop-select-full">
+            <option value="black">Black</option>
+            <option value="white">White</option>
+            <option value="league">League</option>
+            <option value="beige">Beige</option>
+            <option value="sky">Sky</option>
+            <option value="night">Night</option>
+            <option value="serif">Serif</option>
+            <option value="simple">Simple</option>
+            <option value="solarized">Solarized</option>
+            <option value="blood">Blood</option>
+            <option value="moon">Moon</option>
+            <option value="dracula">Dracula</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="close-theme">取消</button>
+        <button class="btn btn-primary" data-action="save-theme">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Hidden file input ===== -->
+  <input type="file" id="file-input" accept=".html,.json,.txt" class="hidden">
+
+  <!-- ===== Add slide layout picker ===== -->
+  <div id="layout-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-layout"></div>
+    <div class="modal-content modal-wide">
+      <div class="modal-header">
+        <span>选择幻灯片布局</span>
+        <button class="icon-btn" data-action="close-layout">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="layout-grid">
+          <button class="layout-card" data-layout="title">
+            <div class="layout-preview layout-prev-title"><span>标题</span></div>
+            <span class="layout-name">标题页</span>
+          </button>
+          <button class="layout-card" data-layout="content">
+            <div class="layout-preview layout-prev-content"><span>• 要点1<br>• 要点2</span></div>
+            <span class="layout-name">内容页</span>
+          </button>
+          <button class="layout-card" data-layout="two-col">
+            <div class="layout-preview layout-prev-twocol"><span>左 | 右</span></div>
+            <span class="layout-name">双栏</span>
+          </button>
+          <button class="layout-card" data-layout="image">
+            <div class="layout-preview layout-prev-image"><span>🖼 图文</span></div>
+            <span class="layout-name">图文</span>
+          </button>
+          <button class="layout-card" data-layout="quote">
+            <div class="layout-preview layout-prev-quote"><span>"引用"</span></div>
+            <span class="layout-name">引用</span>
+          </button>
+          <button class="layout-card" data-layout="section">
+            <div class="layout-preview layout-prev-section"><span>章节</span></div>
+            <span class="layout-name">章节页</span>
+          </button>
+          <button class="layout-card" data-layout="bento">
+            <div class="layout-preview layout-prev-bento"><i class="bp-a"></i><i class="bp-b"></i><i class="bp-c"></i><i class="bp-d"></i></div>
+            <span class="layout-name">Bento 网格</span>
+          </button>
+          <button class="layout-card" data-layout="blank">
+            <div class="layout-preview layout-prev-blank"><span>空白</span></div>
+            <span class="layout-name">空白页</span>
+          </button>
+          <button class="layout-card" data-layout="title-only">
+            <div class="layout-preview" style="display:flex;align-items:center;justify-content:center;"><span style="font-weight:700;color:#333;font-size:20px;">T 仅标题</span></div>
+            <span class="layout-name">仅标题</span>
+          </button>
+          <button class="layout-card" data-layout="content-caption">
+            <div class="layout-preview" style="display:flex;flex-direction:column;justify-content:space-between;padding:10px;"><span style="font-size:10px;color:#888;">• 要点<br>• 要点</span><span style="font-weight:700;color:#333;font-size:14px;">底部标题</span></div>
+            <span class="layout-name">内容与标题</span>
+          </button>
+          <button class="layout-card" data-layout="picture-caption">
+            <div class="layout-preview" style="display:flex;flex-direction:column;justify-content:space-between;padding:8px;"><span style="height:60%;background:linear-gradient(135deg,#2563EB,#0EA5E9);border-radius:4px;display:block;"></span><span style="font-weight:700;color:#333;font-size:13px;">图片标题</span></div>
+            <span class="layout-name">图片与标题</span>
+          </button>
+          <button class="layout-card" data-layout="vertical-text">
+            <div class="layout-preview" style="display:flex;gap:8px;padding:10px;align-items:center;"><span style="writing-mode:vertical-rl;font-size:11px;color:#888;letter-spacing:2px;">竖排文字</span><span style="font-weight:700;color:#333;font-size:14px;">竖排<br>版式</span></div>
+            <span class="layout-name">竖排文字</span>
+          </button>
+          <button class="layout-card" data-layout="agenda">
+            <div class="layout-preview" style="display:flex;flex-direction:column;gap:5px;padding:10px;align-items:flex-start;"><span style="font-size:10px;color:#888;">01 第一部分</span><span style="font-size:10px;color:#888;">02 第二部分</span><span style="font-size:10px;color:#888;">03 第三部分</span></div>
+            <span class="layout-name">议程</span>
+          </button>
+          <button class="layout-card" data-layout="geogebra-applet">
+            <div class="layout-preview layout-prev-geogebra">
+              <i class="lg-bar"></i><i class="lg-img"></i><i class="lg-app"></i>
+            </div>
+            <span class="layout-name">GeoGebra 互动</span>
+          </button>
+          <button class="layout-card" data-layout="desmos-applet">
+            <div class="layout-preview layout-prev-desmos">
+              <i class="lg-bar"></i><i class="lg-img"></i><i class="lg-app"></i>
+            </div>
+            <span class="layout-name">Desmos 互动</span>
+          </button>
+          <button class="layout-card" data-layout="iframe-applet">
+            <div class="layout-preview layout-prev-iframe">
+              <i class="lg-bar"></i><i class="lg-img"></i><i class="lg-app"></i>
+            </div>
+            <span class="layout-name">网页嵌入</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Template library modal ===== -->
+  <div id="template-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-template"></div>
+    <div class="modal-content modal-wide">
+      <div class="modal-header">
+        <span>模板库</span>
+        <button class="icon-btn" data-action="close-template">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="tabs template-tabs">
+          <button class="tab active" data-tcat="basic">基础布局</button>
+          <button class="tab" data-tcat="teaching">教学模板</button>
+          <button class="tab" data-tcat="pro">专业模板</button>
+          <button class="tab" data-tcat="math">高中数学讲义</button>
+        </div>
+        <div id="template-theme-bar" class="template-theme-bar hidden">
+          <span class="theme-bar-label">主题配色</span>
+          <button class="theme-btn active" data-theme="business"><i class="theme-dot" style="background:#1F3A5F"></i>商务蓝</button>
+          <button class="theme-btn" data-theme="dark"><i class="theme-dot" style="background:#39C5CF"></i>深色科技</button>
+          <button class="theme-btn" data-theme="nature"><i class="theme-dot" style="background:#1E4D3B"></i>自然清新</button>
+          <span class="theme-bar-sep"></span>
+          <span class="theme-bar-label">风格卡</span>
+          <select id="template-style" class="prop-select prop-select-sm">
+            <option value="">默认（用主题配色）</option>
+            <option value="consulting">咨询报告风</option>
+            <option value="academic">学术讲义风</option>
+            <option value="edumath">数学课件风</option>
+            <option value="keynote-dark">科技发布深色</option>
+            <option value="editorial">极简杂志风</option>
+            <option value="formal">正式汇报风</option>
+          </select>
+        </div>
+        <div id="template-grid" class="template-grid"></div>
+      </div>
+      <div class="modal-footer">
+        <span class="insp-hint" id="template-hint">点击「追加」插入到末尾，点击「替换」覆盖当前页</span>
+        <button class="btn" data-action="close-template">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Export folder picker modal ===== -->
+  <div id="export-folder-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-export-folder"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <span id="export-folder-title">选择导出文件夹</span>
+        <button class="icon-btn" data-action="close-export-folder">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="export-folder-path">
+          <span class="export-folder-label">当前位置</span>
+          <code id="export-folder-cur">…</code>
+        </div>
+        <div id="export-folder-list" class="export-folder-list"></div>
+        <div class="export-folder-name">
+          <span class="export-folder-label">文件名</span>
+          <input type="text" id="export-folder-filename" class="prop-input" spellcheck="false">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <span class="insp-hint" id="export-folder-hint">将保存到所选文件夹</span>
+        <button class="btn" data-action="cancel-export-folder">取消</button>
+        <button class="btn btn-primary" data-action="save-export-folder">保存到此文件夹</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Math formula modal ===== -->
+  <div id="math-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-math"></div>
+    <div class="modal-content modal-wide">
+      <div class="modal-header">
+        <span>插入数学公式</span>
+        <button class="icon-btn" data-action="close-math">✕</button>
+      </div>
+      <div class="modal-body math-modal-body">
+        <div class="prop-block">
+          <label class="prop-label">预置公式（点击即预览</label>
+          <div class="math-preset-grid" id="math-preset-grid">
+            <!-- 分式 -->
+            <button class="math-preset" data-formula="\frac{a}{b}" title="分式">分式 a/b</button>
+            <button class="math-preset" data-formula="\frac{a+b}{c+d}" title="分式（表达式）">分式（表达式）</button>
+            <!-- 根式 -->
+            <button class="math-preset" data-formula="\sqrt{x}" title="平方根">平方根 √x</button>
+            <button class="math-preset" data-formula="\sqrt[n]{x}" title="n 次根">n 次根 ⁿ√x</button>
+            <button class="math-preset" data-formula="\sqrt{a^2+b^2}" title="勾股定理">勾股定理</button>
+            <!-- 求和 / 极限 -->
+            <button class="math-preset" data-formula="\sum_{i=1}^{n} i = \frac{n(n+1)}{2}" title="求和">求和 Σ</button>
+            <button class="math-preset" data-formula="\prod_{i=1}^{n} a_i" title="连乘">连乘 Π</button>
+            <button class="math-preset" data-formula="\lim_{x \to 0} \frac{\sin x}{x} = 1" title="极限">极限 lim</button>
+            <!-- 积分 -->
+            <button class="math-preset" data-formula="\int_{a}^{b} f(x)\,dx" title="定积分">定积分 ∫</button>
+            <button class="math-preset" data-formula="\iint_D f(x,y)\,dA" title="二重积分">二重积分</button>
+            <!-- 向量 -->
+            <button class="math-preset" data-formula="\vec{a}" title="向量">向量 a⃗</button>
+            <button class="math-preset" data-formula="\overrightarrow{AB}" title="向量 AB">向量 AB→</button>
+            <button class="math-preset" data-formula="|\vec{a}| = \sqrt{a_1^2+a_2^2+a_3^2}" title="向量模">向量模 |a⃗|</button>
+            <button class="math-preset" data-formula="\vec{a} \cdot \vec{b}" title="点积">点积 a·b</button>
+            <button class="math-preset" data-formula="\vec{a} \times \vec{b}" title="叉积">叉积 a×b</button>
+            <!-- 括号 -->
+            <button class="math-preset" data-formula="\left( \frac{a}{b} \right)" title="自适应圆括号">圆括号</button>
+            <button class="math-preset" data-formula="\left[ \frac{a}{b} \right]" title="自适应方括号">方括号</button>
+            <button class="math-preset" data-formula="\left\{ \frac{a}{b} \right\}" title="自适应花括号">花括号</button>
+            <button class="math-preset" data-formula="\left| x \right|" title="绝对值">绝对值 |x|</button>
+            <!-- 几何符号 -->
+            <button class="math-preset" data-formula="a \perp b" title="垂直">垂直 a⊥b</button>
+            <button class="math-preset" data-formula="a \parallel b" title="平行">平行 a∥b</button>
+            <button class="math-preset" data-formula="\angle ABC = 90^\circ" title="角度">角度 ∠ABC</button>
+            <button class="math-preset" data-formula="\triangle ABC \cong \triangle DEF" title="全等">全等 △ABC≅△DEF</button>
+            <button class="math-preset" data-formula="\triangle ABC \sim \triangle DEF" title="相似">相似 △ABC∽△DEF</button>
+            <!-- 指数对数 -->
+            <button class="math-preset" data-formula="a^b" title="指数">指数 aᵇ</button>
+            <button class="math-preset" data-formula="a_n" title="下标">下标 aₙ</button>
+            <button class="math-preset" data-formula="\log_a b" title="对数">对数 logₐb</button>
+            <button class="math-preset" data-formula="\ln x" title="自然对数">自然对数 ln</button>
+            <button class="math-preset" data-formula="e^{i\pi} + 1 = 0" title="欧拉公式">欧拉公式</button>
+            <!-- 矩阵 -->
+            <button class="math-preset" data-formula="\begin{pmatrix} a & b \\ c & d \end{pmatrix}" title="矩阵">矩阵</button>
+            <!-- 不等式 -->
+            <button class="math-preset" data-formula="a \neq b" title="不等">不等 a≠b</button>
+            <button class="math-preset" data-formula="a \leq b" title="小于等于">≤</button>
+            <button class="math-preset" data-formula="a \geq b" title="大于等于">≥</button>
+            <!-- 集合 -->
+            <button class="math-preset" data-formula="A \cup B" title="并集">并集 ∪</button>
+            <button class="math-preset" data-formula="A \cap B" title="交集">交集 ∩</button>
+            <button class="math-preset" data-formula="A \subset B" title="子集">子集 ⊂</button>
+            <button class="math-preset" data-formula="x \in A" title="属于">属于 ∈</button>
+            <button class="math-preset" data-formula="\emptyset" title="空集">空集 ∅</button>
+            <!-- 立体几何：标注体 -->
+            <button class="math-preset" data-formula="ABCD-A_1B_1C_1D_1" title="长方体">平行六面体 > 正方体 ABCD-A₁B₁C₁D₁</button>
+            <button class="math-preset" data-formula="ABC-A_1B_1C_1" title="三棱锥">三棱锥 ABC-A₁B₁C₁</button>
+            <!-- 平面向量：夹角 / 叉乘 / 投影 / 距离 -->
+            <button class="math-preset" data-formula="\cos\theta = \frac{\vec{a}\cdot\vec{b}}{|\vec{a}|\,|\vec{b}|}" title="向量夹角公式">向量夹角 cosθ</button>
+            <button class="math-preset" data-formula="\vec{a}\times\vec{b} = |\vec{a}|\,|\vec{b}|\sin\theta\,\vec{n}" title="向量叉乘（外积）">向量叉乘 a×b</button>
+            <button class="math-preset" data-formula="\mathrm{proj}_{\vec{b}}\vec{a} = \frac{\vec{a}\cdot\vec{b}}{|\vec{b}|^2}\,\vec{b}" title="投影向量">投影向量</button>
+            <button class="math-preset" data-formula="|AB| = \sqrt{(x_2-x_1)^2+(y_2-y_1)^2}" title="两点间距离>两点距离 |AB|</button>
+            <!-- 解析几何：曲线标准方程-->
+            <button class="math-preset" data-formula="\frac{x^2}{a^2}+\frac{y^2}{b^2}=1\quad(a>b>0)" title="椭圆标准方程">椭圆方程</button>
+            <button class="math-preset" data-formula="\frac{x^2}{a^2}-\frac{y^2}{b^2}=1\quad(a,b>0)" title="双曲线标准方程">双曲线方程</button>
+            <button class="math-preset" data-formula="y^2=2px\quad(p>0)" title="抛物线标准方程">抛物线方程y²=2px</button>
+            <button class="math-preset" data-formula="(x-a)^2+(y-b)^2=r^2" title="圆的标准方程">圆标准方程</button>
+            <button class="math-preset" data-formula="d = \frac{|Ax_0+By_0+C|}{\sqrt{A^2+B^2}}" title="点到直线的距离">点到直线的距离</button>
+            <!-- 椭圆点处切线 / 极线（对合直线） -->
+            <button class="math-preset" data-formula="\frac{x_0x}{a^2}+\frac{y_0y}{b^2}=1" title="椭圆上点 (x₀,y₀) 处的切线 / 极线">椭圆切线（极线）</button>
+            <!-- 函数：三次函数-->
+            <button class="math-preset" data-formula="f(x)=ax^3+bx^2+cx+d\quad(a\neq0)" title="三次函数">三次函数</button>
+            <!-- 和差化积-->
+            <button class="math-preset" data-formula="\sin(\alpha\pm\beta)=\sin\alpha\cos\beta\pm\cos\alpha\sin\beta" title="两角和差正弦">sin(α±β)</button>
+            <button class="math-preset" data-formula="\cos(\alpha\pm\beta)=\cos\alpha\cos\beta\mp\sin\alpha\sin\beta" title="两角和差余弦">cos(α±β)</button>
+            <button class="math-preset" data-formula="\tan(\alpha\pm\beta)=\frac{\tan\alpha\pm\tan\beta}{1\mp\tan\alpha\tan\beta}" title="两角和差正切">tan(α±β)</button>
+            <!-- 倍角 -->
+            <button class="math-preset" data-formula="\sin2\alpha=2\sin\alpha\cos\alpha" title="倍角正弦">倍角 sin2α</button>
+            <button class="math-preset" data-formula="\cos2\alpha=\cos^2\alpha-\sin^2\alpha=2\cos^2\alpha-1" title="倍角余弦">倍角 cos2α</button>
+            <button class="math-preset" data-formula="\tan2\alpha=\frac{2\tan\alpha}{1-\tan^2\alpha}" title="倍角正切">倍角 tan2α</button>
+            <!-- 和差化积 -->
+            <button class="math-preset" data-formula="\sin\alpha+\sin\beta=2\sin\frac{\alpha+\beta}{2}\cos\frac{\alpha-\beta}{2}" title="和差化积（正弦和公式）">和差化积</button>
+            <button class="math-preset" data-formula="\cos\alpha-\cos\beta=-2\sin\frac{\alpha+\beta}{2}\sin\frac{\alpha-\beta}{2}" title="和差化积（余弦差公式）">和差化积（余弦）</button>
+            <button class="math-preset" data-formula="\sin\alpha\cos\beta=\frac{1}{2}[\sin(\alpha+\beta)+\sin(\alpha-\beta)]" title="积化和差">积化和差</button>
+            <!-- 万能公式 -->
+            <button class="math-preset" data-formula="\sin\alpha=\frac{2\tan\frac{\alpha}{2}}{1+\tan^2\frac{\alpha}{2}}" title="万能公式（正弦）">万能公式 sinα</button>
+            <button class="math-preset" data-formula="\cos\alpha=\frac{1-\tan^2\frac{\alpha}{2}}{1+\tan^2\frac{\alpha}{2}}" title="万能公式（余弦）">万能公式 cosα</button>
+          </div>
+        </div>
+
+        <div class="prop-divider"></div>
+
+        <div class="prop-block">
+          <label class="prop-label">自定义公式（每行一个，可一次插入多个）</label>
+          <textarea id="math-input" class="modal-textarea" rows="4" placeholder="输入 LaTeX 公式，如 \frac{a}{b}；每行一个公式，可一次插入多个；行内公式用 $x^2$，可混排中文" style="font-family: monospace; resize: vertical;"></textarea>
+        </div>
+
+        <div class="prop-row math-inline-row">
+          <label class="prop-mini math-inline-label">颜色</label>
+          <div class="color-row" id="math-color-row">
+            <button type="button" class="color-swatch" data-color="#000000" style="background:#000000" title="黑"></button>
+            <button type="button" class="color-swatch" data-color="#e53e3e" style="background:#e53e3e" title="红"></button>
+            <button type="button" class="color-swatch" data-color="#dd6b20" style="background:#dd6b20" title="橙"></button>
+            <button type="button" class="color-swatch" data-color="#d69e2e" style="background:#d69e2e" title="黄"></button>
+            <button type="button" class="color-swatch" data-color="#38a169" style="background:#38a169" title="绿"></button>
+            <button type="button" class="color-swatch" data-color="#319795" style="background:#319795" title="青"></button>
+            <button type="button" class="color-swatch" data-color="#3182ce" style="background:#3182ce" title="蓝"></button>
+            <button type="button" class="color-swatch" data-color="#805ad5" style="background:#805ad5" title="紫"></button>
+            <button type="button" class="color-swatch" data-color="#718096" style="background:#718096" title="灰"></button>
+            <input type="color" id="math-color-custom" class="color-custom" value="#000000" title="自定义颜色">
+          </div>
+        </div>
+
+        <div class="prop-row math-inline-row">
+          <label class="prop-mini math-inline-label">实时预览</label>
+          <div id="math-preview" class="math-preview">
+            <span style="color:var(--text-tertiary);font-size:0.7em;">选择预置公式或输入自定义 LaTeX</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="close-math">取消</button>
+        <button class="btn btn-primary" data-action="confirm-math">插入公式</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 组合公式 modal（外观与数学公式面板一致） ===== -->
+  <div id="combo-math-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-combo-math"></div>
+    <div class="modal-content modal-wide">
+      <div class="modal-header">
+        <span>组合公式</span>
+        <button class="icon-btn" data-action="close-combo-math">✕</button>
+      </div>
+      <div class="modal-body math-modal-body">
+        <div class="prop-block">
+          <label class="prop-label">公式内容（支持复制粘贴多段 LaTeX）</label>
+          <textarea id="combo-math-input" class="modal-textarea" rows="4" placeholder="粘贴标准 LaTeX 公式，如 \frac{x^2}{a^2}+\frac{y^2}{b^2}=1 或带定界符的 $$...$$ / \[...\]；组合成一个公式块。" style="font-family: monospace; resize: vertical;"></textarea>
+        </div>
+        <div class="prop-row combo-math-opts">
+          <label class="prop-check">
+            <input type="checkbox" id="combo-math-multiline">
+            <span>多行显示（每行一段）</span>
+          </label>
+          <label class="prop-check">
+            <input type="checkbox" id="combo-math-autowrap">
+            <span>自动换行</span>
+          </label>
+        </div>
+        <div class="prop-block">
+          <label class="prop-label">预设组合（点击填入）</label>
+          <div class="combo-math-presets" id="combo-math-presets">
+            <button class="combo-preset" data-combo-preset="eqsys">方程组</button>
+            <button class="combo-preset" data-combo-preset="multiline">多行推导</button>
+            <button class="combo-preset" data-combo-preset="fracchain">分式链</button>
+            <button class="combo-preset" data-combo-preset="piecewise">分段函数</button>
+            <button class="combo-preset" data-combo-preset="integral">积分公式</button>
+            <button class="combo-preset" data-combo-preset="quadratic">一元二次</button>
+            <button class="combo-preset" data-combo-preset="ineqchain">不等式链</button>
+            <button class="combo-preset" data-combo-preset="ineqchain2">不等式链带名</button>
+            <button class="combo-preset" data-combo-preset="ineqlog">对数平均链</button>
+            <button class="combo-preset" data-combo-preset="ineqlog2">对数平均简单</button>
+            <button class="combo-preset" data-combo-preset="ineqexp">指数平均链</button>
+            <button class="combo-preset" data-combo-preset="ineqexp2">指数平均</button>
+          </div>
+        </div>
+        <div class="prop-row math-inline-row">
+          <label class="prop-mini math-inline-label">颜色</label>
+          <div class="color-row" id="combo-math-color-row">
+            <button type="button" class="color-swatch" data-color="#000000" style="background:#000000" title="黑"></button>
+            <button type="button" class="color-swatch" data-color="#e53e3e" style="background:#e53e3e" title="红"></button>
+            <button type="button" class="color-swatch" data-color="#dd6b20" style="background:#dd6b20" title="橙"></button>
+            <button type="button" class="color-swatch" data-color="#d69e2e" style="background:#d69e2e" title="黄"></button>
+            <button type="button" class="color-swatch" data-color="#38a169" style="background:#38a169" title="绿"></button>
+            <button type="button" class="color-swatch" data-color="#319795" style="background:#319795" title="青"></button>
+            <button type="button" class="color-swatch" data-color="#3182ce" style="background:#3182ce" title="蓝"></button>
+            <button type="button" class="color-swatch" data-color="#805ad5" style="background:#805ad5" title="紫"></button>
+            <input type="color" id="combo-math-color-custom" class="prop-color" value="#000000">
+          </div>
+          <label class="prop-mini math-inline-label" style="width:auto;margin-left:8px;">字号</label>
+          <input type="number" id="combo-math-size" class="prop-input" value="18" min="12" max="72" step="1" style="width:64px;">
+          <span class="prop-unit">px</span>
+          <label class="prop-mini math-inline-label" style="width:auto;margin-left:8px;">背景</label>
+          <div class="color-row" id="combo-math-bg-row">
+            <button type="button" class="color-swatch" data-color="#ffffff" style="background:#ffffff" title="白"></button>
+            <button type="button" class="color-swatch" data-color="#FFF8F0" style="background:#FFF8F0" title="米"></button>
+            <button type="button" class="color-swatch" data-color="#F0FDF9" style="background:#F0FDF9" title="浅绿"></button>
+            <button type="button" class="color-swatch" data-color="#F5F3FF" style="background:#F5F3FF" title="浅紫"></button>
+            <button type="button" class="color-swatch" data-color="#EFF4FF" style="background:#EFF4FF" title="浅蓝"></button>
+            <button type="button" class="color-swatch" data-color="#FAF7F0" style="background:#FAF7F0" title="米白"></button>
+            <button type="button" class="color-swatch" data-color="#ffffff" style="background:#ffffff;border:1px dashed #ccc" title="无"></button>
+          </div>
+          <span class="combo-font-group">
+            <label class="prop-mini math-inline-label" style="width:auto;">字体</label>
+            <select id="combo-math-font" class="prop-select" style="width:120px;flex:0 0 auto;">
+              <option value="">默认</option>
+              <option value="system-ui, sans-serif">系统字体</option>
+              <option value="'Microsoft YaHei', sans-serif">微软雅黑</option>
+              <option value="'PingFang SC', sans-serif">苹方</option>
+              <option value="'Source Han Sans SC', sans-serif">思源黑体</option>
+              <option value="Arial, sans-serif">Arial</option>
+              <option value="Georgia, serif">Georgia</option>
+            </select>
+          </span>
+        </div>
+        <div class="prop-block">
+          <label class="prop-label math-preview-label">实时预览</label>
+          <div id="combo-math-preview" class="math-preview">
+            <span style="color:var(--text-tertiary);font-size:0.7em;">粘贴 LaTeX 公式，此处实时预览组合结果</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="clear-combo-math">清空</button>
+        <button class="btn" data-action="close-combo-math">取消</button>
+        <button class="btn btn-primary" data-action="confirm-combo-math">插入公式</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Slide context menu ===== -->
+  <div id="slide-context-menu" class="context-menu hidden">
+    <button class="ctx-item" data-ctx="make-chapter" id="scm-make-chapter">📚 将本页设为章节</button>
+    <button class="ctx-item" data-ctx="add-subpage" id="scm-add-subpage">📄在章节下添加子页</button>
+    <div class="ctx-divider"></div>
+    <button class="ctx-item" data-ctx="duplicate">📋 复制幻灯片</button>
+    <button class="ctx-item" data-ctx="duplicate-morph">🎬 复制为变形页</button>
+    <button class="ctx-item" data-ctx="move-up">⬆ 上移</button>
+    <button class="ctx-item" data-ctx="move-down">⬇ 下移</button>
+    <div class="ctx-divider"></div>
+    <span class="ctx-label">本页切换速度</span>
+    <button class="ctx-item" data-ctx="speed-default">🚀 默认速度</button>
+    <button class="ctx-item" data-ctx="speed-fast">⚡ 快速</button>
+    <button class="ctx-item" data-ctx="speed-slow">🐢 慢速</button>
+    <div class="ctx-divider"></div>
+    <button class="ctx-item ctx-danger" data-ctx="delete">🗑 删除</button>
+  </div>
+
+  <!-- ===== Element context menu ===== -->
+  <div id="element-context-menu" class="context-menu hidden">
+    <button class="ctx-item" data-ectx="copy">📋 复制</button>
+    <button class="ctx-item" data-ectx="cut">✂ 剪切</button>
+    <button class="ctx-item" data-ectx="paste">📥 粘贴</button>
+    <div class="ctx-divider"></div>
+    <button class="ctx-item" data-ectx="group">⧉ 编组 (G)</button>
+    <button class="ctx-item" data-ectx="ungroup">✂ 取消编组</button>
+    <div class="ctx-divider"></div>
+    <button class="ctx-item" data-ectx="front">⬆ 置于顶层</button>
+    <button class="ctx-item" data-ectx="back">⬇ 置于底层</button>
+    <button class="ctx-item hidden" data-ectx="edit-ggb">⚙ 编辑 GeoGebra</button>
+    <div class="ctx-divider"></div>
+    <button class="ctx-item ctx-danger" data-ectx="delete">🗑 删除</button>
+  </div>
+
+  <!-- Canvas (empty area) right-click menu -->
+  <div id="canvas-context-menu" class="context-menu hidden">
+    <button class="ctx-item" data-cctx="paste">📥 粘贴</button>
+  </div>
+
+  <div id="shot-overlay" class="shot-overlay hidden">
+    <div class="shot-tip">拖拽框选截图区域 · 松开鼠标即可截图 · Esc 取消</div>
+    <div id="shot-rect" class="shot-rect hidden"></div>
+  </div>
+
+  <!-- 自定义确认对话框：替代 window.confirm，避免 Tauri 显示 "tauri.localhost 显示" 来源前缀 -->
+  <div id="confirm-modal" class="modal hidden">
+    <div class="modal-backdrop" data-action="confirm-no"></div>
+    <div class="modal-content modal-sm">
+      <div class="modal-header"><span id="confirm-title">确认</span></div>
+      <div class="modal-body"><p id="confirm-msg" class="confirm-msg"></p></div>
+      <div class="modal-footer">
+        <button class="btn" data-action="confirm-no">取消</button>
+        <button class="btn btn-primary" data-action="confirm-yes">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=106"></script>
+</body>
+</html>
