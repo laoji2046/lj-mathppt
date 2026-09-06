@@ -1,0 +1,176 @@
+/* ============================================================
+   LJ-MathSlides · 设计系统 v2
+   ------------------------------------------------------------
+   一套 token 驱动三个面板（顶部工具栏 / 页面列表 / 属性面板）。
+   原品牌紫 #8a2be2 保留为 --brand-legacy；界面主色改用同色系
+   现代紫 #7c3aed，饱和度更收敛，长时间看稿不刺眼。
+   所有文本色均满足 WCAG AA（正文 4.5:1）。
+   ============================================================ */
+:root {
+  /* ---------- 品牌色阶（violet） ---------- */
+  --brand-50:  #f6f4ff;
+  --brand-100: #ede9fe;
+  --brand-200: #ddd6fe;
+  --brand-300: #c4b5fd;
+  --brand-400: #a78bfa;
+  --brand-500: #8b5cf6;
+  --brand-600: #7c3aed;
+  --brand-700: #6d28d9;
+  --brand-800: #5b21b6;
+  --brand-900: #4c1d95;
+  --brand-legacy: #8a2be2;   /* 原版 LJ-PPT 紫，导出/印刷沿用 */
+
+  /* ---------- 中性色阶（冷灰，与紫调同源） ---------- */
+  --gray-0:   #ffffff;
+  --gray-25:  #fdfdff;
+  --gray-50:  #f8f8fb;
+  --gray-100: #f2f2f6;
+  --gray-200: #e9e9ef;
+  --gray-300: #dcdce5;
+  --gray-400: #c2c2d0;
+  --gray-500: #9a9aa9;
+  --gray-600: #6e6e7e;
+  --gray-700: #4e4e5c;
+  --gray-800: #34343f;
+  --gray-900: #22222a;
+
+  /* ---------- 语义：界面 ---------- */
+  --brand: var(--brand-600);
+  --brand-strong: var(--brand-700);
+  --brand-2: var(--brand-400);
+  --brand-soft: var(--brand-50);
+  --brand-soft-2: var(--brand-100);
+  --brand-ink: var(--brand-900);
+
+  --bg: var(--gray-100);          /* 应用底板 */
+  --bg-deep: var(--gray-200);     /* 画布工作区（更沉，突出舞台） */
+  --bg-sunken: var(--gray-50);    /* 面板内凹陷区 */
+  --panel: var(--gray-0);         /* 面板 */
+  --panel-2: var(--gray-25);      /* 次级面板 */
+  --panel-hover: var(--gray-50);
+  --border: var(--gray-200);
+  --border-strong: var(--gray-300);
+
+  --text: var(--gray-900);        /* 主文字 15.6:1 */
+  --muted: #5e5e6d;               /* 次级文字/标签 6.4:1 */
+  --muted-2: var(--gray-500);     /* 仅用于图标、分隔、禁用态（非正文） */
+
+  /* ---------- 语义：状态 ---------- */
+  --danger: #d92d20;
+  --danger-soft: #fef3f2;
+  --danger-border: #fecdca;
+  --ok: #16a34a;
+  --ok-soft: #f0fdf4;
+  --info: #2563eb;
+  --warn: #d97706;
+
+  /* ---------- 形状 ---------- */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-full: 999px;
+
+  /* ---------- 阴影：四级高度 ---------- */
+  --shadow-xs: 0 1px 2px rgba(24, 18, 46, 0.05);
+  --shadow-sm: 0 1px 2px rgba(24, 18, 46, 0.06), 0 2px 6px rgba(24, 18, 46, 0.05);
+  --shadow: 0 4px 12px rgba(24, 18, 46, 0.10), 0 1px 3px rgba(24, 18, 46, 0.06);
+  --shadow-lg: 0 12px 32px rgba(24, 18, 46, 0.16), 0 2px 8px rgba(24, 18, 46, 0.08);
+  --shadow-stage: 0 2px 6px rgba(24, 18, 46, 0.10), 0 24px 60px rgba(24, 18, 46, 0.18);
+
+  /* ---------- 焦点环 ---------- */
+  --ring-brand: 0 0 0 3px rgba(124, 58, 237, 0.18);
+  --ring-danger: 0 0 0 3px rgba(217, 45, 32, 0.16);
+
+  /* ---------- 动效 ---------- */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --dur-3: 260ms;
+
+  /* ---------- 字体 ---------- */
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Source Han Sans SC', sans-serif;
+  --mono: ui-monospace, 'SF Mono', Consolas, 'Courier New', monospace;
+
+  font-family: var(--font);
+  color: var(--text);
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button { font-family: inherit; }
+::selection { background: var(--brand-100); color: var(--brand-900); }
+
+/* 拖拽/平移期间禁止选中文字 */
+body.is-dragging,
+body.is-panning {
+  user-select: none;
+  cursor: grabbing;
+}
+
+/* 统一聚焦态：3px 品牌环，键盘可见、鼠标不打扰 */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+  box-shadow: var(--ring-brand);
+}
+
+/* 细腻滚动条 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--gray-300);
+  border-radius: var(--radius-full);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--gray-400); background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* 弹层/面板进入动画（v-if 挂载即播放一次） */
+@keyframes fx-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes fx-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.fx-pop { animation: fx-pop var(--dur-2) var(--ease); }
+.fx-fade { animation: fx-fade 0.14s var(--ease); }
+
+/* 通用卡片 */
+.fx-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+
+/* 弹层动画：各 palette 挂载即播放一次 */
+.palette { animation: fx-fade 0.16s var(--ease); }
+.palette__box { animation: fx-pop var(--dur-2) var(--ease); }
+
+/* 尊重系统的「减少动态效果」偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

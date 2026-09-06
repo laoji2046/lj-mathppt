@@ -1,0 +1,203 @@
+// @ts-nocheck — 探索性代码，未被 picker 引用，留作后续 PowerPoint 风整套讲座工厂的基石
+ * 设计原则：
+ * - 真实内容（P3 提示词要求：标题必须是结论句，要点含具体数学对象）
+ * - 同主题内配色与字体严格统一
+ * - 页眉 eyebrow + brand 在所有内容页一致
+ */
+
+import type { Slide } from '@/types'
+import { getTheme, type Theme } from './themes'
+import {
+  bulletsSlide, coverSlide, endSlide, problemSlide, sectionSlide, tocSlide,
+} from './layouts'
+
+export interface TemplateBundle {
+  id: string
+  name: string
+  description: string
+  /** 标签：'lecture' 整套讲座 / 'lesson' 一节课 */
+  tag: 'lecture' | 'lesson'
+  themeId: string
+  theme: Theme
+  slides: Slide[]
+}
+
+function id(prefix: string): string {
+  return prefix + '_' + Math.random().toString(36).slice(2, 10)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 讲座 1：三角函数一轮复习（EduMath · 5 页）
+// ──────────────────────────────────────────────────────────────────────────────
+export function buildTrigLesson(): TemplateBundle {
+  const t = getTheme('edumath')
+  return {
+    id: 'bundle-trig-lesson',
+    name: '三角函数一轮复习',
+    description: 'EduMath 风 · 5 页 · ω/φ 图像变换公开课课件骨架',
+    tag: 'lesson',
+    themeId: t.id,
+    theme: t,
+    slides: [
+      coverSlide(t, {
+        theme: t,
+        title: '三角函数图像变换',
+        subtitle: '一轮复习公开课 · ω 与 φ 的几何解读',
+        author: '老冀',
+        unit: '广东省某中学 · 高三数学组',
+        date: '2026 年 3 月',
+      }),
+      tocSlide(t, {
+        theme: t,
+        eyebrow: '三角函数 · 图像变换',
+        brand: 'Slideo · 课件',
+        pageNum: '02',
+      }),
+      sectionSlide(t, {
+        theme: t,
+        chapterNo: '01',
+        chapterTitle: 'ω 决定周期',
+        subtitle: '把图像横向"挤紧"或"拉开"的那根杠杆',
+      }),
+      bulletsSlide(t, {
+        theme: t,
+        title: 'ω 决定周期：y = sin(ωx) 的周期为 2π / ω',
+        bullets: [
+          { lead: '周期与 ω 反相关', support: 'ω 翻倍，周期 T 缩为一半；ω 缩小一半，T 翻倍。' },
+          { lead: '图像横向压缩/拉伸', support: '把 x 替换为 ωx，相当于把原图像在 x 方向"挤紧"或"拉开"。' },
+          { lead: '不改变振幅与相位', support: 'y = sin(ωx) 的最大值、最小值、零点结构由 ω 与初相共同决定。' },
+          { lead: '五点法的关键坐标变化', support: '原本 ωx = 0, π/2, π, 3π/2, 2π 对应 x = 0, π/2ω, π/ω, 3π/2ω, 2π/ω。' },
+        ],
+        eyebrow: '三角函数 · 图像变换',
+        brand: 'Slideo · 课件',
+        pageNum: '03',
+      }),
+      endSlide(t, {
+        theme: t,
+        closing: '练到会为止，考场才不慌',
+        contactLine: '公众号：老冀聊数学  ·  邮箱：example@school.cn',
+        author: '老冀',
+        unit: '广东省某中学 · 高三数学组',
+      }),
+    ],
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 讲座 2：高考真题点评讲座（Formal · 6 页）
+// ──────────────────────────────────────────────────────────────────────────────
+export function buildGaokaoLecture(): TemplateBundle {
+  const t = getTheme('formal')
+  return {
+    id: 'bundle-gaokao-lecture',
+    name: '高考真题点评讲座',
+    description: 'Formal 风 · 6 页 · 三角函数真题两讲',
+    tag: 'lecture',
+    themeId: t.id,
+    theme: t,
+    slides: [
+      coverSlide(t, {
+        theme: t,
+        title: '三角函数命题趋势与教学启示',
+        subtitle: '2023–2025 新高考Ⅰ卷考点评析',
+        author: '老冀',
+        unit: '高考备考讲座',
+        date: '2026 年 1 月',
+      }),
+      tocSlide(t, {
+        theme: t,
+        eyebrow: '高考备考 · 三角函数',
+        brand: 'Slideo · 讲座',
+        items: [
+          { num: '01', title: '近三年命题结构与分值', page: '03' },
+          { num: '02', title: '高频考点与图像类题型', page: '04' },
+          { num: '03', title: '例题评析：2025 新高考Ⅰ卷', page: '05' },
+          { num: '04', title: '二轮复习策略与常见失分点', page: '06' },
+        ],
+        pageNum: '02',
+      }),
+      sectionSlide(t, {
+        theme: t,
+        chapterNo: '01',
+        chapterTitle: '近三年命题结构与分值',
+        subtitle: '从 2023 到 2025，三角函数题的"位置"基本不变',
+      }),
+      problemSlide(t, {
+        theme: t,
+        eyebrow: '高考备考 · 三角函数',
+        brand: 'Slideo · 讲座',
+        problemNo: '例 1 · 2025 新高考 Ⅰ 卷第 6 题',
+        problemTitle: '已知 f(x) = sin(2x + π/3)，求其最小正周期',
+        problemStatement: '题目原文：函数 f(x) = sin(2x + π/3) 的最小正周期为（    ）。A. π/2  B. π  C. 2π  D. 4π。',
+        steps: [
+          { lead: '识别 ω', support: '与 y = sin(ωx + φ) 对照，ω = 2，φ = π/3（与周期无关）。' },
+          { lead: '套用周期公式', support: 'T = 2π / |ω| = 2π / 2 = π。' },
+          { lead: '验证', support: '令 ω(x + T) = ωx + 2π ⇒ T = π，与公式结果一致。' },
+        ],
+        conclusion: '最小正周期为 π，答案选 B',
+        pageNum: '04',
+      }),
+      problemSlide(t, {
+        theme: t,
+        eyebrow: '高考备考 · 三角函数',
+        brand: 'Slideo · 讲座',
+        problemNo: '例 2 · 2024 新高考 Ⅱ 卷第 8 题',
+        problemTitle: 'y = sin(x/2) 与 y = sin(x) 在 [0, 4π] 上的交点个数',
+        problemStatement: '题目原文：在区间 [0, 4π] 上，函数 y = sin(x/2) 与 y = sin(x) 图象的交点个数为（    ）。',
+        steps: [
+          { lead: '画图定位', support: 'y = sin(x/2) 周期 4π，在 [0, 4π] 上仅画一个完整周期；y = sin(x) 画两个完整周期。' },
+          { lead: '数交点', support: '每个完整周期内两函数交 4 次，再考虑 x = 0 与 x = 4π 重合点。' },
+          { lead: '得出结论', support: '共 8 个交点。' },
+        ],
+        conclusion: '在 [0, 4π] 上共有 8 个交点',
+        pageNum: '05',
+      }),
+      endSlide(t, {
+        theme: t,
+        closing: '研究命题方向，比刷题更省力',
+        contactLine: '微信公众号：老冀聊数学  ·  邮箱：example@school.cn',
+        author: '老冀',
+        unit: '高考备考讲座',
+      }),
+    ],
+  }
+}
+
+export const TEMPLATE_BUNDLES: TemplateBundle[] = [buildTrigLesson(), buildGaokaoLecture()]
+
+/** 单页版式目录（供模板库"单页版式" tab 使用） */
+export interface LayoutTemplate {
+  id: string
+  name: string
+  description: string
+  themeId: string
+  theme: Theme
+  build: () => Slide
+}
+
+export const LAYOUT_TEMPLATES: LayoutTemplate[] = (() => {
+  const list: { id: string; name: string; description: string; themeId: string; build: (t: Theme) => Slide }[] = [
+    { id: 'cover', name: '封面', description: '左主色大色块 + 右侧署名；无页眉无页码', themeId: 'edumath', build: (t) => coverSlide(t, { theme: t }) },
+    { id: 'toc', name: '目录', description: '左侧"目录"大字 + 右侧编号条目', themeId: 'edumath', build: (t) => tocSlide(t, { theme: t }) },
+    { id: 'section', name: '章节页', description: '居中超大章节号 + 章节标题', themeId: 'edumath', build: (t) => sectionSlide(t, { theme: t, theme: t }) },
+    { id: 'bullets', name: '要点页', description: 'Action Title + 主张/支撑句 + 公式侧栏', themeId: 'edumath', build: (t) => bulletsSlide(t, { theme: t }) },
+    { id: 'problem', name: '公式演练', description: '题目 + 解题步骤 + 主色结论横条', themeId: 'edumath', build: (t) => problemSlide(t, { theme: t }) },
+    { id: 'end', name: '结尾页', description: '居中结语 + 联系行 + 署名', themeId: 'edumath', build: (t) => endSlide(t, { theme: t }) },
+  ]
+  // 双主题：每种版式 × 2 主题 = 12 个
+  const out: LayoutTemplate[] = []
+  for (const item of list) {
+    for (const tid of ['edumath', 'formal']) {
+      const t = getTheme(tid)
+      out.push({
+        id: `${item.id}-${tid}`,
+        name: item.name,
+        description: item.description + `（${t.name}）`,
+        themeId: tid,
+        theme: t,
+        build: () => item.build(t),
+      })
+    }
+  }
+  return out
+})()

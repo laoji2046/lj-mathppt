@@ -1,0 +1,278 @@
+<script setup lang="ts">
+import { ref } from 'vue'
+import { useDeckStore } from '@/stores/deck'
+import { useContextMenu, type MenuItem } from '@/composables/useContextMenu'
+import type { SlideElement } from '@/types'
+
+const store = useDeckStore()
+const { openMenu } = useContextMenu()
+
+const THUMB_W = 168
+const THUMB_H = 94.5 // 16:9
+
+/** 把元素的设计坐标等比映射到缩略图尺寸 */
+function thumbStyle(el: SlideElement) {
+  const k = THUMB_W / store.deck.width
+  const base = {
+    position: 'absolute' as const,
+    left: `${el.x * k}px`,
+    top: `${el.y * k}px`,
+    width: `${el.w * k}px`,
+    height: `${el.h * k}px`,
+    overflow: 'hidden' as const,
+  }
+  if (el.type === 'text') {
+    return { ...base, background: 'transparent', color: el.color, fontSize: `${Math.max(3, el.fontSize * k)}px` }
+  }
+  if (el.type === 'shape') {
+    return {
+      ...base,
+      background: el.fill,
+      borderRadius: el.shape === 'ellipse' ? '50%' : '1px',
+    }
+  }
+  if (el.type === 'math') {
+    return { ...base, background: 'repeating-linear-gradient(45deg,#e8e4f0,#e8e4f0 3px,#f2effa 3px,#f2effa 6px)', color: '#534ab7' }
+  }
+  if (el.type === 'geogebra') {
+    return { ...base, background: '#ffffff', border: '1px solid #cfcbd8' }
+  }
+  if (el.type === 'desmos') {
+    return { ...base, background: '#f2fbf6', border: '1px solid #bcd9c8' }
+  }
+  if (el.type === 'image') {
+    return { ...base, background: el.src ? `url(${el.src}) center/cover` : '#f1efe8' }
+  }
+  return base
+}
+
+// ---- 拖拽排序 ----
+const dragFrom = ref<number | null>(null)
+const dragOver = ref<number | null>(null)
+function onDragStart(i: number, e: DragEvent) {
+  dragFrom.value = i
+  dragOver.value = i
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(i))
+  }
+}
+function onDragOver(i: number, e: DragEvent) {
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  if (dragOver.value !== i) dragOver.value = i
+}
+function onDrop(i: number, e: DragEvent) {
+  e.preventDefault()
+  const from = dragFrom.value
+  if (from !== null && from !== i) store.reorderSlide(from, i)
+  resetDrag()
+}
+function onDragEnd() { resetDrag() }
+function resetDrag() { dragFrom.value = null; dragOver.value = null }
+function onSlideCtx(i: number, e: MouseEvent) {
+  e.preventDefault()
+  const s = store.deck.slides[i]
+  const isSub = !!s?.parentId
+  const items: MenuItem[] = [
+    { label: '复制此页', onClick: () => store.copySlide(i) },
+    { label: '上移', onClick: () => store.moveSlide(i, -1), disabled: i === 0 },
+    { label: '下移', onClick: () => store.moveSlide(i, 1), disabled: i === store.slideCount - 1 },
+  ]
+  if (isSub) items.push({ label: '取消子页', onClick: () => store.setSlideSubpage(i, false) })
+  else if (i > 0) items.push({ label: '设为子页', onClick: () => store.setSlideSubpage(i, true) })
+  items.push({ label: '删除此页', onClick: () => store.removeSlide(i), danger: true, disabled: store.slideCount <= 1 })
+  openMenu(e.clientX, e.clientY, items)
+}
+</script>
+
+<template>
+  <div class="slides">
+    <div
+      v-for="(s, i) in store.deck.slides"
+      :key="s.id"
+      class="slide-item"
+      :class="{
+        'slide-item--active': i === store.currentIndex,
+        'slide-item--dragover': dragOver === i && dragFrom !== null && dragFrom !== i,
+        'slide-item--sub': !!s.parentId,
+      }"
+      draggable="true"
+      @click="store.gotoSlide(i)"
+      @contextmenu.prevent="onSlideCtx(i, $event)"
+      @dragstart="onDragStart(i, $event)"
+      @dragover="onDragOver(i, $event)"
+      @drop="onDrop(i, $event)"
+      @dragend="onDragEnd"
+    >
+      <span class="slide-num">{{ i + 1 }}</span>
+      <span v-if="s.parentId" class="slide-sub">↳ 子页</span>
+      <div class="slide-thumb" :style="{ background: s.bg, width: THUMB_W + 'px', height: THUMB_H + 'px' }">
+        <div v-for="el in s.elements" :key="el.id" :style="thumbStyle(el)">
+          <template v-if="el.type === 'text'">{{ (el as any).text }}</template>
+        </div>
+      </div>
+      <div class="slide-tools">
+        <button class="slide-tool" title="复制此页" @click.stop="store.copySlide(i)">⧉</button>
+        <button class="slide-tool" title="上移" :disabled="i === 0" @click.stop="store.moveSlide(i, -1)">↑</button>
+        <button class="slide-tool" title="下移" :disabled="i === store.slideCount - 1" @click.stop="store.moveSlide(i, 1)">↓</button>
+        <button v-if="store.slideCount > 1" class="slide-tool slide-tool--del" title="删除此页" @click.stop="store.removeSlide(i)">×</button>
+      </div>
+    </div>
+
+    <button class="add-slide" @click="store.addSlide()">+ 新页面</button>
+  </div>
+</template>
+
+<style scoped>
+.slides {
+  width: 216px;
+  flex: none;
+  border-right: 1px solid var(--border);
+  background: var(--panel-2);
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* ---------- 单页卡片 ---------- */
+.slide-item {
+  position: relative;
+  margin-bottom: 12px;
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: transform var(--dur-1) var(--ease);
+}
+.slide-item--drag { opacity: 0.55; }
+.slide-item--sub { margin-left: 12px; }
+
+.slide-thumb {
+  position: relative;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: #fff;
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--dur-2) var(--ease), border-color var(--dur-2) var(--ease),
+              transform var(--dur-2) var(--ease);
+}
+.slide-item:hover .slide-thumb {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+  border-color: var(--gray-400);
+}
+.slide-item--dragover .slide-thumb {
+  border-color: var(--brand-400);
+  box-shadow: 0 0 0 2px var(--brand-100), var(--shadow-sm);
+}
+.slide-item--active .slide-thumb {
+  border-color: transparent;
+  box-shadow: 0 0 0 2px var(--brand-600), var(--shadow);
+}
+
+/* ---------- 覆盖徽标 ---------- */
+.slide-num {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  min-width: 20px;
+  height: 19px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background: rgba(34, 34, 42, 0.74);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.slide-item--active .slide-num { background: var(--brand-600); }
+.slide-sub {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  height: 19px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-full);
+  background: var(--brand-600);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+/* ---------- 悬浮操作 ---------- */
+.slide-tools {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  z-index: 2;
+  display: flex;
+  gap: 3px;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
+}
+.slide-item:hover .slide-tools,
+.slide-item:focus-within .slide-tools { opacity: 1; transform: translateY(0); }
+.slide-tool {
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: var(--radius-sm);
+  color: var(--gray-700);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  box-shadow: var(--shadow-xs);
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease),
+              border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
+}
+.slide-tool:hover:not(:disabled) {
+  background: var(--brand-50);
+  border-color: var(--brand-200);
+  color: var(--brand-700);
+  transform: translateY(-1px);
+}
+.slide-tool:disabled { opacity: 0.32; cursor: not-allowed; }
+.slide-tool--del { color: var(--danger); }
+.slide-tool--del:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
+/* ---------- 新建页 ---------- */
+.add-slide {
+  width: 100%;
+  height: 38px;
+  padding: 0;
+  border: 1.5px dashed var(--border-strong);
+  background: var(--panel);
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease),
+              color var(--dur-1) var(--ease);
+}
+.add-slide:hover {
+  background: var(--brand-50);
+  border-color: var(--brand-300);
+  border-style: solid;
+  color: var(--brand-700);
+}
+</style>

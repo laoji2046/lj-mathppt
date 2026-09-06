@@ -1,0 +1,164 @@
+/**
+ * 主题 tokens —— 设计宪法的工程化产物。
+ *
+ * 来源：`../slideo-template-prompts.md` 中 P0 设计宪法 + P1 风格卡。
+ * 锁定后再批量铺版式（slots），保证整套模板视觉一致（母版系统）。
+ *
+ * 关键约束：
+ * - 60-30-10 配色：60% 中性（bg/text）、30% 主色（primary）、10% 强调色（accent）
+ * - 字号阶梯只能取下列值，禁止随意取值
+ * - 圆角 ≤ 8px、阴影 ≤ 8% 黑、字体 ≤ 2 个字族
+ */
+
+import type { Rect } from '@/types'
+
+/** 字号阶梯（设计像素，按 1920×1080 画布设计，导出时按比例缩放） */
+export interface TypeScale {
+  display: number   // 封面主标题
+  h1: number         // 页标题
+  h2: number         // 小节标题
+  h3: number         // 卡片标题
+  body: number       // 正文
+  small: number      // 辅助说明
+  label: number      // 页眉标签与页码
+}
+
+/** 12 列网格系统 */
+export interface GridTokens {
+  margin: number   // 安全边距（画布四边）
+  cols: number     // 12
+  gutter: number   // 列距
+}
+
+/** 主题 tokens —— 一套模板只激活一个主题 */
+export interface Theme {
+  id: string
+  name: string
+  description: string
+  /** 60% 中性：背景色 */
+  bg: string
+  /** 文字墨色（正文/标题主色） */
+  text: string
+  /** 30% 主色：标题强调、色带、图表主系列 */
+  primary: string
+  /** 10% 强调色：仅用于数字、关键词、当前项 */
+  accent: string
+  /** 辅助灰：来源行、辅助说明、图注 */
+  muted: string
+  /** 1px 分隔线与图表灰线 */
+  line: string
+  /** 公式区底色（仅当该主题用得上时） */
+  formulaBg?: string
+  /** 字体族 key（来自 types/index.ts 的 FONT_OPTIONS） */
+  fontTitle: string
+  fontBody: string
+  fontMono: string
+  /** 字号阶梯 */
+  type: TypeScale
+  /** 网格 tokens */
+  grid: GridTokens
+  /** 卡片圆角（≤ 8px） */
+  radius: number
+  /** 是否启用页眉（封面与结尾页不出现） */
+  showHeader: boolean
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// C · EduMath：高中数学课件风（米白底 + 深蓝 + 强调橙）
+// ──────────────────────────────────────────────────────────────────────────────
+const eduMath: Theme = {
+  id: 'edumath',
+  name: 'EduMath · 课件',
+  description: '高中数学课件风，米白底配深蓝主色与橙色强调。课堂讲义、公开课首选。',
+  bg: '#FAF7F0',
+  text: '#26282B',
+  primary: '#1D4E89',
+  accent: '#E8871E',
+  muted: '#5F5E5A',
+  line: '#D3D1C7',
+  formulaBg: '#F0EDE6',
+  fontTitle: 'sans',     // 思源黑体 Bold
+  fontBody: 'sans',      // 思源黑体 Regular
+  fontMono: 'mono',      // 等宽（公式 / 题目编号）
+  type: {
+    display: 84,
+    h1: 54,
+    h2: 36,
+    h3: 30,
+    body: 30,
+    small: 24,
+    label: 18,
+  },
+  grid: { margin: 96, cols: 12, gutter: 16 },
+  radius: 8,
+  showHeader: true,
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// F · Formal：正式汇报风（白底 + 藏青 + 金色点缀）
+// ──────────────────────────────────────────────────────────────────────────────
+const formal: Theme = {
+  id: 'formal',
+  name: 'Formal · 讲座',
+  description: '正式汇报风（藏青主色 + 金色点缀 + 思源宋体），适用于高考备考讲座、公开课评比、职称评审。',
+  bg: '#FFFFFF',
+  text: '#2B2B2B',
+  primary: '#14336B',
+  accent: '#B08D44',
+  muted: '#6B7280',
+  line: '#D1D5DB',
+  formulaBg: '#F4F2EC',
+  fontTitle: 'serif',    // 思源宋体 Bold —— 庄重
+  fontBody: 'sans',
+  fontMono: 'mono',
+  type: {
+    display: 80,
+    h1: 50,
+    h2: 34,
+    h3: 28,
+    body: 28,
+    small: 22,
+    label: 16,
+  },
+  grid: { margin: 88, cols: 12, gutter: 16 },
+  radius: 4,
+  showHeader: true,
+}
+
+export const THEMES: Record<string, Theme> = { edumath: eduMath, formal }
+export const THEME_LIST: Theme[] = [eduMath, formal]
+export function getTheme(id: string): Theme {
+  return THEMES[id] ?? eduMath
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 网格工具：根据主题 + 画布尺寸，按 12 列网格算出元素矩形
+// ──────────────────────────────────────────────────────────────────────────────
+export function gridCell(
+  canvas: { width: number; height: number },
+  theme: Theme,
+  col: number, span: number, rowTop: number, rowHeight: number,
+): Rect {
+  const { margin, cols, gutter } = theme.grid
+  const usable = canvas.width - margin * 2
+  const colW = (usable - gutter * (cols - 1)) / cols
+  return {
+    x: Math.round(margin + (col - 1) * (colW + gutter)),
+    y: Math.round(rowTop),
+    w: Math.round(span * colW + (span - 1) * gutter),
+    h: Math.round(rowHeight),
+  }
+}
+
+// 颜色取值帮手（避免每次写字符串字面量）
+export function c(t: Theme) {
+  return {
+    bg: t.bg, text: t.text, primary: t.primary, accent: t.accent,
+    muted: t.muted, line: t.line, formulaBg: t.formulaBg ?? t.bg,
+  }
+}
+
+// 字号帮手
+export function ts(t: Theme) {
+  return { ...t.type }
+}

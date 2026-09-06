@@ -1,0 +1,21 @@
+# 依赖
+node_modules/
+# 构建产物
+dist/
+*.tmpdir/
+.probe/
+target/
+.vite/
+# 备份（本地版本快照，不进仓库）
+_backup/
+# 环境与本地
+.env
+.env.local
+*.local
+# 系统
+.DS_Store
+Thumbs.db
+# 日志
+*.log
+npm-debug.log*
+pnpm-debug.log*
