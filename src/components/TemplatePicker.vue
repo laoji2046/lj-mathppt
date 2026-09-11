@@ -12,6 +12,14 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 const library = ref<'common' | 'math' | 'mathApplet' | 'pro'>('common')
 
+/** 打开方式不同，说明文字不同：replace=替换当前页 / add=后面新增一页 / addSub=新增子页 */
+const modeHint = computed(() => {
+  const m = props.mode ?? 'replace'
+  if (m === 'add') return '点击卡片：在当前页后新增一页（整套模板插入多页；「空白模板」= 新增空白页）'
+  if (m === 'addSub') return '点击卡片：为当前页新增一个子页（演示时向下展开；「空白模板」= 新增空白子页）'
+  return '点击单页模板替换当前页；点击整套替换整个演示'
+})
+
 type Entry =
   | { kind: 'bundle'; id: string; name: string; cat: '整套'; desc: string; pages: number }
   | { kind: 'single'; id: string; name: string; cat: string; desc: string }
@@ -99,7 +107,7 @@ function applyBundle(id: string) {
     <div class="panel">
       <header class="panel__head">
         <div class="panel__title">模板库</div>
-        <span class="panel__hint">点击单页模板替换当前页；点击整套替换整个演示</span>
+        <span class="panel__hint">{{ modeHint }}</span>
         <button class="panel__close" title="关闭 (Esc)" @click="$emit('close')">✕</button>
       </header>
 

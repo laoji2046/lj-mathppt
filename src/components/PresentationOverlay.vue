@@ -25,6 +25,7 @@ const notesOpen = ref(false)
 const speakerOpen = ref(false)
 const speakerOpacity = ref(0.92)
 const showControls = ref(true)
+const barEl = ref<HTMLElement | null>(null)
 let hideTimer: number | undefined
 const speakerSec = ref(0)
 let speakerTimer: number | undefined
@@ -190,10 +191,23 @@ function onDrawUp() {
 }
 function clearDraw() { strokes = []; current = null; repaint() }
 function undoDraw() { strokes.pop(); repaint() }
-function toggleDraw() {
-  drawOn.value = !drawOn.value
-  if (drawOn.value) setTimeout(resizeDraw, 30)
+/**
+ * 激光笔与批注（画笔）互斥：两者都是"覆盖在演示页之上、抢指针事件"的工具，
+ * 同时打开会互相抢事件（画笔画不出、激光笔拖不动），所以开一个就自动关另一个。
+ */
+function setLaser(on: boolean) {
+  laserOn.value = on
+  if (on) drawOn.value = false
 }
+function setDraw(on: boolean) {
+  drawOn.value = on
+  if (on) {
+    laserOn.value = false
+    setTimeout(resizeDraw, 30)
+  }
+}
+function toggleLaser() { setLaser(!laserOn.value) }
+function toggleDraw() { setDraw(!drawOn.value) }
 
 function reveal() {
   return (frameEl.value?.contentWindow as any)?.Reveal
@@ -223,17 +237,8 @@ async function renderHostPdfs() {
 
 function onFrameLoad() {
   renderHostPdfs()
-  // 底部工具条自动隐藏：鼠标进入底部带(96px)显示，离开隐藏
-  const doc = frameEl.value?.contentDocument
-  if (doc) {
-    doc.addEventListener('mousemove', (e: MouseEvent) => {
-      const h = doc.documentElement.clientHeight || window.innerHeight
-      const w = doc.documentElement.clientWidth || window.innerWidth
-      // 只在底部居中区（避开右下角播放按钮）感应
-      showControls.value = (e.clientY > h - 96) && Math.abs(e.clientX - w / 2) < 320
-    })
-  }
-  // 进入演示先显示 2.5s，随后自动隐藏
+  attachFrameMove()
+  // 进入演示先显示 2.5s，随后自动隐藏；之后由 updateBarVisible 负责显隐
   showControls.value = true
   clearTimeout(hideTimer)
   hideTimer = window.setTimeout(() => { showControls.value = false }, 2500)
@@ -241,8 +246,51 @@ function onFrameLoad() {
   postToFrame({ type: 'fx-laser-color', color: laserColor.value })
 }
 
+/** 鼠标是否停在"应用自己的 UI"上（控制条 / 备注 / 演讲者视图 / 批注工具条，统一挂 .present__ui）。
+ *  注意：来自 iframe 的事件，e.target 属于另一个 realm，instanceof 判断会失效，用鸭子类型。 */
+function overHostUI(target: EventTarget | null): boolean {
+  const el = target as (Element & { closest?: (s: string) => Element | null }) | null
+  if (!el || typeof el.closest !== 'function') return false
+  try { return !!el.closest('.present__ui') } catch { return false }
+}
+
+/**
+ * 底部控制条显隐判定（鼠标进入底部居中带显示、移开自动消隐；停在自家 UI 上则一直显示）。
+ * 左右各留 320px：避开右下角的播放控制箭头，工具条也不会盖住它们。
+ *
+ * 必须同时监听两个来源：
+ * - iframe 内部的 document —— 鼠标在幻灯片区域时（iframe 铺满全屏），事件只在 iframe 里；
+ * - 宿主 window —— 打开激光笔/批注后，全屏画布（z-index 1001/1002）盖在 iframe 之上，
+ *   事件到不了 iframe。
+ * 只监听其中一个，就会出现"工具条唤不出来 / 关不掉激光笔"这类锁死。
+ */
+function updateBarVisible(x: number, y: number, target: EventTarget | null) {
+  const h = window.innerHeight
+  const w = window.innerWidth
+  const inBand = y > h - 96 && Math.abs(x - w / 2) < 320
+  showControls.value = overHostUI(target) || inBand
+}
+function onHostMove(e: MouseEvent) {
+  updateBarVisible(e.clientX, e.clientY, e.target)
+  if (laserOn.value) laser.value = { x: e.clientX, y: e.clientY }
+}
+function onFrameMove(e: MouseEvent) { updateBarVisible(e.clientX, e.clientY, e.target) }
+/** iframe 每次重新加载都是新 document，这里挂监听并保证不重复挂 */
+let frameDoc: Document | null = null
+function attachFrameMove() {
+  const doc = frameEl.value?.contentDocument
+  if (!doc || doc === frameDoc) return
+  frameDoc?.removeEventListener('mousemove', onFrameMove)
+  doc.addEventListener('mousemove', onFrameMove)
+  frameDoc = doc
+}
+
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') { e.preventDefault(); close() }
+  if (e.key === 'Escape') { e.preventDefault(); close(); return }
+  // 兜底快捷键：万一控制条被藏住，也能开关激光笔 / 批注
+  const k = e.key.toLowerCase()
+  if (k === 'l') { e.preventDefault(); toggleLaser(); return }
+  if (k === 'p') { e.preventDefault(); toggleDraw() }
 }
 function onMessage(e: MessageEvent) {
   if (e.data === 'fx-present-esc') { close() ; return }
@@ -255,6 +303,9 @@ function onMessage(e: MessageEvent) {
     }
   } catch { /* 非本应用消息 */ }
 }
+// 打开备注 / 演讲者视图时把控制条显示出来，免得它正处在隐藏态、用户找不到
+watch([notesOpen, speakerOpen], ([n, s]) => { if (n || s) showControls.value = true })
+
 function toggleSpeaker() {
   speakerOpen.value = !speakerOpen.value
   if (speakerOpen.value) {
@@ -271,12 +322,16 @@ onMounted(() => {
   window.addEventListener('keydown', onKey, true)
   window.addEventListener('message', onMessage)
   window.addEventListener('resize', initLaserCanvas)
+  window.addEventListener('mousemove', onHostMove)
   initLaserCanvas()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey, true)
   window.removeEventListener('message', onMessage)
   window.removeEventListener('resize', initLaserCanvas)
+  window.removeEventListener('mousemove', onHostMove)
+  frameDoc?.removeEventListener('mousemove', onFrameMove)
+  frameDoc = null
   window.onmouseup = null
   laserFades.forEach((t) => clearTimeout(t)); laserFades = []
   if (blobUrl) URL.revokeObjectURL(blobUrl)
@@ -299,7 +354,7 @@ watch(
 </script>
 
 <template>
-  <div v-if="deck" class="present" @mousemove="laserOn && (laser = { x: $event.clientX, y: $event.clientY })">
+  <div v-if="deck" class="present">
     <iframe ref="frameEl" class="present__frame" :src="url" allow="fullscreen" @load="onFrameLoad()" />
 
     <!-- 批注绘制图层（覆盖在展示页之上） -->
@@ -324,7 +379,7 @@ watch(
     <div v-if="laserOn" class="present__laser" :style="laserStyle"></div>
 
     <!-- 批注工具栏（绘制时浮在控制条上方） -->
-    <div v-if="drawOn" class="present__drawbar">
+    <div v-if="drawOn" class="present__drawbar present__ui">
       <button v-for="c in ['#ff3b30', '#ffcc00', '#00d0ff', '#22c55e', '#ffffff']" :key="c" class="dw" :class="{ 'dw--on': drawColor === c }" :style="{ background: c }" @click="drawColor = c" title="笔色"></button>
       <span class="pc-sep"></span>
       <button v-for="w in drawWidths" :key="'d' + w" class="dw dw--txt" :class="{ 'dw--on': drawWidth === w }" @click="drawWidth = w" :title="'线宽 ' + w">
@@ -336,7 +391,7 @@ watch(
     </div>
 
     <!-- 激光笔色板 -->
-    <div v-if="laserOn" class="present__laserbar">
+    <div v-if="laserOn" class="present__laserbar present__ui">
       <button v-for="c in ['#ff3b30', '#ffcc00', '#00d0ff', '#22c55e', '#ffffff']" :key="c" class="dw" :class="{ 'dw--on': laserColor === c }" :style="{ background: c }" @click="laserColor = c" title="激光颜色"></button>
       <span class="pc-sep"></span>
       <button v-for="w in laserWidths" :key="'w' + w" class="dw dw--txt" :class="{ 'dw--on': laserWidth === w }" @click="laserWidth = w" :title="'线宽 ' + w">
@@ -347,13 +402,13 @@ watch(
     </div>
 
     <!-- 备注面板 -->
-    <div v-if="notesOpen" class="present__notes">
+    <div v-if="notesOpen" class="present__notes present__ui">
       <div class="present__notes-head">备注 <button class="present__notes-x" @click="notesOpen = false">×</button></div>
       <div class="present__notes-body">{{ currentNotes || '（本页暂无备注）' }}</div>
     </div>
 
     <!-- 演讲者视图（备注 + 计时 + 上一张/下一张预览） -->
-    <div v-if="speakerOpen" class="present__speaker" :style="{ opacity: speakerOpacity }">
+    <div v-if="speakerOpen" class="present__speaker present__ui" :style="{ opacity: speakerOpacity }">
       <header class="present__speaker-head">
         <span class="present__speaker-title">📝 演讲者备注</span>
         <span class="present__speaker-tools">
@@ -380,12 +435,12 @@ watch(
     </div>
 
     <!-- 底部控制条 -->
-    <div class="present__controls" :class="{ 'present__controls--hide': !showControls }">
+    <div ref="barEl" class="present__controls present__ui" :class="{ 'present__controls--hide': !showControls }">
       <button class="pc" title="上一页 (←)" @click="navPrev"><svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6" /></svg></button>
       <button class="pc" title="下一页 (→)" @click="navNext"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6" /></svg></button>
       <span class="pc-sep"></span>
-      <button class="pc" :class="{ 'pc--on': laserOn }" title="激光笔" @click="laserOn = !laserOn"><svg viewBox="0 0 24 24"><circle cx="6" cy="18" r="3"/><path d="M8.5 15.5L20 4"/></svg></button>
-      <button class="pc" :class="{ 'pc--on': drawOn }" title="批注（画笔）" @click="toggleDraw"><svg viewBox="0 0 24 24"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg></button>
+      <button class="pc" :class="{ 'pc--on': laserOn }" title="激光笔（打开时自动关闭批注）" @click="toggleLaser"><svg viewBox="0 0 24 24"><circle cx="6" cy="18" r="3"/><path d="M8.5 15.5L20 4"/></svg></button>
+      <button class="pc" :class="{ 'pc--on': drawOn }" title="批注（画笔，打开时自动关闭激光笔）" @click="toggleDraw"><svg viewBox="0 0 24 24"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg></button>
       <button class="pc" title="总览（网格）" @click="overview"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button>
       <button class="pc" title="全屏" @click="fullscreen"><svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
       <button class="pc" :class="{ 'pc--on': notesOpen }" title="备注" @click="notesOpen = !notesOpen"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 10h16M4 14h10"/><path d="M15 18h6"/></svg></button>

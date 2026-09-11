@@ -514,10 +514,10 @@ defineExpose({ resetView })
       <span v-else class="hud__tip">空格/中键拖动可平移</span>
     </div>
 
-    <!-- 快捷加页：右侧=正常页，底部=子页 -->
+    <!-- 快捷加页：右侧=在当前页后新增一页，底部=在当前页后新增子页；点击打开模板库选模板（「空白模板」= 空白页） -->
     <template v-if="!presenting">
-      <button class="add-page-btn add-page-btn--right" title="新增空白页" @click="store.addSlide()">＋</button>
-      <button class="add-page-btn add-page-btn--bottom" title="新增空白子页" @click="store.addSubpageAfterCurrent()">＋</button>
+      <button class="add-page-btn add-page-btn--right" title="新增页：打开模板库（含空白页）" @click="openTemplateLibrary('add')">＋</button>
+      <button class="add-page-btn add-page-btn--bottom" title="新增子页：打开模板库（含空白子页）" @click="openTemplateLibrary('addSub')">＋</button>
     </template>
   </div>
 </template>

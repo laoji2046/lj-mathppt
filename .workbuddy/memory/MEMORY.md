@@ -26,6 +26,8 @@
 - `tauri build` 前要手动清 `dist/`（safe-delete 拦 vite 的清理）；原应用进程未退出锁文件导致编译失败
 - 中文用户名下 `rm` 也会被 safe-delete 拦，用 `python -c "os.remove(...)"` 替代
 - `vue-tsc --noEmit` 有 6 处历史类型错误（store/TableElement/TextElement/ElementFrame），与本次美化无关
+- 演示层（`PresentationOverlay.vue`）底部控制条显隐：**必须同时监听 iframe document 与宿主 window**（只监听任一方都会让工具条"锁死唤不回"）；控制条/备注/演讲者视图/批注工具条统一挂 `.present__ui`，用 `closest('.present__ui')` 保持显示（跨 realm 判 target 不能用 instanceof，要用鸭子类型）。感应带 = 底部中间 96×640px，避开右下角 Reveal 翻页箭头。
+- 组件里出现"导入了但没用"的函数（例如 `EditorCanvas.vue` 的 `openTemplateLibrary`）通常意味着功能被改坏了 —— 死导入是回归的痕迹，先查它。
 
 ## 导出体系（2026-09-06 实现，09-07 验证通过）
 - 文件菜单三项：导出 HTML（CDN 独立文件）/ 导出 PDF / 导出 PNG（当前页）
