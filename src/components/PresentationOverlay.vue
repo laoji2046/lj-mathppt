@@ -255,20 +255,40 @@ function overHostUI(target: EventTarget | null): boolean {
 }
 
 /**
- * 底部控制条显隐判定（鼠标进入底部居中带显示、移开自动消隐；停在自家 UI 上则一直显示）。
- * 左右各留 320px：避开右下角的播放控制箭头，工具条也不会盖住它们。
+ * 底部控制条感应带 = **屏幕最下方一条窄带**（不再跟着工具条的整体高度走）：
+ *   纵向：屏幕底边往上 bandH，bandH = 控制条高度的 1/3（约 17px，最小 12px）
+ *   横向：居中，宽度 = 工具条宽度 ± 24px
+ * 工具条隐藏时停在屏幕外，这条窄带就是"唤出区"；鼠标一旦离开窄带、又没有停在工具条本身上，
+ * 就自动消隐。悬停工具条/备注/演讲者视图/批注工具条（.present__ui）时始终显示。
+ *
+ * 注：数值取 offsetWidth/offsetHeight 并缓存（mousemove 每次读 getComputedStyle 会触发重排）。
+ * 不能直接用 getBoundingClientRect()：工具条隐藏时带着 translate(-50%,120%)，rect 会跑到屏幕外。
  *
  * 必须同时监听两个来源：
  * - iframe 内部的 document —— 鼠标在幻灯片区域时（iframe 铺满全屏），事件只在 iframe 里；
- * - 宿主 window —— 打开激光笔/批注后，全屏画布（z-index 1001/1002）盖在 iframe 之上，
- *   事件到不了 iframe。
+ * - 宿主 window —— 打开激光笔/批注后，全屏画布（z-index 1001/1002）盖在 iframe 之上，事件到不了 iframe。
  * 只监听其中一个，就会出现"工具条唤不出来 / 关不掉激光笔"这类锁死。
  */
+let barBox = { w: 520, h: 52, bottom: 20 }
+function measureBar() {
+  const el = barEl.value
+  if (!el) return
+  barBox = {
+    w: el.offsetWidth,
+    h: el.offsetHeight,
+    bottom: parseFloat(getComputedStyle(el).bottom) || 0,
+  }
+}
 function updateBarVisible(x: number, y: number, target: EventTarget | null) {
+  if (overHostUI(target)) { showControls.value = true; return }
   const h = window.innerHeight
   const w = window.innerWidth
-  const inBand = y > h - 96 && Math.abs(x - w / 2) < 320
-  showControls.value = overHostUI(target) || inBand
+  // 唤出区 = 屏幕最下方一条窄带，高度为控制条高度(含上下 4px 余量)的三分之一
+  const bandH = Math.max(12, Math.round((barBox.h + 8) / 3))
+  const inRow = y >= h - bandH
+  const padX = 24
+  const inCol = Math.abs(x - w / 2) < barBox.w / 2 + padX
+  showControls.value = inCol && inRow
 }
 function onHostMove(e: MouseEvent) {
   updateBarVisible(e.clientX, e.clientY, e.target)
@@ -323,6 +343,8 @@ onMounted(() => {
   window.addEventListener('message', onMessage)
   window.addEventListener('resize', initLaserCanvas)
   window.addEventListener('mousemove', onHostMove)
+  window.addEventListener('resize', measureBar)
+  nextTick(() => measureBar())
   initLaserCanvas()
 })
 onBeforeUnmount(() => {
@@ -330,6 +352,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('message', onMessage)
   window.removeEventListener('resize', initLaserCanvas)
   window.removeEventListener('mousemove', onHostMove)
+  window.removeEventListener('resize', measureBar)
   frameDoc?.removeEventListener('mousemove', onFrameMove)
   frameDoc = null
   window.onmouseup = null
