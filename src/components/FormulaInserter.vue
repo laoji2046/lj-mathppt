@@ -21,6 +21,11 @@ const previewHost = ref<HTMLElement | null>(null)
 const texRef = ref<HTMLTextAreaElement | null>(null)
 let timer: number | undefined
 
+/** 色板补充：公式色在紧凑 8 色后追加 4 色（暗红 / 琥珀 / 深蓝 / 洋红） */
+const MATH_COLORS = ['#d64545', '#f4a63a', '#1d4e89', '#b23f88']
+/** 背景色追加 3 个浅色底（米黄 / 浅蓝灰 / 暖灰） */
+const BG_COLORS = ['#fdf6e3', '#e8edf4', '#f4f2ec']
+
 /** 预设组合（点击填入） */
 const PRESETS: { label: string; latex: string }[] = [
   { label: '方程组', latex: '\\begin{cases} x+y=3 \\\\ x-y=1 \\end{cases}' },
@@ -120,33 +125,33 @@ function insertHardBreak() {
       </header>
 
       <div class="panel__body">
-        <div class="lbl">公式内容 <em>（支持复制粘贴多段 LaTeX）</em></div>
-        <div class="brk"><button class="chip" title="在光标处插入硬换行（回车）" @click="insertHardBreak">⏎ 硬换行</button></div>
+        <div class="lbl lbl--row">
+          <span>公式内容 <em>（支持复制粘贴多段 LaTeX）</em></span>
+          <span class="lbl__tools">
+            <button class="chip chip--xs" title="在光标处插入硬换行（回车）" @click="insertHardBreak">⏎ 硬换行</button>
+            <label class="chk"><input type="checkbox" v-model="multiLine" /> 多行显示</label>
+            <label class="chk"><input type="checkbox" v-model="autoWrap" /> 自动换行</label>
+          </span>
+        </div>
         <textarea ref="texRef" class="latex" v-model="latex" rows="4" placeholder="粘贴标准 LaTeX 公式，如 \frac{x^2}{a^2}+\frac{y^2}{b^2}=1 或带定界符的 $$...$$ / \[...\]：组合成一个公式块。"></textarea>
 
-        <div class="opts">
-          <label class="chk"><input type="checkbox" v-model="multiLine" /> 多行显示（每行一段）</label>
-          <label class="chk"><input type="checkbox" v-model="autoWrap" /> 自动换行</label>
+        <div class="lbl">实时预览 <em>（与原式同色 / 同字号）</em></div>
+        <div ref="previewHost" class="prev" :style="previewStyle"></div>
+
+        <div class="ctrls">
+          <div class="ctrl"><span class="ctrl__lbl">颜色</span><ColorSwatches compact :extra="MATH_COLORS" :model-value="color" @update:model-value="(v) => color = v" /></div>
+          <div class="ctrl"><span class="ctrl__lbl">背景</span><ColorSwatches compact allow-transparent :extra="BG_COLORS" :model-value="bgColor" @update:model-value="(v) => bgColor = v" /></div>
+          <div class="ctrl ctrl--inline"><span class="ctrl__lbl">字号</span>
+            <div class="size"><input type="number" v-model.number="fontSize" min="8" max="60" /><em>px</em></div>
+            <span class="ctrl__lbl ctrl__lbl--sub">字体</span>
+            <select v-model="fontFamily" class="fontsel"><option v-for="f in FONT_OPTIONS" :key="f.v" :value="f.v">{{ f.label }}</option></select>
+          </div>
         </div>
 
-        <div class="lbl">预设组合 <em>（点击填入）</em></div>
+        <div class="lbl">预设组合 <em>（点击填入上方输入框）</em></div>
         <div class="chips">
           <button v-for="p in PRESETS" :key="p.label" class="chip" @click="latex = p.latex">{{ p.label }}</button>
         </div>
-
-        <div class="ctrls">
-          <div class="ctrl"><span class="ctrl__lbl">颜色</span><ColorSwatches :model-value="color" @update:model-value="(v) => color = v" /></div>
-          <div class="ctrl ctrl--inline"><span class="ctrl__lbl">字号</span>
-            <div class="size"><input type="number" v-model.number="fontSize" min="8" max="60" /><em>px</em></div>
-          </div>
-          <div class="ctrl ctrl--inline"><span class="ctrl__lbl">字体</span>
-            <select v-model="fontFamily" class="fontsel"><option v-for="f in FONT_OPTIONS" :key="f.v" :value="f.v">{{ f.label }}</option></select>
-          </div>
-          <div class="ctrl"><span class="ctrl__lbl">背景</span><ColorSwatches :model-value="bgColor" allow-transparent @update:model-value="(v) => bgColor = v" /></div>
-        </div>
-
-        <div class="lbl">实时预览</div>
-        <div ref="previewHost" class="prev" :style="previewStyle"></div>
 
       </div>
 
@@ -168,24 +173,31 @@ function insertHardBreak() {
 .panel__body { flex: 1; overflow-y: auto; padding: 14px 18px 6px; }
 .lbl { font-size: 12px; color: var(--muted); margin: 12px 0 6px; font-weight: 600; }
 .lbl em { font-weight: 400; color: #aaa; }
+/* 标签行右侧放"硬换行 + 两个选项"，省掉独立的一行，输入框紧贴预览 */
+.lbl--row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.lbl__tools { display: inline-flex; align-items: center; gap: 12px; font-weight: 400; }
+.lbl__tools .chk { font-size: 11.5px; }
 .latex { width: 100%; box-sizing: border-box; padding: 9px 11px; border: 1px solid #dcdce6; border-radius: 8px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; line-height: 1.6; resize: vertical; background: #fafafd; }
 .latex:focus { outline: none; border-color: #7c5cd6; background: #fff; }
 .opts { display: flex; gap: 18px; margin: 10px 0 2px; }
 .chk { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); cursor: pointer; }
 .chk input { accent-color: var(--brand-600); }
 .brk { display: flex; align-items: center; margin: 6px 0 4px; }
+/* 颜色 / 背景两行紧凑排布，字号与字体合并到一行 */
+.ctrl__lbl--sub { margin-left: 8px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
 .chip { padding: 4px 10px; border: 1px solid #d7d3e6; background: #fff; border-radius: 6px; font-size: 12px; color: #5a5770; cursor: pointer; transition: background .12s, border-color .12s, color .12s; }
 .chip:hover { background: #f1eeff; border-color: #b9a9f0; color: var(--brand-700); }
-.ctrls { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; }
+.chip--xs { padding: 2px 8px; font-size: 11px; }
+.ctrls { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; }
 .ctrl { display: flex; align-items: flex-start; gap: 10px; }
-.ctrl__lbl { flex: none; font-size: 12px; color: var(--muted); line-height: 28px; min-width: 30px; }
+.ctrl__lbl { flex: none; font-size: 12px; color: var(--muted); line-height: 24px; min-width: 30px; }
 .ctrl--inline { align-items: center; gap: 12px; }
 .size { display: flex; align-items: center; gap: 5px; }
 .size input { width: 62px; padding: 5px 7px; border: 1px solid #dcdce6; border-radius: 6px; font-size: 13px; }
 .size em { font-style: normal; font-size: 12px; color: var(--muted); }
 .fontsel { padding: 5px 8px; border: 1px solid #dcdce6; border-radius: 6px; font-size: 13px; }
-.prev { border: 1px solid #e8e8f0; border-radius: 10px; padding: 14px; min-height: 80px; line-height: 1.7; word-break: break-word; overflow: visible; background: #fbfbfe; }
+.prev { border: 1px solid #e8e8f0; border-radius: 10px; padding: 14px 16px; min-height: 78px; line-height: 1.7; word-break: break-word; overflow: visible; background: linear-gradient(#fbfbfe, #f7f7fd); box-shadow: inset 0 1px 2px rgba(20, 24, 34, 0.04); }
 .prev .ph { color: #bbb; font-size: 13px; }
 .panel__foot { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--border); padding: 11px 18px; background: #fff; }
 .foot { padding: 7px 16px; border: 1px solid #dcdce6; background: #fff; border-radius: 7px; font-size: 13px; color: var(--muted); cursor: pointer; transition: background .12s; }
