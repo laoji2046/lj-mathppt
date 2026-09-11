@@ -91,7 +91,7 @@ export function hasRendered(host: HTMLElement) {
  * 把 LaTeX 渲染进宿主元素，并等比缩放以适配宿主尺寸。
  * MathJax 产出的是固定尺寸 SVG，改 font-size 无效，只能用 transform: scale()。
  */
-export async function renderLatex(host: HTMLElement, latex: string, fontSize: number) {
+export async function renderLatex(host: HTMLElement, latex: string, fontSize: number, maxScale = 4) {
   await loadMathJax()
   const mj = window.MathJax
   if (!mj?.tex2svg) throw new Error('MathJax 未就绪')
@@ -139,14 +139,15 @@ export async function renderLatex(host: HTMLElement, latex: string, fontSize: nu
       target.dataset.nw = String(naturalW)
       target.dataset.nh = String(naturalH)
     }
-    fitMath(host)
+    fitMath(host, maxScale)
   } finally {
     probe.remove()
   }
 }
 
-/** 按宿主当前尺寸重新缩放公式（用 renderLatex 记录的自然尺寸，只改 transform，不重排）。 */
-export function fitMath(host: HTMLElement) {
+/** 按宿主当前尺寸重新缩放公式（用 renderLatex 记录的自然尺寸，只改 transform，不重排）。
+ *  maxScale 限制放大倍数：maxScale=1 表示只缩小、不放大（列表预览用，保证各条公式视觉大小统一）。 */
+export function fitMath(host: HTMLElement, maxScale = 4) {
   const target = (host.querySelector('mjx-container') as HTMLElement | null) || (host.querySelector('svg') as HTMLElement | null)
   if (!target) return
   const nw = parseFloat(target.dataset.nw || '0')
@@ -154,7 +155,7 @@ export function fitMath(host: HTMLElement) {
   const boxW = host.clientWidth
   const boxH = host.clientHeight
   if (!(nw > 0 && nh > 0 && boxW > 0 && boxH > 0)) return
-  const f = Math.min(boxW / nw, boxH / nh, 4)
+  const f = Math.min(boxW / nw, boxH / nh, maxScale)
   target.style.transformOrigin = 'center center'
   target.style.transform = `scale(${f})`
   target.dataset.scale = String(f)

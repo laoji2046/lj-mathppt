@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { loadMathJax } from '@/composables/useMathJax'
+import { imagesDir, isTauri, readLocalImage } from '@/composables/useTauri'
 
 /**
  * 试卷 / 讲义模式（A4 分页 + 题号识别），移植自参考版 LJ-PPT 的 PaperMode。
@@ -299,11 +300,67 @@ function parse(src: string): string {
   return out
 }
 
+/** 打包(Tauri)时把相对图片路径转成资产协议，可读 exe 同级的 images/（作为内嵌 data URL 失败时的兜底） */
+function assetUrl(u: string): string {
+  if (!u) return u
+  if (/^(https?:|data:|blob:|asset:|file:|[a-zA-Z]:\\)/.test(u)) return u
+  const w = typeof window !== 'undefined' ? (window as any) : {}
+  const packaged = w.location && (w.location.protocol === 'tauri:' || w.location.protocol === 'http:' && (('__TAURI_INTERNALS__' in w) || w.__TAURI__))
+  if (!packaged) return u
+  const p = u.replace(/^\/+/, '')
+  // 资产协议：http://asset.localhost/<path>（对中文/空格文件名 encodeURI）
+  return 'http://asset.localhost/' + encodeURI(p)
+}
+
+/** 相对图片路径 → 内嵌 data URL 的缓存（打包后由 Rust 读 exe 同级任意子目录得到） */
+const imgCache = ref<Record<string, string>>({})
+const imgDirHint = ref('')
+const imgLoading = ref(false)
+
+/** 判断是否为「需要读本地磁盘」的相对路径（网络图 / data / 绝对路径直接放行） */
+function isLocalRel(u: string): boolean {
+  return !!u && !/^(https?:|data:|blob:|asset:|file:|[a-zA-Z]:\\)/.test(u)
+}
+
+/**
+ * 预加载正文里所有本地图片：打包后前端跑在内存页里，相对路径够不着磁盘，
+ * 这里统一通过 Rust 按 exe 同级相对路径读取（images/、pic/ 等任意子目录均可）
+ * 并转成 data URL 缓存起来。
+ */
+async function preloadImages() {
+  if (!isTauri()) return
+  const re = /!\[([^\]]*)\]\(([^)]+)\)/g
+  const todo: string[] = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(input.value))) {
+    const u = (m[2] || '').trim()
+    if (!isLocalRel(u) || imgCache.value[u]) continue
+    if (!todo.includes(u)) todo.push(u)
+  }
+  if (!todo.length) return
+  imgLoading.value = true
+  try {
+    await Promise.all(
+      todo.map(async (u) => {
+        const d = await readLocalImage(u)
+        if (d) imgCache.value[u] = d
+      }),
+    )
+  } finally {
+    imgLoading.value = false
+  }
+}
+
+/** 图片最终 src：优先内嵌 data URL，其次资产协议，最后原样（浏览器 dev 走相对路径） */
+function imgSrcFor(u: string): string {
+  return imgCache.value[u] || assetUrl(u)
+}
 function imageHtml(html: string): string {
   return html.replace(/\[图(\d+)((?::[^\[\]:=]+)*)\]/g, (_m0, n: string, params: string) => {
     const im = images.value[Number(n)]
     if (!im) return '<span style="color:#c00">[图片缺失图' + n + ']</span>'
     const url = im.src
+    const src = imgSrcFor(url)
     let align = '', width = '', rotate = '', float = '', caption = ''
     ;(params || '').split(':').forEach((p) => {
       if (!p) return
@@ -317,11 +374,11 @@ function imageHtml(html: string): string {
     const imgStyle = rotate ? 'style="' + rotate + '"' : ''
     const figWidth = width ? 'width:' + width.replace('max-width:', '') + ';' : 'width:fit-content;'
     const figImg = width ? 'width:100%;' : ''
-    const mk = (mm: string) => '<figure class="paper-fig" style="' + figWidth + mm + '"><img class="paper-img" style="' + figImg + rotate + '" src="' + url + '" />' +
+    const mk = (mm: string) => '<figure class="paper-fig" style="' + figWidth + mm + '"><img class="paper-img" style="' + figImg + rotate + '" src="' + src + '" />' +
       (caption ? '<figcaption class="paper-figcap">' + esc(caption) + '</figcaption>' : '') + '</figure>'
     if (float) {
       const s = float === 'left' ? 'float:left;margin:0 10px 8px 0;' : 'float:right;margin:0 0 8px 10px;'
-      return '<figure class="paper-fig paper-float-fig" style="' + figWidth + s + '"><img class="paper-float-img" style="' + figImg + rotate + '" src="' + url + '" />' +
+      return '<figure class="paper-fig paper-float-fig" style="' + figWidth + s + '"><img class="paper-float-img" style="' + figImg + rotate + '" src="' + src + '" />' +
         (caption ? '<figcaption class="paper-figcap">' + esc(caption) + '</figcaption>' : '') + '</figure>'
     }
     if (align) {
@@ -331,13 +388,14 @@ function imageHtml(html: string): string {
       return '<div class="paper-imgbox">' + mk(mm) + '</div>'
     }
     if (caption) return '<div class="paper-imgbox">' + mk('margin-left:auto;margin-right:auto;') + '</div>'
-    return '<img class="paper-img-inline" ' + imgStyle + ' src="' + url + '" />'
+    return '<img class="paper-img-inline" ' + imgStyle + ' src="' + src + '" />'
   })
 }
 
 async function render() {
   const el = pageEl.value
   if (!el) return
+  await preloadImages()   // 打包后先把本地图读成内嵌 data URL，再生成 HTML
   if (a4El.value) { a4El.value.style.zoom = '1' }   // 先重置缩放，避免上轮 zoom 影响选项测宽
   zoom.value = 1
   const html = imageHtml(parse(input.value)) || '<p style="color:#999">输入内容后在此预览 A4 排版</p>'
@@ -694,7 +752,17 @@ let draftTimer: number | undefined
 function saveDraftSoon() { clearTimeout(draftTimer); draftTimer = window.setTimeout(saveDraft, 300) }
 watch([input, template, fontFamily, fontSize, fontColor, lineHeight, para, indent, numStyle, headerText, footerText, autoNum, h2size, gapQ, headerGap, footerGap, optLayout], saveDraftSoon)
 
-onMounted(() => { if (!restoreDraft() && !input.value.trim()) input.value = DEFAULT; render() })
+onMounted(() => {
+  if (!restoreDraft() && !input.value.trim()) input.value = DEFAULT
+  // 桌面端顺带拿到 images 目录，界面上提示用户「试题图放这里」
+  if (isTauri()) imagesDir().then((d) => { imgDirHint.value = d })
+  render()
+})
+/** 图片有更新（用户换了图）时清缓存重渲染 */
+function refreshImages() {
+  imgCache.value = {}
+  render()
+}
 watch(numStyle, () => render())
 watch(optLayout, () => render())
 watch([fontFamily, fontSize, fontColor, lineHeight, para, indent, h2size, gapQ, headerGap, footerGap], () => refreshLayout())
@@ -791,6 +859,9 @@ watch([headerText, footerText], () => render())
                 <button class="pm__btn" title="一键导出 19 题试卷为 PDF" @click="exportExam19Pdf">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 13l3 3 5-6"/></svg><span>19题PDF</span>
                 </button>
+                <button v-if="imgDirHint" class="pm__btn" :title="'重新读取本地图（根目录：' + imgDirHint + '）'" @click="refreshImages">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg><span>{{ imgLoading ? '读图中…' : '刷新图片' }}</span>
+                </button>
                 <button class="pm__btn pm__btn--danger" title="清空输入" @click="clear">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 4h4M9 7l1 12h4l1-12"/></svg><span>清空</span>
                 </button>
@@ -807,6 +878,7 @@ watch([headerText, footerText], () => render())
                 <button class="pm__btn" title="语法帮助（含详细示范）" @click="helpOpen = true">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 .3c0 1.8-2.5 1.7-2.5 3.2"/><path d="M12 16.5h.01"/></svg><span>帮助</span>
                 </button>
+                <span v-if="imgDirHint" class="pm__imghint" :title="imgDirHint + ' 下任意子目录（images/、pic/…）里的图片都能引用'">图片根目录 {{ imgDirHint }}</span>
                 <div v-if="blankOpen" class="pm__blankpop">
                   <input type="number" v-model.number="blankVal" min="0.5" max="30" step="0.5" title="空白高度">
                   <select v-model="blankUnit">
@@ -896,6 +968,11 @@ watch([headerText, footerText], () => render())
 .pm__btn--danger:hover { background: #fdecec; border-color: var(--danger-border); }
 .pm__btn--sm { padding: 3px 8px; }
 .pm__sep { width: 1px; height: 20px; margin: 0 2px; background: #e0e0ea; }
+.pm__imghint {
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; color: var(--muted); margin-left: 4px;
+  border: 1px dashed var(--border-strong); border-radius: 5px; padding: 2px 7px;
+}
 .pm__blankpop {
   position: absolute; left: 0; bottom: calc(100% + 6px);
   background: #fff; border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px;

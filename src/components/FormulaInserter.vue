@@ -185,7 +185,7 @@ function insertHardBreak() {
 .size input { width: 62px; padding: 5px 7px; border: 1px solid #dcdce6; border-radius: 6px; font-size: 13px; }
 .size em { font-style: normal; font-size: 12px; color: var(--muted); }
 .fontsel { padding: 5px 8px; border: 1px solid #dcdce6; border-radius: 6px; font-size: 13px; }
-.prev { border: 1px solid #e8e8f0; border-radius: 10px; padding: 14px; min-height: 80px; line-height: 1.7; word-break: break-word; overflow: hidden; background: #fbfbfe; }
+.prev { border: 1px solid #e8e8f0; border-radius: 10px; padding: 14px; min-height: 80px; line-height: 1.7; word-break: break-word; overflow: visible; background: #fbfbfe; }
 .prev .ph { color: #bbb; font-size: 13px; }
 .panel__foot { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--border); padding: 11px 18px; background: #fff; }
 .foot { padding: 7px 16px; border: 1px solid #dcdce6; background: #fff; border-radius: 7px; font-size: 13px; color: var(--muted); cursor: pointer; transition: background .12s; }

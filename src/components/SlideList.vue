@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useDeckStore } from '@/stores/deck'
 import { useContextMenu, type MenuItem } from '@/composables/useContextMenu'
 import type { SlideElement } from '@/types'
+import SlideThumb from './SlideThumb.vue'
 
 const store = useDeckStore()
 const { openMenu } = useContextMenu()
@@ -107,10 +108,8 @@ function onSlideCtx(i: number, e: MouseEvent) {
     >
       <span class="slide-num">{{ i + 1 }}</span>
       <span v-if="s.parentId" class="slide-sub">↳ 子页</span>
-      <div class="slide-thumb" :style="{ background: s.bg, width: THUMB_W + 'px', height: THUMB_H + 'px' }">
-        <div v-for="el in s.elements" :key="el.id" :style="thumbStyle(el)">
-          <template v-if="el.type === 'text'">{{ (el as any).text }}</template>
-        </div>
+      <div class="slide-thumb" style="width:100%;height:100%">
+        <SlideThumb :slide="s" :width="THUMB_W" />
       </div>
       <div class="slide-tools">
         <button class="slide-tool" title="复制此页" @click.stop="store.copySlide(i)">⧉</button>

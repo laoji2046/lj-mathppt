@@ -41,7 +41,7 @@ async function renderAll() {
   for (const node of Array.from(nodes)) {
     const latex = node.getAttribute('data-latex') || ''
     node.innerHTML = ''
-    jobs.push(renderLatex(node, latex, 26).catch(() => {}))
+    jobs.push(renderLatex(node, latex, 22, 1).catch(() => {}))
   }
   await Promise.all(jobs)
 }
@@ -249,14 +249,14 @@ function insert(item: FormulaItem) {
   box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 .fcard__preview {
-  height: 76px;
+  height: 86px;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   border-radius: 8px;
   background: #fbfbfd;
-  font-size: 26px;
+  font-size: 22px;
 }
 .fcard__preview :deep(mjx-container) { display: inline-flex !important; }
 .fcard__label {

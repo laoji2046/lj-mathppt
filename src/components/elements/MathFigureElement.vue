@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { MathFigureElement, SlideElement } from '@/types'
 import { lineDashCss } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
+import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel } from '@/composables/solid3d'
+import { solidSel, selectSolidVertex, selectSolidEdge, selectSolidFace, clearSolidSel } from '@/composables/solidSel'
 
 const props = defineProps<{ el: MathFigureElement; selected?: boolean }>()
 const emit = defineEmits<{ (e: 'update', patch: Partial<SlideElement>): void }>()
@@ -13,7 +15,7 @@ const box = ref<HTMLElement | null>(null)
 const DEF_POLY = [0.5, 0.08, 0.86, 0.29, 0.86, 0.71, 0.5, 0.92, 0.14, 0.71, 0.14, 0.29]
 const DEF_BEZIER = [0.06, 0.75, 0.28, 0.08, 0.72, 0.92, 0.94, 0.25]
 
-const editable = computed(() => props.el.kind === 'polygon' || props.el.kind === 'bezier')
+const editable = computed(() => props.el.kind === 'polygon' || props.el.kind === 'bezier' || (SOLID_KINDS as readonly string[]).includes(props.el.kind))
 const showHandles = computed(() => editable.value && (!!props.selected || shapeEdit.value.id === props.el.id))
 
 /** 当前顶点（归一化）；无存点用默认 */
@@ -21,11 +23,16 @@ const pts = computed(() => {
   const p = props.el.points
   if (props.el.kind === 'polygon') return p && p.length >= 6 ? p : DEF_POLY
   if (props.el.kind === 'bezier') return p && p.length >= 8 ? p : DEF_BEZIER
+  const n = SOLID_VCOUNT[props.el.kind]
+  if (n) {
+    const ok = !!p && p.length >= 4 && p.length % 2 === 0 && (!!props.el.mesh || p.length === n * 2)
+    return ok ? (p as number[]) : solidVerts(props.el.kind, props.el.w, props.el.h, props.el.depth)
+  }
   return p
 })
 
 const innerHtml = computed(() => {
-  const { w, h, stroke, strokeWidth, fill, kind } = props.el
+  const { w, h, stroke, strokeWidth, fill, kind, depth: dep } = props.el
   const s = strokeWidth || 2
   const dash = lineDashCss(props.el.strokeDash)
   const strokeAttrs = `stroke="${stroke}" stroke-width="${s}" stroke-linecap="round" stroke-linejoin="round"` + (dash ? ` stroke-dasharray="${dash}"` : '')
@@ -47,6 +54,9 @@ const innerHtml = computed(() => {
     for (let i = 0; i < list.length; i += 2) a.push((list[i] * w).toFixed(1) + ',' + (list[i + 1] * h).toFixed(1))
     return a.join(' ')
   }
+
+  // 三维多面体统一走顶点模型渲染（支持拖拽顶点编辑）
+  if (SOLID_VCOUNT[kind]) return renderSolid(kind, pts.value, w, h, stroke, s, fillColor, dashed, props.el.vlabels, props.el.edgeStyles, solidSel.elementId === props.el.id ? (solidSel.vertex ?? undefined) : undefined, solidSel.elementId === props.el.id ? (solidSel.edge ?? undefined) : undefined, props.el.labelOffsets, props.el.faceStyles, solidSel.elementId === props.el.id ? (solidSel.face ?? undefined) : undefined, props.el.mesh)
 
   switch (kind) {
     case 'parabola':
@@ -126,6 +136,151 @@ const innerHtml = computed(() => {
       }
       return `<polygon points="${pts.join(' ')}" ${strokeAttrs} fill="${fillColor}"/>`
     }
+    case 'cube': case 'cuboid': {
+      const d = (dep ?? 0.4) * m * 0.4, dx = d, dy = -d * 0.8
+      const side = kind === 'cube' ? Math.min(w, h) * 0.62 : 0
+      const fw = kind === 'cube' ? side : w * 0.78
+      const fh = kind === 'cube' ? side : h * 0.64
+      const fx = (w - fw) / 2, fy = h * 0.16
+      const front = fx + ',' + (fy + fh) + ' ' + (fx + fw) + ',' + (fy + fh) + ' ' + (fx + fw) + ',' + fy + ' ' + fx + ',' + fy
+      const top = fx + ',' + fy + ' ' + (fx + fw) + ',' + fy + ' ' + (fx + fw + dx) + ',' + (fy + dy) + ' ' + (fx + dx) + ',' + (fy + dy)
+      const right = (fx + fw) + ',' + fy + ' ' + (fx + fw + dx) + ',' + (fy + dy) + ' ' + (fx + fw + dx) + ',' + (fy + fh + dy) + ' ' + (fx + fw) + ',' + (fy + fh)
+      return '<g ' + strokeAttrs + ' fill="' + fillColor + '"><polygon points="' + top + '" opacity="0.8"/><polygon points="' + right + '" opacity="0.62"/><polygon points="' + front + '"/>' +
+        '<line ' + dashed + ' x1="' + fx + '" y1="' + (fy + fh) + '" x2="' + (fx + dx) + '" y2="' + (fy + fh + dy) + '"/>' +
+        '<line ' + dashed + ' x1="' + (fx + dx) + '" y1="' + (fy + fh + dy) + '" x2="' + (fx + fw + dx) + '" y2="' + (fy + fh + dy) + '"/>' +
+        '<line ' + dashed + ' x1="' + (fx + dx) + '" y1="' + (fy + fh + dy) + '" x2="' + (fx + dx) + '" y2="' + (fy + dy) + '"/></g>'
+    }
+    case 'cylinder': {
+      const rx = m * 0.36, ry = m * 0.12, cx = w / 2, topY = h * 0.2, botY = h * 0.78
+      return '<g ' + strokeAttrs + ' fill="' + fillColor + '">' +
+        '<line x1="' + (cx - rx) + '" y1="' + topY + '" x2="' + (cx - rx) + '" y2="' + botY + '"/>' +
+        '<line x1="' + (cx + rx) + '" y1="' + topY + '" x2="' + (cx + rx) + '" y2="' + botY + '"/>' +
+        '<path ' + dashed + ' d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 1 ' + (cx + rx) + ' ' + botY + '"/>' +
+        '<path d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 0 ' + (cx + rx) + ' ' + botY + '"/>' +
+        '<ellipse cx="' + cx + '" cy="' + topY + '" rx="' + rx + '" ry="' + ry + '"/></g>'
+    }
+    case 'cone': {
+      const rx = m * 0.38, ry = m * 0.13, cx = w / 2, botY = h * 0.8, apexY = h * 0.12
+      return '<g ' + strokeAttrs + ' fill="' + fillColor + '">' +
+        '<path d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 0 ' + (cx + rx) + ' ' + botY + ' L ' + cx + ' ' + apexY + ' Z"/>' +
+        '<path ' + dashed + ' d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 1 ' + (cx + rx) + ' ' + botY + '"/></g>'
+    }
+    case 'sphere': {
+      const r = m * 0.42, cx = w / 2, cy = h / 2, ry = r * 0.34
+      return '<g ' + strokeAttrs + ' fill="' + fillColor + '">' +
+        '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '"/>' +
+        '<path ' + dashed + ' d="M ' + (cx - r) + ' ' + cy + ' A ' + r + ' ' + ry + ' 0 0 1 ' + (cx + r) + ' ' + cy + '"/>' +
+        '<path d="M ' + (cx - r) + ' ' + cy + ' A ' + r + ' ' + ry + ' 0 0 0 ' + (cx + r) + ' ' + cy + '"/>' +
+        '<path ' + dashed + ' d="M ' + cx + ' ' + (cy - r) + ' A ' + (r * 0.34) + ' ' + r + ' 0 0 0 ' + cx + ' ' + (cy + r) + '"/>' +
+        '<path d="M ' + cx + ' ' + (cy - r) + ' A ' + (r * 0.34) + ' ' + r + ' 0 0 1 ' + cx + ' ' + (cy + r) + '"/></g>'
+    }
+    case 'pyramid': {
+      const d = (dep ?? 0.4) * m * 0.4, dx = d, dy = -d * 0.8
+      const wb = m * 0.42, cx = w / 2, botY = h * 0.78, apexY = h * 0.12
+      const b1 = (cx - wb) + ',' + (botY - dy), b2 = (cx + wb) + ',' + (botY - dy)
+      const f1 = (cx - wb + dx) + ',' + botY, f2 = (cx + wb + dx) + ',' + botY
+      const ap = cx + ',' + apexY
+      return '<g ' + strokeAttrs + '>' +
+        '<polygon points="' + b1 + ' ' + b2 + ' ' + f2 + ' ' + f1 + '" fill="' + fillColor + '" stroke="none" opacity="0.7"/>' +
+        '<polygon points="' + ap + ' ' + f1 + ' ' + f2 + '" fill="' + fillColor + '" stroke="none" opacity="0.95"/>' +
+        '<line x1="' + f1 + '" x2="' + f2 + '"/><line x1="' + ap + '" x2="' + f1 + '"/><line x1="' + ap + '" x2="' + f2 + '"/>' +
+        '<line x1="' + f1 + '" x2="' + b1 + '"/><line x1="' + f2 + '" x2="' + b2 + '"/>' +
+        '<line ' + dashed + ' x1="' + b1 + '" x2="' + b2 + '"/><line ' + dashed + ' x1="' + ap + '" x2="' + b1 + '"/><line ' + dashed + ' x1="' + ap + '" x2="' + b2 + '"/></g>'
+    }
+    case 'prism': {
+      const d = (dep ?? 0.4) * m * 0.4, dx = d, dy = -d * 0.8
+      const fx = w * 0.16, fy = h * 0.24, fw = w * 0.56, fh = h * 0.56
+      const triF = fx + ',' + (fy + fh) + ' ' + (fx + fw) + ',' + (fy + fh) + ' ' + (fx + fw / 2) + ',' + fy
+      const triB = (fx + dx) + ',' + (fy + fh + dy) + ' ' + (fx + fw + dx) + ',' + (fy + fh + dy) + ' ' + (fx + fw / 2 + dx) + ',' + (fy + dy)
+      return '<g ' + strokeAttrs + '>' +
+        '<polygon points="' + triB + '" fill="' + fillColor + '" stroke="none" opacity="0.5"/>' +
+        '<polygon points="' + triB + '" fill="none" ' + dashed + '/>' +
+        '<polygon points="' + triF + '" fill="' + fillColor + '" stroke="none" opacity="0.9"/>' +
+        '<polygon points="' + triF + '" fill="none"/>' +
+        '<line x1="' + fx + ',' + (fy + fh) + '" x2="' + (fx + dx) + ',' + (fy + fh + dy) + '"/><line x1="' + (fx + fw) + ',' + (fy + fh) + '" x2="' + (fx + fw + dx) + ',' + (fy + fh + dy) + '"/><line x1="' + (fx + fw / 2) + ',' + fy + '" x2="' + (fx + fw / 2 + dx) + ',' + (fy + dy) + '"/></g>'
+    }
+    case 'tetrahedron': {
+      const cx = w / 2, cy = h / 2, base = m * 0.42
+      const p0 = (cx - base * 0.7) + ',' + (cy + base * 0.4), p1 = (cx + base * 0.7) + ',' + (cy + base * 0.4)
+      const p2 = cx + ',' + (cy - base * 0.4), p3 = cx + ',' + (cy - base * 0.9)
+      return '<g ' + strokeAttrs + '>' +
+        '<polygon points="' + p0 + ' ' + p1 + ' ' + p2 + '" fill="' + fillColor + '" stroke="none" opacity="0.4"/>' +
+        '<polygon points="' + p3 + ' ' + p0 + ' ' + p2 + '" fill="' + fillColor + '" stroke="none" opacity="0.86"/>' +
+        '<polygon points="' + p3 + ' ' + p1 + ' ' + p0 + '" fill="' + fillColor + '" stroke="none" opacity="0.76"/>' +
+        '<polygon points="' + p3 + ' ' + p2 + ' ' + p1 + '" fill="' + fillColor + '" stroke="none" opacity="0.66"/>' +
+        '<line x1="' + p0 + '" x2="' + p1 + '"/><line x1="' + p3 + '" x2="' + p0 + '"/><line x1="' + p3 + '" x2="' + p1 + '"/>' +
+        '<line ' + dashed + ' x1="' + p0 + '" x2="' + p2 + '"/><line ' + dashed + ' x1="' + p1 + '" x2="' + p2 + '"/><line ' + dashed + ' x1="' + p3 + '" x2="' + p2 + '"/></g>'
+    }
+    case 'frustum': {
+      const mm = Math.min(w, h), rB = mm * 0.4, rT = mm * 0.24, ryB = mm * 0.12, ryT = mm * 0.09, cx = w / 2, topY = h * 0.28, botY = h * 0.76
+      const frB = 'M ' + (cx - rB) + ' ' + botY + ' A ' + rB + ' ' + ryB + ' 0 0 0 ' + (cx + rB) + ' ' + botY
+      return '<g ' + strokeAttrs + ' fill="' + fillColor + '">' +
+        '<line x1="' + (cx - rB) + '" y1="' + botY + '" x2="' + (cx - rT) + '" y2="' + topY + '"/>' +
+        '<line x1="' + (cx + rB) + '" y1="' + botY + '" x2="' + (cx + rT) + '" y2="' + topY + '"/>' +
+        '<path ' + dashed + ' d="M ' + (cx - rB) + ' ' + botY + ' A ' + rB + ' ' + ryB + ' 0 0 1 ' + (cx + rB) + ' ' + botY + '"/>' +
+        '<path d="' + frB + '"/>' +
+        '<ellipse cx="' + cx + '" cy="' + topY + '" rx="' + rT + '" ry="' + ryT + '"/></g>'
+    }
+    case 'pyraFrustum': {
+      const mm = Math.min(w, h), d = (dep ?? 0.4) * mm * 0.4, dx = d, dy = -d * 0.8
+      const wB = mm * 0.42, wT = mm * 0.26, cx = w / 2, botY = h * 0.74, topY = h * 0.26, bby = botY + dy, tby = topY + dy
+      const bFL = (cx - wB) + ',' + botY, bFR = (cx + wB) + ',' + botY, bBL = (cx - wB + dx) + ',' + bby, bBR = (cx + wB + dx) + ',' + bby
+      const tFL = (cx - wT) + ',' + topY, tFR = (cx + wT) + ',' + topY, tBL = (cx - wT + dx) + ',' + tby, tBR = (cx + wT + dx) + ',' + tby
+      return '<g ' + strokeAttrs + '>' +
+        '<polygon points="' + bFL + ' ' + bFR + ' ' + bBR + ' ' + bBL + '" fill="' + fillColor + '" stroke="none" opacity="0.6"/>' +
+        '<polygon points="' + tFL + ' ' + tFR + ' ' + tBR + ' ' + tBL + '" fill="' + fillColor + '" stroke="none" opacity="0.9"/>' +
+        '<line x1="' + bFL + '" x2="' + bFR + '"/><line x1="' + bFL + '" x2="' + bBL + '"/><line x1="' + bFR + '" x2="' + bBR + '"/>' +
+        '<line x1="' + tFL + '" x2="' + tFR + '"/><line x1="' + tFL + '" x2="' + tBL + '"/><line x1="' + tFR + '" x2="' + tBR + '"/>' +
+        '<line x1="' + bFL + '" x2="' + tFL + '"/><line x1="' + bFR + '" x2="' + tFR + '"/>' +
+        '<line ' + dashed + ' x1="' + bBL + '" x2="' + bBR + '"/><line ' + dashed + ' x1="' + bBL + '" x2="' + tBL + '"/>' +
+        '<line ' + dashed + ' x1="' + tBL + '" x2="' + tBR + '"/><line ' + dashed + ' x1="' + bBR + '" x2="' + tBR + '"/></g>'
+    }
+    case 'dihedral': {
+      const mm = Math.min(w, h), d = (dep ?? 0.4) * mm * 0.5, cx = w / 2, hingeY = h * 0.5
+      const p1 = '0,' + hingeY + ' ' + (cx) + ',' + hingeY + ' ' + cx + ',' + (hingeY - h * 0.3) + ' 0,' + (hingeY - h * 0.3)
+      const p2 = cx + ',' + hingeY + ' ' + (cx + d) + ',' + (hingeY - d * 0.8) + ' ' + (cx + d) + ',' + (hingeY - d * 0.8 - h * 0.3) + ' ' + cx + ',' + (hingeY - h * 0.3)
+      return '<g ' + strokeAttrs + ' fill="' + fillColor + '"><polygon points="' + p1 + '" opacity="0.9"/><polygon points="' + p2 + '" opacity="0.7"/><line x1="0" y1="' + hingeY + '" x2="' + w + '" y2="' + hingeY + '"/></g>'
+    }
+    case 'isoaxis': {
+      const mm = Math.min(w, h), cx = w / 2, cy = h / 2, L = mm * 0.36
+      return '<g ' + strokeAttrs + ' fill="none">' +
+        '<line x1="' + cx + '" y1="' + cy + '" x2="' + cx + '" y2="' + (cy - L) + '"/>' +
+        '<line x1="' + cx + '" y1="' + cy + '" x2="' + (cx + L * 0.87) + '" y2="' + (cy + L * 0.5) + '"/>' +
+        '<line x1="' + cx + '" y1="' + cy + '" x2="' + (cx - L * 0.87) + '" y2="' + (cy + L * 0.5) + '"/>' +
+        '<polygon points="' + cx + ',' + (cy - L) + ' ' + (cx - 7) + ',' + (cy - L + 12) + ' ' + (cx + 7) + ',' + (cy - L + 12) + '" fill="' + stroke + '"/></g>'
+    }
+    // ---- 辅助线 / 标注 ----
+    case 'auxLine':
+      return '<line x1="' + (w * 0.04) + '" y1="' + (h * 0.6) + '" x2="' + (w * 0.96) + '" y2="' + (h * 0.6) + '" ' + strokeAttrs + ' stroke-dasharray="7 5" fill="none"/>'
+    case 'rightAngle': {
+      const x0 = w * 0.18, y0 = h * 0.86, L = Math.min(w, h) * 0.72, t = Math.min(w, h) * 0.16
+      return '<line x1="' + x0 + '" y1="' + y0 + '" x2="' + (x0 + L) + '" y2="' + y0 + '" ' + strokeAttrs + ' fill="none"/>' +
+        '<line x1="' + x0 + '" y1="' + y0 + '" x2="' + x0 + '" y2="' + (y0 - L) + '" ' + strokeAttrs + ' fill="none"/>' +
+        '<path d="M ' + (x0 + t) + ' ' + y0 + ' L ' + (x0 + t) + ' ' + (y0 - t) + ' L ' + x0 + ' ' + (y0 - t) + '" ' + strokeAttrs + ' fill="none"/>'
+    }
+    case 'equalMark': {
+      const y = h * 0.5, x1 = w * 0.12, x2 = w * 0.88, tk = Math.min(w, h) * 0.2, g = Math.min(w, h) * 0.06
+      return '<line x1="' + x1 + '" y1="' + y + '" x2="' + x2 + '" y2="' + y + '" ' + strokeAttrs + ' fill="none"/>' +
+        '<line x1="' + (w * 0.5 - g) + '" y1="' + (y - tk) + '" x2="' + (w * 0.5 - g) + '" y2="' + (y + tk) + '" ' + strokeAttrs + ' fill="none"/>' +
+        '<line x1="' + (w * 0.5 + g) + '" y1="' + (y - tk) + '" x2="' + (w * 0.5 + g) + '" y2="' + (y + tk) + '" ' + strokeAttrs + ' fill="none"/>'
+    }
+    case 'parallelMark': {
+      const y = h * 0.5, tk = Math.min(w, h) * 0.22, g = Math.min(w, h) * 0.07
+      return '<line x1="' + (w * 0.5 - g) + '" y1="' + (y + tk) + '" x2="' + (w * 0.5 - g) + '" y2="' + (y - tk) + '" ' + strokeAttrs + ' fill="none"/>' +
+        '<line x1="' + (w * 0.5 + g) + '" y1="' + (y + tk) + '" x2="' + (w * 0.5 + g) + '" y2="' + (y - tk) + '" ' + strokeAttrs + ' fill="none"/>'
+    }
+    case 'angleArc': {
+      const ox = w * 0.16, oy = h * 0.84, L = Math.min(w, h) * 0.72, r = Math.min(w, h) * 0.3, a2 = -Math.PI / 3
+      const ex = ox + L * Math.cos(a2), ey = oy + L * Math.sin(a2)
+      const ax = ox + r * Math.cos(a2), ay = oy + r * Math.sin(a2)
+      return '<line x1="' + ox + '" y1="' + oy + '" x2="' + (ox + L) + '" y2="' + oy + '" ' + strokeAttrs + ' fill="none"/>' +
+        '<line x1="' + ox + '" y1="' + oy + '" x2="' + ex + '" y2="' + ey + '" ' + strokeAttrs + ' fill="none"/>' +
+        '<path d="M ' + (ox + r) + ' ' + oy + ' A ' + r + ' ' + r + ' 0 0 0 ' + ax + ' ' + ay + '" ' + strokeAttrs + ' fill="none"/>'
+    }
+    case 'section': {
+      const pp = (w * 0.2) + ',' + (h * 0.36) + ' ' + (w * 0.8) + ',' + (h * 0.26) + ' ' + (w * 0.8) + ',' + (h * 0.72) + ' ' + (w * 0.2) + ',' + (h * 0.82)
+      return '<polygon points="' + pp + '" ' + strokeAttrs + ' fill="' + fillColor + '" opacity="0.55"/>'
+    }
     case 'polygon':
       return `<polygon points="${ptsStr(pts.value || DEF_POLY)}" ${strokeAttrs} fill="${fillColor}"/>`
     case 'bezier': {
@@ -141,6 +296,8 @@ const innerHtml = computed(() => {
 const dragging = ref(false)
 let dragIdx = -1
 let lastDown = { idx: -1, t: 0 }
+let moved = false
+let downPt: [number, number] | null = null
 function normPt(e: { clientX: number; clientY: number }): [number, number] {
   const r = box.value?.getBoundingClientRect()
   if (!r || !r.width || !r.height) return [0, 0]
@@ -158,6 +315,7 @@ function onHandleDown(e: PointerEvent, i: number) {
     if (p.length / 2 > 3) { p.splice(i * 2, 2); emit('update', { points: p }) }
     return
   }
+  moved = false; downPt = [e.clientX, e.clientY]
   lastDown = { idx: i, t: e.timeStamp }
   const t = e.currentTarget as HTMLElement
   try { t.setPointerCapture(e.pointerId) } catch {}
@@ -166,12 +324,109 @@ function onHandleDown(e: PointerEvent, i: number) {
 }
 function onHandleMove(e: PointerEvent, i: number) {
   if (!dragging.value || dragIdx < 0) return
+  if (!moved && downPt && Math.hypot(e.clientX - downPt[0], e.clientY - downPt[1]) > 4) moved = true
   const [nx, ny] = normPt(e)
   const p = [...(pts.value || DEF_POLY)]
   p[i * 2] = nx; p[i * 2 + 1] = ny
   emit('update', { points: p } as Partial<SlideElement>)
 }
-function onHandleUp() { dragging.value = false; dragIdx = -1 }
+function onHandleUp() {
+  if (!moved && dragIdx >= 0 && SOLID_VCOUNT[props.el.kind]) {
+    selectSolidVertex(props.el.id, dragIdx)
+  }
+  dragging.value = false; dragIdx = -1
+}
+
+
+
+function segDist(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
+  const abx = bx - ax, aby = by - ay, l2 = abx * abx + aby * aby
+  let t = l2 ? ((px - ax) * abx + (py - ay) * aby) / l2 : 0
+  t = Math.max(0, Math.min(1, t))
+  return Math.hypot(px - (ax + t * abx), py - (ay + t * aby))
+}
+function pointInPoly(px: number, py: number, poly: [number, number][]) {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1]
+    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) inside = !inside
+  }
+  return inside
+}
+function onSvgClick(e: MouseEvent) {
+  if (!SOLID_VCOUNT[props.el.kind]) return
+  const [nx, ny] = normPt(e)
+  const px = nx * props.el.w, py = ny * props.el.h
+  const p = pts.value || []
+  const P: [number, number][] = []
+  for (let i = 0; i < p.length; i += 2) P.push([p[i] * props.el.w, p[i + 1] * props.el.h])
+  const list = meshEdges(props.el.kind, props.el.mesh)
+  let best = Infinity, bestE = -1
+  for (let i = 0; i < list.length; i++) {
+    const a = list[i][0], b = list[i][1]
+    if (!P[a] || !P[b]) continue
+    const d = segDist(px, py, P[a][0], P[a][1], P[b][0], P[b][1])
+    if (d < best) { best = d; bestE = i }
+  }
+  if (best < 10) { selectSolidEdge(props.el.id, bestE); return }
+  const polys = meshFaces(props.el.kind, props.el.mesh)
+  let hitFace = -1
+  for (let i = 0; i < polys.length; i++) {
+    const poly = polys[i].map(vi => P[vi]).filter(Boolean) as [number, number][]
+    if (poly.length >= 3 && pointInPoly(px, py, poly)) hitFace = i
+  }
+  if (hitFace >= 0) selectSolidFace(props.el.id, hitFace)
+  else clearSolidSel()
+}
+watch(showHandles, (v) => { if (!v && solidSel.elementId === props.el.id) clearSolidSel() })
+
+// ---- 顶点字母拖拽定位（避免遮挡） ----
+function escHtml(s: string) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }
+function labelHtml(s: string): string {
+  const d = decodeLabel(s || '')
+  return escHtml(d.base || '(字母)') + (d.sub ? '<sub>' + escHtml(d.sub) + '</sub>' : '') + (d.sup ? '<sup>' + escHtml(d.sup) + '</sup>' : '')
+}
+function labelOffAt(i: number) { const o = props.el.labelOffsets && props.el.labelOffsets[i]; return o || { dx: 0, dy: 0 } }
+function setLabelOff(i: number, off: { dx: number; dy: number }) {
+  const arr = [...(props.el.labelOffsets || [])]
+  const n = SOLID_VCOUNT[props.el.kind] || 0
+  while (arr.length < n) arr.push({ dx: 0, dy: 0 })
+  arr[i] = off
+  emit('update', { labelOffsets: arr } as Partial<SlideElement>)
+}
+const labelDrag = ref(false)
+let lIdx = -1
+function onLabelDown(e: PointerEvent, i: number) {
+  e.stopPropagation()
+  lIdx = i
+  labelDrag.value = true
+  const t = e.currentTarget as HTMLElement
+  try { t.setPointerCapture(e.pointerId) } catch {}
+}
+function onLabelMove(e: PointerEvent, i: number) {
+  if (!labelDrag.value || lIdx !== i) return
+  const [nx, ny] = normPt(e)
+  const p = pts.value || []
+  const vx = (p[i * 2] ?? 0.5) * props.el.w, vy = (p[i * 2 + 1] ?? 0.5) * props.el.h
+  const R = Math.min(props.el.w, props.el.h) * 0.45
+  let cdx = nx * props.el.w - vx
+  let cdy = ny * props.el.h - (vy - 12)
+  cdx = Math.max(-R, Math.min(R, cdx))
+  cdy = Math.max(-R, Math.min(R, cdy))
+  setLabelOff(i, { dx: cdx / props.el.w, dy: cdy / props.el.h })
+}
+function onLabelUp() { labelDrag.value = false; lIdx = -1 }
+const selLabelPos = computed(() => {
+  if (solidSel.elementId !== props.el.id || solidSel.vertex == null) return null
+  const i = solidSel.vertex, p = pts.value || []
+  const vx = (p[i * 2] ?? 0.5) * props.el.w, vy = (p[i * 2 + 1] ?? 0.5) * props.el.h
+  const off = labelOffAt(i)
+  return { left: (vx + off.dx * props.el.w) + 'px', top: (vy - 12 + off.dy * props.el.h) + 'px', idx: i }
+})
+const selLabelText = computed(() => selLabelPos.value ? (props.el.vlabels?.[selLabelPos.value.idx] || '') : '')
+
+
+
 /** 双击多边形边线（进入顶点编辑后）→ 在最近的边上插入一个新顶点 */
 function onSvgDbl(e: MouseEvent) {
   if (props.el.kind !== 'polygon' || shapeEdit.value.id !== props.el.id) return
@@ -199,18 +454,20 @@ function onSvgDbl(e: MouseEvent) {
 
 <template>
   <div ref="box" class="mathfig-el">
-    <svg :viewBox="`0 0 ${props.el.w} ${props.el.h}`" width="100%" height="100%" preserveAspectRatio="none" v-html="innerHtml" @dblclick="onSvgDbl"></svg>
+    <svg :viewBox="`0 0 ${props.el.w} ${props.el.h}`" width="100%" height="100%" preserveAspectRatio="none" v-html="innerHtml" @click="onSvgClick" @dblclick="onSvgDbl"></svg>
     <template v-if="showHandles">
       <span
         v-for="v in (pts ? Math.floor(pts.length / 2) : 0)"
         :key="v"
         class="mf-handle"
+        :class="{ sel: solidSel.elementId === props.el.id && solidSel.vertex === v - 1 }"
         :style="{ left: ((pts ? pts[v * 2] : 0) * props.el.w) + 'px', top: ((pts ? pts[v * 2 + 1] : 0) * props.el.h) + 'px' }"
         @pointerdown.stop="onHandleDown($event, v)"
         @pointermove="onHandleMove($event, v)"
         @pointerup="onHandleUp"
       ></span>
     </template>
+    <span v-if="showHandles && selLabelPos" class="mf-vlabel" :style="{ left: selLabelPos.left, top: selLabelPos.top }" @pointerdown.stop="onLabelDown($event, selLabelPos.idx)" @pointermove="onLabelMove($event, selLabelPos.idx)" @pointerup="onLabelUp" v-html="labelHtml(selLabelText)"></span>
   </div>
 </template>
 
@@ -230,4 +487,14 @@ function onSvgDbl(e: MouseEvent) {
   box-sizing: border-box;
 }
 .mf-handle:hover { background: var(--brand-soft); transform: scale(1.15); }
+.mf-handle.sel { border-color: #ff8f1f; box-shadow: 0 0 0 4px rgba(255,143,31,0.28); }
+.mf-vlabel {
+  position: absolute; z-index: 5;
+  transform: translate(-50%, -50%);
+  padding: 0 3px; border-radius: 4px;
+  border: 1px dashed #ff8f1f; background: rgba(255,255,255,0.72);
+  color: #333; font-size: 20px; font-style: italic;
+  line-height: 1.2; cursor: move; white-space: nowrap; box-sizing: border-box;
+}
+.mf-vlabel:hover { background: #fff; }
 </style>

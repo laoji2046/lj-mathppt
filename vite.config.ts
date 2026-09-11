@@ -15,7 +15,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     // 备份 / 构建产物 / 探针目录不触发文件监听，避免 EBUSY 或误刷新
-    watch: { ignored: ['**/node_modules/**', '**/_backup/**', '**/dist/**', '**/.probe/**', '**/参考/**', '**/.*.tmpdir/**'] },
+    watch: { ignored: ['**/node_modules/**', '**/_backup/**', '**/dist/**', '**/.probe/**', '**/参考/**', '**/.*.tmpdir/**', '**/src-tauri/target/**'] },
   },
   // Tauri 环境变量以 TAURI_ 为前缀，默认已含 VITE_，无需额外配置
   envPrefix: ['VITE_', 'TAURI_'],

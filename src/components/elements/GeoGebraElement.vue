@@ -29,6 +29,7 @@ async function mountApplet() {
       enableShiftDragZoom: props.el.enableShiftDragZoom,
       showAxis: props.el.showAxis,
       showGrid: props.el.showGrid,
+      commands: props.el.commands,
     })
     injected = true
   } catch (e) {
@@ -62,6 +63,7 @@ watch(
     props.el.showMenuBar,
     props.el.showResetIcon,
     props.el.enableShiftDragZoom,
+    JSON.stringify(props.el.commands || []),
   ],
   () => {
     destroyGeoGebra(host.value)

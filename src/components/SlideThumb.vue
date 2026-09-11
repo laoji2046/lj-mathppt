@@ -1,43 +1,46 @@
 <script setup lang="ts">
-import type { Slide, SlideElement } from '@/types'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { slideToHtml } from '@/reveal/renderer'
+import { typesetMixed } from '@/composables/useMathJax'
+import { slideBgCss } from '@/types'
 
-const props = defineProps<{ slide: Slide; width: number; height: number }>()
+const props = defineProps<{ slide: any; width?: number }>()
+const host = ref<HTMLElement | null>(null)
+const k = computed(() => (props.width || 160) / 1920)
+const bgCss = ref('')
+let seq = 0
 
-function style(el: SlideElement) {
-  const k = props.width / 1920
-  const base = {
-    position: 'absolute' as const,
-    left: el.x * k + 'px',
-    top: el.y * k + 'px',
-    width: el.w * k + 'px',
-    height: el.h * k + 'px',
-    overflow: 'hidden' as const,
-  }
-  if (el.type === 'text') return { ...base, color: el.color, fontSize: Math.max(3, el.fontSize * k) + 'px' }
-  if (el.type === 'shape') return { ...base, background: el.fill, borderRadius: el.shape === 'ellipse' ? '50%' : '1px' }
-  if (el.type === 'math') return { ...base, background: 'repeating-linear-gradient(45deg,#e8e4f0,#e8e4f0 3px,#f2effa 3px,#f2effa 6px)', color: '#534ab7' }
-  if (el.type === 'geogebra') return { ...base, background: '#ffffff', border: '1px solid #cfcbd8' }
-  if (el.type === 'desmos') return { ...base, background: '#f2fbf6', border: '1px solid #bcd9c8' }
-  if (el.type === 'image') return { ...base, background: el.src ? `url(${el.src}) center/cover` : '#f1efe8' }
-  return base
+async function refresh() {
+  const s = props.slide
+  const my = ++seq
+  bgCss.value = s ? slideBgCss(s) : ''
+  await nextTick()
+  if (my !== seq || !host.value) return
+  try {
+    let h = s ? slideToHtml(s) : ''
+    // 缩略图中把 GeoGebra / PDF 引擎占位换成可识别徽标（缩略图无法运行引擎）
+    h = h.replace(/<div class="ggb-host"[^>]*><\/div>/, '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#6a52c8;font-size:14px;font-weight:700">GeoGebra</div>')
+    h = h.replace(/<div class="fx-doc"[^>]*><\/div>/, '<div class="fx-doc" style="width:100%;height:100%;background:#f3f1ee;border:1px solid #e3dfd5;border-radius:4px;display:flex;align-items:center;justify-content:center;color:#a33;font-size:14px;font-weight:700">PDF</div>')
+    // typesetMixed 设置 innerHTML 并触发 MathJax 排版（对 \(...\) 公式可靠，与编辑器一致）
+    await typesetMixed(host.value, h)
+  } catch { /* 忽略 */ }
 }
+onMounted(refresh)
+watch(() => props.slide, refresh)
 </script>
 
 <template>
-  <div class="slide-thumb" :style="{ background: slide.bg, width: width + 'px', height: height + 'px' }">
-    <div v-for="el in slide.elements" :key="el.id" :style="style(el)">
-      <template v-if="el.type === 'text'">{{ (el as any).text }}</template>
-      <template v-if="el.type === 'richtex'">{{ (el as any).text }}</template>
-    </div>
+  <div class="slthumb" :style="{ width: '100%', aspectRatio: '16 / 9' }">
+    <div ref="host" class="slthumb-inner" :style="{ width: '1920px', height: '1080px', transform: 'scale(' + k + ')', background: bgCss }"></div>
   </div>
 </template>
 
 <style scoped>
-.slide-thumb {
-  position: relative;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  overflow: hidden;
-  box-sizing: border-box;
-}
+.slthumb { position: relative; overflow: hidden; border-radius: 4px; background: #fff; }
+.slthumb-inner { position: absolute; top: 0; left: 0; transform-origin: top left; }
+/* 缩略图内数学块：改为块级显示，避免 flex 让 mjx 尺寸为 0 */
+.slthumb-inner :deep(.fx-math) { display: block !important; }
+.slthumb-inner :deep(.fx-math mjx-container) { display: block; }
+.slthumb-inner :deep(mjx-container) { max-width: 100%; }
+.slthumb-inner :deep(mjx-container svg) { width: auto !important; height: auto !important; }
 </style>

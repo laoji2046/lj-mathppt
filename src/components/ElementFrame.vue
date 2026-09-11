@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { SlideElement } from '@/types'
 import { HANDLES, type Handle } from '@/composables/useDragResize'
 import { openShapeEdit } from '@/ui/shapeEditor'
+import { requestInlineEdit } from '@/ui/inlineEdit'
 import { useDeckStore } from '@/stores/deck'
 import { useContextMenu } from '@/composables/useContextMenu'
 import TextElement from './elements/TextElement.vue'
@@ -87,6 +88,14 @@ function onHandleDown(e: PointerEvent, handle: Handle) {
 }
 function onDblClick() {
   const t = props.el
+  // 组合内的元素：第一次双击进入组内单独编辑（不再整组选中），
+  // 再双击才走原有的顶点 / 形状编辑；文字元素由 contenteditable 自己接管。
+  if (t.groupId && store.editingGroupId !== t.groupId) {
+    store.enterGroup(t.id)
+    return
+  }
+  // 文本 / 混排公式：双击进入就地编辑（在帧层捕获，避免被拖拽的指针捕获吃掉）
+  if (t.type === 'text' || t.type === 'richtex' || t.type === 'math') { requestInlineEdit(t.id); return }
   if (t.type === 'mathfig' && (t.kind === 'polygon' || t.kind === 'bezier')) openShapeEdit(t.id)
   else if (t.type === 'line' || t.type === 'arrow') openShapeEdit(t.id)
 }
@@ -109,7 +118,7 @@ function onDblClick() {
     />
     <ShapeElement v-else-if="el.type === 'shape'" :el="el" />
     <ImageElement v-else-if="el.type === 'image'" :el="el" />
-    <MathElement v-else-if="el.type === 'math'" :el="el" />
+    <MathElement v-else-if="el.type === 'math'" :el="el" @update="(p) => emit('update', el.id, p)" />
     <GeoGebraElement v-else-if="el.type === 'geogebra'" :el="el" :selected="selected" />
     <DesmosElement v-else-if="el.type === 'desmos'" :el="el" :selected="selected" />
     <LineElement v-else-if="el.type === 'line'" :el="el" :selected="selected" @update="(p) => emit('update', el.id, p)" />
@@ -120,7 +129,7 @@ function onDblClick() {
     <TableElement v-else-if="el.type === 'table'" :el="el" />
     <IconElement v-else-if="el.type === 'icon'" :el="el" />
     <EmbedElement v-else-if="el.type === 'embed'" :el="el" :selected="selected" />
-    <RichTextElement v-else-if="el.type === 'richtex'" :el="el" />
+    <RichTextElement v-else-if="el.type === 'richtex'" :el="el" @update="(p) => emit('update', el.id, p)" />
 
     <template v-if="selected && showHandles && !isLineLike">
       <span

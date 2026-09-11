@@ -244,6 +244,12 @@ export type MathFigureKind =
   | 'coordinate' | 'numberline' | 'venn' | 'righttriangle' | 'angle' | 'semicircle'
   | 'triangle' | 'rectangle' | 'circle' | 'pentagon' | 'hexagon' | 'rhombus'
   | 'parallelogram' | 'trapezoid' | 'star' | 'bezier' | 'polygon'
+  // ---- 3D 立体几何 ----
+  | 'cube' | 'cuboid' | 'cylinder' | 'cone' | 'sphere' | 'pyramid' | 'prism' | 'tetrahedron'
+  | 'frustum' | 'pyraFrustum' | 'dihedral' | 'isoaxis'
+  | 'octahedron' | 'hexPrism' | 'obliquePrism' | 'triFrustum'
+  // ---- 辅助线 / 标注 ----
+  | 'auxLine' | 'rightAngle' | 'equalMark' | 'parallelMark' | 'angleArc' | 'section'
 
 export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string }[] = [
   { v: 'parabola', label: '抛物线' },
@@ -266,6 +272,30 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string }[] = [
   { v: 'parallelogram', label: '平行四边形' },
   { v: 'trapezoid', label: '梯形' },
   { v: 'star', label: '五角星' },
+  // ---- 3D 立体 ----
+  { v: 'cube', label: '立方体' },
+  { v: 'cuboid', label: '长方体' },
+  { v: 'cylinder', label: '圆柱' },
+  { v: 'cone', label: '圆锥' },
+  { v: 'sphere', label: '球' },
+  { v: 'pyramid', label: '四棱锥' },
+  { v: 'prism', label: '棱柱' },
+  { v: 'tetrahedron', label: '四面体' },
+  { v: 'frustum', label: '圆台' },
+  { v: 'pyraFrustum', label: '棱台' },
+  { v: 'dihedral', label: '二面角' },
+  { v: 'isoaxis', label: '等距轴' },
+  { v: 'octahedron', label: '正八面体' },
+  { v: 'hexPrism', label: '正六棱柱' },
+  { v: 'obliquePrism', label: '斜棱柱' },
+  { v: 'triFrustum', label: '正三棱台' },
+  // ---- 辅助线 / 标注 ----
+  { v: 'auxLine', label: '辅助虚线' },
+  { v: 'rightAngle', label: '直角符号' },
+  { v: 'equalMark', label: '等长标记' },
+  { v: 'parallelMark', label: '平行标记' },
+  { v: 'angleArc', label: '角标记' },
+  { v: 'section', label: '截面' },
   { v: 'bezier', label: '贝塞尔曲线' },
   { v: 'polygon', label: '自定义多边形' },
 ]
@@ -310,6 +340,18 @@ export interface MathFigureElement extends ElementBase {
   strokeWidth: number
   /** 可编辑图形（贝塞尔/自定义多边形）的归一化顶点，扁平 [x0,y0,x1,y1,...]，0~1 */
   points?: number[]
+  /** 3D 立体的投影深度(0~1) */
+  depth?: number
+  /** 每个顶点的字母标注（下标/上标用 _ 和 ^，如 "A_1" "B^2"、\' 加撇），长度与顶点数一致 */
+  vlabels?: (string | null)[]
+  /** 每条边的样式覆盖（实线/虚线/点线、粗细、颜色），索引与立体边表一致 */
+  edgeStyles?: ({ dash?: 'solid' | 'dash' | 'dot'; width?: number; color?: string } | null)[]
+  /** 每个顶点字母相对默认位置(顶点上方)的拖拽偏移(归一化)，用于避免遮挡 */
+  labelOffsets?: { dx: number; dy: number }[]
+  /** 每个面的样式覆盖（填充色/透明度/隐藏该面），索引与面表一致 */
+  faceStyles?: ({ fill?: string; opacity?: number; hidden?: boolean } | null)[]
+  /** 自由建模：自定义拓扑（顶点用 points），启用后覆盖该类型默认的边/面 */
+  mesh?: { edges: [number, number, number][]; faces: number[][] }
 }
 
 /** 图表类型 */
@@ -467,6 +509,8 @@ export interface GeoGebraElement extends ElementBase {
   showAxis: boolean
   /** 显示网格 */
   showGrid: boolean
+  /** 打开后自动执行的 GeoGebra 命令（预设动态图，如 "f(x)=x^2"、"A=(1,1)"） */
+  commands?: string[]
 }
 
 export interface DesmosElement extends ElementBase {

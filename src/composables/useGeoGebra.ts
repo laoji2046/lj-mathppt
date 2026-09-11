@@ -85,6 +85,8 @@ export interface GgbInjectOptions {
   enableShiftDragZoom: boolean
   showAxis: boolean
   showGrid: boolean
+  /** 打开后自动执行的 GeoGebra 命令（用于“预设好的动态图”，如 f(x)=x^2、A=(1,1)） */
+  commands?: string[]
 }
 
 /** 注入一个 GeoGebra 小程序到宿主元素，返回 applet 实例 */
@@ -124,6 +126,10 @@ export async function injectGeoGebra(host: HTMLElement, opts: GgbInjectOptions) 
       // 代数区（视图）：本 5.0 web3d 引擎无 showView，必须用 setPerspective 切视角
       applyAlgebraView(api, opts.app, opts.showAlgebra)
     } catch { /* 3D/CAS 等套件可能不支持，忽略 */ }
+    // 预设命令：模板里的“开箱即用动态图”
+    for (const cmd of opts.commands ?? []) {
+      try { if (cmd && typeof api.evalCommand === 'function') api.evalCommand(cmd) } catch { /* ignore */ }
+    }
     // 把 api 引用挂到实例上，供后续运行时切换使用
     try { (applet as Record<string, unknown>).__ggbApi = api } catch { /* ignore */ }
   }

@@ -4,12 +4,13 @@ import { useDeckStore } from '@/stores/deck'
 import { mathTemplates } from '@/templates/mathTemplates'
 import { mathBundles } from '@/templates/mathBundles'
 import { proTemplates, proBundles } from '@/templates/proTemplates'
+import { mathAppletTemplates } from '@/templates/mathAppletTemplates'
 
 const store = useDeckStore()
 const props = defineProps<{ mode?: 'replace' | 'add' | 'addSub' }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
-const library = ref<'common' | 'math' | 'pro'>('common')
+const library = ref<'common' | 'math' | 'mathApplet' | 'pro'>('common')
 
 type Entry =
   | { kind: 'bundle'; id: string; name: string; cat: '整套'; desc: string; pages: number }
@@ -38,6 +39,7 @@ const filteredCommon = computed<Entry[]>(() => [
   ...mathBundles.map<Entry>((b) => ({ kind: 'bundle', id: b.id, name: b.name, cat: '整套', desc: b.description, pages: b.slides.length })),
   ...mathTemplates.filter((t) => commonMathIds.includes(t.id)).map<Entry>((t) => ({ kind: 'single', id: t.id, name: t.name, cat: t.cat, desc: '' })),
   ...proTemplates.filter((t) => commonProIds.includes(t.id)).map<Entry>((t) => ({ kind: 'single', id: t.id, name: t.name, cat: t.cat, desc: '' })),
+  ...mathAppletTemplates.filter((t) => ['ex-formula-quadratic', 'ex-ggb-quad', 'ex-desmos-func', 'ex-html-prob'].includes(t.id)).map<Entry>((t) => ({ kind: 'single', id: t.id, name: t.name, cat: t.cat, desc: t.desc })),
 ])
 
 // ---- 专业模板（PPT 风） ----
@@ -65,10 +67,11 @@ function blocksOf(els: any[]): PBlock[] {
 }
 const previewMap = new Map<string, PBlock[]>()
 function regPreview(id: string, els: any[]) { previewMap.set(id, blocksOf(els)) }
-for (const t of mathTemplates) { try { regPreview(t.id, t.build()) } catch {} }
-for (const t of proTemplates) { try { regPreview(t.id, t.build()) } catch {} }
+for (const t of mathTemplates) { try { regPreview(t.id, (t.build() as any[]).flat()) } catch {} }
+for (const t of proTemplates) { try { regPreview(t.id, (t.build() as any[]).flat()) } catch {} }
 for (const b of mathBundles) { try { regPreview(b.id, (b.slides[0] as any)?.elements ?? []) } catch {} }
 for (const b of proBundles) { try { regPreview(b.id, (b.slides[0] as any)?.elements ?? []) } catch {} }
+for (const t of mathAppletTemplates) { try { regPreview(t.id, (t.build() as any[]).flat()) } catch {} }
 function previewOf(id: string) { return previewMap.get(id) ?? [] }
 
 function apply(id: string) {
@@ -103,6 +106,7 @@ function applyBundle(id: string) {
       <div class="panel__tabs">
         <button class="panel__tab" :class="{ 'panel__tab--active': library === 'common' }" @click="library = 'common'">常用模板</button>
         <button class="panel__tab" :class="{ 'panel__tab--active': library === 'math' }" @click="library = 'math'">数学讲义模板</button>
+        <button class="panel__tab" :class="{ 'panel__tab--active': library === 'mathApplet' }" @click="library = 'mathApplet'">高中数学例题</button>
         <button class="panel__tab" :class="{ 'panel__tab--active': library === 'pro' }" @click="library = 'pro'">专业模板</button>
       </div>
 
@@ -146,6 +150,7 @@ function applyBundle(id: string) {
             </button>
           </div>
           <div v-else class="panel__grid">
+            <div v-if="!filtered.length" style="padding:24px;color:#8a8aa0;font-size:14px">模板库已清空（如需恢复模板，告诉我）</div>
             <button v-for="t in filtered" :key="t.kind + ':' + t.id" class="card" :class="{ 'card--bundle': t.kind === 'bundle' }" :title="t.name" @click="t.kind === 'bundle' ? applyBundle(t.id) : apply(t.id)">
               <div class="card__thumb">
                 <svg v-if="previewOf(t.id).length" viewBox="0 0 1920 1080" preserveAspectRatio="none"><rect v-for="(bl, i) in previewOf(t.id)" :key="i" :x="bl.x" :y="bl.y" :width="bl.w" :height="bl.h" :fill="bl.c" :opacity="bl.o" rx="10" /></svg>
@@ -161,13 +166,30 @@ function applyBundle(id: string) {
           </div>
         </div>
       </template>
-
+      <template v-else-if="library === 'mathApplet'">
+        <div class="panel__body">
+          <div class="panel__grid">
+            <button v-for="t in mathAppletTemplates" :key="t.id" class="card" :title="t.desc" @click="apply(t.id)">
+              <div class="card__thumb">
+                <svg v-if="previewOf(t.id).length" viewBox="0 0 1920 1080" preserveAspectRatio="none"><rect v-for="(bl, i) in previewOf(t.id)" :key="i" :x="bl.x" :y="bl.y" :width="bl.w" :height="bl.h" :fill="bl.c" :opacity="bl.o" rx="10" /></svg>
+                <div v-else class="card__thumb-none"></div>
+              </div>
+              <div class="card__info">
+                <span class="card__badge">{{ t.tag }}</span>
+                <span class="card__name">{{ t.name }}</span>
+                <span class="card__desc">{{ t.desc }}</span>
+              </div>
+            </button>
+          </div>
+        </div>
+      </template>
       <template v-else>
         <div class="panel__cats">
           <button v-for="c in proCatsAll" :key="c" class="panel__cat" :class="{ 'panel__cat--active': activeProCat === c }" @click="activeProCat = c">{{ c }}</button>
         </div>
         <div class="panel__body">
           <div class="panel__grid">
+            <div v-if="!proFiltered.length && !proBundles.length" style="padding:24px;color:#8a8aa0;font-size:14px">模板库已清空（如需恢复模板，告诉我）</div>
             <button v-for="t in proFiltered" :key="t.id" class="card" :title="t.name" @click="apply(t.id)">
               <div class="card__thumb">
                 <svg v-if="previewOf(t.id).length" viewBox="0 0 1920 1080" preserveAspectRatio="none"><rect v-for="(bl, i) in previewOf(t.id)" :key="i" :x="bl.x" :y="bl.y" :width="bl.w" :height="bl.h" :fill="bl.c" :opacity="bl.o" rx="10" /></svg>

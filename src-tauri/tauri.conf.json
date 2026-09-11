@@ -19,7 +19,8 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": { "enable": true, "scope": ["$APPDIR/**", "$APPDIR/images/**"] }
     }
   },
   "bundle": {
@@ -29,6 +30,9 @@
     ],
     "icon": [
       "icons/icon.ico"
+    ],
+    "resources": [
+      "../images"
     ],
     "windows": {
       "nsis": {

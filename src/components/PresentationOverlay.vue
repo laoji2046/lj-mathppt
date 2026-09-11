@@ -23,6 +23,9 @@ let blobUrl: string | null = null
 const currentIndex = ref(0)
 const notesOpen = ref(false)
 const speakerOpen = ref(false)
+const speakerOpacity = ref(0.92)
+const showControls = ref(true)
+let hideTimer: number | undefined
 const speakerSec = ref(0)
 let speakerTimer: number | undefined
 const currentNotes = computed(() => props.deck?.slides[currentIndex.value]?.notes || '')
@@ -220,6 +223,20 @@ async function renderHostPdfs() {
 
 function onFrameLoad() {
   renderHostPdfs()
+  // 底部工具条自动隐藏：鼠标进入底部带(96px)显示，离开隐藏
+  const doc = frameEl.value?.contentDocument
+  if (doc) {
+    doc.addEventListener('mousemove', (e: MouseEvent) => {
+      const h = doc.documentElement.clientHeight || window.innerHeight
+      const w = doc.documentElement.clientWidth || window.innerWidth
+      // 只在底部居中区（避开右下角播放按钮）感应
+      showControls.value = (e.clientY > h - 96) && Math.abs(e.clientX - w / 2) < 320
+    })
+  }
+  // 进入演示先显示 2.5s，随后自动隐藏
+  showControls.value = true
+  clearTimeout(hideTimer)
+  hideTimer = window.setTimeout(() => { showControls.value = false }, 2500)
   postToFrame({ type: 'fx-laser-on', on: laserOn.value })
   postToFrame({ type: 'fx-laser-color', color: laserColor.value })
 }
@@ -336,10 +353,11 @@ watch(
     </div>
 
     <!-- 演讲者视图（备注 + 计时 + 上一张/下一张预览） -->
-    <div v-if="speakerOpen" class="present__speaker">
+    <div v-if="speakerOpen" class="present__speaker" :style="{ opacity: speakerOpacity }">
       <header class="present__speaker-head">
         <span class="present__speaker-title">📝 演讲者备注</span>
         <span class="present__speaker-tools">
+          <span class="sp-op"><input type="range" min="0.2" max="1" step="0.05" v-model.number="speakerOpacity" title="视图透明度" /><b>{{ Math.round(speakerOpacity * 100) }}%</b></span>
           <b class="present__speaker-timer">{{ fmt(speakerSec) }}</b>
           <button class="sp-tbtn" :title="speakerPaused ? '继续' : '暂停'" @click="speakerPaused = !speakerPaused">{{ speakerPaused ? '▶' : '⏸' }}</button>
           <button class="sp-tbtn" title="重置计时" @click="speakerSec = 0">↻</button>
@@ -362,7 +380,7 @@ watch(
     </div>
 
     <!-- 底部控制条 -->
-    <div class="present__controls">
+    <div class="present__controls" :class="{ 'present__controls--hide': !showControls }">
       <button class="pc" title="上一页 (←)" @click="navPrev"><svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6" /></svg></button>
       <button class="pc" title="下一页 (→)" @click="navNext"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6" /></svg></button>
       <span class="pc-sep"></span>
@@ -413,11 +431,14 @@ watch(
 .present__notes-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
 .present__notes-x { border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #f0ede4; border-radius: 5px; padding: 3px 8px; font-size: 12px; cursor: pointer; }
 .present__notes-body { font-size: 13px; line-height: 1.6; white-space: pre-wrap; max-height: 40vh; overflow: auto; text-align: left; }
-.present__speaker { position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%); z-index: 1005; width: 560px; max-width: 94vw; background: rgba(20,20,26,0.94); border-radius: 14px; padding: 12px 14px; color: #f0ede4; box-shadow: 0 10px 34px rgba(0,0,0,0.55); }
+.present__speaker { position: fixed; left: 18px; bottom: 18px; z-index: 1005; width: 560px; max-width: 94vw; background: rgba(20,20,26,0.94); border-radius: 14px; padding: 12px 14px; color: #f0ede4; box-shadow: 0 10px 34px rgba(0,0,0,0.55); transition: opacity .2s; }
 .present__speaker-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .present__speaker-title { font-size: 15px; font-weight: 600; }
 .present__speaker-tools { display: flex; align-items: center; gap: 8px; }
 .present__speaker-timer { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sp-op { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #bbb; }
+.sp-op input { accent-color: #4b6cf0; width: 72px; }
+.sp-op b { font-size: 11px; color: #ddd; min-width: 34px; }
 .sp-tbtn { width: 28px; height: 28px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #f0ede4; border-radius: 6px; cursor: pointer; }
 .sp-tbtn:hover { background: rgba(255,255,255,0.12); }
 .present__speaker-x { border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #f0ede4; border-radius: 6px; padding: 5px 10px; font-size: 13px; cursor: pointer; }
@@ -474,9 +495,11 @@ watch(
   padding: 8px 12px;
   border-radius: 999px;
   background: rgba(24, 24, 28, 0.82);
+  transition: opacity .25s, transform .25s, visibility .25s;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(8px);
 }
+.present__controls--hide { opacity: 0; transform: translate(-50%, 120%); visibility: hidden; pointer-events: none; }
 .pc {
   display: inline-flex;
   align-items: center;

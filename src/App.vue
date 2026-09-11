@@ -15,6 +15,8 @@ import TemplatePicker from '@/components/TemplatePicker.vue'
 import { ggbEdit, openGgbSuite, closeGgbSuite } from '@/ui/ggbEditor'
 import ImageEditorModal from '@/components/ImageEditorModal.vue'
 import { imageEditOpen, imageEditId, closeImageEditor } from '@/ui/imageEditor'
+import MarkdownSourcePanel from '@/components/MarkdownSourcePanel.vue'
+import { viewMode } from '@/ui/view'
 import { tplOpen, tplMode, openTemplateLibrary, closeTemplateLibrary } from '@/ui/templateLibrary'
 import ContextMenu from '@/components/ContextMenu.vue'
 
@@ -112,8 +114,9 @@ function onPresent() {
     <EditToolbar />
     <div class="app__body">
       <SlideList />
-      <EditorCanvas :presenting="presenting" />
-      <PropertyPanel />
+      <EditorCanvas v-if="viewMode !== 'source'" :presenting="presenting" />
+      <MarkdownSourcePanel v-if="viewMode === 'split' || viewMode === 'source'" />
+      <PropertyPanel v-if="viewMode === 'canvas'" />
     </div>
     <PresentationOverlay
       :deck="presenting ? store.deck : null"

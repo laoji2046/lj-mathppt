@@ -2,10 +2,14 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { MathElement } from '@/types'
 import { fitMath, renderLatex } from '@/composables/useMathJax'
+import { inlineEditReq } from '@/ui/inlineEdit'
+import InlineEditor from '../InlineEditor.vue'
 
 const props = defineProps<{ el: MathElement }>()
+const emit = defineEmits<{ (e: 'update', patch: Partial<MathElement>): void }>()
 
 const host = ref<HTMLElement | null>(null)
+const editing = ref(false)
 const error = ref('')
 let timer: number | undefined
 /** 渲染串行化：避免输入时多次 renderLatex 并发、把多个 mjx-container 叠进同一个宿主 */
@@ -22,7 +26,9 @@ function watchSize() {
   if (!node || typeof ResizeObserver === 'undefined') return
   ro = new ResizeObserver(() => {
     cancelAnimationFrame(raf)
-    raf = requestAnimationFrame(() => { if (host.value) fitMath(host.value) })
+    // maxScale=1：只缩小不放大。公式大小由「字号」决定；元素框变大不再把公式撑大，
+    // 否则宽框里的短公式会被放大到 4 倍，跟页面正文（26~32px）严重不成比例。
+    raf = requestAnimationFrame(() => { if (host.value) fitMath(host.value, 1) })
   })
   ro.observe(node)
 }
@@ -47,7 +53,7 @@ async function run() {
       // 等一帧确保宿主节点已挂载（元素宿主绝不能 v-if 卸载）
       await nextTick()
       try {
-        await renderLatex(node, latex, props.el.fontSize)
+        await renderLatex(node, latex, props.el.fontSize, 1)
       } catch (e) {
         error.value = e instanceof Error ? e.message : String(e)
       }
@@ -65,6 +71,14 @@ function schedule(delay = 160) {
 
 onMounted(() => { watchSize(); run() })
 onBeforeUnmount(() => { clearTimeout(timer); ro?.disconnect() })
+
+// ---- 双击编辑 LaTeX：大弹窗（编辑区 + 实时预览）----
+function beginEdit() { editing.value = true }
+function onCommit(t: string) {
+  editing.value = false
+  if (t !== props.el.latex) emit('update', { latex: t })
+}
+watch(inlineEditReq, (v) => { if (v && v.id === props.el.id && !editing.value) beginEdit() })
 
 watch(
   () => [
@@ -87,6 +101,14 @@ watch(
 <template>
   <div class="math-el" :style="{ color: el.color }">
     <div ref="host" class="math-el__host"></div>
+    <InlineEditor
+      v-if="editing"
+      title="编辑公式（LaTeX）"
+      kind="math"
+      :initial="el.latex || ''"
+      @commit="onCommit"
+      @cancel="editing = false"
+    />
     <div v-if="error" class="math-el__err">公式渲染失败：{{ error }}</div>
   </div>
 </template>

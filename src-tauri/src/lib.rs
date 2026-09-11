@@ -12,6 +12,8 @@ use std::path::PathBuf;
 //   app_dir()                          -> { dir: "<程序所在目录>" }
 //   list_dir(path?)                    -> { ok, path, parent, dirs:[..] }
 //   export_json(path, name, dataBase64) -> { ok, path } | { ok:false, error }
+//   images_dir()                       -> { ok, dir }  图片根目录（exe 所在目录，任意子目录可放图）
+//   read_local_image(name)             -> { ok, dataBase64, mime, path } | { ok:false, error }
 // 浏览器环境下回退到 showSaveFilePicker / 下载。
 // ////////////////////////////////////////////////////////////////////////////
 
@@ -85,6 +87,31 @@ fn list_dir(path: Option<String>) -> serde_json::Value {
     })
 }
 
+/// 常用目录（桌面 / 文档 / 下载 / 用户目录 / 程序目录）：前端「另存为」对话框的快捷入口。
+#[tauri::command]
+fn user_dirs() -> serde_json::Value {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from);
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    if let Some(h) = home {
+        let cands = [
+            ("桌面", h.join("Desktop")),
+            ("文档", h.join("Documents")),
+            ("下载", h.join("Downloads")),
+            ("用户目录", h.clone()),
+        ];
+        for (label, p) in cands {
+            if p.is_dir() {
+                out.push(serde_json::json!({ "label": label, "path": p.to_string_lossy() }));
+            }
+        }
+    }
+    let pd = program_dir();
+    out.push(serde_json::json!({ "label": "程序目录", "path": pd.to_string_lossy() }));
+    serde_json::json!({ "ok": true, "dirs": out })
+}
+
 /// 写入导出文件：解码 base64 后写到 `<path>/<name>`。
 #[tauri::command]
 fn export_json(path: String, name: String, data_base64: String) -> serde_json::Value {
@@ -94,10 +121,101 @@ fn export_json(path: String, name: String, data_base64: String) -> serde_json::V
     }
 }
 
+// ---------------------------------------------------------------------------
+// 本地试题图：读 exe 同级目录下的任意相对路径（images/、pic/ 等任何子目录）。
+//
+// 打包后前端跑在 asset:// 内存页里，`pic/3.jpg` 这类相对路径解析不到磁盘文件
+// （dist 里没有用户图片，也不该把图打进二进制）。这里由 Rust 直接读盘并回传
+// base64，前端内嵌成 data URL —— 既能显示，导出 PDF/PNG 时也不会再受协议限制。
+// ---------------------------------------------------------------------------
+
+/// 按扩展名猜 MIME，未知一律按 jpeg。
+fn guess_image_mime(p: &std::path::Path) -> String {
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "png" => "image/png".to_string(),
+        "gif" => "image/gif".to_string(),
+        "webp" => "image/webp".to_string(),
+        "svg" => "image/svg+xml".to_string(),
+        "bmp" => "image/bmp".to_string(),
+        _ => "image/jpeg".to_string(),
+    }
+}
+
+/// exe 同级的 images 目录；不存在则创建，方便用户直接往里丢图。
+fn images_dir_path() -> PathBuf {
+    let mut d = program_dir();
+    d.push("images");
+    let _ = fs::create_dir_all(&d);
+    d
+}
+
+/// 返回（并确保存在）images 目录，前端据此提示用户「图片放这里」。
+/// 注意：这只是默认/推荐目录，read_local_image 实际支持 exe 同级任意子目录。
+#[tauri::command]
+fn images_dir() -> serde_json::Value {
+    let _ = images_dir_path();
+    serde_json::json!({ "ok": true, "dir": program_dir().to_string_lossy() })
+}
+
+/// 读取 exe 同级的任意相对路径图片（`pic/3.jpg`、`images/9ti.jpg` 均可）并回传 base64。
+/// 兼容旧写法：不带目录的裸文件名（如 `9ti.jpg`）优先按 exe 同级找，找不到再回退 images/ 下。
+/// 禁止 `..` 穿越出 exe 目录。
+#[tauri::command]
+fn read_local_image(name: String) -> serde_json::Value {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+
+    let rel = name.trim().replace('\\', "/");
+    let rel = rel.trim_start_matches('/').to_string();
+    if rel.is_empty() {
+        return serde_json::json!({ "ok": false, "error": "文件名为空" });
+    }
+    if rel.split('/').any(|s| s.is_empty() || s == "..") {
+        return serde_json::json!({ "ok": false, "error": "非法路径" });
+    }
+
+    // 按书写原样相对 exe 目录解析：pic/3.jpg、images/9ti.jpg 都能命中
+    let mut full = program_dir();
+    for seg in rel.split('/') {
+        full.push(seg);
+    }
+    // 旧习惯兜底：裸文件名（不带目录）exe 同级没有时，去 images/ 下找
+    if !rel.contains('/') && !full.is_file() {
+        full = images_dir_path();
+        full.push(rel.as_str());
+    }
+
+    match fs::read(&full) {
+        Ok(bytes) => serde_json::json!({
+            "ok": true,
+            "dataBase64": B64.encode(&bytes),
+            "mime": guess_image_mime(&full),
+            "path": full.to_string_lossy(),
+        }),
+        Err(e) => serde_json::json!({
+            "ok": false,
+            "error": format!("读取失败: {}", e),
+            "path": full.to_string_lossy(),
+        }),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![app_dir, list_dir, export_json])
+        .invoke_handler(tauri::generate_handler![
+            app_dir,
+            list_dir,
+            user_dirs,
+            export_json,
+            images_dir,
+            read_local_image
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

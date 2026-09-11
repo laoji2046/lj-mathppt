@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useDeckStore } from '@/stores/deck'
 import type {
   ArrowElement, ChartElement, ChartType, DesmosElement, EmbedElement, EmbedKind, GeoGebraElement,
@@ -11,6 +11,8 @@ import { captureDesmosState } from '@/composables/useDesmos'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
 import { openShapeEdit } from '@/ui/shapeEditor'
+import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type EdgeStyle, type FaceStyle } from '@/composables/solid3d'
+import { solidSel } from '@/composables/solidSel'
 import { openImageEditor } from '@/ui/imageEditor'
 import ColorSwatches from './ColorSwatches.vue'
 import { saveTextFile } from '@/composables/useTauri'
@@ -66,6 +68,162 @@ const arrow = computed(() => el.value as ArrowElement | undefined)
 const pen = computed(() => el.value as PenElement | undefined)
 const mathfig = computed(() => el.value as MathFigureElement | undefined)
 const isEditableFig = computed(() => mathfig.value?.kind === 'polygon' || mathfig.value?.kind === 'bezier')
+
+const isSolid = computed(() => !!mathfig.value && !!SOLID_VCOUNT[mathfig.value.kind])
+const vertCount = computed(() => mathfig.value ? (SOLID_VCOUNT[mathfig.value.kind] || 0) : 0)
+const edgeCount = computed(() => mathfig.value && isSolid.value ? solidEdges(mathfig.value.kind).length : 0)
+function vLetter(i: number) { return String.fromCharCode(65 + i) }
+function vLabelAt(i: number) { return (mathfig.value?.vlabels?.[i]) || '' }
+function setVLabel(i: number, v: string) {
+  const m = mathfig.value; if (!m) return
+  const arr = [...(m.vlabels || [])]
+  while (arr.length < vertCount.value) arr.push(null)
+  arr[i] = v || null
+  patch({ vlabels: arr } as Partial<SlideElement>)
+}
+function edgeStyleAt(i: number): EdgeStyle | null { return mathfig.value?.edgeStyles?.[i] || null }
+function edgeDashAt(i: number): 'solid' | 'dash' | 'dot' {
+  const d = edgeStyleAt(i)?.dash
+  if (d) return d
+  const l = mathfig.value ? solidEdges(mathfig.value.kind) : []
+  return (l[i] && l[i][2] === 1) ? 'dash' : 'solid'
+}
+function setEdgePatch(i: number, patchObj: Partial<EdgeStyle>) {
+  const m = mathfig.value; if (!m) return
+  const arr = [...(m.edgeStyles || [])]
+  while (arr.length < edgeCount.value) arr.push(null)
+  arr[i] = { ...(arr[i] || {}), ...patchObj }
+  patch({ edgeStyles: arr } as Partial<SlideElement>)
+}
+function setEdgeDash(i: number, v: string) { setEdgePatch(i, { dash: v as EdgeStyle['dash'] }) }
+function setEdgeWidth(i: number, w: number) { setEdgePatch(i, { width: w }) }
+function setEdgeColor(i: number, c: string) { setEdgePatch(i, { color: c }) }
+function dashCn(v: string) { return v === 'dash' ? '虚线' : v === 'dot' ? '点线' : '实线' }
+
+// ---- 面样式（填充色 / 透明度 / 隐藏）----
+const faceCount = computed(() => (mathfig.value && isSolid.value) ? solidFaces(mathfig.value.kind).length : 0)
+function faceStyleAt(i: number): FaceStyle | null { return mathfig.value?.faceStyles?.[i] || null }
+function isFaceHidden(i: number) { return !!faceStyleAt(i)?.hidden }
+function faceFillAt(i: number) { return faceStyleAt(i)?.fill || mathfig.value?.fill || '#c9d6ea' }
+function faceOpacityAt(i: number) { const o = faceStyleAt(i)?.opacity; return typeof o === 'number' ? Math.round(o * 100) : 80 }
+function setFacePatch(i: number, obj: Partial<FaceStyle>) {
+  const m = mathfig.value; if (!m) return
+  const arr = [...(m.faceStyles || [])]
+  while (arr.length < faceCount.value) arr.push(null)
+  arr[i] = { ...(arr[i] || {}), ...obj }
+  patch({ faceStyles: arr } as Partial<SlideElement>)
+}
+function setFaceFill(i: number, c: string) { setFacePatch(i, { fill: c, hidden: false }) }
+function setFaceOpacity(i: number, v: number) { setFacePatch(i, { opacity: Math.max(0, Math.min(1, v / 100)), hidden: false }) }
+function toggleFaceHidden(i: number) { setFacePatch(i, { hidden: !isFaceHidden(i) }) }
+
+// ---- 自由建模：增删点 / 连边 / 成面 ----
+const meshOn = computed(() => !!mathfig.value?.mesh)
+const meshPick = ref<number[]>([])
+const vCount = computed(() => {
+  const m = mathfig.value
+  if (!m) return 0
+  if (m.mesh && m.points && m.points.length >= 4) return Math.floor(m.points.length / 2)
+  return SOLID_VCOUNT[m.kind] || 0
+})
+function isPicked(i: number) { return meshPick.value.includes(i) }
+function togglePick(i: number) {
+  const a = [...meshPick.value]
+  const k = a.indexOf(i)
+  if (k >= 0) a.splice(k, 1); else a.push(i)
+  meshPick.value = a
+}
+function enableMesh() {
+  const m = mathfig.value; if (!m) return
+  const edges = solidEdges(m.kind).map(e => [e[0], e[1], e[2]] as [number, number, number])
+  const faces = solidFacesAll(m.kind).map(f => [...f])
+  const pts = (m.points && m.points.length >= 4) ? [...m.points] : solidVerts(m.kind, m.w, m.h, m.depth)
+  meshPick.value = []
+  patch({ mesh: { edges, faces }, points: pts } as Partial<SlideElement>)
+}
+function disableMesh() {
+  meshPick.value = []
+  patch({ mesh: undefined, edgeStyles: undefined, faceStyles: undefined } as Partial<SlideElement>)
+}
+function restoreMesh() {
+  const m = mathfig.value; if (!m || !m.mesh) return
+  const edges = solidEdges(m.kind).map(e => [e[0], e[1], e[2]] as [number, number, number])
+  const faces = solidFaces(m.kind).map(f => [...f])
+  meshPick.value = []
+  patch({ mesh: { edges, faces } } as Partial<SlideElement>)
+}
+function addVertex() {
+  const m = mathfig.value; if (!m || !m.mesh) return
+  const pts = [...(m.points || [])]
+  const n = Math.floor(pts.length / 2)
+  let ax = 0.5, ay = 0.5
+  if (n) { ax = 0; ay = 0; for (let i = 0; i < n; i++) { ax += pts[i * 2]; ay += pts[i * 2 + 1] } ax /= n; ay /= n }
+  pts.push(Math.max(0.02, Math.min(0.98, ax + 0.1)), Math.max(0.02, Math.min(0.98, ay + 0.1)))
+  patch({ points: pts } as Partial<SlideElement>)
+}
+function delPickedVertices() {
+  const m = mathfig.value; if (!m || !m.mesh || !meshPick.value.length) return
+  const picks = [...meshPick.value]
+  const removed = new Set(picks)
+  const pts = [...(m.points || [])]
+  for (const i of [...picks].sort((a, b) => b - a)) pts.splice(i * 2, 2)
+  const keep = (old: number) => { let s = 0; for (const i of picks) if (i < old) s++; return old - s }
+  const edges = m.mesh.edges.filter(e => !removed.has(e[0]) && !removed.has(e[1])).map(e => [keep(e[0]), keep(e[1]), e[2]] as [number, number, number])
+  const faces = m.mesh.faces.filter(f => f.every(v => !removed.has(v))).map(f => f.map(keep))
+  meshPick.value = []
+  patch({ points: pts, mesh: { edges, faces } } as Partial<SlideElement>)
+}
+function connectPicked() {
+  const m = mathfig.value; if (!m || !m.mesh) return
+  const pk = meshPick.value
+  if (pk.length !== 2) return
+  const a = pk[0], b = pk[1]
+  if (m.mesh.edges.some(e => (e[0] === a && e[1] === b) || (e[0] === b && e[1] === a))) return
+  patch({ mesh: { edges: [...m.mesh.edges, [a, b, 0]], faces: m.mesh.faces.map(f => [...f]) } } as Partial<SlideElement>)
+  meshPick.value = []
+}
+function facePicked() {
+  const m = mathfig.value; if (!m || !m.mesh) return
+  const pk = [...meshPick.value]
+  if (pk.length < 3) return
+  patch({ mesh: { edges: m.mesh.edges.map(e => [...e] as [number, number, number]), faces: [...m.mesh.faces, pk] } } as Partial<SlideElement>)
+  meshPick.value = []
+}
+
+
+const selVertex = computed(() => (mathfig.value && solidSel.elementId === mathfig.value.id) ? solidSel.vertex : null)
+const selEdge = computed(() => (mathfig.value && solidSel.elementId === mathfig.value.id) ? solidSel.edge : null)
+const selFace = computed(() => (mathfig.value && solidSel.elementId === mathfig.value.id) ? solidSel.face : null)
+const selLabel = computed(() => {
+  if (selVertex.value != null) return '顶点 ' + vLetter(selVertex.value)
+  if (selEdge.value != null) return '边 ' + (selEdge.value + 1)
+  if (selFace.value != null) return '面 ' + (selFace.value + 1)
+  return ''
+})
+const vInputs = ref<HTMLInputElement[]>([])
+function setVRef(i: number, el: unknown) { (vInputs.value[i] = (el as HTMLInputElement) || (null as any)) }
+watch(() => [solidSel.elementId, solidSel.vertex] as const, async () => {
+  if (!mathfig.value) return
+  if (solidSel.elementId !== mathfig.value.id || solidSel.vertex == null) return
+  await nextTick()
+  ;(vInputs.value[solidSel.vertex] as HTMLInputElement | undefined)?.focus()
+});
+
+/** 当某条边被选中时，通用 线条颜色/线宽 只应用到该边 */
+const edgeTarget = computed(() => (mathfig.value && selEdge.value != null) ? selEdge.value : null)
+const strokeColorVal = computed(() => edgeTarget.value != null ? (edgeStyleAt(edgeTarget.value)?.color || mathfig.value?.stroke || '') : (mathfig.value?.stroke || ''))
+const strokeWidthVal = computed(() => edgeTarget.value != null ? (edgeStyleAt(edgeTarget.value)?.width || mathfig.value?.strokeWidth || 2) : (mathfig.value?.strokeWidth || 2))
+function onStrokeColor(v: string) {
+  if (edgeTarget.value != null) setEdgeColor(edgeTarget.value, v)
+  else patch({ stroke: v } as Partial<SlideElement>)
+}
+function onStrokeWidth(v: number) {
+  if (edgeTarget.value != null) setEdgeWidth(edgeTarget.value, v)
+  else patch({ strokeWidth: v } as Partial<SlideElement>)
+}
+
+
+
 const chart = computed(() => el.value as ChartElement | undefined)
 const tableEl = computed(() => el.value as TableElement | undefined)
 const iconEl = computed(() => el.value as IconElement | undefined)
@@ -628,11 +786,15 @@ function layerTypeLabel(type: string) {
             <option v-for="f in MATH_FIGURE_OPTIONS" :key="f.v" :value="f.v">{{ f.label }}</option>
           </select>
         </label>
-        <label class="field"><span>线条颜色</span>
-          <ColorSwatches :model-value="mathfig?.stroke" @update:model-value="(v) => patch({ stroke: v } as Partial<SlideElement>)" />
+        <label class="field"><span>线条颜色<span v-if="edgeTarget != null" class="panel__tag">▶ 边{{ edgeTarget + 1 }}</span></span>
+          <ColorSwatches :model-value="strokeColorVal" @update:model-value="(v) => onStrokeColor(v as string)" />
         </label>
-        <label class="field"><span>线宽</span>
-          <input type="number" :value="mathfig?.strokeWidth" @input="patch({ strokeWidth: num(($event.target as HTMLInputElement).value, 3) } as Partial<SlideElement>)" />
+        <label class="field"><span>线宽<span v-if="edgeTarget != null" class="panel__tag">▶ 边{{ edgeTarget + 1 }}</span></span>
+          <input type="number" :value="strokeWidthVal" @input="onStrokeWidth(num(($event.target as HTMLInputElement).value, 3))" />
+        </label>
+        <p v-if="edgeTarget != null" class="panel__hint">当前选中了该立体的一条边：线条颜色/线宽只作用于这条边；点空白取消选中后即作用于整个图形。</p>
+        <label class="field"><span>深度 (3D)</span>
+          <input type="number" :value="mathfig?.depth ?? 0.4" min="0" max="1" step="0.05" @input="patch({ depth: num(($event.target as HTMLInputElement).value, 0.4) } as Partial<SlideElement>)" />
         </label>
         <label class="field"><span>填充（透明=无）</span>
           <ColorSwatches :model-value="mathfig?.fill" allow-transparent @update:model-value="(v) => patch({ fill: v } as Partial<SlideElement>)" />
@@ -640,6 +802,60 @@ function layerTypeLabel(type: string) {
         <button class="quick__btn" style="width:100%;margin-top:4px" @click="patch({ fill: 'transparent' } as Partial<SlideElement>)">无填充</button>
         <button v-if="isEditableFig" class="quick__btn" style="width:100%;margin-top:4px;background:#ede9fb;border-color:#c9b8f0;color:#5b43ad" @click="openShapeEdit(el.id)">✎ 编辑顶点（也可双击图形）</button>
         <p v-if="mathfig?.kind === 'polygon'" style="margin:6px 0 0;font-size:11px;color:#8a8aa0;line-height:1.55">顶点编辑：拖动顶点即可调整；<b>双击顶点删除</b>；<b>双击边线插入顶点</b>（最少保留 3 个顶点）</p>
+        <template v-if="isSolid">
+          <div class="solid-prop">
+            <div v-if="selLabel" class="solid-prop__sel">已选中：{{ selLabel }} —— 在画布点选顶点/边，这里直接改</div>
+            <div class="solid-prop__title">顶点字母 <span class="solid-prop__sub">（_ 下标 、^ 上标、' 撇）</span></div>
+            <div class="solid-prop__grid">
+              <label v-for="i in vertCount" :key="i" class="solid-prop__cell" :class="{ 'solid-prop__cell--sel': selVertex === i - 1 }">
+                <span class="solid-prop__name">{{ vLetter(i - 1) }}</span>
+                <input class="solid-prop__in" :ref="(el) => setVRef(i - 1, el)" :value="vLabelAt(i - 1)" @input="setVLabel(i - 1, ($event.target as HTMLInputElement).value)" :placeholder="vLetter(i - 1)" />
+              </label>
+            </div>
+            <div class="solid-prop__title">边线样式 <span class="solid-prop__sub">（线型 / 粗细 / 颜色）</span></div>
+            <div v-for="i in edgeCount" :key="'e' + i" class="solid-prop__edge" :class="{ 'solid-prop__edge--sel': selEdge === i - 1 }">
+              <span class="solid-prop__ename">边{{ i }}</span>
+              <span class="solid-prop__dash">
+                <button v-for="dv in ['solid','dash','dot']" :key="dv" class="seg__btn" :class="{ 'seg__btn--on': edgeDashAt(i - 1) === dv }" @click="setEdgeDash(i - 1, dv)">{{ dashCn(dv) }}</button>
+              </span>
+              <input type="number" min="1" max="12" class="solid-prop__w" :value="edgeStyleAt(i - 1)?.width || 2" @input="setEdgeWidth(i - 1, num(($event.target as HTMLInputElement).value, 2))" />
+              <input type="color" :value="edgeStyleAt(i - 1)?.color || '#333333'" @input="setEdgeColor(i - 1, ($event.target as HTMLInputElement).value)" />
+            </div>
+            <template v-if="faceCount">
+              <div class="solid-prop__title">面样式 <span class="solid-prop__sub">（填充 / 透明度 / 隐藏该面看内部）</span></div>
+              <div v-for="i in faceCount" :key="'f' + i" class="solid-prop__face" :class="{ 'solid-prop__edge--sel': selFace === i - 1 }">
+                <span class="solid-prop__ename">面{{ i }}</span>
+                <input type="color" :value="faceFillAt(i - 1)" @input="setFaceFill(i - 1, ($event.target as HTMLInputElement).value)" />
+                <input type="range" min="0" max="100" step="5" class="solid-prop__op" :value="faceOpacityAt(i - 1)" @input="setFaceOpacity(i - 1, num(($event.target as HTMLInputElement).value, 80))" />
+                <span class="solid-prop__num">{{ faceOpacityAt(i - 1) }}%</span>
+                <button class="seg__btn" :class="{ 'seg__btn--on': isFaceHidden(i - 1) }" @click="toggleFaceHidden(i - 1)">{{ isFaceHidden(i - 1) ? '显示' : '隐藏' }}</button>
+              </div>
+            </template>
+            <template v-if="isSolid">
+              <div class="solid-prop__title">自由建模 <span class="solid-prop__sub">（增删点 / 连边 / 成面）</span></div>
+              <button v-if="!meshOn" class="quick__btn" style="width:100%" @click="enableMesh">✎ 启用自由建模（可自由加点 / 连边 / 成面）</button>
+              <template v-else>
+                <div class="solid-prop__picks">
+                  <label v-for="i in vCount" :key="'p' + i" class="solid-prop__pick" :class="{ on: isPicked(i - 1) }">
+                    <input type="checkbox" :checked="isPicked(i - 1)" @change="togglePick(i - 1)" />{{ vLetter(i - 1) }}
+                  </label>
+                </div>
+                <div class="solid-prop__row2">
+                  <button class="quick__btn" @click="addVertex">＋ 加点</button>
+                  <button class="quick__btn" :disabled="!meshPick.length" @click="delPickedVertices">－ 删点</button>
+                  <button class="quick__btn" :disabled="meshPick.length !== 2" @click="connectPicked">连边</button>
+                  <button class="quick__btn" :disabled="meshPick.length < 3" @click="facePicked">成面</button>
+                </div>
+                <div class="solid-prop__row2">
+                  <button class="quick__btn" @click="restoreMesh">恢复默认拓扑</button>
+                  <button class="quick__btn" @click="disableMesh">退出自由建模</button>
+                </div>
+                <p class="solid-prop__hint" style="margin-top:4px">勾选顶点后：选 <b>2 个</b>→连边；选 <b>3 个及以上</b>→成面（按勾选顺序）。加点后拖动画布上的顶点圆点定位。</p>
+              </template>
+            </template>
+            <p class="solid-prop__hint">提示：画布上可点选<b>顶点</b>（标字母）、<b>边</b>（线型/粗细/颜色）、<b>面</b>（点面内部）分别编辑；拖动顶点圆点可改形。</p>
+          </div>
+        </template>
       </div>
 
       <div v-if="isChart" class="panel__section">
@@ -887,7 +1103,7 @@ function layerTypeLabel(type: string) {
         </label>
         <button class="quick__btn" style="width:100%;margin-top:6px" @click="openFormulaLibrary()">📚 预制公式库（点击卡片替换当前公式）</button>
         <p class="panel__hint">
-          已内置宏：<code>\R \N \Z \Q \C \E</code>（数集）、<code>\abs{x}</code> 绝对值、<code>\norm{x}</code> 范数、<code>\dd</code> 微分、<code>\ee</code> 自然常数、<code>\ii</code> 虚数单位、<code>\comb{n}{k}</code> 组合、<code>\perm{n}{k}</code> 排列、<code>\half</code> ½。公式自动等比缩放填满元素框。
+          已内置宏：<code>\R \N \Z \Q \C \E</code>（数集）、<code>\abs{x}</code> 绝对值、<code>\norm{x}</code> 范数、<code>\dd</code> 微分、<code>\ee</code> 自然常数、<code>\ii</code> 虚数单位、<code>\comb{n}{k}</code> 组合、<code>\perm{n}{k}</code> 排列、<code>\half</code> ½。公式按「字号」显示，元素框不够大时自动缩小以完整显示（不再放大撑满框）。
         </p>
       </div>
 
@@ -1132,6 +1348,7 @@ function layerTypeLabel(type: string) {
   padding: 8px 10px;
   margin: 8px 0 0;
 }
+.panel__tag { color: #b26a00; background: #fff3e0; border-radius: 4px; padding: 1px 5px; font-size: 11px; margin-left: 5px; }
 .wordart-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .wordart-chip {
   font-size: 12px;
@@ -1419,4 +1636,32 @@ function layerTypeLabel(type: string) {
 .layer__btn:disabled { opacity: 0.3; cursor: not-allowed; }
 .layer__btn--del { color: var(--danger); }
 .layer__btn--del:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); }
+
+.solid-prop { margin-top: 8px; border-top: 1px dashed #ddd; padding-top: 8px; }
+.solid-prop__title { font-size: 12px; font-weight: 600; color: #333; margin: 8px 0 6px; }
+.solid-prop__sub { font-weight: 400; color: #999; }
+.solid-prop__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; }
+.solid-prop__cell { display: flex; flex-direction: column; gap: 3px; }
+.solid-prop__name { font-size: 12px; font-weight: 600; color: #5b43ad; }
+.solid-prop__in { width: 100%; box-sizing: border-box; border: 1px solid #ddd; border-radius: 6px; padding: 4px 6px; font-size: 13px; }
+.solid-prop__edge { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+.solid-prop__ename { min-width: 34px; font-size: 12px; color: #666; }
+.solid-prop__dash { display: inline-flex; gap: 3px; }
+.solid-prop__dash .seg__btn { flex: 1; white-space: nowrap; }
+.solid-prop__w { width: 52px; border: 1px solid #ddd; border-radius: 6px; padding: 3px 4px; font-size: 12px; }
+.solid-prop__edge input[type=color] { width: 26px; height: 22px; border: none; padding: 0; cursor: pointer; }
+.solid-prop__hint { margin: 8px 0 0; font-size: 11px; color: #8a8aa0; line-height: 1.55; }
+.solid-prop__sel { background: #fff8ec; border: 1px solid #ffd9a0; color: #b26a00; border-radius: 6px; padding: 5px 8px; font-size: 12px; margin-bottom: 6px; }
+.solid-prop__cell--sel { outline: 2px solid #ff8f1f; outline-offset: 1px; border-radius: 6px; }
+.solid-prop__edge--sel { background: #fff8ec; border: 1px solid #ffd9a0; border-radius: 6px; padding: 3px 5px; }
+.solid-prop__face { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+.solid-prop__face input[type=color] { width: 26px; height: 22px; border: none; padding: 0; cursor: pointer; }
+.solid-prop__op { flex: 1; min-width: 40px; }
+.solid-prop__num { min-width: 30px; font-size: 11px; color: #666; }
+.solid-prop__picks { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+.solid-prop__pick { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; border: 1px solid #ddd; border-radius: 6px; padding: 2px 6px; cursor: pointer; }
+.solid-prop__pick.on { border-color: #ff8f1f; background: #fff8ec; }
+.solid-prop__row2 { display: flex; gap: 6px; margin-top: 5px; }
+.solid-prop__row2 .quick__btn { flex: 1; }
+
 </style>

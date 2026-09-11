@@ -1,5 +1,6 @@
 import type { Deck, Slide, SlideElement, TextElement } from '@/types'
 import { fontStack, imageEffectCss, lineDashCss, normalizeMixed, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
+import { SOLID_VCOUNT, renderSolid, solidVerts, type EdgeStyle, type FaceStyle, type SolidMesh } from '@/composables/solid3d'
 
 /**
  * 场景图 → Reveal.js 演示页。
@@ -17,6 +18,14 @@ import { fontStack, imageEffectCss, lineDashCss, normalizeMixed, shadowCss, slid
 export interface RenderOptions {
   /** 'local' = 应用内演示（默认）；'cdn' = 导出独立文件 */
   assets?: 'local' | 'cdn'
+  /**
+   * 打印模式（导出 PDF / PNG 用）：
+   * - Reveal 以 view:'print' 初始化，全部幻灯片展开为 .pdf-page 分页堆叠（无 transform）
+   * - ready 后对每一页执行 MathJax / GeoGebra / Desmos / pdf.js 挂载
+   * - 所有引擎挂载完成后向宿主 postMessage({ type: 'fx-print-ready' })
+   * 宿主（TopToolbar 导出）收到信号后即可 print() 或 html2canvas 截图。
+   */
+  print?: boolean
 }
 
 function esc(s: string): string {
@@ -31,12 +40,15 @@ function esc(s: string): string {
 function figureInner(
   kind: string, w: number, h: number,
   stroke: string, strokeWidth: number, fill: string,
-  points?: number[], strokeDash?: string,
+  points?: number[], strokeDash?: string, depth?: number,
+  vlabels?: (string | null)[], edgeStyles?: (EdgeStyle | null)[],
+  labelOffsets?: { dx: number; dy: number }[], faceStyles?: (FaceStyle | null)[], mesh?: SolidMesh | null,
 ): string {
   const s = strokeWidth || 2
   const dash = lineDashCss(strokeDash)
   const sa = `stroke="${stroke}" stroke-width="${s}" stroke-linecap="round" stroke-linejoin="round"` + (dash ? ` stroke-dasharray="${dash}"` : '')
   const fc = fill && fill !== 'transparent' ? fill : 'none'
+  const dsh = 'stroke-dasharray="6 5"'
   const thin = Math.max(1, s * 0.55)
   function reg(n: number, cx: number, cy: number, rx: number, ry: number, rot = -Math.PI / 2) {
     const a: string[] = []
@@ -45,6 +57,10 @@ function figureInner(
       a.push((cx + rx * Math.cos(ang)).toFixed(1) + ',' + (cy + ry * Math.sin(ang)).toFixed(1))
     }
     return a.join(' ')
+  }
+  if (SOLID_VCOUNT[kind]) {
+    const pv = points && points.length === SOLID_VCOUNT[kind] * 2 ? points : solidVerts(kind, w, h, depth)
+    return renderSolid(kind, pv, w, h, stroke, s, fc, dsh, vlabels, edgeStyles, undefined, undefined, labelOffsets, faceStyles, undefined, mesh)
   }
   switch (kind) {
     case 'parabola':
@@ -127,6 +143,151 @@ function figureInner(
       }
       return `<polygon points="${pts.join(' ')}" ${sa} fill="${fc}"/>`
     }
+    case 'cube': case 'cuboid': {
+      const dep = (depth ?? 0.4) * Math.min(w, h) * 0.4, dx = dep, dy = -dep * 0.8
+      const side = kind === 'cube' ? Math.min(w, h) * 0.62 : 0
+      const fw = kind === 'cube' ? side : w * 0.78, fh = kind === 'cube' ? side : h * 0.64
+      const fx = (w - fw) / 2, fy = h * 0.16
+      const fc = fill && fill !== 'transparent' ? fill : 'none'
+      const front = fx + ',' + (fy + fh) + ' ' + (fx + fw) + ',' + (fy + fh) + ' ' + (fx + fw) + ',' + fy + ' ' + fx + ',' + fy
+      const top = fx + ',' + fy + ' ' + (fx + fw) + ',' + fy + ' ' + (fx + fw + dx) + ',' + (fy + dy) + ' ' + (fx + dx) + ',' + (fy + dy)
+      const right = (fx + fw) + ',' + fy + ' ' + (fx + fw + dx) + ',' + (fy + dy) + ' ' + (fx + fw + dx) + ',' + (fy + fh + dy) + ' ' + (fx + fw) + ',' + (fy + fh)
+      return '<g ' + sa + ' fill="' + fc + '"><polygon points="' + top + '" opacity="0.8"/><polygon points="' + right + '" opacity="0.62"/><polygon points="' + front + '"/>' +
+        '<line ' + dsh + ' x1="' + fx + '" y1="' + (fy + fh) + '" x2="' + (fx + dx) + '" y2="' + (fy + fh + dy) + '"/>' +
+        '<line ' + dsh + ' x1="' + (fx + dx) + '" y1="' + (fy + fh + dy) + '" x2="' + (fx + fw + dx) + '" y2="' + (fy + fh + dy) + '"/>' +
+        '<line ' + dsh + ' x1="' + (fx + dx) + '" y1="' + (fy + fh + dy) + '" x2="' + (fx + dx) + '" y2="' + (fy + dy) + '"/></g>'
+    }
+    case 'cylinder': {
+      const m = Math.min(w, h), rx = m * 0.36, ry = m * 0.12, cx = w / 2, topY = h * 0.2, botY = h * 0.78
+      const fc = fill && fill !== 'transparent' ? fill : 'none'
+      return '<g ' + sa + ' fill="' + fc + '">' +
+        '<line x1="' + (cx - rx) + '" y1="' + topY + '" x2="' + (cx - rx) + '" y2="' + botY + '"/>' +
+        '<line x1="' + (cx + rx) + '" y1="' + topY + '" x2="' + (cx + rx) + '" y2="' + botY + '"/>' +
+        '<path ' + dsh + ' d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 1 ' + (cx + rx) + ' ' + botY + '"/>' +
+        '<path d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 0 ' + (cx + rx) + ' ' + botY + '"/>' +
+        '<ellipse cx="' + cx + '" cy="' + topY + '" rx="' + rx + '" ry="' + ry + '"/></g>'
+    }
+    case 'cone': {
+      const m = Math.min(w, h), rx = m * 0.38, ry = m * 0.13, cx = w / 2, botY = h * 0.8, apexY = h * 0.12
+      const fc = fill && fill !== 'transparent' ? fill : 'none'
+      return '<g ' + sa + ' fill="' + fc + '"><path d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 0 ' + (cx + rx) + ' ' + botY + ' L ' + cx + ' ' + apexY + ' Z"/>' +
+        '<path ' + dsh + ' d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 1 ' + (cx + rx) + ' ' + botY + '"/></g>'
+    }
+    case 'sphere': {
+      const m = Math.min(w, h), r = m * 0.42, cx = w / 2, cy = h / 2, ry = r * 0.34
+      const fc = fill && fill !== 'transparent' ? fill : 'none'
+      return '<g ' + sa + ' fill="' + fc + '"><circle cx="' + cx + '" cy="' + cy + '" r="' + r + '"/>' +
+        '<path ' + dsh + ' d="M ' + (cx - r) + ' ' + cy + ' A ' + r + ' ' + ry + ' 0 0 1 ' + (cx + r) + ' ' + cy + '"/>' +
+        '<path d="M ' + (cx - r) + ' ' + cy + ' A ' + r + ' ' + ry + ' 0 0 0 ' + (cx + r) + ' ' + cy + '"/>' +
+        '<path ' + dsh + ' d="M ' + cx + ' ' + (cy - r) + ' A ' + (r * 0.34) + ' ' + r + ' 0 0 0 ' + cx + ' ' + (cy + r) + '"/>' +
+        '<path d="M ' + cx + ' ' + (cy - r) + ' A ' + (r * 0.34) + ' ' + r + ' 0 0 1 ' + cx + ' ' + (cy + r) + '"/></g>'
+    }
+    case 'pyramid': {
+      const m = Math.min(w, h), dep = (depth ?? 0.4) * m * 0.4, dx = dep, dy = -dep * 0.8
+      const wb = m * 0.42, cx = w / 2, botY = h * 0.78, apexY = h * 0.12
+      const fc = fill && fill !== 'transparent' ? fill : 'none'
+      const b1 = (cx - wb) + ',' + (botY - dy), b2 = (cx + wb) + ',' + (botY - dy)
+      const f1 = (cx - wb + dx) + ',' + botY, f2 = (cx + wb + dx) + ',' + botY
+      const ap = cx + ',' + apexY
+      return '<g ' + sa + '>' +
+        '<polygon points="' + b1 + ' ' + b2 + ' ' + f2 + ' ' + f1 + '" fill="' + fc + '" stroke="none" opacity="0.7"/>' +
+        '<polygon points="' + ap + ' ' + f1 + ' ' + f2 + '" fill="' + fc + '" stroke="none" opacity="0.95"/>' +
+        '<line x1="' + f1 + '" x2="' + f2 + '"/><line x1="' + ap + '" x2="' + f1 + '"/><line x1="' + ap + '" x2="' + f2 + '"/>' +
+        '<line x1="' + f1 + '" x2="' + b1 + '"/><line x1="' + f2 + '" x2="' + b2 + '"/>' +
+        '<line ' + dsh + ' x1="' + b1 + '" x2="' + b2 + '"/><line ' + dsh + ' x1="' + ap + '" x2="' + b1 + '"/><line ' + dsh + ' x1="' + ap + '" x2="' + b2 + '"/></g>'
+    }
+    case 'prism': {
+      const m = Math.min(w, h), dep = (depth ?? 0.4) * m * 0.4, dx = dep, dy = -dep * 0.8
+      const fx = w * 0.16, fy = h * 0.24, fw = w * 0.56, fh = h * 0.56
+      const fc = fill && fill !== 'transparent' ? fill : 'none'
+      const triF = fx + ',' + (fy + fh) + ' ' + (fx + fw) + ',' + (fy + fh) + ' ' + (fx + fw / 2) + ',' + fy
+      const triB = (fx + dx) + ',' + (fy + fh + dy) + ' ' + (fx + fw + dx) + ',' + (fy + fh + dy) + ' ' + (fx + fw / 2 + dx) + ',' + (fy + dy)
+      return '<g ' + sa + '>' +
+        '<polygon points="' + triB + '" fill="' + fc + '" stroke="none" opacity="0.5"/>' +
+        '<polygon points="' + triB + '" fill="none" ' + dsh + '/>' +
+        '<polygon points="' + triF + '" fill="' + fc + '" stroke="none" opacity="0.9"/>' +
+        '<polygon points="' + triF + '" fill="none"/>' +
+        '<line x1="' + fx + ',' + (fy + fh) + '" x2="' + (fx + dx) + ',' + (fy + fh + dy) + '"/><line x1="' + (fx + fw) + ',' + (fy + fh) + '" x2="' + (fx + fw + dx) + ',' + (fy + fh + dy) + '"/><line x1="' + (fx + fw / 2) + ',' + fy + '" x2="' + (fx + fw / 2 + dx) + ',' + (fy + dy) + '"/></g>'
+    }
+    case 'tetrahedron': {
+      const m = Math.min(w, h), cx = w / 2, cy = h / 2, base = m * 0.42
+      const fc = fill && fill !== 'transparent' ? fill : 'none'
+      const p0 = (cx - base * 0.7) + ',' + (cy + base * 0.4), p1 = (cx + base * 0.7) + ',' + (cy + base * 0.4), p2 = cx + ',' + (cy - base * 0.4), p3 = cx + ',' + (cy - base * 0.9)
+      return '<g ' + sa + '>' +
+        '<polygon points="' + p0 + ' ' + p1 + ' ' + p2 + '" fill="' + fc + '" stroke="none" opacity="0.4"/>' +
+        '<polygon points="' + p3 + ' ' + p0 + ' ' + p2 + '" fill="' + fc + '" stroke="none" opacity="0.86"/>' +
+        '<polygon points="' + p3 + ' ' + p1 + ' ' + p0 + '" fill="' + fc + '" stroke="none" opacity="0.76"/>' +
+        '<polygon points="' + p3 + ' ' + p2 + ' ' + p1 + '" fill="' + fc + '" stroke="none" opacity="0.66"/>' +
+        '<line x1="' + p0 + '" x2="' + p1 + '"/><line x1="' + p3 + '" x2="' + p0 + '"/><line x1="' + p3 + '" x2="' + p1 + '"/>' +
+        '<line ' + dsh + ' x1="' + p0 + '" x2="' + p2 + '"/><line ' + dsh + ' x1="' + p1 + '" x2="' + p2 + '"/><line ' + dsh + ' x1="' + p3 + '" x2="' + p2 + '"/></g>'
+    }
+    case 'frustum': {
+      const mm = Math.min(w, h), rB = mm * 0.4, rT = mm * 0.24, ryB = mm * 0.12, ryT = mm * 0.09, cx = w / 2, topY = h * 0.28, botY = h * 0.76
+      const fcc = fill && fill !== 'transparent' ? fill : 'none'
+      return '<g ' + sa + ' fill="' + fcc + '">' +
+        '<line x1="' + (cx - rB) + '" y1="' + botY + '" x2="' + (cx - rT) + '" y2="' + topY + '"/><line x1="' + (cx + rB) + '" y1="' + botY + '" x2="' + (cx + rT) + '" y2="' + topY + '"/>' +
+        '<path ' + dsh + ' d="M ' + (cx - rB) + ' ' + botY + ' A ' + rB + ' ' + ryB + ' 0 0 1 ' + (cx + rB) + ' ' + botY + '"/>' +
+        '<path d="M ' + (cx - rB) + ' ' + botY + ' A ' + rB + ' ' + ryB + ' 0 0 0 ' + (cx + rB) + ' ' + botY + '"/>' +
+        '<ellipse cx="' + cx + '" cy="' + topY + '" rx="' + rT + '" ry="' + ryT + '"/></g>'
+    }
+    case 'pyraFrustum': {
+      const mm = Math.min(w, h), d = (depth ?? 0.4) * mm * 0.4, dx = d, dy = -d * 0.8
+      const wB = mm * 0.42, wT = mm * 0.26, cx = w / 2, botY = h * 0.74, topY = h * 0.26, bby = botY + dy, tby = topY + dy
+      const fcc = fill && fill !== 'transparent' ? fill : 'none'
+      const bFL = (cx - wB) + ',' + botY, bFR = (cx + wB) + ',' + botY, bBL = (cx - wB + dx) + ',' + bby, bBR = (cx + wB + dx) + ',' + bby
+      const tFL = (cx - wT) + ',' + topY, tFR = (cx + wT) + ',' + topY, tBL = (cx - wT + dx) + ',' + tby, tBR = (cx + wT + dx) + ',' + tby
+      return '<g ' + sa + '>' +
+        '<polygon points="' + bFL + ' ' + bFR + ' ' + bBR + ' ' + bBL + '" fill="' + fcc + '" stroke="none" opacity="0.6"/>' +
+        '<polygon points="' + tFL + ' ' + tFR + ' ' + tBR + ' ' + tBL + '" fill="' + fcc + '" stroke="none" opacity="0.9"/>' +
+        '<line x1="' + bFL + '" x2="' + bFR + '"/><line x1="' + bFL + '" x2="' + bBL + '"/><line x1="' + bFR + '" x2="' + bBR + '"/>' +
+        '<line x1="' + tFL + '" x2="' + tFR + '"/><line x1="' + tFL + '" x2="' + tBL + '"/><line x1="' + tFR + '" x2="' + tBR + '"/>' +
+        '<line x1="' + bFL + '" x2="' + tFL + '"/><line x1="' + bFR + '" x2="' + tFR + '"/>' +
+        '<line ' + dsh + ' x1="' + bBL + '" x2="' + bBR + '"/><line ' + dsh + ' x1="' + bBL + '" x2="' + tBL + '"/>' +
+        '<line ' + dsh + ' x1="' + tBL + '" x2="' + tBR + '"/><line ' + dsh + ' x1="' + bBR + '" x2="' + tBR + '"/></g>'
+    }
+    case 'dihedral': {
+      const mm = Math.min(w, h), d = (depth ?? 0.4) * mm * 0.5, cx = w / 2, hingeY = h * 0.5
+      const fcc = fill && fill !== 'transparent' ? fill : 'none'
+      const p1 = '0,' + hingeY + ' ' + cx + ',' + hingeY + ' ' + cx + ',' + (hingeY - h * 0.3) + ' 0,' + (hingeY - h * 0.3)
+      const p2 = cx + ',' + hingeY + ' ' + (cx + d) + ',' + (hingeY - d * 0.8) + ' ' + (cx + d) + ',' + (hingeY - d * 0.8 - h * 0.3) + ' ' + cx + ',' + (hingeY - h * 0.3)
+      return '<g ' + sa + ' fill="' + fcc + '"><polygon points="' + p1 + '" opacity="0.9"/><polygon points="' + p2 + '" opacity="0.7"/><line x1="0" y1="' + hingeY + '" x2="' + w + '" y2="' + hingeY + '"/></g>'
+    }
+    case 'isoaxis': {
+      const mm = Math.min(w, h), cx = w / 2, cy = h / 2, L = mm * 0.36
+      return '<g ' + sa + ' fill="none"><line x1="' + cx + '" y1="' + cy + '" x2="' + cx + '" y2="' + (cy - L) + '"/><line x1="' + cx + '" y1="' + cy + '" x2="' + (cx + L * 0.87) + '" y2="' + (cy + L * 0.5) + '"/><line x1="' + cx + '" y1="' + cy + '" x2="' + (cx - L * 0.87) + '" y2="' + (cy + L * 0.5) + '"/><polygon points="' + cx + ',' + (cy - L) + ' ' + (cx - 7) + ',' + (cy - L + 12) + ' ' + (cx + 7) + ',' + (cy - L + 12) + '" fill="' + stroke + '"/></g>'
+    }
+    // ---- 辅助线 / 标注 ----
+    case 'auxLine':
+      return '<line x1="' + (w * 0.04) + '" y1="' + (h * 0.6) + '" x2="' + (w * 0.96) + '" y2="' + (h * 0.6) + '" ' + sa + ' stroke-dasharray="7 5" fill="none"/>'
+    case 'rightAngle': {
+      const x0 = w * 0.18, y0 = h * 0.86, L = Math.min(w, h) * 0.72, t = Math.min(w, h) * 0.16
+      return '<line x1="' + x0 + '" y1="' + y0 + '" x2="' + (x0 + L) + '" y2="' + y0 + '" ' + sa + ' fill="none"/>' +
+        '<line x1="' + x0 + '" y1="' + y0 + '" x2="' + x0 + '" y2="' + (y0 - L) + '" ' + sa + ' fill="none"/>' +
+        '<path d="M ' + (x0 + t) + ' ' + y0 + ' L ' + (x0 + t) + ' ' + (y0 - t) + ' L ' + x0 + ' ' + (y0 - t) + '" ' + sa + ' fill="none"/>'
+    }
+    case 'equalMark': {
+      const y = h * 0.5, x1 = w * 0.12, x2 = w * 0.88, tk = Math.min(w, h) * 0.2, g = Math.min(w, h) * 0.06
+      return '<line x1="' + x1 + '" y1="' + y + '" x2="' + x2 + '" y2="' + y + '" ' + sa + ' fill="none"/>' +
+        '<line x1="' + (w * 0.5 - g) + '" y1="' + (y - tk) + '" x2="' + (w * 0.5 - g) + '" y2="' + (y + tk) + '" ' + sa + ' fill="none"/>' +
+        '<line x1="' + (w * 0.5 + g) + '" y1="' + (y - tk) + '" x2="' + (w * 0.5 + g) + '" y2="' + (y + tk) + '" ' + sa + ' fill="none"/>'
+    }
+    case 'parallelMark': {
+      const y = h * 0.5, tk = Math.min(w, h) * 0.22, g = Math.min(w, h) * 0.07
+      return '<line x1="' + (w * 0.5 - g) + '" y1="' + (y + tk) + '" x2="' + (w * 0.5 - g) + '" y2="' + (y - tk) + '" ' + sa + ' fill="none"/>' +
+        '<line x1="' + (w * 0.5 + g) + '" y1="' + (y + tk) + '" x2="' + (w * 0.5 + g) + '" y2="' + (y - tk) + '" ' + sa + ' fill="none"/>'
+    }
+    case 'angleArc': {
+      const ox = w * 0.16, oy = h * 0.84, L = Math.min(w, h) * 0.72, r = Math.min(w, h) * 0.3, a2 = -Math.PI / 3
+      const ex = ox + L * Math.cos(a2), ey = oy + L * Math.sin(a2)
+      const ax = ox + r * Math.cos(a2), ay = oy + r * Math.sin(a2)
+      return '<line x1="' + ox + '" y1="' + oy + '" x2="' + (ox + L) + '" y2="' + oy + '" ' + sa + ' fill="none"/>' +
+        '<line x1="' + ox + '" y1="' + oy + '" x2="' + ex + '" y2="' + ey + '" ' + sa + ' fill="none"/>' +
+        '<path d="M ' + (ox + r) + ' ' + oy + ' A ' + r + ' ' + r + ' 0 0 0 ' + ax + ' ' + ay + '" ' + sa + ' fill="none"/>'
+    }
+    case 'section': {
+      const pp = (w * 0.2) + ',' + (h * 0.36) + ' ' + (w * 0.8) + ',' + (h * 0.26) + ' ' + (w * 0.8) + ',' + (h * 0.72) + ' ' + (w * 0.2) + ',' + (h * 0.82)
+      return '<polygon points="' + pp + '" ' + sa + ' fill="' + fc + '" opacity="0.55"/>'
+    }
     case 'polygon': {
       const pp = points && points.length >= 6 ? points : [0.5,0.08,0.86,0.29,0.86,0.71,0.5,0.92,0.14,0.71,0.14,0.29]
       return `<polygon points="${pp.map((v, i) => (i % 2 === 0 ? v * w : v * h)).join(' ')}" ${sa} fill="${fc}"/>`
@@ -205,7 +366,7 @@ function chartInner(
   return out
 }
 
-function elementToHtml(el: SlideElement): string {
+function elementToHtml(el: SlideElement, thumb = false): string {
   const box = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.w}px;height:${el.h}px;` +
     (el.shadowOn ? `box-shadow:${el.shadowX ?? 0}px ${el.shadowY ?? 6}px ${el.shadowBlur ?? 18}px ${el.shadowColor || '#000000'}55;` : '')
   const rot = el.rot ? `transform:rotate(${el.rot}deg);` : ''
@@ -318,7 +479,7 @@ function elementToHtml(el: SlideElement): string {
   }
 
   if (el.type === 'mathfig') {
-    return `<div style="${box}${rot}"${cls}${fragIdx}><svg width="100%" height="100%" viewBox="0 0 ${el.w} ${el.h}" preserveAspectRatio="none">${figureInner(el.kind, el.w, el.h, el.stroke, el.strokeWidth, el.fill, el.points, el.strokeDash)}</svg></div>`
+    return `<div style="${box}${rot}"${cls}${fragIdx}><svg width="100%" height="100%" viewBox="0 0 ${el.w} ${el.h}" preserveAspectRatio="none">${figureInner(el.kind, el.w, el.h, el.stroke, el.strokeWidth, el.fill, el.points, el.strokeDash, el.depth, el.vlabels, el.edgeStyles, el.labelOffsets, el.faceStyles, el.mesh)}</svg></div>`
   }
 
   if (el.type === 'chart') {
@@ -368,7 +529,8 @@ function elementToHtml(el: SlideElement): string {
   if (el.type === 'richtex') {
     const hasBg = !!el.bgColor && el.bgColor !== 'transparent'
     const wrap = el.wrap === false ? 'pre' : 'pre-wrap'
-    const inner = `width:100%;height:100%;box-sizing:border-box;overflow:hidden;word-break:break-word;white-space:${wrap};line-height:1.5;display:flex;align-items:center;justify-content:center;` +
+    const jc = el.align === 'left' ? 'flex-start' : el.align === 'right' ? 'flex-end' : 'center'
+    const inner = `width:100%;height:100%;box-sizing:border-box;overflow:hidden;word-break:break-word;white-space:${wrap};line-height:1.5;display:flex;align-items:center;justify-content:${jc};` +
       `color:${esc(el.color)};font-size:${el.fontSize}px;font-weight:${el.fontWeight};` +
       `font-family:${esc(fontStack(el.fontFamily))};` +
       `text-shadow:${esc(shadowCss(el.shadow))};` +
@@ -413,14 +575,14 @@ function renderSlidesStack(slides: Slide[]): string {
   return out.join('')
 }
 
-function slideToHtml(s: Slide): string {
+export function slideToHtml(s: Slide): string {
   const body = s.elements.map(elementToHtml).join('\n')
   const notes = s.notes ? `<aside class="notes">${esc(s.notes)}</aside>` : ''
   const trans = s.transition ? ' data-transition="' + esc(s.transition) + '"' : ''
   const bgAttr = (s.bgImage || (s.bgGradient && s.bgGradient.stops && s.bgGradient.stops.length))
     ? ' style="background:' + esc(slideBgCss(s)) + '"'
     : ' data-background-color="' + esc(s.bg) + '"'
-  return '<section' + trans + bgAttr + '>' + body + notes + '</section>'
+  return '<section data-slide-id="' + esc(s.id) + '"' + trans + bgAttr + '>' + body + notes + '</section>'
 }
 /** 生成完整的独立演示页 HTML */
 export function renderDeckToRevealHtml(deck: Deck, opts: RenderOptions = {}): string {
@@ -506,7 +668,8 @@ ${slides}
       if (!mjx) return;
       var nw = mjx.offsetWidth, nh = mjx.offsetHeight;
       if (!nw || !nh) return;
-      var f = Math.min(box.clientWidth / nw, box.clientHeight / nh, 4);
+      // 与编辑器画布一致：只缩小不放大（上限 1），公式大小由 font-size 决定
+      var f = Math.min(box.clientWidth / nw, box.clientHeight / nh, 1);
       if (!(f > 0)) return;
       mjx.style.transformOrigin = 'center center';
       mjx.style.transform = 'scale(' + f + ')';
@@ -522,7 +685,7 @@ ${slides}
       var bw = box.clientWidth, bh = box.clientHeight;
       var nw = inner.offsetWidth, nh = inner.offsetHeight;
       if (!(nw > 0 && nh > 0 && bw > 0 && bh > 0)) continue;
-      var f = Math.min(bw / nw, bh / nh, 4);
+      var f = Math.min(bw / nw, bh / nh, 1);   // 与编辑器一致：只缩小不放大
       inner.style.transformOrigin = 'center center';
       inner.style.transform = 'scale(' + f + ')';
     }
@@ -698,7 +861,8 @@ ${slides}
           (function(pgnum){
             chain = chain.then(function(){ return doc.getPage(pgnum); }).then(function(page){
               var v1 = page.getViewport({ scale: 1 });
-              var scale = Math.max(0.2, W / v1.width);
+              var dpr = window.devicePixelRatio || 1;
+              var scale = Math.max(0.2, (W / v1.width) * dpr);   // 按设备像素比渲染，高分屏不模糊
               var viewport = page.getViewport({ scale: scale });
               var canvas = document.createElement('canvas');
               canvas.width = viewport.width; canvas.height = viewport.height;
@@ -736,11 +900,13 @@ ${slides}
     setTimeout(function(){ mountPdf(slide); }, 120);
   }
   if (window.Reveal) {
+    var PRINT_MODE = ${JSON.stringify(!!opts.print)};
     Reveal.initialize({
       width: ${deck.width}, height: ${deck.height}, margin: 0,
-      center: true, hash: false, controls: true, progress: true,
+      center: true, hash: false, controls: !PRINT_MODE, progress: !PRINT_MODE,
       transition: ${JSON.stringify(deck.transition || 'slide')},
       transitionSpeed: ${JSON.stringify(deck.transitionSpeed || 'default')},
+      view: PRINT_MODE ? 'print' : null,
       plugins: window.RevealNotes ? [window.RevealNotes] : []
     });
     function tellHost(){ try { parent.postMessage(JSON.stringify({ type: 'fx-index', index: Reveal.getIndices().h }), '*'); } catch(err){} }
@@ -748,11 +914,39 @@ ${slides}
       hideBoot();
       prepare(e && e.currentSlide);
       setTimeout(tellHost, 120);
+      if (PRINT_MODE) prepareAllForPrint();
     });
     Reveal.on('slidechanged', function(e){
       prepare(e && e.currentSlide);
       tellHost();
     });
+    // ---------- 打印模式：全部页面挂载 + 就绪通知 ----------
+    // view:'print' 下 Reveal 把每页包成 .pdf-page 堆叠展示（无 transform），
+    // ready 只给 currentSlide，必须手动对每一页做 MathJax/GGB/Desmos/pdf 挂载。
+    function prepareAllForPrint(){
+      var pages = document.querySelectorAll('.reveal .slides section');
+      Array.prototype.forEach.call(pages, function(pg){ prepare(pg); });
+      var calm = 0, ticks = 0;
+      var pollReady = setInterval(function(){
+        // 挂载队列全部排空才算就绪；连续两轮安静 + 400ms 缓冲，保证 MathJax 缩放收尾
+        var busy = !!(mathPoll || ggbPollTimer || pendingGgb.length || pendingDsm.length || pendingPdf.length);
+        calm = busy ? 0 : calm + 1;
+        if (calm >= 2 || ++ticks > 160) {   // 最长 ~40s 放弃等待，尽力输出
+          clearInterval(pollReady);
+          setTimeout(notifyPrintReady, 400);
+        }
+      }, 250);
+      // 兜底：pdf-ready 后 6s 强制通知（GGB 引擎 30s 超时太久，别让用户干等）
+      Reveal.on('pdf-ready', function(){
+        setTimeout(notifyPrintReady, 6000);
+      });
+    }
+    var printNotified = false;
+    function notifyPrintReady(){
+      if (printNotified) return;
+      printNotified = true;
+      try { parent.postMessage(JSON.stringify({ type: 'fx-print-ready' }), '*'); } catch(err) {}
+    }
   } else {
     hideBoot();
   }

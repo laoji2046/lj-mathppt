@@ -8,6 +8,7 @@ import { createElement, findTheme, GRAPHIC_TYPES } from '@/types'
 import { findTemplate } from '@/templates/mathTemplates'
 import { findBundle } from '@/templates/mathBundles'
 import { findProTemplate, findProBundle } from '@/templates/proTemplates'
+import { findMathAppletTemplate } from '@/templates/mathAppletTemplates'
 
 const STORAGE_KEY = 'lj-mathslides-vue:deck'
 const VERSIONS_KEY = 'lj-mathslides-vue:versions'
@@ -34,44 +35,67 @@ function initialDeck(): Deck {
   return { title: '未命名演示', width: 1920, height: 1080, slides: [emptySlide()] }
 }
 
+/** 校验并补齐旧版本字段（防止旧 JSON 导入后因缺字段而崩溃）；结构非法返回 null */
+function normalizeDeck(raw: unknown): Deck | null {
+  if (!raw || typeof raw !== 'object' || !Array.isArray((raw as Deck).slides)) return null
+  const deck = raw as Deck
+  if (typeof deck.title !== 'string') deck.title = '导入演示'
+  if (typeof deck.width !== 'number' || !deck.width) deck.width = 1920
+  if (typeof deck.height !== 'number' || !deck.height) deck.height = 1080
+  if (typeof deck.theme !== 'string' || !deck.theme) deck.theme = 'white'
+  deck.slides = deck.slides.map((s) => {
+    if (!s || typeof s !== 'object') s = { id: uid('slide'), bg: '#ffffff', elements: [] } as unknown as Slide
+    if (typeof s.id !== 'string' || !s.id) s.id = uid('slide')
+    if (typeof s.bg !== 'string' || !s.bg) s.bg = '#ffffff'
+    if (!Array.isArray(s.elements)) s.elements = []
+    s.elements = s.elements.filter((el) => el && typeof el === 'object')
+    for (const el of s.elements) {
+      const any = el as any
+      if (typeof any.id !== 'string' || !any.id) any.id = uid('el')
+      if (typeof any.type !== 'string' || !any.type) any.type = 'text'
+      if (typeof any.x !== 'number') any.x = 0
+      if (typeof any.y !== 'number') any.y = 0
+      if (typeof any.w !== 'number') any.w = 400
+      if (typeof any.h !== 'number') any.h = 280
+      if (typeof any.rot !== 'number') any.rot = 0
+      if (typeof any.fragment !== 'boolean') any.fragment = false
+      if (any.type === 'text' || any.type === 'richtex') {
+        if (typeof any.fontFamily !== 'string' || !any.fontFamily) any.fontFamily = 'sans'
+        if (typeof any.bgColor !== 'string' || !any.bgColor) any.bgColor = 'transparent'
+        if (typeof any.shadow !== 'string' || !any.shadow) any.shadow = 'none'
+        if (typeof any.fontSize !== 'number') any.fontSize = 26
+        if (typeof any.fontWeight !== 'number') any.fontWeight = 400
+        if (typeof any.align !== 'string') any.align = 'left'
+        if (typeof any.color !== 'string' || !any.color) any.color = '#1a1a1a'
+      }
+      if (any.type === 'math') {
+        if (typeof any.fontSize !== 'number') any.fontSize = 32
+        if (typeof any.align !== 'string') any.align = 'center'
+        if (typeof any.color !== 'string' || !any.color) any.color = '#1a1a1a'
+      }
+      if (any.type === 'shape') {
+        if (!any.shape) any.shape = 'rect'
+        if (typeof any.strokeWidth !== 'number') any.strokeWidth = 0
+        if (typeof any.stroke !== 'string' || !any.stroke) any.stroke = '#1a1a1a'
+        if (typeof any.fill !== 'string') any.fill = 'transparent'
+      }
+      if (any.type === 'image') { if (typeof any.fit !== 'string') any.fit = 'contain' }
+      if (any.type === 'geogebra') { if (typeof any.showAxis !== 'boolean') any.showAxis = true; if (typeof any.showGrid !== 'boolean') any.showGrid = false }
+      if (any.type === 'desmos') { if (typeof any.state !== 'string' || any.state == null) any.state = ''; if (typeof any.showPanel !== 'boolean') any.showPanel = true; if (typeof any.showToolbar !== 'boolean') any.showToolbar = true; if (typeof any.color !== 'string' || !any.color) any.color = '#4a4a4a' }
+      if (any.type === 'embed') { if (typeof any.kind !== 'string' || !any.kind) any.kind = 'url'; if (typeof any.dataBase64 !== 'string') any.dataBase64 = ''; if (typeof any.mime !== 'string') any.mime = '' }
+    }
+    return s
+  })
+  return deck
+}
+
 function loadDeck(): Deck {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return initialDeck()
-    const parsed = JSON.parse(raw) as Deck
-    if (!parsed?.slides?.length) return initialDeck()
-    // 向后兼容：旧存档的元素可能缺新字段（如 GeoGebra 的 showAxis/showGrid）
-    for (const s of parsed.slides) {
-      for (const el of s.elements ?? []) {
-        if (el.type === 'geogebra') {
-          const g = el as GeoGebraElement
-          if (typeof g.showAxis !== 'boolean') g.showAxis = true
-          if (typeof g.showGrid !== 'boolean') g.showGrid = false
-        } else if (el.type === 'desmos') {
-          const d = el as DesmosElement
-          if (typeof d.state !== 'string' || d.state == null) d.state = ''
-          if (typeof d.showPanel !== 'boolean') d.showPanel = true
-          if (typeof d.showToolbar !== 'boolean') d.showToolbar = true
-          if (typeof d.color !== 'string' || !d.color) d.color = '#4a4a4a'
-        } else if (el.type === 'text') {
-          // 旧存档补文字元素的新属性（字体/背景/阴影）
-          const t = el as TextElement
-          if (typeof t.fontFamily !== 'string' || !t.fontFamily) t.fontFamily = 'sans'
-          if (typeof t.bgColor !== 'string' || !t.bgColor) t.bgColor = 'transparent'
-          if (typeof t.shadow !== 'string' || !t.shadow) t.shadow = 'none'
-        } else if (el.type === 'embed') {
-          // 旧存档补嵌入的新字段
-          const emb = el as EmbedElement
-          if (typeof emb.kind !== 'string' || !emb.kind) emb.kind = 'url'
-          if (typeof emb.dataBase64 !== 'string') emb.dataBase64 = ''
-          if (typeof emb.mime !== 'string') emb.mime = ''
-        }
-        // 渐显动画：旧元素默认关闭
-        if (typeof el.fragment !== 'boolean') (el as SlideElement).fragment = false
-      }
-    }
-    if (typeof parsed.theme !== 'string' || !parsed.theme) parsed.theme = 'white'
-    return parsed
+    const parsed = JSON.parse(raw)
+    const n = normalizeDeck(parsed)
+    return n || initialDeck()
   } catch {
     return initialDeck()
   }
@@ -102,6 +126,12 @@ export const useDeckStore = defineStore('deck', () => {
   const selectedIds = ref<string[]>([])
   /** 画布绘制工具（线/箭头/笔/多边形）：设置后在画布上绘制；多边形为点击放角点 */
   const drawTool = ref<'line' | 'arrow' | 'pen' | 'poly' | null>(null)
+  /**
+   * 组内单独编辑：非空表示正停留在某个组合内部。
+   * 此态下点击/拖拽/属性修改只作用于组内那一个元素，组合本身不解散
+   * （类似 PowerPoint 双击进入组合内部）。
+   */
+  const editingGroupId = ref<string | null>(null)
 
   // ---- 撤销 / 重做（快照式）----
   const past = ref<string[]>([])
@@ -209,6 +239,9 @@ export const useDeckStore = defineStore('deck', () => {
   function expandGroups(ids: string[]): string[] {
     if (!currentSlide.value) return ids
     const els = currentSlide.value.elements
+    // 组内编辑态：只圈定「属于该组」的元素，不再把整组拉进来
+    const gid = editingGroupId.value
+    if (gid) return ids.filter((id) => els.find((e) => e.id === id)?.groupId === gid)
     const groupIds = new Set<string>()
     for (const id of ids) {
       const el = els.find((e) => e.id === id)
@@ -220,8 +253,32 @@ export const useDeckStore = defineStore('deck', () => {
     return [...out]
   }
 
+  /** 进入组内单独编辑：此后点击/拖拽/改属性只作用于组内那一个元素 */
+  function enterGroup(id: string) {
+    const el = currentSlide.value?.elements.find((e) => e.id === id)
+    if (!el?.groupId) return
+    editingGroupId.value = el.groupId
+    selectedIds.value = [id]   // 直接赋值：此刻已进组内，不能再被 expandGroups 展开
+  }
+  /** 退出组内编辑：回到整组选中（保持组合不被解散） */
+  function exitGroup() {
+    const gid = editingGroupId.value
+    if (!gid) return
+    editingGroupId.value = null
+    const ids = (currentSlide.value?.elements ?? []).filter((e) => e.groupId === gid).map((e) => e.id)
+    selectedIds.value = ids
+  }
+  /** 组内编辑态下点了组外的东西 —— 先退出，再按常规逻辑选中 */
+  function syncGroupOnSelect(id: string) {
+    const gid = editingGroupId.value
+    if (!gid) return
+    const el = currentSlide.value?.elements.find((e) => e.id === id)
+    if (!el || el.groupId !== gid) exitGroup()
+  }
+
   /** additive=true 时为 Ctrl 加选（点已选项则取消） */
   function selectElement(id: string, additive = false) {
+    syncGroupOnSelect(id)
     const expanded = expandGroups([id])
     if (!additive) {
       selectedIds.value = expanded
@@ -237,10 +294,13 @@ export const useDeckStore = defineStore('deck', () => {
   }
 
   function setSelection(ids: string[]) {
+    if (ids.length) syncGroupOnSelect(ids[0])
     selectedIds.value = expandGroups(ids)
   }
   function clearSelection() {
     selectedIds.value = []
+    // 点空白处取消选择时一并退出组内编辑，避免「看不见的组内态」残留
+    editingGroupId.value = null
   }
 
   // ---- 页面 ----
@@ -269,12 +329,12 @@ export const useDeckStore = defineStore('deck', () => {
   /** 用一个单页模板在当前页后新增一页（asSubpage=true 设为子页） */
   function addPageWithTemplate(id: string, asSubpage = false) {
     if (!currentSlide.value) return
-    const tpl = findTemplate(id) || findProTemplate(id)
+    const tpl = findTemplate(id) || findMathAppletTemplate(id) || findProTemplate(id)
     if (!tpl) return
     pushHistory()
     let parent: Slide | undefined
     if (asSubpage) parent = currentSlide.value.parentId ? deck.value.slides.find((s) => s.id === currentSlide.value.parentId) : currentSlide.value
-    const s: Slide = { ...emptySlide(), elements: tpl.build() }
+    const s: Slide = { ...emptySlide(), elements: (tpl.build() as SlideElement[]).flat() as SlideElement[] }
     if (asSubpage && parent) s.parentId = parent.id
     deck.value.slides.splice(currentIndex.value + 1, 0, s)
     currentIndex.value += 1
@@ -305,6 +365,7 @@ export const useDeckStore = defineStore('deck', () => {
     const b = findBundle(id) || findProBundle(id)
     if (!b || !b.slides.length) return
     pushHistory()
+    try { saveVersion('整套插入前') } catch { /* 忽略 */ }
     let parent: Slide | undefined
     if (asSubpage) parent = currentSlide.value.parentId ? deck.value.slides.find((s) => s.id === currentSlide.value.parentId) : currentSlide.value
     const insertAt = currentIndex.value + 1
@@ -327,6 +388,7 @@ export const useDeckStore = defineStore('deck', () => {
   function insertSlides(slides: Slide[], afterIndex?: number) {
     if (!slides.length) return
     pushHistory()
+    try { saveVersion('插入前') } catch { /* 忽略 */ }
     const insertAt = typeof afterIndex === 'number'
       ? Math.max(0, Math.min(deck.value.slides.length, afterIndex + 1))
       : deck.value.slides.length
@@ -336,14 +398,25 @@ export const useDeckStore = defineStore('deck', () => {
   }
 
   /** 用一个完整的演示覆盖当前（模板库"应用整套讲座"用） */
-  function replaceDeck(next: { title?: string; width?: number; height?: number; slides: Slide[] }) {
+  function replaceDeck(next: { title?: string; width?: number; height?: number; slides: Slide[] }, opts?: { snapshot?: boolean }) {
     pushHistory()
+    // 源码面板边打字边重排时不要建版本快照（否则每敲一下都写一份完整快照，卡且占满 localStorage）
+    if (opts?.snapshot !== false) { try { saveVersion('整体替换前') } catch { /* 忽略 */ } }
     deck.value.title = next.title ?? deck.value.title
     deck.value.width = next.width ?? deck.value.width
     deck.value.height = next.height ?? deck.value.height
     deck.value.slides = next.slides.length ? next.slides : [emptySlide()]
     currentIndex.value = 0
     clearSelection()
+  }
+  /** 导入外部演示 JSON：校验+补齐旧字段；失败则不替换并返回 false */
+  function importDeck(raw: unknown): boolean {
+    const n = normalizeDeck(raw)
+    if (!n || !n.slides || !n.slides.length) return false
+    // 导入前自动备份当前演示，日后可一键恢复（文件菜单→版本历史）；导入本身也可 Ctrl+Z 撤销
+    try { saveVersion('导入前自动备份') } catch {}
+    replaceDeck(n)
+    return true
   }
   function removeSlide(index: number) {
     if (deck.value.slides.length <= 1) return
@@ -549,9 +622,10 @@ export const useDeckStore = defineStore('deck', () => {
   /** 应用模板：用模板生成的一组元素替换当前页，并套用模板内容 */
   function applyTemplate(templateId: string) {
     if (!currentSlide.value) return
-    const tpl = findTemplate(templateId) || findProTemplate(templateId)
+    const tpl = findTemplate(templateId) || findMathAppletTemplate(templateId) || findProTemplate(templateId)
     if (!tpl) return
     pushHistory()
+    try { saveVersion('模板替换前') } catch { /* 忽略 */ }
     currentSlide.value.elements = tpl.build().flat() as SlideElement[]
     currentSlide.value.bg = '#ffffff'
     clearSelection()
@@ -562,6 +636,7 @@ export const useDeckStore = defineStore('deck', () => {
     const b = findBundle(bundleId) || findProBundle(bundleId)
     if (!b) return
     pushHistory()
+    try { saveVersion('整套替换前') } catch { /* 忽略 */ }
     deck.value.title = b.name
     deck.value.slides = b.slides.map((s) => ({
       ...s,
@@ -585,6 +660,7 @@ export const useDeckStore = defineStore('deck', () => {
     if (!els.length) return
     pushHistory()
     for (const e of els) delete e.groupId
+    editingGroupId.value = null   // 组合已解散，组内编辑态同步失效
   }
 
   /** 把选中的元素按组合聚合成对齐/分布的最小单位 */
@@ -707,12 +783,19 @@ export const useDeckStore = defineStore('deck', () => {
     els.splice(to, 0, item)
   }
 
-  // ---- 自动保存 ----
+  // ---- 自动保存 + 自动快照（防误操作）----
   let saveTimer: number | undefined
+  let lastSnapAt = 0
   watch(deck, () => {
     clearTimeout(saveTimer)
     saveTimer = setTimeout(() => {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(deck.value)) } catch { /* 忽略 */ }
+      // 每 3 分钟自动存一个版本快照：误操作（整套替换/模板覆盖）后可到「版本」里回退
+      const now = Date.now()
+      if (now - lastSnapAt > 3 * 60 * 1000) {
+        lastSnapAt = now
+        try { saveVersion('自动快照 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false })) } catch { /* 忽略 */ }
+      }
     }, 600) as unknown as number
   }, { deep: true })
 
@@ -749,7 +832,8 @@ export const useDeckStore = defineStore('deck', () => {
     selectedElements, selectedElement, selectionCount, selectionBounds,
     canUndo, canRedo,
     isSelected, selectElement, setSelection, clearSelection, pruneSelection,
-    addSlide, addSubpageAfterCurrent, addPageWithTemplate, addBundlePages, applyBlank, addBlankPage, removeSlide, setSlideSubpage, gotoSlide, insertSlides, replaceDeck, copySlide, moveSlide, reorderSlide,
+    editingGroupId, enterGroup, exitGroup,
+    addSlide, addSubpageAfterCurrent, addPageWithTemplate, addBundlePages, applyBlank, addBlankPage, removeSlide, setSlideSubpage, gotoSlide, insertSlides, replaceDeck, importDeck, copySlide, moveSlide, reorderSlide,
     versions, saveVersion, restoreVersion, deleteVersion,
     addElement, updateElement, switchGraphic, commitElements, setAllFragments, removeSelected, copyElements, cutElements, pasteElements, canPaste, setSlideBg, setSlideBgGradient, setSlideBgImage, setSlideTransition, setSlideNotes, applyTemplate, applyBundle,
     groupSelection, ungroup,

@@ -12,7 +12,10 @@ import ThemePalette from './ThemePalette.vue'
 import FormulaInserter from './FormulaInserter.vue'
 import FormulaLibrary from './FormulaLibrary.vue'
 import { formulaLib, openFormulaLibrary, closeFormulaLibrary } from '@/ui/formulaLibrary'
+import { setViewMode, viewMode } from '@/ui/view'
 import VersionHistory from './VersionHistory.vue'
+import SaveAsDialog from './SaveAsDialog.vue'
+import { isTauri } from '@/composables/useTauri'
 import SettingsPanel from './SettingsPanel.vue'
 
 const store = useDeckStore()
@@ -37,6 +40,32 @@ const settingsOpen = ref(false)
 const fileOpen = ref(false)
 const fileWrap = ref<HTMLElement | null>(null)
 const fileToast = ref('')
+const deckJsonInput = ref<HTMLInputElement | null>(null)
+const saveAsOpen = ref(false)
+const saveAsName = ref('演示.json')
+const saveAsText = ref('')
+function onDeckSaved(path: string) { fileToast.value = '已另存为：' + path; flashToast() }
+function pickDeckJson() { fileOpen.value = false; deckJsonInput.value?.click() }
+function onDeckJsonPicked(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    try {
+      const deck = JSON.parse(reader.result as string)
+      const ok = store.importDeck(deck)
+      if (!ok) throw new Error('不是有效的演示 JSON（已取消，未影响当前内容）')
+      fileToast.value = '已导入演示：' + ((deck && deck.title) || '导入演示')
+      flashToast()
+    } catch (err) {
+      fileToast.value = '导入失败：' + (err instanceof Error ? err.message : String(err))
+      flashToast()
+    }
+  }
+  reader.readAsText(file)
+  input.value = ''
+}
 const drawOpen = ref(false)
 const drawWrap = ref<HTMLElement | null>(null)
 const moreOpen = ref(false)
@@ -158,6 +187,50 @@ function saveDeck() {
   fileToast.value = ok ? '已保存到本地' : '保存失败'
   flashToast()
 }
+/* ---------- 另存为：把演示写成 JSON 文件，用户可自选目录 ---------- */
+function deckFileName() {
+  const t = String(store.deck.title || '演示').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 60)
+  return (t || '演示') + '.json'
+}
+function deckJsonText() { return JSON.stringify(JSON.parse(JSON.stringify(store.deck)), null, 2) }
+async function saveDeckAs() {
+  fileOpen.value = false
+  const name = deckFileName()
+  const text = deckJsonText()
+  // 桌面端（exe/WebView2）弹自带的目录选择框；浏览器用原生"另存为"
+  if (isTauri()) {
+    saveAsName.value = name
+    saveAsText.value = text
+    saveAsOpen.value = true
+    return
+  }
+  const w = window as unknown as { showSaveFilePicker?: (o: unknown) => Promise<any> }
+  if (typeof w.showSaveFilePicker === 'function') {
+    try {
+      const handle = await w.showSaveFilePicker({
+        suggestedName: name,
+        types: [{ description: 'LJ-MathSlides 演示 JSON', accept: { 'application/json': ['.json'] } }],
+      })
+      const writable = await handle.createWritable()
+      await writable.write(new Blob([text], { type: 'application/json;charset=utf-8' }))
+      await writable.close()
+      fileToast.value = '已另存为：' + (handle.name || name)
+      flashToast()
+      return
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError') return // 用户点了取消
+      // 其它情况（浏览器不支持该能力）走下面的下载回退
+    }
+  }
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json;charset=utf-8' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  a.click()
+  URL.revokeObjectURL(url)
+  fileToast.value = '已另存为：' + name + '（保存到浏览器下载目录）'
+  flashToast()
+}
 function exportHtml() {
   fileOpen.value = false
   const html = renderDeckToRevealHtml(store.deck, { assets: 'cdn' })
@@ -170,6 +243,114 @@ function exportHtml() {
   URL.revokeObjectURL(url)
   fileToast.value = '已导出 HTML（需联网加载第三方资源）'
   flashToast()
+}
+/* ---------- 导出 PDF / PNG：共用 print 模式渲染 iframe ----------
+ * renderer 的 print 模式把全部幻灯片展开为 .pdf-page 堆叠（Reveal view:'print'），
+ * 并在 MathJax / GeoGebra / Desmos / pdf.js 全部挂载完成后 postMessage 'fx-print-ready'。
+ * - PDF：调 iframe 的 print()，走系统打印对话框（选「另存为 PDF」，矢量文字质量最好）
+ * - PNG：html2canvas 截当前页的 .pdf-page（2 倍分辨率）
+ */
+interface PrintFrame { frame: HTMLIFrameElement; doc: Document; url: string }
+function openPrintFrame(): Promise<PrintFrame> {
+  return new Promise((resolve, reject) => {
+    const html = renderDeckToRevealHtml(store.deck, { assets: 'local', print: true })
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const frame = document.createElement('iframe')
+    // 离屏但保持可见性（visibility/opacity 会连累内部元素的计算样式，导致截图空白）
+    frame.style.cssText = 'position:fixed;left:-32000px;top:0;width:' + store.deck.width + 'px;height:' + store.deck.height + 'px;border:0;'
+    let settled = false
+    const finish = (ok: boolean, err?: string) => {
+      if (settled) return
+      settled = true
+      window.removeEventListener('message', onMsg)
+      clearTimeout(guard)
+      if (ok) resolve({ frame, doc: frame.contentDocument!, url })
+      else { frame.remove(); URL.revokeObjectURL(url); reject(new Error(err || '渲染失败')) }
+    }
+    const onMsg = (e: MessageEvent) => {
+      try {
+        const m = typeof e.data === 'string' ? JSON.parse(e.data) : e.data
+        if (m && m.type === 'fx-print-ready') finish(true)
+      } catch { /* 非本应用消息 */ }
+    }
+    // 兜底：45s 放行（GGB 引擎挂载超时时尽力输出）
+    const guard = setTimeout(() => finish(true), 45000)
+    window.addEventListener('message', onMsg)
+    frame.onerror = () => finish(false, '渲染页加载失败')
+    document.body.appendChild(frame)
+    frame.src = url
+  })
+}
+/** 延迟回收：打印对话框关闭前内容需保持存活 */
+function disposePrintFrame(f: PrintFrame, delay = 8000) {
+  setTimeout(() => { f.frame.remove(); URL.revokeObjectURL(f.url) }, delay)
+}
+async function exportPdf() {
+  fileOpen.value = false
+  fileToast.value = '正在渲染全部页面（公式 / 画布挂载中）…'
+  flashToast()
+  try {
+    const f = await openPrintFrame()
+    fileToast.value = '已打开打印：请选「另存为 PDF」'
+    flashToast()
+    setTimeout(() => {
+      try {
+        f.frame.contentWindow?.focus()
+        f.frame.contentWindow?.print()
+      } catch { window.print() }
+      disposePrintFrame(f, 6000)
+    }, 250)
+  } catch (e) {
+    fileToast.value = '导出 PDF 失败：' + (e instanceof Error ? e.message : String(e))
+    flashToast()
+  }
+}
+async function exportPng() {
+  fileOpen.value = false
+  fileToast.value = '正在截图当前页…'
+  flashToast()
+  try {
+    const f = await openPrintFrame()
+    // 加载截图库（与试卷模块共用 public/pdf/html2canvas.min.js）
+    const w = window as any
+    if (!w.html2canvas) {
+      await new Promise<void>((res, rej) => {
+        const s = document.createElement('script')
+        s.src = window.location.origin + '/pdf/html2canvas.min.js'
+        s.onload = () => res()
+        s.onerror = () => rej(new Error('截图组件加载失败'))
+        document.head.appendChild(s)
+      })
+    }
+    // 当前页：通过 data-slide-id 精确定位（带子页的父页在打印视图展开为多个 .pdf-page）
+    const cur = store.deck.slides[store.currentIndex]
+    const pages = Array.from(f.doc.querySelectorAll('.reveal .slides .pdf-page')) as HTMLElement[]
+    if (!pages.length) throw new Error('未找到页面元素')
+    let page: HTMLElement | undefined
+    if (cur) {
+      const mark = f.doc.querySelector('.pdf-page [data-slide-id="' + cur.id + '"]')
+      page = (mark?.closest('.pdf-page') as HTMLElement) || undefined
+    }
+    page = page || pages[Math.min(store.currentIndex, pages.length - 1)]
+    const canvas = await w.html2canvas(page, { scale: 2, useCORS: true, backgroundColor: '#ffffff' })
+    const name = ((store.deck.title || '幻灯片') + '-' + String(store.currentIndex + 1).padStart(2, '0')).replace(/[\\/:*?"<>|]/g, '_')
+    canvas.toBlob((b: Blob | null) => {
+      if (!b) return
+      const u = URL.createObjectURL(b)
+      const a = document.createElement('a')
+      a.href = u
+      a.download = name + '.png'
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(u), 4000)
+    }, 'image/png')
+    fileToast.value = '已导出 PNG：第 ' + (store.currentIndex + 1) + ' 页（2 倍分辨率）'
+    flashToast()
+    disposePrintFrame(f, 3000)
+  } catch (e) {
+    fileToast.value = '导出 PNG 失败：' + (e instanceof Error ? e.message : String(e))
+    flashToast()
+  }
 }
 let toastTimer: number | undefined
 function flashToast() {
@@ -233,6 +414,8 @@ const I: Record<string, string> = {
   new: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M12 14v6M9 17h6"/>',
   save: '<path d="M12 3v10M7 9l5 4 5-4M5 19h14"/>',
   html: '<path d="M4 5h16v13H4zM8 9l-2 2 2 2M16 9l2 2-2 2"/>',
+  pdf: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13.5h1.5a1.25 1.25 0 0 1 0 2.5H9zM9 16v2"/>',
+  png: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="M21 16l-5-5L5 19"/>',
   paste: '<path d="M8 3h8l1 3H7zM5 3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2"/><path d="M8 11h8M8 15h8"/>',
   blankMath: '<path d="M8 4v16M16 4v16M8 12l8-4M8 12l8 4"/>',
   library: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/>',
@@ -370,11 +553,19 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <div v-if="fileOpen" class="dropdown__menu">
           <button class="dropdown__item" @click="newDeck"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.new"></svg></span>新建演示</button>
           <button class="dropdown__item" @click="saveDeck"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.save"></svg></span>保存</button>
+              <button class="dropdown__item" title="把当前演示另存为 JSON 文件（可自选目录、自定义文件名；用「导入演示 JSON」可再次打开）" @click="saveDeckAs"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.save"></svg></span>另存为…（JSON）</button>
           <button class="dropdown__item" title="导出独立 HTML" @click="exportHtml"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.html"></svg></span>导出 HTML</button>
+          <button class="dropdown__item" title="全部页面 → 打印对话框 → 另存为 PDF（矢量文字）" @click="exportPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导出 PDF</button>
+          <button class="dropdown__item" title="当前页截图为 PNG（2 倍分辨率）" @click="exportPng"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.png"></svg></span>导出 PNG（当前页）</button>
+          <button class="dropdown__item" title="Markdown 源码：导出或导入（--- 横向 / -- 垂直 / Note: 备注）" @click="setViewMode('split')"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.file"></svg></span>MD 源码（导出/导入 Markdown）</button>
+          <button class="dropdown__item" title="导入之前导出的演示 JSON（.json）" @click="pickDeckJson"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>导入演示 JSON</button>
         </div>
       </div>
     </div>
 
+    <button class="btn" :class="{ 'btn--open': viewMode !== 'canvas' }" title="MD 源码：分屏实时预览" @click="setViewMode(viewMode === 'canvas' ? 'split' : 'canvas')">
+      <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.file"></svg></span>MD 源码
+    </button>
     <div class="group">
       <button v-for="b in addButtons" :key="b.type" class="btn" @click="addFromToolbar(b.type)">
         <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="b.svg"></svg></span>{{ b.label }}
@@ -383,7 +574,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
       <!-- 形状下拉：矩形 / 椭圆 / 数学图形 -->
       <div ref="shapeWrap" class="dropdown">
         <button class="btn" :class="{ 'btn--open': shapeMenuOpen }" title="插入形状 / 数学图形" @click="toggleShapeMenu">
-          <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.shape"></svg></span>形状<span class="caret">▾</span>
+          <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.shape"></svg></span>绘制/形状<span class="caret">▾</span>
         </button>
         <div v-if="shapeMenuOpen" class="dropdown__menu">
           <button class="dropdown__item" @click="addRect">
@@ -392,11 +583,8 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           <button class="dropdown__item" @click="addEllipse">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.ellipse"></svg></span>椭圆
           </button>
-          <button class="dropdown__item" @click="addLine">
-            <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.line"></svg></span>直线
-          </button>
-          <button class="dropdown__item" @click="addArrow">
-            <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.arrow"></svg></span>箭头
+          <button v-for="d in drawButtons" :key="d.type" class="dropdown__item" :class="{ 'dropdown__item--on': store.drawTool === d.type }" :title="d.title || ('在画布空白处拖拽绘制 ' + d.label)" @click="toggleDraw(d.type); shapeMenuOpen = false">
+            <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="d.svg"></svg></span>{{ d.label }}
           </button>
           <button class="dropdown__item" title="数学图形：抛物线 / 三角形 / 贝塞尔 / 自定义多边形等" @click="openFig(); shapeMenuOpen = false">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.fig"></svg></span>数学图形…
@@ -438,6 +626,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         </div>
       </div>
       <input ref="imgFileInput" type="file" accept="image/*" style="display:none" @change="onImgPicked" />
+      <input ref="deckJsonInput" type="file" accept=".json,application/json" style="display:none" @change="onDeckJsonPicked" />
 
       <!-- 公式下拉：混排公式（粘贴 LaTeX）/ 空白公式 -->
       <div ref="formulaWrap" class="dropdown">
@@ -457,29 +646,6 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         </div>
       </div>
 
-      <!-- 绘制下拉：直线 / 箭头 / 笔 -->
-      <div ref="drawWrap" class="dropdown">
-        <button
-          class="btn"
-          :class="{ 'btn--open': drawOpen || !!store.drawTool }"
-          title="在画布空白处拖拽绘制"
-          @click="toggleDrawMenu"
-        >
-          <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.draw"></svg></span>绘制<span class="caret">▾</span>
-        </button>
-        <div v-if="drawOpen" class="dropdown__menu">
-          <button
-            v-for="d in drawButtons"
-            :key="d.type"
-            class="dropdown__item"
-            :class="{ 'dropdown__item--on': store.drawTool === d.type }"
-            :title="d.title || ('在画布空白处拖拽绘制 ' + d.label)"
-            @click="toggleDraw(d.type); drawOpen = false"
-          >
-            <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="d.svg"></svg></span>{{ d.label }}
-          </button>
-        </div>
-      </div>
 
       <!-- 插入下拉：符号 / 图形 / 图标 / 图片库 -->
       <div ref="moreWrap" class="dropdown">
@@ -592,6 +758,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   <ScreenshotCapture v-if="screenshotOpen" @close="screenshotOpen = false" />
   <ThemePalette v-if="themeOpen" @close="themeOpen = false" />
   <VersionHistory v-if="versionOpen" @close="versionOpen = false" />
+    <SaveAsDialog v-if="saveAsOpen" :name="saveAsName" :text="saveAsText" @close="saveAsOpen = false" @saved="onDeckSaved" />
   <SettingsPanel v-if="settingsOpen" @close="settingsOpen = false" />
   <FormulaInserter v-if="formulaModalOpen" @close="formulaModalOpen = false" />
   <FormulaLibrary v-if="formulaLib.open" @close="closeFormulaLibrary()" />

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { TextElement } from '@/types'
 import { fontStack, shadowCss, textEffectCss, textShadowCss } from '@/types'
+import { inlineEditReq } from '@/ui/inlineEdit'
 
 const props = defineProps<{ el: TextElement }>()
 const emit = defineEmits<{ (e: 'update', patch: Partial<TextElement>): void }>()
@@ -57,6 +58,8 @@ function endEdit() {
   const text = editorRef.value?.innerText ?? props.el.text
   if (text !== props.el.text) emit('update', { text })
 }
+// 帧层捕获的双击 → 进入就地编辑
+watch(inlineEditReq, (v) => { if (v && v.id === props.el.id && !editing.value) beginEdit() })
 </script>
 
 <template>
@@ -67,8 +70,12 @@ function endEdit() {
       class="text-el__editor"
       :style="textStyle"
       contenteditable="true"
+      @pointerdown.stop
+      @click.stop
+      @dblclick.stop
       @blur="endEdit"
       @keydown.esc.prevent="endEdit"
+      @keydown.enter.ctrl.prevent="endEdit"
     >{{ el.text }}</div>
     <span v-else :style="textStyle" @dblclick.stop="beginEdit">{{ el.text }}</span>
   </div>

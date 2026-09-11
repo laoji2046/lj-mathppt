@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "默认 capability：允许核心功能与资产协议（读取 exe 同级资源，如 images/）",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

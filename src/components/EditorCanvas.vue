@@ -103,7 +103,7 @@ const polyDraw = ref<{ points: { x: number; y: number }[]; cur: { x: number; y: 
 const polyActive = computed(() => store.drawTool === 'poly')
 let polyLast = { t: 0, x: 0, y: 0 }
 
-watch(store.drawTool, (t) => {
+watch(() => store.drawTool, (t) => {
   if (t !== 'poly') cancelPoly()
 })
 function cancelPoly() {
@@ -499,6 +499,12 @@ defineExpose({ resetView })
       </template>
     </div>
 
+    <div v-if="store.editingGroupId" class="grp-tip">
+      <span class="grp-tip__dot"></span>
+      正在编辑组合内部（只影响当前选中元素）
+      <button class="grp-tip__btn" @click="store.exitGroup()">退出组合编辑</button>
+    </div>
+
     <div class="hud">
       缩放 {{ Math.round(scale * 100) }}%
       <button class="hud__btn" @click="resetView">复位</button>
@@ -510,8 +516,8 @@ defineExpose({ resetView })
 
     <!-- 快捷加页：右侧=正常页，底部=子页 -->
     <template v-if="!presenting">
-      <button class="add-page-btn add-page-btn--right" title="用模板新增页（弹出模板库）" @click="openTemplateLibrary('add')">＋</button>
-      <button class="add-page-btn add-page-btn--bottom" title="用模板新增子页（弹出模板库）" @click="openTemplateLibrary('addSub')">＋</button>
+      <button class="add-page-btn add-page-btn--right" title="新增空白页" @click="store.addSlide()">＋</button>
+      <button class="add-page-btn add-page-btn--bottom" title="新增空白子页" @click="store.addSubpageAfterCurrent()">＋</button>
     </template>
   </div>
 </template>
@@ -577,6 +583,46 @@ defineExpose({ resetView })
 .guide--h { left: 0; right: 0; height: 1px; }
 
 /* ---------- 悬浮 HUD ---------- */
+/* 组内编辑提示条：顶部居中浮出，明确「现在改的是组内单个元素」 */
+.grp-tip {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10003;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 12px;
+  font-size: 12px;
+  color: var(--brand-700, #5b21b6);
+  background: var(--brand-50, #f5f3ff);
+  border: 1px solid var(--brand-200, #ddd6fe);
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+  animation: grp-tip-in 0.18s var(--ease, ease);
+}
+.grp-tip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand-600, #7c3aed);
+}
+.grp-tip__btn {
+  font-size: 11px;
+  padding: 3px 9px;
+  color: var(--brand-700, #5b21b6);
+  background: #fff;
+  border: 1px solid var(--brand-200, #ddd6fe);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background var(--dur-1, 0.12s) var(--ease, ease);
+}
+.grp-tip__btn:hover { background: var(--brand-100, #ede9fe); }
+@keyframes grp-tip-in {
+  from { opacity: 0; transform: translate(-50%, -6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
 .hud {
   position: absolute;
   right: 14px;

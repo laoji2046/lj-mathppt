@@ -37,7 +37,9 @@ export async function renderPdfInto(host: HTMLElement, base64: string) {
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p)
     const v1 = page.getViewport({ scale: 1 })
-    const scale = Math.max(0.2, W / v1.width)
+    const dpr = window.devicePixelRatio || 1
+    // 按设备像素比渲染（高分屏才清晰；CSS 宽度仍为 100%）
+    const scale = Math.max(0.2, (W / v1.width) * dpr)
     const vp = page.getViewport({ scale })
     const canvas = document.createElement('canvas')
     canvas.width = vp.width
