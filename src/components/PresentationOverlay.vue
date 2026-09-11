@@ -246,20 +246,26 @@ function onFrameLoad() {
   postToFrame({ type: 'fx-laser-color', color: laserColor.value })
 }
 
-/** 鼠标是否停在"应用自己的 UI"上（控制条 / 备注 / 演讲者视图 / 批注工具条，统一挂 .present__ui）。
- *  注意：来自 iframe 的事件，e.target 属于另一个 realm，instanceof 判断会失效，用鸭子类型。 */
-function overHostUI(target: EventTarget | null): boolean {
+/** target 是否落在某个选择器内（来自 iframe 的事件其 target 属于另一个 realm，
+ *  instanceof Element 会失效，所以用鸭子类型判 closest） */
+function closestIn(target: EventTarget | null, sel: string): boolean {
   const el = target as (Element & { closest?: (s: string) => Element | null }) | null
   if (!el || typeof el.closest !== 'function') return false
-  try { return !!el.closest('.present__ui') } catch { return false }
+  try { return !!el.closest(sel) } catch { return false }
 }
+/** 应用自己的面板（控制条本体 / 备注 / 演讲者视图，挂 .present__ui）：悬停时控制条保持显示 */
+function overHostUI(target: EventTarget | null): boolean { return closestIn(target, '.present__ui') }
+/** 画笔 / 激光属性条（挂 .present__propbar）：**中性区** —— 悬停它时不改变控制条显隐。
+ *  它正好贴在控制条上方，如果按"自家 UI"处理就会一直把控制条唤出来，两条叠成一大坨挡住幻灯片。 */
+function overPropBar(target: EventTarget | null): boolean { return closestIn(target, '.present__propbar') }
 
 /**
  * 底部控制条感应带 = **屏幕最下方一条窄带**（不再跟着工具条的整体高度走）：
- *   纵向：屏幕底边往上 bandH，bandH = 控制条高度的 1/3（约 17px，最小 12px）
+ *   纵向：屏幕底边往上 bandH，bandH = 控制条高度的 1/6（约 10px，最小 10px —— 必须与控制条 bottom 重叠）
  *   横向：居中，宽度 = 工具条宽度 ± 24px
  * 工具条隐藏时停在屏幕外，这条窄带就是"唤出区"；鼠标一旦离开窄带、又没有停在工具条本身上，
- * 就自动消隐。悬停工具条/备注/演讲者视图/批注工具条（.present__ui）时始终显示。
+ * 就自动消隐。悬停工具条/备注/演讲者视图（.present__ui）时始终显示；
+ * 悬停画笔/激光属性条（.present__propbar）则保持现状（不呼出控制条）。
  *
  * 注：数值取 offsetWidth/offsetHeight 并缓存（mousemove 每次读 getComputedStyle 会触发重排）。
  * 不能直接用 getBoundingClientRect()：工具条隐藏时带着 translate(-50%,120%)，rect 会跑到屏幕外。
@@ -281,10 +287,13 @@ function measureBar() {
 }
 function updateBarVisible(x: number, y: number, target: EventTarget | null) {
   if (overHostUI(target)) { showControls.value = true; return }
+  // 悬停画笔/激光属性条：既不呼出也不收起控制条，保持现状
+  if (overPropBar(target)) return
   const h = window.innerHeight
   const w = window.innerWidth
-  // 唤出区 = 屏幕最下方一条窄带，高度为控制条高度(含上下 4px 余量)的三分之一
-  const bandH = Math.max(12, Math.round((barBox.h + 8) / 3))
+  // 唤出区 = 屏幕最下方一条窄带，高度为控制条高度的六分之一；保底 10px，
+  // 保证与控制条的 bottom:6px 有重叠区（两者必须相接，否则鼠标"够不到"工具条）
+  const bandH = Math.max(10, Math.round((barBox.h + 8) / 6))
   const inRow = y >= h - bandH
   const padX = 24
   const inCol = Math.abs(x - w / 2) < barBox.w / 2 + padX
@@ -402,7 +411,7 @@ watch(
     <div v-if="laserOn" class="present__laser" :style="laserStyle"></div>
 
     <!-- 批注工具栏（绘制时浮在控制条上方） -->
-    <div v-if="drawOn" class="present__drawbar present__ui">
+    <div v-if="drawOn" class="present__drawbar present__propbar">
       <button v-for="c in ['#ff3b30', '#ffcc00', '#00d0ff', '#22c55e', '#ffffff']" :key="c" class="dw" :class="{ 'dw--on': drawColor === c }" :style="{ background: c }" @click="drawColor = c" title="笔色"></button>
       <span class="pc-sep"></span>
       <button v-for="w in drawWidths" :key="'d' + w" class="dw dw--txt" :class="{ 'dw--on': drawWidth === w }" @click="drawWidth = w" :title="'线宽 ' + w">
@@ -411,10 +420,12 @@ watch(
       <span class="pc-sep"></span>
       <button class="dw dw--txt" @click="undoDraw" title="撤销">↩</button>
       <button class="dw dw--txt" @click="clearDraw" title="清空">🗑</button>
+      <span class="pc-sep"></span>
+      <button class="dw dw--txt dw--close" @click="setDraw(false)" title="退出批注（画笔）模式">✕</button>
     </div>
 
     <!-- 激光笔色板 -->
-    <div v-if="laserOn" class="present__laserbar present__ui">
+    <div v-if="laserOn" class="present__laserbar present__propbar">
       <button v-for="c in ['#ff3b30', '#ffcc00', '#00d0ff', '#22c55e', '#ffffff']" :key="c" class="dw" :class="{ 'dw--on': laserColor === c }" :style="{ background: c }" @click="laserColor = c" title="激光颜色"></button>
       <span class="pc-sep"></span>
       <button v-for="w in laserWidths" :key="'w' + w" class="dw dw--txt" :class="{ 'dw--on': laserWidth === w }" @click="laserWidth = w" :title="'线宽 ' + w">
@@ -422,6 +433,8 @@ watch(
       </button>
       <span class="pc-sep"></span>
       <button class="dw dw--txt" @click="clearLaser()" title="清空激光笔画迹">🗑</button>
+      <span class="pc-sep"></span>
+      <button class="dw dw--txt dw--close" @click="setLaser(false)" title="退出激光笔模式">✕</button>
     </div>
 
     <!-- 备注面板 -->
@@ -505,7 +518,7 @@ watch(
   box-shadow: 0 0 12px 4px rgba(255, 60, 50, 0.5);
   pointer-events: none;
 }
-.present__notes { position: fixed; right: 18px; bottom: 74px; z-index: 1005; width: 320px; background: rgba(24,24,28,0.92); border-radius: 12px; padding: 12px 14px; color: #f0ede4; box-shadow: 0 8px 28px rgba(0,0,0,0.5); }
+.present__notes { position: fixed; right: 18px; bottom: 56px; z-index: 1005; width: 320px; background: rgba(24,24,28,0.92); border-radius: 12px; padding: 12px 14px; color: #f0ede4; box-shadow: 0 8px 28px rgba(0,0,0,0.5); }
 .present__notes-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
 .present__notes-x { border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #f0ede4; border-radius: 5px; padding: 3px 8px; font-size: 12px; cursor: pointer; }
 .present__notes-body { font-size: 13px; line-height: 1.6; white-space: pre-wrap; max-height: 40vh; overflow: auto; text-align: left; }
@@ -528,49 +541,58 @@ watch(
 .sp-card-label { font-size: 13px; font-weight: 600; }
 .sp-empty { display: flex; align-items: center; justify-content: center; min-height: 128px; font-size: 12px; color: rgba(240,237,228,0.6); }
 .present__speaker-note { font-size: 13px; line-height: 1.6; white-space: pre-wrap; max-height: 30vh; overflow: auto; text-align: left; color: #d9d6cf; }
+/* 批注/激光属性条：贴在控制条正上方（控制条 bottom:6px + 高约 40px = 顶边 46px，这里留 4px 缝）。
+   属性条高度 = 按钮 22px + 上下 padding 8px = 30px（原来 26px 按钮 + 12px padding = 38px）。
+   改控制条高度/位置时记得同步这里的 bottom。 */
 .present__drawbar {
   position: fixed;
   left: 50%;
-  bottom: 74px;
+  bottom: 50px;
   transform: translateX(-50%);
   z-index: 1004;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
+  gap: 4px;
+  padding: 4px 8px;
   border-radius: 999px;
   background: rgba(24, 24, 28, 0.85);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
 }
-.dw { width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.25); cursor: pointer; }
+.dw { width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.25); cursor: pointer; }
 .dw--on { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,0.5); }
-.dw--txt { border-radius: 6px; color: #e8e6ee; background: transparent; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; }
-.dw-wline { display: block; background: currentColor; border-radius: 2px; min-width: 16px; }
+.dw--txt { border-radius: 6px; color: #e8e6ee; background: transparent; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; }
+.dw-wline { display: block; background: currentColor; border-radius: 2px; min-width: 14px; }
 .dw--txt:hover { background: rgba(255,255,255,0.12); }
+/* 属性条右端的关闭按钮：点它退出批注 / 激光笔模式（等价于再点一次控制条上的那个按钮） */
+.dw--close { font-size: 13px; color: #ffb3b3; }
+.dw--close:hover { background: rgba(255, 107, 107, 0.22); color: #ff6b6b; }
 .present__laserbar {
   position: fixed;
   left: 50%;
-  bottom: 122px;
+  bottom: 50px;
   transform: translateX(-50%);
   z-index: 1004;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
+  gap: 4px;
+  padding: 4px 8px;
   border-radius: 999px;
   background: rgba(24, 24, 28, 0.85);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
 }
+/* 控制条贴底 6px：必须与最下沿 10px 的"唤出带"重叠（见 updateBarVisible）。
+   以前是 bottom:20px，鼠标从唤出带上移到工具条之间要穿过一段"既不在带内、也不在工具条上"的空白，
+   工具条会在被抓住之前先滑走 —— 表现为"看得见但点不到"。 */
 .present__controls {
   position: fixed;
   left: 50%;
-  bottom: 20px;
+  bottom: 6px;
   transform: translateX(-50%);
   z-index: 1002;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
+  gap: 3px;
+  padding: 5px 9px;
   border-radius: 999px;
   background: rgba(24, 24, 28, 0.82);
   transition: opacity .25s, transform .25s, visibility .25s;
@@ -582,10 +604,10 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
   color: #e8e6ee;
   cursor: pointer;
@@ -594,8 +616,8 @@ watch(
 .pc:hover { background: rgba(255, 255, 255, 0.12); }
 .pc:active { transform: scale(0.92); }
 .pc--on { background: rgba(255, 255, 255, 0.18); color: #ffd479; }
-.pc svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.pc-sep { width: 1px; height: 22px; margin: 0 4px; background: rgba(255, 255, 255, 0.18); }
+.pc svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.pc-sep { width: 1px; height: 18px; margin: 0 3px; background: rgba(255, 255, 255, 0.18); }
 .pc--danger { color: #ff6b6b; }
 .pc--danger:hover { background: rgba(255, 90, 90, 0.22); }
 </style>
