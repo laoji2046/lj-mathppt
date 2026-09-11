@@ -245,6 +245,7 @@ export type MathFigureKind =
   | 'tangent' | 'sine' | 'cosine' | 'sinusoid' | 'exponential' | 'expDecay' | 'logarithm'
   // ---- 圆锥曲线 ----
   | 'conicCircle' | 'ellipse' | 'hyperbola' | 'conicParabola' | 'conicFocusDir'
+  | 'ellipseV' | 'hyperbolaV' | 'conicParabolaV' | 'conicCircleY'
   // ---- 平面图形 ----
   | 'coordinate' | 'numberline' | 'venn' | 'righttriangle' | 'angle' | 'semicircle'
   | 'triangle' | 'rectangle' | 'circle' | 'pentagon' | 'hexagon' | 'rhombus'
@@ -278,9 +279,13 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   { v: 'logarithm', label: '对数 y=log₂x', cat: '函数图像' },
   // ---- 圆锥曲线 ----
   { v: 'conicCircle', label: '圆 x²+y²=r²', cat: '圆锥曲线' },
-  { v: 'ellipse', label: '椭圆（焦点·顶点）', cat: '圆锥曲线' },
-  { v: 'hyperbola', label: '双曲线（焦点·渐近线）', cat: '圆锥曲线' },
-  { v: 'conicParabola', label: '抛物线 y²=2px（焦点·准线）', cat: '圆锥曲线' },
+  { v: 'conicCircleY', label: '圆（圆心在 y 轴）', cat: '圆锥曲线' },
+  { v: 'ellipse', label: '椭圆（焦点在 x 轴）', cat: '圆锥曲线' },
+  { v: 'ellipseV', label: '椭圆（焦点在 y 轴）', cat: '圆锥曲线' },
+  { v: 'hyperbola', label: '双曲线（焦点在 x 轴）', cat: '圆锥曲线' },
+  { v: 'hyperbolaV', label: '双曲线（焦点在 y 轴）', cat: '圆锥曲线' },
+  { v: 'conicParabola', label: '抛物线 y²=2px（焦点在 x 轴）', cat: '圆锥曲线' },
+  { v: 'conicParabolaV', label: '抛物线 x²=2py（焦点在 y 轴）', cat: '圆锥曲线' },
   { v: 'conicFocusDir', label: '圆锥曲线统一定义（焦点·准线）', cat: '圆锥曲线' },
   // ---- 平面图形 ----
   { v: 'coordinate', label: '坐标系', cat: '平面图形' },

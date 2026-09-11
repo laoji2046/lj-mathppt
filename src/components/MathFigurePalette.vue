@@ -1,9 +1,11 @@
 <script setup lang="ts">
-/** 数学图形面板：按分类（平面 / 立体 / 函数 / 圆锥曲线 / 辅助标注）分页浏览与插入 */
+/** 数学图形面板：分类页签 + 卡片缩略图（缩略图直接用元素组件渲染，所见即所得） */
 import { computed, ref } from 'vue'
 import { useDeckStore } from '@/stores/deck'
 import type { MathFigureCat, MathFigureKind } from '@/types'
 import { MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS } from '@/types'
+import { figureBox, viewAspect } from '@/composables/mathPlot'
+import FigurePreview from './elements/MathFigureElement.vue'
 
 const store = useDeckStore()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -17,15 +19,28 @@ const groups = computed(() => MATH_FIGURE_CATS.map((c) => ({
 const cat = ref<MathFigureCat>('函数图像')
 const current = computed(() => groups.value.find((g) => g.cat === cat.value) ?? groups.value[0])
 
-/** 函数图像 / 圆锥曲线插入时给一个宽一点的框（坐标系 + 曲线需要横向空间） */
-const SIZE: Partial<Record<MathFigureCat, { w: number; h: number }>> = {
-  函数图像: { w: 520, h: 360 },
-  圆锥曲线: { w: 520, h: 340 },
+/**
+ * 缩略图用的"假元素"：
+ * - 有数学视图（函数 / 圆锥曲线）的，按视图宽高比给框，配合 fit="contain" 等比缩放起来不歪；
+ * - 平面 / 立体 / 标注类本来就是按框自适应画的，直接用 140×80 + 默认拉伸。
+ */
+const PV_H = 80
+function previewEl(kind: MathFigureKind) {
+  const a = viewAspect(kind)
+  return {
+    id: 'pv_' + kind, type: 'mathfig', x: 0, y: 0, rot: 0,
+    w: a ? Math.round(PV_H * a) : 140, h: PV_H,
+    kind, fill: 'transparent', stroke: '#3b3b46', strokeWidth: 2.6,
+  } as any
+}
+function previewFit(kind: MathFigureKind): 'stretch' | 'contain' {
+  return viewAspect(kind) ? 'contain' : 'stretch'
 }
 
+/** 插入尺寸：函数 / 圆锥曲线按视图宽高比给（圆才会是圆），其余用元素默认值 */
 function insert(kind: MathFigureKind) {
-  const size = SIZE[current.value?.cat ?? '平面图形'] ?? {}
-  store.addElement('mathfig', { kind, ...size } as any)
+  const box = figureBox(kind)
+  store.addElement('mathfig', box ? { kind, ...box } : { kind } as any)
   emit('close')
 }
 </script>
@@ -50,15 +65,18 @@ function insert(kind: MathFigureKind) {
         </button>
       </div>
 
-      <div class="palette__grid palette__grid--fig">
+      <div class="palette__grid">
         <button
           v-for="f in current?.list ?? []"
           :key="f.v"
-          class="palette__fig"
+          class="card"
           :title="f.label"
           @click="insert(f.v)"
         >
-          <span class="palette__figname">{{ f.label }}</span>
+          <span class="card__thumb">
+            <FigurePreview :el="previewEl(f.v)" :fit="previewFit(f.v)" />
+          </span>
+          <span class="card__name">{{ f.label }}</span>
         </button>
       </div>
 
@@ -78,9 +96,9 @@ function insert(kind: MathFigureKind) {
   justify-content: center;
 }
 .palette__box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); padding: 14px 16px;
-  max-width: 760px;
+  max-width: 800px;
   width: 92vw;
-  max-height: 84vh;
+  max-height: 86vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;}
@@ -113,23 +131,33 @@ function insert(kind: MathFigureKind) {
 
 .palette__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
   overflow-y: auto;
-  padding-right: 2px;
+  padding: 2px 4px 2px 2px;
 }
-.palette__fig {
-  padding: 12px 8px;
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px;
   border: 1px solid var(--border-strong);
   background: #fff;
-  border-radius: 8px;
+  border-radius: 9px;
   cursor: pointer;
-  color: var(--text);
   text-align: center;
-  line-height: 1.35;
-  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease);
 }
-.palette__fig:hover { background: var(--brand-soft); border-color: var(--brand-400); transform: translateY(-1px); }
-.palette__figname { font-size: 12.5px; }
+.card:hover { background: var(--brand-soft); border-color: var(--brand-400); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.card__thumb {
+  position: relative;
+  display: block;
+  aspect-ratio: 7 / 4;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #fff;
+  pointer-events: none;
+}
+.card__name { font-size: 12px; color: var(--text); line-height: 1.35; }
 .palette__hint { margin-top: 12px; font-size: 12px; color: var(--muted); }
 </style>

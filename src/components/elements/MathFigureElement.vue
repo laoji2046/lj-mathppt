@@ -7,7 +7,7 @@ import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFace
 import { CONIC_KINDS, FUNCTION_KINDS, conicFigure, functionFigure } from '@/composables/mathPlot'
 import { solidSel, selectSolidVertex, selectSolidEdge, selectSolidFace, clearSolidSel } from '@/composables/solidSel'
 
-const props = defineProps<{ el: MathFigureElement; selected?: boolean }>()
+const props = defineProps<{ el: MathFigureElement; selected?: boolean; /** 预览用：等比缩放（contain）而不是拉伸（stretch） */ fit?: 'stretch' | 'contain' }>()
 const emit = defineEmits<{ (e: 'update', patch: Partial<SlideElement>): void }>()
 
 const box = ref<HTMLElement | null>(null)
@@ -450,7 +450,7 @@ function onSvgDbl(e: MouseEvent) {
 
 <template>
   <div ref="box" class="mathfig-el">
-    <svg :viewBox="`0 0 ${props.el.w} ${props.el.h}`" width="100%" height="100%" preserveAspectRatio="none" v-html="innerHtml" @click="onSvgClick" @dblclick="onSvgDbl"></svg>
+    <svg :viewBox="`0 0 ${props.el.w} ${props.el.h}`" width="100%" height="100%" :preserveAspectRatio="fit === 'contain' ? 'xMidYMid meet' : 'none'" v-html="innerHtml" @click="onSvgClick" @dblclick="onSvgDbl"></svg>
     <template v-if="showHandles">
       <span
         v-for="v in (pts ? Math.floor(pts.length / 2) : 0)"
