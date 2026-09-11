@@ -4,6 +4,7 @@ import type { MathFigureElement, SlideElement } from '@/types'
 import { lineDashCss } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
 import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel } from '@/composables/solid3d'
+import { CONIC_KINDS, FUNCTION_KINDS, conicFigure, functionFigure } from '@/composables/mathPlot'
 import { solidSel, selectSolidVertex, selectSolidEdge, selectSolidFace, clearSolidSel } from '@/composables/solidSel'
 
 const props = defineProps<{ el: MathFigureElement; selected?: boolean }>()
@@ -55,21 +56,16 @@ const innerHtml = computed(() => {
     return a.join(' ')
   }
 
+  // 函数图像 / 圆锥曲线：走纯几何模块 mathPlot（真采样，非手工贝塞尔）
+  if (FUNCTION_KINDS.includes(kind)) return functionFigure(kind, w, h, stroke, s)
+  if (CONIC_KINDS.includes(kind)) return conicFigure(kind, w, h, stroke, s, fillColor)
+
   // 三维多面体统一走顶点模型渲染（支持拖拽顶点编辑）
   if (SOLID_VCOUNT[kind]) return renderSolid(kind, pts.value, w, h, stroke, s, fillColor, dashed, props.el.vlabels, props.el.edgeStyles, solidSel.elementId === props.el.id ? (solidSel.vertex ?? undefined) : undefined, solidSel.elementId === props.el.id ? (solidSel.edge ?? undefined) : undefined, props.el.labelOffsets, props.el.faceStyles, solidSel.elementId === props.el.id ? (solidSel.face ?? undefined) : undefined, props.el.mesh)
 
   switch (kind) {
-    case 'parabola':
-      return `<path d="M 0 ${h} Q ${w * 0.5} ${-h * 0.9} ${w} ${h}" ${strokeAttrs} fill="none"/>` +
-             `<line x1="0" y1="${h * 0.62}" x2="${w}" y2="${h * 0.62}" stroke="${stroke}" stroke-width="${thin}" ${dashed}/>`
-    case 'sine':
-      return `<path d="M 0 ${h / 2} C ${w * 0.25} ${h * 0.1}, ${w * 0.25} ${h * 0.9}, ${w / 2} ${h / 2} S ${w * 0.75} ${h * 0.1}, ${w} ${h / 2}" ${strokeAttrs} fill="none"/>`
-    case 'cosine':
-      return `<path d="M 0 ${h * 0.12} C ${w * 0.22} ${h * 0.12}, ${w * 0.22} ${h * 0.88}, ${w / 2} ${h * 0.88} S ${w * 0.78} ${h * 0.12}, ${w} ${h * 0.12}" ${strokeAttrs} fill="none"/>`
-    case 'exponential':
-      return `<path d="M 0 ${h} C ${w * 0.5} ${h}, ${w * 0.7} ${h * 0.4}, ${w} ${h * 0.06}" ${strokeAttrs} fill="none"/>`
-    case 'logarithm':
-      return `<path d="M ${w * 0.04} ${h * 0.06} C ${w * 0.3} ${h * 0.3}, ${w * 0.55} ${h * 0.7}, ${w} ${h}" ${strokeAttrs} fill="none"/>`
+    // 抛物线 / 正余弦 / 指数 / 对数：旧的手绘贝塞尔版本已删除，
+    // 统一由本函数开头的 FUNCTION_KINDS 分支（mathPlot.functionFigure）真采样绘制。
     case 'coordinate': {
       const axis = `stroke="${stroke}" stroke-width="${s}"`
       let ticks = ''

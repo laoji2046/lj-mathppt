@@ -240,7 +240,12 @@ export interface PenElement extends ElementBase {
 
 /** 数学图形种类 */
 export type MathFigureKind =
-  | 'parabola' | 'sine' | 'cosine' | 'exponential' | 'logarithm'
+  // ---- 函数图像（含新增：一次 / 三次 / 绝对值 / 根式 / 反比例 / 双钩 / 正切 / 正弦型 / 指数递减） ----
+  | 'linear' | 'parabola' | 'cubic' | 'absolute' | 'sqrt' | 'reciprocal' | 'hook'
+  | 'tangent' | 'sine' | 'cosine' | 'sinusoid' | 'exponential' | 'expDecay' | 'logarithm'
+  // ---- 圆锥曲线 ----
+  | 'conicCircle' | 'ellipse' | 'hyperbola' | 'conicParabola' | 'conicFocusDir'
+  // ---- 平面图形 ----
   | 'coordinate' | 'numberline' | 'venn' | 'righttriangle' | 'angle' | 'semicircle'
   | 'triangle' | 'rectangle' | 'circle' | 'pentagon' | 'hexagon' | 'rhombus'
   | 'parallelogram' | 'trapezoid' | 'star' | 'bezier' | 'polygon'
@@ -251,53 +256,74 @@ export type MathFigureKind =
   // ---- 辅助线 / 标注 ----
   | 'auxLine' | 'rightAngle' | 'equalMark' | 'parallelMark' | 'angleArc' | 'section'
 
-export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string }[] = [
-  { v: 'parabola', label: '抛物线' },
-  { v: 'sine', label: '正弦' },
-  { v: 'cosine', label: '余弦' },
-  { v: 'exponential', label: '指数' },
-  { v: 'logarithm', label: '对数' },
-  { v: 'coordinate', label: '坐标系' },
-  { v: 'numberline', label: '数轴' },
-  { v: 'venn', label: 'Venn 图' },
-  { v: 'righttriangle', label: '直角三角形' },
-  { v: 'angle', label: '角' },
-  { v: 'semicircle', label: '半圆' },
-  { v: 'triangle', label: '三角形' },
-  { v: 'rectangle', label: '矩形' },
-  { v: 'circle', label: '圆' },
-  { v: 'pentagon', label: '五边形' },
-  { v: 'hexagon', label: '正六边形' },
-  { v: 'rhombus', label: '菱形' },
-  { v: 'parallelogram', label: '平行四边形' },
-  { v: 'trapezoid', label: '梯形' },
-  { v: 'star', label: '五角星' },
-  // ---- 3D 立体 ----
-  { v: 'cube', label: '立方体' },
-  { v: 'cuboid', label: '长方体' },
-  { v: 'cylinder', label: '圆柱' },
-  { v: 'cone', label: '圆锥' },
-  { v: 'sphere', label: '球' },
-  { v: 'pyramid', label: '四棱锥' },
-  { v: 'prism', label: '棱柱' },
-  { v: 'tetrahedron', label: '四面体' },
-  { v: 'frustum', label: '圆台' },
-  { v: 'pyraFrustum', label: '棱台' },
-  { v: 'dihedral', label: '二面角' },
-  { v: 'isoaxis', label: '等距轴' },
-  { v: 'octahedron', label: '正八面体' },
-  { v: 'hexPrism', label: '正六棱柱' },
-  { v: 'obliquePrism', label: '斜棱柱' },
-  { v: 'triFrustum', label: '正三棱台' },
+/** 数学图形分类（面板按这个分组显示） */
+export type MathFigureCat = '平面图形' | '立体几何' | '函数图像' | '圆锥曲线' | '辅助标注'
+export const MATH_FIGURE_CATS: MathFigureCat[] = ['平面图形', '立体几何', '函数图像', '圆锥曲线', '辅助标注']
+
+export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathFigureCat }[] = [
+  // ---- 函数图像 ----
+  { v: 'linear', label: '一次函数 y=x+1', cat: '函数图像' },
+  { v: 'parabola', label: '二次函数 y=x²', cat: '函数图像' },
+  { v: 'cubic', label: '三次函数 y=x³', cat: '函数图像' },
+  { v: 'absolute', label: '绝对值 y=|x|', cat: '函数图像' },
+  { v: 'sqrt', label: '根式 y=√x', cat: '函数图像' },
+  { v: 'reciprocal', label: '反比例 y=1/x', cat: '函数图像' },
+  { v: 'hook', label: '双钩 y=x+1/x', cat: '函数图像' },
+  { v: 'sine', label: '正弦 y=sin x', cat: '函数图像' },
+  { v: 'cosine', label: '余弦 y=cos x', cat: '函数图像' },
+  { v: 'sinusoid', label: '正弦型 y=2sin(2x+π/6)', cat: '函数图像' },
+  { v: 'tangent', label: '正切 y=tan x', cat: '函数图像' },
+  { v: 'exponential', label: '指数 y=2ˣ', cat: '函数图像' },
+  { v: 'expDecay', label: '指数 y=(1/2)ˣ', cat: '函数图像' },
+  { v: 'logarithm', label: '对数 y=log₂x', cat: '函数图像' },
+  // ---- 圆锥曲线 ----
+  { v: 'conicCircle', label: '圆 x²+y²=r²', cat: '圆锥曲线' },
+  { v: 'ellipse', label: '椭圆（焦点·顶点）', cat: '圆锥曲线' },
+  { v: 'hyperbola', label: '双曲线（焦点·渐近线）', cat: '圆锥曲线' },
+  { v: 'conicParabola', label: '抛物线 y²=2px（焦点·准线）', cat: '圆锥曲线' },
+  { v: 'conicFocusDir', label: '圆锥曲线统一定义（焦点·准线）', cat: '圆锥曲线' },
+  // ---- 平面图形 ----
+  { v: 'coordinate', label: '坐标系', cat: '平面图形' },
+  { v: 'numberline', label: '数轴', cat: '平面图形' },
+  { v: 'venn', label: 'Venn 图', cat: '平面图形' },
+  { v: 'righttriangle', label: '直角三角形', cat: '平面图形' },
+  { v: 'angle', label: '角', cat: '平面图形' },
+  { v: 'semicircle', label: '半圆', cat: '平面图形' },
+  { v: 'triangle', label: '三角形', cat: '平面图形' },
+  { v: 'rectangle', label: '矩形', cat: '平面图形' },
+  { v: 'circle', label: '圆', cat: '平面图形' },
+  { v: 'pentagon', label: '五边形', cat: '平面图形' },
+  { v: 'hexagon', label: '正六边形', cat: '平面图形' },
+  { v: 'rhombus', label: '菱形', cat: '平面图形' },
+  { v: 'parallelogram', label: '平行四边形', cat: '平面图形' },
+  { v: 'trapezoid', label: '梯形', cat: '平面图形' },
+  { v: 'star', label: '五角星', cat: '平面图形' },
+  { v: 'bezier', label: '贝塞尔曲线', cat: '平面图形' },
+  { v: 'polygon', label: '自定义多边形', cat: '平面图形' },
+  // ---- 立体几何 ----
+  { v: 'cube', label: '立方体', cat: '立体几何' },
+  { v: 'cuboid', label: '长方体', cat: '立体几何' },
+  { v: 'cylinder', label: '圆柱', cat: '立体几何' },
+  { v: 'cone', label: '圆锥', cat: '立体几何' },
+  { v: 'sphere', label: '球', cat: '立体几何' },
+  { v: 'pyramid', label: '四棱锥', cat: '立体几何' },
+  { v: 'prism', label: '棱柱', cat: '立体几何' },
+  { v: 'tetrahedron', label: '四面体', cat: '立体几何' },
+  { v: 'frustum', label: '圆台', cat: '立体几何' },
+  { v: 'pyraFrustum', label: '棱台', cat: '立体几何' },
+  { v: 'triFrustum', label: '正三棱台', cat: '立体几何' },
+  { v: 'hexPrism', label: '正六棱柱', cat: '立体几何' },
+  { v: 'obliquePrism', label: '斜棱柱', cat: '立体几何' },
+  { v: 'octahedron', label: '正八面体', cat: '立体几何' },
+  { v: 'dihedral', label: '二面角', cat: '立体几何' },
+  { v: 'isoaxis', label: '等距轴', cat: '立体几何' },
   // ---- 辅助线 / 标注 ----
-  { v: 'auxLine', label: '辅助虚线' },
-  { v: 'rightAngle', label: '直角符号' },
-  { v: 'equalMark', label: '等长标记' },
-  { v: 'parallelMark', label: '平行标记' },
-  { v: 'angleArc', label: '角标记' },
-  { v: 'section', label: '截面' },
-  { v: 'bezier', label: '贝塞尔曲线' },
-  { v: 'polygon', label: '自定义多边形' },
+  { v: 'auxLine', label: '辅助虚线', cat: '辅助标注' },
+  { v: 'rightAngle', label: '直角符号', cat: '辅助标注' },
+  { v: 'equalMark', label: '等长标记', cat: '辅助标注' },
+  { v: 'parallelMark', label: '平行标记', cat: '辅助标注' },
+  { v: 'angleArc', label: '角标记', cat: '辅助标注' },
+  { v: 'section', label: '截面', cat: '辅助标注' },
 ]
 
 /** 数学符号面板：点击插入为文本元素 */

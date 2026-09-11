@@ -6,7 +6,7 @@ import type {
   GgbApp, IconElement, ImageElement, LineElement, MathElement, MathFigureElement,
   MathFigureKind, PenElement, RichTextElement, ShapeElement, SlideElement, TableElement, TextElement, WordArtPreset,
 } from '@/types'
-import { ARROW_HEADS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_REFLECTIONS, LINE_STYLES, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
+import { ARROW_HEADS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_REFLECTIONS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
 import { captureDesmosState } from '@/composables/useDesmos'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
@@ -783,7 +783,9 @@ function layerTypeLabel(type: string) {
             :value="mathfig?.kind"
             @change="patch({ kind: ($event.target as HTMLSelectElement).value as MathFigureKind } as Partial<SlideElement>)"
           >
-            <option v-for="f in MATH_FIGURE_OPTIONS" :key="f.v" :value="f.v">{{ f.label }}</option>
+            <optgroup v-for="c in MATH_FIGURE_CATS" :key="c" :label="c">
+              <option v-for="f in MATH_FIGURE_OPTIONS.filter((x) => x.cat === c)" :key="f.v" :value="f.v">{{ f.label }}</option>
+            </optgroup>
           </select>
         </label>
         <label class="field"><span>线条颜色<span v-if="edgeTarget != null" class="panel__tag">▶ 边{{ edgeTarget + 1 }}</span></span>
