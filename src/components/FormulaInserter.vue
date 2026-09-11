@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDeckStore } from '@/stores/deck'
-import { typesetMixed } from '@/composables/useMathJax'
+import { renderLatex, typesetMixed } from '@/composables/useMathJax'
 import { FONT_OPTIONS } from '@/types'
 import type { SlideElement } from '@/types'
 import ColorSwatches from './ColorSwatches.vue'
+import { FORMULA_LIBRARY, FORMULA_TAGS, formulaTags } from '@/templates/formulaLibrary'
+import type { FormulaItem } from '@/templates/formulaLibrary'
 
 const store = useDeckStore()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -82,7 +84,7 @@ function buildText() {
 async function updatePreview() {
   if (!previewHost.value) return
   const text = buildText()
-  if (!text) { previewHost.value.innerHTML = '<span class="ph">粘贴标准 LaTeX 公式，此处实时预览组合结果</span>'; return }
+  if (!text) { previewHost.value.innerHTML = '<span class="ph">粘贴标准 LaTeX 公式，或从右侧公式库点击挑选</span>'; return }
   try { await typesetMixed(previewHost.value, text) } catch { /* 忽略 */ }
 }
 
@@ -90,7 +92,100 @@ watch([latex, fontSize, color, multiLine, autoWrap], () => {
   clearTimeout(timer)
   timer = setTimeout(updatePreview, 200) as unknown as number
 })
-onMounted(() => { nextTick(updatePreview) })
+
+/* ---------------------------------------------------------------------------
+ * 右侧「预制公式库」：单击填入上方输入框（可连续点多个），双击直接插入当前页
+ * ------------------------------------------------------------------------- */
+const libKey = ref(FORMULA_LIBRARY[0].key)
+const libQuery = ref('')
+const libTag = ref('')
+const libWrap = ref<HTMLElement | null>(null)
+const libActive = computed(() => FORMULA_LIBRARY.find((c) => c.key === libKey.value) || FORMULA_LIBRARY[0])
+
+/** 当前展示的公式：搜索时跨分类搜；选标签时跨分类筛；否则用当前分类 */
+const libVisible = computed<FormulaItem[]>(() => {
+  const q = libQuery.value.trim().toLowerCase()
+  const cats = (q || libTag.value) ? FORMULA_LIBRARY : [libActive.value]
+  const hits: FormulaItem[] = []
+  for (const c of cats) {
+    for (const f of c.formulas) {
+      if (q && !(f.label.toLowerCase().includes(q) || f.latex.toLowerCase().includes(q))) continue
+      if (libTag.value && !formulaTags(f).includes(libTag.value)) continue
+      hits.push(f)
+    }
+  }
+  return hits
+})
+
+/** 排版右侧列表里的全部公式预览（22px 基准、只缩不放，保证各条视觉大小一致） */
+async function renderLib() {
+  await nextTick()
+  const box = libWrap.value
+  if (!box) return
+  const jobs: Promise<void>[] = []
+  for (const node of Array.from(box.querySelectorAll<HTMLElement>('[data-latex]'))) {
+    node.innerHTML = ''
+    jobs.push(renderLatex(node, node.getAttribute('data-latex') || '', 20, 1).catch(() => {}))
+  }
+  await Promise.all(jobs)
+}
+watch([libKey, libQuery, libTag], renderLib)
+onMounted(() => { nextTick(updatePreview); renderLib() })
+
+let clickTimer: number | undefined
+let pendingKey = ''
+let pendingAt = 0
+let lastAppend = { text: '', at: 0 }
+onBeforeUnmount(() => clearTimeout(clickTimer))
+
+function keyOf(f: FormulaItem) { return f.latex + '|' + f.label }
+
+/** 单击：把公式追加进输入框（连续点多个就依次排成多行） */
+function appendFormula(f: FormulaItem) {
+  const cur = latex.value.replace(/\s+$/, '')
+  const added = cur ? '\n' + f.latex : f.latex
+  latex.value = cur + added
+  lastAppend = { text: added, at: Date.now() }
+  nextTick(() => {
+    const ta = texRef.value
+    if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length }
+  })
+}
+/** 双击：直接把这条公式插到当前页面（与「预制公式库」面板一致：选中公式元素则替换其内容） */
+function insertDirect(f: FormulaItem) {
+  // 双击的第一下可能已经触发过"填入输入框"，这里撤掉，避免重复
+  if (lastAppend.text && Date.now() - lastAppend.at < 800 && latex.value.endsWith(lastAppend.text)) {
+    latex.value = latex.value.slice(0, latex.value.length - lastAppend.text.length)
+    lastAppend = { text: '', at: 0 }
+  }
+  store.clearDrawTool()
+  const sel = store.selectedElement
+  if (sel && sel.type === 'math') {
+    store.updateElement(sel.id, { latex: f.latex } as Partial<SlideElement>)
+  } else {
+    store.addElement('math', {
+      latex: f.latex, w: 620, h: 168, color: color.value, fontSize: Math.max(24, fontSize.value + 14),
+    } as Partial<SlideElement>)
+  }
+}
+function onCardClick(f: FormulaItem) {
+  const now = Date.now()
+  // 300ms 内的同一条第二次点击 = 双击的第二下，交给 dblclick 处理
+  if (pendingKey === keyOf(f) && now - pendingAt < 300) {
+    clearTimeout(clickTimer); clickTimer = undefined; pendingKey = ''
+    return
+  }
+  clearTimeout(clickTimer)
+  pendingKey = keyOf(f); pendingAt = now
+  clickTimer = window.setTimeout(() => {
+    clickTimer = undefined; pendingKey = ''
+    appendFormula(f)
+  }, 260) as unknown as number
+}
+function onCardDblClick(f: FormulaItem) {
+  clearTimeout(clickTimer); clickTimer = undefined; pendingKey = ''
+  insertDirect(f)
+}
 
 function insert() {
   const raw = latex.value.trim()
@@ -105,7 +200,7 @@ function insert() {
   emit('close')
 }
 function clearAll() { latex.value = '' }
-/** 在光标处插入一个硬换行\n（混排文本里显示为换行；若在 aligned/cases 里需换行用 \\） */
+/** 在光标处插入一个硬换行（混排文本里显示为换行；若在 aligned/cases 里需换行用 \\） */
 function insertHardBreak() {
   const ta = texRef.value
   const cur = ta ? ta.selectionStart : latex.value.length
@@ -121,38 +216,77 @@ function insertHardBreak() {
     <div class="panel">
       <header class="panel__head">
         <strong>组合公式</strong>
+        <span class="panel__sub">左边写 / 贴 LaTeX，右边点选预制公式</span>
         <button class="panel__close" @click="emit('close')">✕</button>
       </header>
 
-      <div class="panel__body">
-        <div class="lbl lbl--row">
-          <span>公式内容 <em>（支持复制粘贴多段 LaTeX）</em></span>
-          <span class="lbl__tools">
-            <button class="chip chip--xs" title="在光标处插入硬换行（回车）" @click="insertHardBreak">⏎ 硬换行</button>
-            <label class="chk"><input type="checkbox" v-model="multiLine" /> 多行显示</label>
-            <label class="chk"><input type="checkbox" v-model="autoWrap" /> 自动换行</label>
-          </span>
-        </div>
-        <textarea ref="texRef" class="latex" v-model="latex" rows="4" placeholder="粘贴标准 LaTeX 公式，如 \frac{x^2}{a^2}+\frac{y^2}{b^2}=1 或带定界符的 $$...$$ / \[...\]：组合成一个公式块。"></textarea>
+      <div class="panel__main">
+        <!-- 左栏：原有布局保持不变 -->
+        <div class="panel__body">
+          <div class="lbl lbl--row">
+            <span>公式内容 <em>（支持复制粘贴多段 LaTeX）</em></span>
+            <span class="lbl__tools">
+              <button class="chip chip--xs" title="在光标处插入硬换行（回车）" @click="insertHardBreak">⏎ 硬换行</button>
+              <label class="chk"><input type="checkbox" v-model="multiLine" /> 多行显示</label>
+              <label class="chk"><input type="checkbox" v-model="autoWrap" /> 自动换行</label>
+            </span>
+          </div>
+          <textarea ref="texRef" class="latex" v-model="latex" rows="4" placeholder="粘贴标准 LaTeX 公式，或点击右侧公式库自动填入（可连点多个，逐行排列）。"></textarea>
 
-        <div class="lbl">实时预览 <em>（与原式同色 / 同字号）</em></div>
-        <div ref="previewHost" class="prev" :style="previewStyle"></div>
+          <div class="lbl">实时预览 <em>（与原式同色 / 同字号）</em></div>
+          <div ref="previewHost" class="prev" :style="previewStyle"></div>
 
-        <div class="ctrls">
-          <div class="ctrl"><span class="ctrl__lbl">颜色</span><ColorSwatches compact :extra="MATH_COLORS" :model-value="color" @update:model-value="(v) => color = v" /></div>
-          <div class="ctrl"><span class="ctrl__lbl">背景</span><ColorSwatches compact allow-transparent :extra="BG_COLORS" :model-value="bgColor" @update:model-value="(v) => bgColor = v" /></div>
-          <div class="ctrl ctrl--inline"><span class="ctrl__lbl">字号</span>
-            <div class="size"><input type="number" v-model.number="fontSize" min="8" max="60" /><em>px</em></div>
-            <span class="ctrl__lbl ctrl__lbl--sub">字体</span>
-            <select v-model="fontFamily" class="fontsel"><option v-for="f in FONT_OPTIONS" :key="f.v" :value="f.v">{{ f.label }}</option></select>
+          <div class="ctrls">
+            <div class="ctrl"><span class="ctrl__lbl">颜色</span><ColorSwatches compact :extra="MATH_COLORS" :model-value="color" @update:model-value="(v) => color = v" /></div>
+            <div class="ctrl"><span class="ctrl__lbl">背景</span><ColorSwatches compact allow-transparent :extra="BG_COLORS" :model-value="bgColor" @update:model-value="(v) => bgColor = v" /></div>
+            <div class="ctrl ctrl--inline"><span class="ctrl__lbl">字号</span>
+              <div class="size"><input type="number" v-model.number="fontSize" min="8" max="60" /><em>px</em></div>
+              <span class="ctrl__lbl ctrl__lbl--sub">字体</span>
+              <select v-model="fontFamily" class="fontsel"><option v-for="f in FONT_OPTIONS" :key="f.v" :value="f.v">{{ f.label }}</option></select>
+            </div>
+          </div>
+
+          <div class="lbl">预设组合 <em>（点击填入上方输入框）</em></div>
+          <div class="chips">
+            <button v-for="p in PRESETS" :key="p.label" class="chip" @click="latex = p.latex">{{ p.label }}</button>
           </div>
         </div>
 
-        <div class="lbl">预设组合 <em>（点击填入上方输入框）</em></div>
-        <div class="chips">
-          <button v-for="p in PRESETS" :key="p.label" class="chip" @click="latex = p.latex">{{ p.label }}</button>
-        </div>
+        <!-- 右栏：预制公式库（带滚动条） -->
+        <aside class="panel__lib">
+          <div class="lib__head">
+            <span class="lib__title">预制公式库 <em>{{ libVisible.length }} 条</em></span>
+          </div>
+          <div class="lib__search">
+            <svg viewBox="0 0 24 24" width="14" height="14" class="lib__search-icon"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <input v-model="libQuery" class="lib__search-input" placeholder="搜索：正弦 / 方差 / 集合…" />
+            <button v-if="libQuery" class="lib__search-clear" @click="libQuery = ''">×</button>
+          </div>
+          <select v-model="libKey" class="lib__cat" :disabled="!!libQuery || !!libTag">
+            <option v-for="c in FORMULA_LIBRARY" :key="c.key" :value="c.key">{{ c.icon }} {{ c.name }}（{{ c.formulas.length }}）</option>
+          </select>
+          <div class="lib__tags">
+            <button class="libtag" :class="{ 'libtag--on': libTag === '' }" @click="libTag = ''">全部</button>
+            <button v-for="t in FORMULA_TAGS" :key="t" class="libtag" :class="{ 'libtag--on': libTag === t }" @click="libTag = (libTag === t ? '' : t)">{{ t }}</button>
+          </div>
 
+          <div ref="libWrap" class="lib__list">
+            <button
+              v-for="f in libVisible"
+              :key="libKey + f.latex"
+              class="lcard"
+              :title="(f.note ? f.label + ' —— ' + f.note : f.label) + '\n单击：填入左侧输入框　双击：直接插入当前页'"
+              @click="onCardClick(f)"
+              @dblclick="onCardDblClick(f)"
+            >
+              <span class="lcard__pv" :data-latex="f.latex"></span>
+              <span class="lcard__label">{{ f.label }}</span>
+            </button>
+            <div v-if="!libVisible.length" class="lib__empty">没有匹配的公式，换个关键词试试</div>
+          </div>
+
+          <div class="lib__hint">单击 = 填入左侧输入框（可连点多个）· 双击 = 直接插入当前页</div>
+        </aside>
       </div>
 
       <footer class="panel__foot">
@@ -166,11 +300,16 @@ function insertHardBreak() {
 
 <style scoped>
 .palette { position: fixed; inset: 0; z-index: 410; background: rgba(15,18,30,0.5); display: flex; align-items: center; justify-content: center; }
-.panel { width: min(640px, 94vw); max-height: 92vh; display: flex; flex-direction: column; background: #fff; border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); overflow: hidden; }
-.panel__head { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; border-bottom: 1px solid var(--border); font-size: 15px; color: var(--text); }
-.panel__close { width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border); background: #fff; color: var(--muted); font-size: 15px; cursor: pointer; }
+.panel { width: min(1120px, 96vw); max-height: 92vh; display: flex; flex-direction: column; background: #fff; border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); overflow: hidden; }
+.panel__head { display: flex; align-items: center; gap: 10px; padding: 13px 18px; border-bottom: 1px solid var(--border); font-size: 15px; color: var(--text); }
+.panel__sub { flex: 1; font-size: 12px; font-weight: 400; color: var(--muted); }
+.panel__close { width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border); background: #fff; color: var(--muted); font-size: 15px; cursor: pointer; flex: none; }
 .panel__close:hover { background: var(--gray-50); color: var(--text); }
-.panel__body { flex: 1; overflow-y: auto; padding: 14px 18px 6px; }
+
+/* 左右两栏；各自滚动 */
+.panel__main { display: flex; flex: 1; min-height: 0; }
+.panel__body { flex: 1; min-width: 0; overflow-y: auto; padding: 14px 18px 6px; }
+
 .lbl { font-size: 12px; color: var(--muted); margin: 12px 0 6px; font-weight: 600; }
 .lbl em { font-weight: 400; color: #aaa; }
 /* 标签行右侧放"硬换行 + 两个选项"，省掉独立的一行，输入框紧贴预览 */
@@ -199,9 +338,57 @@ function insertHardBreak() {
 .fontsel { padding: 5px 8px; border: 1px solid #dcdce6; border-radius: 6px; font-size: 13px; }
 .prev { border: 1px solid #e8e8f0; border-radius: 10px; padding: 14px 16px; min-height: 78px; line-height: 1.7; word-break: break-word; overflow: visible; background: linear-gradient(#fbfbfe, #f7f7fd); box-shadow: inset 0 1px 2px rgba(20, 24, 34, 0.04); }
 .prev .ph { color: #bbb; font-size: 13px; }
+
+/* ---- 右侧预制公式库 ---- */
+.panel__lib {
+  width: 396px; flex: none; min-height: 0;
+  display: flex; flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: linear-gradient(#fcfcff, #fafafd);
+}
+.lib__head { padding: 12px 14px 6px; }
+.lib__title { font-size: 13px; font-weight: 600; color: var(--text); }
+.lib__title em { font-style: normal; font-weight: 400; font-size: 11.5px; color: var(--muted); margin-left: 4px; }
+.lib__search { display: flex; align-items: center; gap: 7px; margin: 0 14px 6px; padding: 6px 10px; border: 1px solid #e7e7ef; border-radius: 9px; background: #fff; }
+.lib__search-icon { color: #9a9aa4; flex: none; }
+.lib__search-input { flex: 1; min-width: 0; border: none; background: transparent; font-size: 12.5px; color: var(--text); outline: none; }
+.lib__search-input::placeholder { color: #b4b4be; }
+.lib__search-clear { border: none; background: #ececf3; color: #6b6b78; width: 18px; height: 18px; border-radius: 50%; cursor: pointer; font-size: 12px; line-height: 1; flex: none; }
+.lib__cat { margin: 0 14px 6px; padding: 5px 8px; border: 1px solid #e7e7ef; border-radius: 8px; font-size: 12.5px; color: var(--text); background: #fff; }
+.lib__cat:disabled { opacity: 0.55; }
+.lib__tags { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 14px 8px; }
+.libtag { padding: 2px 9px; border: 1px solid #e2dff0; background: #fff; border-radius: 999px; font-size: 11px; color: #6b6880; cursor: pointer; }
+.libtag:hover { background: var(--brand-soft); border-color: var(--brand-300); }
+.libtag--on { background: var(--brand-600); border-color: var(--brand-600); color: #fff; }
+
+.lib__list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 12px 8px; display: flex; flex-direction: column; gap: 5px; }
+.lcard {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 5px 8px 5px 6px; border: 1px solid #eeeef5; border-radius: 9px; background: #fff;
+  cursor: pointer; text-align: left;
+  transition: border-color .12s, box-shadow .12s, background .12s, transform .12s;
+}
+.lcard:hover { border-color: var(--brand-300); background: #fbfaff; box-shadow: 0 4px 12px rgba(124, 58, 237, 0.09); transform: translateX(-1px); }
+.lcard:active { transform: scale(0.995); }
+.lcard__pv {
+  flex: none; width: 168px; height: 46px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 7px; background: #fbfbfd; font-size: 20px;
+}
+.lcard__pv :deep(mjx-container) { display: inline-flex !important; }
+.lcard__label { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib__empty { padding: 24px 8px; text-align: center; font-size: 12px; color: #a6a6b0; }
+.lib__hint { padding: 8px 14px; border-top: 1px solid #f0f0f4; font-size: 11.5px; color: var(--muted); }
+
 .panel__foot { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--border); padding: 11px 18px; background: #fff; }
 .foot { padding: 7px 16px; border: 1px solid #dcdce6; background: #fff; border-radius: 7px; font-size: 13px; color: var(--muted); cursor: pointer; transition: background .12s; }
 .foot:hover { background: var(--gray-50); }
 .foot--primary { background: var(--brand-600); border-color: var(--brand-600); color: #fff; font-weight: 600; }
 .foot--primary:hover { background: var(--brand-700); border-color: var(--brand-700); }
+
+/* 窄屏：先保证左栏可用 */
+@media (max-width: 900px) {
+  .panel__lib { width: 320px; }
+  .lcard__pv { width: 120px; }
+}
 </style>
