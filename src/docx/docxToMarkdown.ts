@@ -46,7 +46,9 @@ export function textHeight(text: string, fontSize: number, lineHeight = 1.55): n
   }
   return Math.round(lines * fontSize * lineHeight) + 12
 }
-function lineWeight(line: string, fontPx: number): number {
+// 下面这几个是分页/分块口径，PDF 导入（src/pdf/pdfImport.ts）复用同一份，
+// 两边如果各写一套，同一个文档换个入口进来分页就会不一样。
+export function lineWeight(line: string, fontPx: number): number {
   const t = line.trim()
   if (!t) return 0
   if (t.startsWith('![')) return 540
@@ -58,10 +60,10 @@ function lineWeight(line: string, fontPx: number): number {
   }
   return textHeight(t, fontPx) + 20
 }
-function isQuestionStart(line: string): boolean {
+export function isQuestionStart(line: string): boolean {
   return /^[0-9]{1,3}\s*[.、．]/.test(line.trim())
 }
-function isHeadingLine(line: string): boolean {
+export function isHeadingLine(line: string): boolean {
   return /^#{1,6} /.test(line)
 }
 
@@ -264,7 +266,7 @@ function tableLines(tbl: XmlNode): string[] {
 }
 
 /** 按块装箱分页：一个块整体放进当前页，放不下才换页 */
-function packPages(lines: string[], budgetPx: number, fontPx: number): string[] {
+export function packPages(lines: string[], budgetPx: number, fontPx: number): string[] {
   const items: { kind: 'block' | 'blank' | 'page'; lines?: string[]; weight?: number }[] = []
   let cur: string[] = []
   const flushCur = () => {

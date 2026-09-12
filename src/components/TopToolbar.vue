@@ -19,6 +19,8 @@ import { isTauri } from '@/composables/useTauri'
 import SettingsPanel from './SettingsPanel.vue'
 import { ICONS as I } from '@/ui/icons'
 import { docxToMarkdown } from '@/docx/docxToMarkdown'
+import PdfImportDialog from './PdfImportDialog.vue'
+import { pdfImportOpen, pdfImportFile, openPdfImport, closePdfImport } from '@/ui/pdfImport'
 import { markdownToDeck } from '@/composables/mdDeck'
 
 const store = useDeckStore()
@@ -72,6 +74,17 @@ function onDeckJsonPicked(e: Event) {
 /** 导入 Word（.docx）：本地解析 → Markdown → 走应用自己的 Markdown 导入管线（图片内嵌成 data URL） */
 const docxInput = ref<HTMLInputElement | null>(null)
 function pickDocx() { fileOpen.value = false; docxInput.value?.click() }
+/** 导入 PDF：先弹窗探测（有没有文本层）再决定怎么导 */
+const pdfInput = ref<HTMLInputElement | null>(null)
+function pickPdf() { fileOpen.value = false; pdfInput.value?.click() }
+function onPdfPicked(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (file) openPdfImport(file)
+}
+function onPdfDone(msg: string) { fileToast.value = msg; flashToast() }
+
 async function onDocxPicked(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
@@ -544,6 +557,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           <button class="dropdown__item" title="Markdown 源码：导出或导入（--- 横向 / -- 垂直 / Note: 备注）" @click="setViewMode('split')"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>MD 源码（导出/导入 Markdown）</button>
           <button class="dropdown__item" title="导入之前导出的演示 JSON（.json）" @click="pickDeckJson"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>导入演示 JSON</button>
         <button class="dropdown__item" title="导入 Word 文档（.docx）：本地解析、图片内嵌，一题一页" @click="pickDocx"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>导入 Word 文档（.docx）</button>
+        <button class="dropdown__item" title="导入 PDF（.pdf）：自动判断有没有文本层 —— 有就抽成可编辑文字，没有就每页一张图" @click="pickPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导入 PDF（.pdf）</button>
         </div>
       </div>
     </div>
@@ -613,6 +627,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
       <input ref="imgFileInput" type="file" accept="image/*" style="display:none" @change="onImgPicked" />
       <input ref="deckJsonInput" type="file" accept=".json,application/json" style="display:none" @change="onDeckJsonPicked" />
     <input ref="docxInput" type="file" accept=".docx" style="display:none" @change="onDocxPicked" />
+    <input ref="pdfInput" type="file" accept=".pdf,application/pdf" style="display:none" @change="onPdfPicked" />
 
       <!-- 公式下拉：混排公式（粘贴 LaTeX）/ 空白公式 -->
       <div ref="formulaWrap" class="dropdown">
@@ -737,6 +752,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
     </div>
   </header>
 
+  <PdfImportDialog v-if="pdfImportOpen && pdfImportFile" :file="pdfImportFile" @close="closePdfImport()" @done="onPdfDone" />
   <SymbolPalette v-if="symbolOpen" @close="symbolOpen = false" />
   <MathFigurePalette v-if="figOpen" @close="figOpen = false" />
   <IconPalette v-if="iconOpen" @close="iconOpen = false" />
