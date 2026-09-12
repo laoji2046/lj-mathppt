@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useDeckStore } from '@/stores/deck'
+import AppIcon from './AppIcon.vue'
 import type { SlideElement } from '@/types'
 import { ICON_LIBRARY } from '@/types'
 
@@ -17,7 +18,7 @@ function insert(ic: string) {
     <div class="palette__box">
       <div class="palette__head">
         <span>图标库</span>
-        <button class="palette__close" @click="emit('close')">×</button>
+        <button class="palette__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </div>
       <div class="palette__grid">
         <button v-for="ic in ICON_LIBRARY" :key="ic" class="palette__sym" @click="insert(ic)">{{ ic }}</button>

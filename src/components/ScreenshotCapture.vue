@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type { SlideElement } from '@/types'
 
@@ -114,7 +115,7 @@ onBeforeUnmount(stopStream)
     <div class="shot__box">
       <header class="shot__head">
         <span>屏幕截图</span>
-        <button class="shot__x" @click="emit('close')">×</button>
+        <button class="shot__x" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </header>
 
       <div v-if="state === 'loading'" class="shot__state">正在等待选择要捕获的屏幕/窗口…</div>

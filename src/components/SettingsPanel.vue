@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { useDeckStore } from '@/stores/deck'
+import AppIcon from './AppIcon.vue'
+import { APP_NAME, APP_VERSION, COPYRIGHT, COPYRIGHT_NOTE } from '@/ui/appInfo'
 import { REVEAL_SPEEDS, REVEAL_THEMES, REVEAL_TRANSITIONS } from '@/types'
 
 const store = useDeckStore()
@@ -11,7 +13,7 @@ const emit = defineEmits<{ (e: 'close'): void }>()
     <div class="palette__box">
       <div class="palette__head">
         <span>设置</span>
-        <button class="palette__close" @click="emit('close')">×</button>
+        <button class="palette__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </div>
 
       <label class="field"><span>标题</span>
@@ -48,6 +50,14 @@ const emit = defineEmits<{ (e: 'close'): void }>()
       </label>
 
       <p class="hint">主题 / 字体 / 过渡 / 速度用于「▶ 演示」与导出；标题、描述为文稿元信息。改完点演示即生效。</p>
+
+      <!-- 关于 / 版权：只在设置面板里出现，「演示」与导出的 HTML / PDF 都不带 -->
+      <div class="about">
+        <span class="about__name">{{ APP_NAME }}</span>
+        <span class="about__ver">v{{ APP_VERSION }}</span>
+        <span class="about__copy">{{ COPYRIGHT }}</span>
+        <span class="about__note">{{ COPYRIGHT_NOTE }}</span>
+      </div>
     </div>
   </div>
 </template>
@@ -65,4 +75,9 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 .prop-textarea { resize: vertical; line-height: 1.5; }
 .prop-input { font-size: 13px; }
 .hint { margin-top: 10px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.about { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 12px; color: var(--muted); }
+.about__name { font-size: 13px; font-weight: 600; color: var(--text); }
+.about__ver { font-variant-numeric: tabular-nums; opacity: 0.8; }
+.about__copy, .about__note { width: 100%; line-height: 1.6; }
+.about__note { opacity: 0.85; }
 </style>

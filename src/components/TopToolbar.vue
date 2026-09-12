@@ -17,6 +17,7 @@ import VersionHistory from './VersionHistory.vue'
 import SaveAsDialog from './SaveAsDialog.vue'
 import { isTauri } from '@/composables/useTauri'
 import SettingsPanel from './SettingsPanel.vue'
+import { ICONS as I } from '@/ui/icons'
 
 const store = useDeckStore()
 const emit = defineEmits<{ (e: 'present'): void; (e: 'open-templates'): void; (e: 'open-paper'): void; (e: 'open-ggb-suite'): void }>()
@@ -396,48 +397,6 @@ const addButtons: { type: ElementType; label: string; icon: string; svg: string 
   { type: 'table', label: '表格', icon: '', svg: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>' },
 ]
 
-/** 工具栏/下拉 SVG 图标（统一样式：描边、无填充、圆头） */
-const I: Record<string, string> = {
-  file: '<path d="M4 6h16M4 12h16M4 18h16"/>',
-  templates: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
-  formula: '<path d="M18 6H7l5 6-5 6h11"/>',
-  draw: '<path d="M3 21l1.5-4.5L17 4l3 3L7.5 19.5 3 21zM15 6l3 3"/>',
-  more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
-  theme: '<rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><circle cx="17" cy="17" r="4"/>',
-  version: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  settings: '<circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/>',
-  ggb: '<path d="M4 20h16M20 4v16"/><circle cx="8" cy="15" r="1"/><circle cx="15" cy="8" r="1"/>',
-  desmos: '<path d="M4 16c2-7 5-11 8-11s6 4 8 11"/>',
-  new: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M12 14v6M9 17h6"/>',
-  save: '<path d="M12 3v10M7 9l5 4 5-4M5 19h14"/>',
-  html: '<path d="M4 5h16v13H4zM8 9l-2 2 2 2M16 9l2 2-2 2"/>',
-  pdf: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13.5h1.5a1.25 1.25 0 0 1 0 2.5H9zM9 16v2"/>',
-  png: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="M21 16l-5-5L5 19"/>',
-  paste: '<path d="M8 3h8l1 3H7zM5 3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2"/><path d="M8 11h8M8 15h8"/>',
-  blankMath: '<path d="M8 4v16M16 4v16M8 12l8-4M8 12l8 4"/>',
-  library: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/>',
-  symbol: '<path d="M18 6H7l5 6-5 6h11"/>',
-  fig: '<rect x="3" y="3" width="18" height="18" rx="2"/>',
-  icon: '<path d="M12 3l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9 6.7 19.2l1-5.8L3.5 9.3l5.9-.9z"/>',
-  img: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/>',
-  shape: '<rect x="3" y="3" width="18" height="18" rx="2"/>',
-  rect: '<rect x="4" y="6" width="16" height="12" rx="1"/>',
-  ellipse: '<ellipse cx="12" cy="12" rx="8" ry="6"/>',
-  line: '<path d="M4 20L20 4"/>',
-  arrow: '<path d="M4 20L18 6M13 5h6v6"/>',
-  capture: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 8h8v8H8z"/><circle cx="12" cy="12" r="1.4"/>',
-  pen: '<path d="M3 21l1.5-4.5L17 4l3 3L7.5 19.5 3 21zM15 6l3 3"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
-  web: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
-  embed: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 11l-2 2 2 2M16 11l2 2-2 2M13 9l-2 6"/>',
-  undo: '<path d="M4 7v5h5M4 12a8 8 0 1 0 2-5.3L4 9"/>',
-  redo: '<path d="M20 7v5h-5M20 12a8 8 0 1 1-2-5.3l2 2.3"/>',
-  fragment: '<path d="M8 5v14l10-7z"/>',
-  paper: '<path d="M6 2h8l4 4v16H6zM14 2v5h4M9 13h6M9 17h6"/>',
-  play: '<path d="M8 5l12 7-12 7z"/>',
-}
-
 /** 打开本地 .ggb：一步创建已加载内容的 GeoGebra 元素 */
 const ggbFileInput = ref<HTMLInputElement | null>(null)
 function pickGgb() {
@@ -554,14 +513,14 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           <button class="dropdown__item" title="导出独立 HTML" @click="exportHtml"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.html"></svg></span>导出 HTML</button>
           <button class="dropdown__item" title="全部页面 → 打印对话框 → 另存为 PDF（矢量文字）" @click="exportPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导出 PDF</button>
           <button class="dropdown__item" title="当前页截图为 PNG（2 倍分辨率）" @click="exportPng"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.png"></svg></span>导出 PNG（当前页）</button>
-          <button class="dropdown__item" title="Markdown 源码：导出或导入（--- 横向 / -- 垂直 / Note: 备注）" @click="setViewMode('split')"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.file"></svg></span>MD 源码（导出/导入 Markdown）</button>
+          <button class="dropdown__item" title="Markdown 源码：导出或导入（--- 横向 / -- 垂直 / Note: 备注）" @click="setViewMode('split')"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>MD 源码（导出/导入 Markdown）</button>
           <button class="dropdown__item" title="导入之前导出的演示 JSON（.json）" @click="pickDeckJson"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>导入演示 JSON</button>
         </div>
       </div>
     </div>
 
     <button class="btn" :class="{ 'btn--open': viewMode !== 'canvas' }" title="MD 源码：分屏实时预览" @click="setViewMode(viewMode === 'canvas' ? 'split' : 'canvas')">
-      <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.file"></svg></span>MD 源码
+      <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.md"></svg></span>MD 源码
     </button>
     <div class="group">
       <button v-for="b in addButtons" :key="b.type" class="btn" @click="addFromToolbar(b.type)">

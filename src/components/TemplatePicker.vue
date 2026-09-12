@@ -119,7 +119,7 @@ function applyBundle(id: string) {
       <header class="panel__head">
         <div class="panel__title">模板库</div>
         <span class="panel__hint">{{ modeHint }}</span>
-        <button class="panel__close" title="关闭 (Esc)" @click="$emit('close')">✕</button>
+        <button class="panel__close" title="关闭 (Esc)" @click="$emit('close')"><AppIcon name="close" :size="13" /></button>
       </header>
 
       <div class="panel__tabs">

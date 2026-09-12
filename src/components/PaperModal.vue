@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import AppIcon from './AppIcon.vue'
 import { loadMathJax } from '@/composables/useMathJax'
 import { imagesDir, isTauri, readLocalImage } from '@/composables/useTauri'
 
@@ -776,7 +777,7 @@ watch([headerText, footerText], () => render())
       <div class="pm__box">
         <header class="pm__head">
           <span>试卷 / 讲义模式（A4）</span>
-          <button class="pm__x" @click="emit('close')" title="关闭">✕</button>
+          <button class="pm__x" @click="emit('close')" title="关闭"><AppIcon name="close" :size="13" /></button>
         </header>
         <div class="pm__body">
           <div class="pm__split">
@@ -893,9 +894,9 @@ watch([headerText, footerText], () => render())
             </div>
             <div class="pm__right">
               <div class="pm__zoom">
-                <button @click="zoomBy(-0.1)">−</button>
+                <button @click="zoomBy(-0.1)"><AppIcon name="minus" :size="14" /></button>
                 <span>{{ Math.round(zoom * 100) }}%</span>
-                <button @click="zoomBy(0.1)">＋</button>
+                <button @click="zoomBy(0.1)"><AppIcon name="plus" :size="14" /></button>
                 <button @click="zoomReset">重置</button>
               </div>
               <div ref="a4El" class="pm__a4"></div>
@@ -908,7 +909,7 @@ watch([headerText, footerText], () => render())
       <div class="pm__helpbox">
         <header class="pm__helphead">
           <strong>试卷 / 讲义 · 语法帮助</strong>
-          <button class="pm__x" @click="helpOpen = false">✕</button>
+          <button class="pm__x" @click="helpOpen = false"><AppIcon name="close" :size="13" /></button>
         </header>
         <div class="pm__helpbody">
           <div v-for="sec in HELP" :key="sec.title" class="pm__helpsec">
@@ -918,7 +919,7 @@ watch([headerText, footerText], () => render())
               <p class="pm__helpdesc">{{ e.desc }}</p>
             </div>
           </div>
-          <button class="pm__btn pm__btn--primary" style="margin-top:12px" @click="loadHelpDemo">📋 载入示例内容到编辑区</button>
+          <button class="pm__btn pm__btn--primary" style="margin-top:12px" @click="loadHelpDemo"><AppIcon name="load" :size="14" /> 载入示例内容到编辑区</button>
         </div>
       </div>
     </div>

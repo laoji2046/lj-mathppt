@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type { SlideElement } from '@/types'
 
@@ -124,7 +125,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     <div class="ie__box">
       <header class="ie__head">
         <div class="ie__title"><span class="ie__badge">✂</span> 图片编辑器</div>
-        <button class="ie__close" @click="emit('close')">✕</button>
+        <button class="ie__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </header>
       <div class="ie__body">
         <div class="ie__left">
@@ -140,7 +141,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             <div class="ie__label">旋转 / 翻转</div>
             <div class="ie__row">
               <button class="ie__btn" @click="rot90(-90)">⟲ 左转90°</button>
-              <button class="ie__btn" @click="rot90(90)">⟳ 右转90°</button>
+              <button class="ie__btn" @click="rot90(90)"><AppIcon name="rotate" :size="14" /> 右转90°</button>
               <button class="ie__btn" :class="{ 'ie__btn--on': flipH }" @click="onFlip('h')">⇆ 水平翻转</button>
               <button class="ie__btn" :class="{ 'ie__btn--on': flipV }" @click="onFlip('v')">⇅ 垂直翻转</button>
             </div>

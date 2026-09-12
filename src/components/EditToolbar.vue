@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { ICONS as ICON } from '@/ui/icons'
 import { useDeckStore } from '@/stores/deck'
 import type { AlignMode, DistributeAxis, ZOrderAction } from '@/types'
 
@@ -14,23 +15,6 @@ const canDistribute = computed(() => n.value >= 3)
 const canGroup = computed(() => n.value >= 2)
 const canUngroup = computed(() => store.selectedElements.some((e) => !!e.groupId))
 
-/** 图标路径（24×24，描边式，与顶部工具栏同源风格） */
-const ICON = {
-  group: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M14 10.5h4.5V6"/>',
-  ungroup: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M14 10.5h4.5V6"/><path d="M4 20L20 4"/>',
-  alignLeft: '<path d="M3 3v18"/><rect x="6" y="6" width="12" height="4" rx="1"/><rect x="6" y="14" width="8" height="4" rx="1"/>',
-  alignHCenter: '<path d="M12 2v20"/><rect x="4" y="6" width="16" height="4" rx="1"/><rect x="7" y="14" width="10" height="4" rx="1"/>',
-  alignRight: '<path d="M21 3v18"/><rect x="6" y="6" width="12" height="4" rx="1"/><rect x="10" y="14" width="8" height="4" rx="1"/>',
-  alignTop: '<path d="M3 3h18"/><rect x="6" y="6" width="4" height="12" rx="1"/><rect x="14" y="6" width="4" height="8" rx="1"/>',
-  alignVCenter: '<path d="M2 12h20"/><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="7" width="4" height="10" rx="1"/>',
-  alignBottom: '<path d="M3 21h18"/><rect x="6" y="6" width="4" height="12" rx="1"/><rect x="14" y="10" width="4" height="8" rx="1"/>',
-  distH: '<path d="M2 4v16M22 4v16"/><rect x="7" y="7" width="4" height="10" rx="1"/><rect x="15" y="7" width="4" height="10" rx="1"/>',
-  distV: '<path d="M4 2h16M4 22h16"/><rect x="7" y="7" width="10" height="4" rx="1"/><rect x="7" y="15" width="10" height="4" rx="1"/>',
-  toFront: '<rect x="3" y="3" width="12" height="12" rx="2"/><path d="M9 21h10a2 2 0 0 0 2-2V9"/>',
-  toBack: '<path d="M3 9v10a2 2 0 0 0 2 2h10"/><rect x="9" y="3" width="12" height="12" rx="2"/>',
-  forward: '<path d="M12 4v9M8 8l4-4 4 4"/><rect x="3" y="15" width="18" height="5" rx="1.5"/>',
-  backward: '<path d="M12 20v-9M8 16l4 4 4-4"/><rect x="3" y="4" width="18" height="5" rx="1.5"/>',
-}
 
 const aligns: { mode: AlignMode; icon: string; tip: string }[] = [
   { mode: 'left',    icon: ICON.alignLeft,    tip: '左对齐' },

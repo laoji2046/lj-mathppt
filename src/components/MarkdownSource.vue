@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import { deckToMarkdown, markdownToDeck } from '@/composables/mdDeck'
 import type { Deck } from '@/types'
@@ -30,7 +31,7 @@ onMounted(exportFromDeck)
     <div class="md__box">
       <header class="md__head">
         <div class="md__title"><span class="md__badge">MD</span> Markdown 源码（Reveal 规范：--- 横向 / -- 垂直 / Note: 备注）</div>
-        <button class="md__x" @click="emit('close')">✕</button>
+        <button class="md__x" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </header>
       <textarea v-model="src" class="md__area" spellcheck="false" placeholder="# 标题&#10;$$公式$$&#10;&#10;正文文本&#10;&#10;---&#10;## 子页&#10;--&#10;垂直子页&#10;&#10;Note: 备注"></textarea>
       <div class="md__foot">

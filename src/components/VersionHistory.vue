@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 
 const store = useDeckStore()
@@ -20,7 +21,7 @@ function fmt(t: number) {
     <div class="palette__box">
       <div class="palette__head">
         <span>版本历史</span>
-        <button class="palette__close" @click="emit('close')">×</button>
+        <button class="palette__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </div>
       <div class="ver-save">
         <input v-model="label" class="ver-input" placeholder="给当前版本起个名字（可选）" @keydown.enter="save" />

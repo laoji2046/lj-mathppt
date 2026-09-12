@@ -5,6 +5,7 @@
  * 做一个可浏览、可切换目录的文件夹选择器，用户自己决定存到哪个目录。
  */
 import { computed, onMounted, ref } from 'vue'
+import AppIcon from './AppIcon.vue'
 import { listDir, userDirs, saveTextToDir, type DirEntry } from '@/composables/useTauri'
 
 const props = defineProps<{ name: string; text: string }>()
@@ -65,7 +66,7 @@ onMounted(async () => {
     <div class="palette__box">
       <div class="palette__head">
         <span>另存为</span>
-        <button class="palette__close" @click="emit('close')">×</button>
+        <button class="palette__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </div>
 
       <div v-if="quick.length" class="sa-quick">
@@ -74,7 +75,7 @@ onMounted(async () => {
 
       <div class="sa-path">
         <input v-model="pathInput" class="sa-input" spellcheck="false" placeholder="目录路径（可直接粘贴，回车跳转）" @keydown.enter="go(pathInput)" />
-        <button class="sa-btn" :disabled="!parent" title="上一级目录" @click="go(parent)">↑ 上级</button>
+        <button class="sa-btn" :disabled="!parent" title="上一级目录" @click="go(parent)"><AppIcon name="up" :size="13" /> 上级</button>
         <button class="sa-btn" title="跳转到输入的目录" @click="go(pathInput)">转到</button>
       </div>
 
@@ -82,7 +83,7 @@ onMounted(async () => {
         <div v-if="loading" class="sa-hint">读取中…</div>
         <div v-else-if="!dirs.length" class="sa-hint">该目录下没有子文件夹（也可以直接点下面的「保存」存到当前目录）</div>
         <button v-for="d in dirs" :key="d" class="sa-dir" @click="enter(d)">
-          <span class="sa-dir__ico">📁</span>{{ d }}
+          <span class="sa-dir__ico"><AppIcon name="folder" :size="14" /></span>{{ d }}
         </button>
       </div>
 

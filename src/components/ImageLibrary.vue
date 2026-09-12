@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type { SlideElement } from '@/types'
 
@@ -65,7 +66,7 @@ onMounted(loadRandom)
     <div class="palette__box">
       <div class="palette__head">
         <span>在线图片库</span>
-        <button class="palette__close" @click="emit('close')">×</button>
+        <button class="palette__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </div>
 
       <div class="lib-search">
@@ -83,7 +84,7 @@ onMounted(loadRandom)
         <button v-for="t in thumbs" :key="t.id" class="thumb" :class="{ 'thumb--fail': t.failed }" @click="t.ok && (preview = t.full)">
           <img v-if="t.ok" :src="t.url" class="thumb__img" loading="lazy" alt="" draggable="false" @error="onErr(t)" />
           <div v-else class="thumb__ph">加载失败</div>
-          <span class="thumb__add">＋</span>
+          <span class="thumb__add"><AppIcon name="plus" :size="22" /></span>
         </button>
       </div>
 

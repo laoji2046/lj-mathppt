@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useDeckStore } from '@/stores/deck'
 import { useContextMenu, type MenuItem } from '@/composables/useContextMenu'
 import SlideThumb from './SlideThumb.vue'
+import AppIcon from './AppIcon.vue'
 
 const store = useDeckStore()
 const { openMenu } = useContextMenu()
@@ -74,14 +75,14 @@ function onSlideCtx(i: number, e: MouseEvent) {
         <SlideThumb :slide="s" :width="THUMB_W" />
       </div>
       <div class="slide-tools">
-        <button class="slide-tool" title="复制此页" @click.stop="store.copySlide(i)">⧉</button>
-        <button class="slide-tool" title="上移" :disabled="i === 0" @click.stop="store.moveSlide(i, -1)">↑</button>
-        <button class="slide-tool" title="下移" :disabled="i === store.slideCount - 1" @click.stop="store.moveSlide(i, 1)">↓</button>
-        <button v-if="store.slideCount > 1" class="slide-tool slide-tool--del" title="删除此页" @click.stop="store.removeSlide(i)">×</button>
+        <button class="slide-tool" title="复制此页" @click.stop="store.copySlide(i)"><AppIcon name="copy" :size="13" /></button>
+        <button class="slide-tool" title="上移" :disabled="i === 0" @click.stop="store.moveSlide(i, -1)"><AppIcon name="up" :size="13" /></button>
+        <button class="slide-tool" title="下移" :disabled="i === store.slideCount - 1" @click.stop="store.moveSlide(i, 1)"><AppIcon name="down" :size="13" /></button>
+        <button v-if="store.slideCount > 1" class="slide-tool slide-tool--del" title="删除此页" @click.stop="store.removeSlide(i)"><AppIcon name="trash" :size="13" /></button>
       </div>
     </div>
 
-    <button class="add-slide" @click="store.addSlide()">+ 新页面</button>
+    <button class="add-slide" @click="store.addSlide()"><AppIcon name="plus" :size="14" /> 新页面</button>
   </div>
 </template>
 

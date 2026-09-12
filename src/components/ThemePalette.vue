@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useDeckStore } from '@/stores/deck'
+import AppIcon from './AppIcon.vue'
 import { THEMES } from '@/types'
 
 const store = useDeckStore()
@@ -16,7 +17,7 @@ function apply(id: string) {
     <div class="palette__box">
       <div class="palette__head">
         <span>主题</span>
-        <button class="palette__close" @click="emit('close')">×</button>
+        <button class="palette__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </div>
       <div class="thm-grid">
         <button

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useDeckStore } from '@/stores/deck'
+import AppIcon from './AppIcon.vue'
 import { MATH_SYMBOLS } from '@/types'
 
 const store = useDeckStore()
@@ -16,7 +17,7 @@ function insert(s: string) {
     <div class="palette__box">
       <div class="palette__head">
         <span>数学符号</span>
-        <button class="palette__close" @click="emit('close')">×</button>
+        <button class="palette__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </div>
       <div class="palette__grid">
         <button v-for="s in MATH_SYMBOLS" :key="s" class="palette__sym" @click="insert(s)">{{ s }}</button>

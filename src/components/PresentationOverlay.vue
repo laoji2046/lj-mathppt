@@ -419,9 +419,9 @@ watch(
       </button>
       <span class="pc-sep"></span>
       <button class="dw dw--txt" @click="undoDraw" title="撤销">↩</button>
-      <button class="dw dw--txt" @click="clearDraw" title="清空">🗑</button>
+      <button class="dw dw--txt" @click="clearDraw" title="清空"><AppIcon name="trash" :size="15" /></button>
       <span class="pc-sep"></span>
-      <button class="dw dw--txt dw--close" @click="setDraw(false)" title="退出批注（画笔）模式">✕</button>
+      <button class="dw dw--txt dw--close" @click="setDraw(false)" title="退出批注（画笔）模式"><AppIcon name="close" :size="13" /></button>
     </div>
 
     <!-- 激光笔色板 -->
@@ -432,28 +432,28 @@ watch(
         <span class="dw-wline" :style="{ height: w + 'px' }"></span>
       </button>
       <span class="pc-sep"></span>
-      <button class="dw dw--txt" @click="clearLaser()" title="清空激光笔画迹">🗑</button>
+      <button class="dw dw--txt" @click="clearLaser()" title="清空激光笔画迹"><AppIcon name="trash" :size="15" /></button>
       <span class="pc-sep"></span>
-      <button class="dw dw--txt dw--close" @click="setLaser(false)" title="退出激光笔模式">✕</button>
+      <button class="dw dw--txt dw--close" @click="setLaser(false)" title="退出激光笔模式"><AppIcon name="close" :size="13" /></button>
     </div>
 
     <!-- 备注面板 -->
     <div v-if="notesOpen" class="present__notes present__ui">
-      <div class="present__notes-head">备注 <button class="present__notes-x" @click="notesOpen = false">×</button></div>
+      <div class="present__notes-head">备注 <button class="present__notes-x" @click="notesOpen = false"><AppIcon name="close" :size="13" /></button></div>
       <div class="present__notes-body">{{ currentNotes || '（本页暂无备注）' }}</div>
     </div>
 
     <!-- 演讲者视图（备注 + 计时 + 上一张/下一张预览） -->
     <div v-if="speakerOpen" class="present__speaker present__ui" :style="{ opacity: speakerOpacity }">
       <header class="present__speaker-head">
-        <span class="present__speaker-title">📝 演讲者备注</span>
+        <span class="present__speaker-title">演讲者备注</span>
         <span class="present__speaker-tools">
           <span class="sp-op"><input type="range" min="0.2" max="1" step="0.05" v-model.number="speakerOpacity" title="视图透明度" /><b>{{ Math.round(speakerOpacity * 100) }}%</b></span>
           <b class="present__speaker-timer">{{ fmt(speakerSec) }}</b>
-          <button class="sp-tbtn" :title="speakerPaused ? '继续' : '暂停'" @click="speakerPaused = !speakerPaused">{{ speakerPaused ? '▶' : '⏸' }}</button>
-          <button class="sp-tbtn" title="重置计时" @click="speakerSec = 0">↻</button>
+          <button class="sp-tbtn" :title="speakerPaused ? '继续' : '暂停'" @click="speakerPaused = !speakerPaused"><AppIcon :name="speakerPaused ? 'play' : 'pause'" :size="14" /></button>
+          <button class="sp-tbtn" title="重置计时" @click="speakerSec = 0"><AppIcon name="rotate" :size="14" /></button>
         </span>
-        <button class="present__speaker-x" title="关闭演讲者视图" @click="toggleSpeaker">✕</button>
+        <button class="present__speaker-x" title="关闭演讲者视图" @click="toggleSpeaker"><AppIcon name="close" :size="13" /></button>
       </header>
       <div class="present__speaker-body">
         <button class="sp-card" @click="navPrev" :disabled="!prevSlide">

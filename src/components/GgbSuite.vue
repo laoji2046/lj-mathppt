@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import AppIcon from './AppIcon.vue'
 import type { SlideElement } from '@/types'
 import { useDeckStore } from '@/stores/deck'
 import { hasLocalEngine, loadGeoGebra } from '@/composables/useGeoGebra'
@@ -184,15 +185,15 @@ onBeforeUnmount(() => { if (host.value) host.value.innerHTML = ''; clearTimeout(
       <div class="ggbs__box">
         <header class="ggbs__head">
           <span>GeoGebra 套件 · 作图器</span>
-          <button class="ggbs__x" @click="emit('close')" title="关闭">✕</button>
+          <button class="ggbs__x" @click="emit('close')" title="关闭"><AppIcon name="close" :size="13" /></button>
         </header>
         <div class="ggbs__body">
           <div class="ggbs__bar">
             <select v-model="app" class="ggbs__sel" @change="onOptionChange('app')">
               <option value="classic">🧩 经典套件（全功能）</option>
-              <option value="graphing">📈 图形计算器</option>
-              <option value="geometry">📐 几何</option>
-              <option value="scientific">🔢 科学计算器</option>
+              <option value="graphing">图形计算器</option>
+              <option value="geometry">几何</option>
+              <option value="scientific">科学计算器</option>
               <option value="3d">🧊 3D 计算器</option>
             </select>
 
@@ -213,7 +214,7 @@ M 是 AB 的中点
         <footer class="ggbs__foot">
           <span v-if="notice" class="ggbs__notice">{{ notice }}</span>
           <button class="ggbs__btn" @click="emit('close')">关闭</button>
-          <button class="ggbs__btn" @click="save">💾 保存为 .ggb</button>
+          <button class="ggbs__btn" @click="save"><AppIcon name="save" :size="14" /> 保存为 .ggb</button>
           <button class="ggbs__btn ggbs__btn--primary" @click="apply">{{ props.editId ? '更新当前页' : '插入当前页' }}</button>
         </footer>
       </div>

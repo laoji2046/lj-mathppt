@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import AppIcon from './AppIcon.vue'
+import { COPYRIGHT } from '@/ui/appInfo'
 import { useDeckStore } from '@/stores/deck'
 import { useStageScale } from '@/composables/useStageScale'
 import { useDragResize, type DragItem, type Handle } from '@/composables/useDragResize'
@@ -513,12 +515,14 @@ defineExpose({ resetView })
         {{ store.drawTool === 'line' ? '绘制直线' : store.drawTool === 'arrow' ? '绘制箭头' : store.drawTool === 'pen' ? '画笔' : '画多边形' }}：{{ store.drawTool === 'poly' ? '点击放角点，双击或点首点闭合，Esc 取消' : '在画布空白处拖拽，Esc 取消' }}
       </span>
       <span v-else class="hud__tip">空格/中键拖动可平移</span>
+      <!-- 版权信息：只出现在编辑器里。演示状态整块被全屏覆盖，这里再显式收口一次 -->
+      <span v-if="!presenting" class="hud__copy">{{ COPYRIGHT }}</span>
     </div>
 
     <!-- 快捷加页：右侧=在当前页后新增一页，底部=在当前页后新增子页；点击打开模板库选模板（「空白模板」= 空白页） -->
     <template v-if="!presenting">
-      <button class="add-page-btn add-page-btn--right" title="新增页：打开模板库（含空白页）" @click="openTemplateLibrary('add')">＋</button>
-      <button class="add-page-btn add-page-btn--bottom" title="新增子页：打开模板库（含空白子页）" @click="openTemplateLibrary('addSub')">＋</button>
+      <button class="add-page-btn add-page-btn--right" title="新增页：打开模板库（含空白页）" @click="openTemplateLibrary('add')"><AppIcon name="plus" :size="20" /></button>
+      <button class="add-page-btn add-page-btn--bottom" title="新增子页：打开模板库（含空白子页）" @click="openTemplateLibrary('addSub')"><AppIcon name="plus" :size="20" /></button>
     </template>
   </div>
 </template>
@@ -661,6 +665,8 @@ defineExpose({ resetView })
   color: var(--brand-700);
 }
 .hud__tip { font-size: 11.5px; color: var(--muted); padding-right: 7px; }
+/* 版权：贴状态栏右端（hud 是 flex，margin-left:auto 顶到最右）；演示时不渲染 */
+.hud__copy { margin-left: 14px; padding-right: 7px; font-size: 11px; color: var(--muted); opacity: 0.9; white-space: nowrap; }
 .hud__tip--draw { color: var(--brand-700); font-weight: 600; }
 
 /* ---------- 快捷加页 ---------- */

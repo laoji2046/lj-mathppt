@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type {
   ArrowElement, ChartElement, ChartType, DesmosElement, EmbedElement, EmbedKind, GeoGebraElement,
@@ -509,10 +510,10 @@ function layerTypeLabel(type: string) {
           <div class="field__row">
             <input type="number" :value="Math.round(st.at * 100)" @input="setBgGradStop(i, 'at', num(($event.target as HTMLInputElement).value, 0) / 100)" />
             <ColorSwatches :model-value="st.color" @update:model-value="(v) => setBgGradStop(i, 'c', v)" />
-            <button v-if="(store.currentSlide?.bgGradient?.stops.length ?? 0) > 2" class="panel__mini" @click="removeBgGradStop(i)">✕</button>
+            <button v-if="(store.currentSlide?.bgGradient?.stops.length ?? 0) > 2" class="panel__mini" @click="removeBgGradStop(i)"><AppIcon name="minus" :size="13" /></button>
           </div>
         </label>
-        <button class="quick__btn" style="width:100%;margin-top:4px" @click="addBgGradStop">＋ 加渐变停靠点</button>
+        <button class="quick__btn" style="width:100%;margin-top:4px" @click="addBgGradStop"><AppIcon name="plus" :size="13" /> 加渐变停靠点</button>
       </template>
       <label v-if="slideBgKind === 'image'" class="field"><span>背景图地址</span>
         <input type="text" :value="store.currentSlide?.bgImage || ''" placeholder="https://… 或 dataURL" @input="store.setSlideBgImage(($event.target as HTMLInputElement).value)" />
@@ -722,10 +723,10 @@ function layerTypeLabel(type: string) {
             <div class="field__row">
               <input type="number" :value="Math.round(s.at * 100)" @input="setGradStopAt(i, num(($event.target as HTMLInputElement).value, 0) / 100)" />
               <ColorSwatches :model-value="s.color" @update:model-value="(v) => setGradStopColor(i, v)" />
-              <button v-if="textGrad.stops.length > 2" class="panel__mini" @click="removeGradStop(i)">✕</button>
+              <button v-if="textGrad.stops.length > 2" class="panel__mini" @click="removeGradStop(i)"><AppIcon name="minus" :size="13" /></button>
             </div>
           </label>
-          <button class="quick__btn" style="width:100%;margin-top:4px" @click="addGradStop">＋ 加渐变停靠点</button>
+          <button class="quick__btn" style="width:100%;margin-top:4px" @click="addGradStop"><AppIcon name="plus" :size="13" /> 加渐变停靠点</button>
         </template>
         <label class="field"><span>描边宽 (px)</span>
           <input type="number" :value="text?.textStroke?.width || 0" @input="setTextStrokeWidth(num(($event.target as HTMLInputElement).value, 0))" />
@@ -867,7 +868,7 @@ function layerTypeLabel(type: string) {
                   </label>
                 </div>
                 <div class="solid-prop__row2">
-                  <button class="quick__btn" @click="addVertex">＋ 加点</button>
+                  <button class="quick__btn" @click="addVertex"><AppIcon name="plus" :size="13" /> 加点</button>
                   <button class="quick__btn" :disabled="!meshPick.length" @click="delPickedVertices">－ 删点</button>
                   <button class="quick__btn" :disabled="meshPick.length !== 2" @click="connectPicked">连边</button>
                   <button class="quick__btn" :disabled="meshPick.length < 3" @click="facePicked">成面</button>
@@ -909,8 +910,8 @@ function layerTypeLabel(type: string) {
       <div v-if="isTable" class="panel__section">
         <h3 class="panel__title">表格
           <span style="display:flex;gap:4px">
-            <button class="panel__mini" @click="addRow">＋行</button>
-            <button class="panel__mini" @click="addCol">＋列</button>
+            <button class="panel__mini" @click="addRow"><AppIcon name="plus" :size="12" />行</button>
+            <button class="panel__mini" @click="addCol"><AppIcon name="plus" :size="12" />列</button>
           </span>
         </h3>
         <div class="tbl">
@@ -922,7 +923,7 @@ function layerTypeLabel(type: string) {
               :value="c ?? ''"
               @input="setCell(i, j, ($event.target as HTMLInputElement).value)"
             />
-            <button class="tbl__del" title="删除第 {{ i + 1 }} 行" @click="delRow(i)">×</button>
+            <button class="tbl__del" title="删除第 {{ i + 1 }} 行" @click="delRow(i)"><AppIcon name="trash" :size="12" /></button>
           </div>
         </div>
         <div class="tbl__cols">
@@ -1131,7 +1132,7 @@ function layerTypeLabel(type: string) {
         </label>
         <label class="prop-check"><input type="checkbox" :checked="(math?.fitMode ?? 'fill') === 'fill'"
           @change="patch({ fitMode: ($event.target as HTMLInputElement).checked ? 'fill' : 'shrink' } as Partial<SlideElement>)"><span>充满外框（拖动外框时公式跟着无级放大）</span></label>
-        <button class="quick__btn" style="width:100%;margin-top:6px" @click="openFormulaLibrary()">📚 预制公式库（点击卡片替换当前公式）</button>
+        <button class="quick__btn" style="width:100%;margin-top:6px" @click="openFormulaLibrary()"><AppIcon name="formula" :size="13" /> 预制公式库（点击卡片替换当前公式）</button>
         <p class="panel__hint">
           已内置宏：<code>\R \N \Z \Q \C \E</code>（数集）、<code>\abs{x}</code> 绝对值、<code>\norm{x}</code> 范数、<code>\dd</code> 微分、<code>\ee</code> 自然常数、<code>\ii</code> 虚数单位、<code>\comb{n}{k}</code> 组合、<code>\perm{n}{k}</code> 排列、<code>\half</code> ½。勾选「充满外框」时拖动外框即可无级缩放公式；取消勾选则按「字号」显示、只在装不下时缩小。
         </p>
@@ -1198,9 +1199,9 @@ function layerTypeLabel(type: string) {
         </label>
 
         <div style="display:grid;gap:6px;margin-top:10px">
-          <button class="quick__btn" style="width:100%" @click="onDsmSave">💾 保存当前内容</button>
+          <button class="quick__btn" style="width:100%" @click="onDsmSave"><AppIcon name="save" :size="13" /> 保存当前内容</button>
           <button class="quick__btn" style="width:100%" :disabled="!dsm?.state" @click="onDsmExport">
-            ⬇ 导出状态 JSON
+            <AppIcon name="down" :size="13" /> 导出状态 JSON
           </button>
           <button class="quick__btn quick__btn--danger" style="width:100%"
             @click="patch({ state: '' } as Partial<SlideElement>)">清空内容</button>
@@ -1220,9 +1221,9 @@ function layerTypeLabel(type: string) {
         <span class="layer__idx">{{ i }}</span>
         <span class="layer__type">{{ layerTypeLabel(el.type) }}</span>
         <span class="layer__menu">
-          <button class="layer__btn" @click.stop="store.setElementIndex(el.id, i - 1)" :disabled="i === 0">↑</button>
-          <button class="layer__btn" @click.stop="store.setElementIndex(el.id, i + 1)" :disabled="i === (store.currentSlide?.elements.length ?? 0) - 1">↓</button>
-          <button class="layer__btn layer__btn--del" @click.stop="store.removeSelected()" v-if="store.isSelected(el.id)">✕</button>
+          <button class="layer__btn" @click.stop="store.setElementIndex(el.id, i - 1)" :disabled="i === 0"><AppIcon name="up" :size="12" /></button>
+          <button class="layer__btn" @click.stop="store.setElementIndex(el.id, i + 1)" :disabled="i === (store.currentSlide?.elements.length ?? 0) - 1"><AppIcon name="down" :size="12" /></button>
+          <button class="layer__btn layer__btn--del" @click.stop="store.removeSelected()" v-if="store.isSelected(el.id)"><AppIcon name="trash" :size="12" /></button>
         </span>
       </div>
       <p class="panel__hint">当前页 {{ (store.currentSlide?.elements.length ?? 0) }} 个元素</p>

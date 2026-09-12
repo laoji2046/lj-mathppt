@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import { renderLatex, typesetMixed } from '@/composables/useMathJax'
 import { FONT_OPTIONS } from '@/types'
@@ -267,7 +268,7 @@ function insertHardBreak() {
       <header class="panel__head">
         <strong>组合公式</strong>
         <span class="panel__sub">左边写 / 贴 LaTeX，右边点选预制公式</span>
-        <button class="panel__close" @click="emit('close')">✕</button>
+        <button class="panel__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </header>
 
       <div class="panel__main">
@@ -300,7 +301,7 @@ function insertHardBreak() {
             <span>预设组合 <em>（点击填入上方输入框{{ userPresets.length ? '；带 × 的是你自己存的' : '' }}）</em></span>
             <span class="lbl__tools">
               <span v-if="presetTip" class="chip-tip">{{ presetTip }}</span>
-              <button class="chip chip--xs chip--add" title="把上方输入框里的内容存为预设组合，之后一点即填" @click="addToPresets">＋ 加入预设组合</button>
+              <button class="chip chip--xs chip--add" title="把上方输入框里的内容存为预设组合，之后一点即填" @click="addToPresets"><AppIcon name="plus" :size="12" /> 加入预设组合</button>
             </span>
           </div>
           <div class="chips">
@@ -312,7 +313,7 @@ function insertHardBreak() {
               :title="p.latex + '\n单击填入输入框 · 点右侧 × 删除'"
             >
               <span class="chip__t" @click="latex = p.latex">{{ p.label }}</span>
-              <button class="chip__x" title="从预设组合里删除这一条" @click.stop="removePreset(i)">×</button>
+              <button class="chip__x" title="从预设组合里删除这一条" @click.stop="removePreset(i)"><AppIcon name="close" :size="13" /></button>
             </span>
           </div>
         </div>
@@ -325,7 +326,7 @@ function insertHardBreak() {
           <div class="lib__search">
             <svg viewBox="0 0 24 24" width="14" height="14" class="lib__search-icon"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             <input v-model="libQuery" class="lib__search-input" placeholder="搜索：正弦 / 方差 / 集合…" />
-            <button v-if="libQuery" class="lib__search-clear" @click="libQuery = ''">×</button>
+            <button v-if="libQuery" class="lib__search-clear" @click="libQuery = ''"><AppIcon name="close" :size="12" /></button>
           </div>
           <select v-model="libKey" class="lib__cat" :disabled="!!libQuery || !!libTag">
             <option v-for="c in FORMULA_LIBRARY" :key="c.key" :value="c.key">{{ c.icon }} {{ c.name }}（{{ c.formulas.length }}）</option>

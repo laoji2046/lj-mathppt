@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import { FORMULA_LIBRARY, FORMULA_TAGS, formulaTags } from '@/templates/formulaLibrary'
 import { renderLatex } from '@/composables/useMathJax'
@@ -73,7 +74,7 @@ function insert(item: FormulaItem) {
             <small>按高中数学章节分类 · 点击插入当前页</small>
           </div>
         </div>
-        <button class="palette__close" @click="emit('close')">×</button>
+        <button class="palette__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </header>
 
       <div class="cats">
@@ -99,7 +100,7 @@ function insert(item: FormulaItem) {
       <div class="search">
         <svg viewBox="0 0 24 24" width="16" height="16" class="search__icon"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <input v-model="query" class="search__input" placeholder="搜索公式，如：正弦、方差、集合…" />
-        <button v-if="query" class="search__clear" @click="query = ''">×</button>
+        <button v-if="query" class="search__clear" @click="query = ''"><AppIcon name="close" :size="12" /></button>
       </div>
 
       <div v-if="query" class="search__meta">找到 {{ visible.length }} 条「{{ query }}」相关公式</div>
@@ -122,8 +123,8 @@ function insert(item: FormulaItem) {
       <footer class="palette__foot">
         <span class="palette__hint">
           {{ store.selectedElement && store.selectedElement.type === 'math'
-            ? '🔧 当前选中了一个公式元素：点击卡片会替换它的内容（位置/字号保留）'
-            : '💡 点击卡片插入为「公式」元素，可再拖拽缩放 / 改颜色字号' }}
+            ? '当前选中了一个公式元素：点击卡片会替换它的内容（位置/字号保留）'
+            : '点击卡片插入为「公式」元素，可再拖拽缩放 / 改颜色字号' }}
         </span>
       </footer>
     </div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** 数学图形面板：分类页签 + 卡片缩略图（缩略图直接用元素组件渲染，所见即所得） */
 import { computed, ref } from 'vue'
+import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type { MathFigureCat, MathFigureKind } from '@/types'
 import { MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS } from '@/types'
@@ -50,7 +51,7 @@ function insert(kind: MathFigureKind) {
     <div class="palette__box">
       <div class="palette__head">
         <span>数学图形 <em>{{ MATH_FIGURE_OPTIONS.length }} 种</em></span>
-        <button class="palette__close" @click="emit('close')">×</button>
+        <button class="palette__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </div>
 
       <div class="palette__tabs">
