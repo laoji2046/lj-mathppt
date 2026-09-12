@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
-import { COPYRIGHT } from '@/ui/appInfo'
+import { fitScale, pan, resetView, zoom, zoomBy } from '@/ui/canvasView'
 import { useDeckStore } from '@/stores/deck'
 import { useStageScale } from '@/composables/useStageScale'
 import { useDragResize, type DragItem, type Handle } from '@/composables/useDragResize'
@@ -19,10 +19,13 @@ defineProps<{ presenting?: boolean }>()
 
 const viewport = ref<HTMLElement | null>(null)
 const stage = ref<HTMLElement | null>(null)
-const { scale } = useStageScale(viewport, store.deck.width, store.deck.height)
+const { scale: fitScaleRef } = useStageScale(viewport, store.deck.width, store.deck.height)
+// 适屏比例回写到共享状态（底部状态栏要用它算真实百分比）
+watch(fitScaleRef, (v) => { fitScale.value = v }, { immediate: true })
+/** 真实比例 = 适屏比例 × 用户缩放（zoom / pan 都在 @/ui/canvasView，与状态栏共用同一份） */
+const scale = computed(() => fitScaleRef.value * zoom.value)
 
 // ---- 画布平移 ----
-const pan = ref({ x: 0, y: 0 })
 const spaceDown = ref(false)
 let panOrigin: { x: number; y: number; px: number; py: number } | null = null
 
@@ -350,8 +353,11 @@ function bindMarquee() {
   window.addEventListener('pointerup', onUp)
 }
 
-function resetView() {
-  pan.value = { x: 0, y: 0 }
+/** Ctrl/⌘ + 滚轮缩放。舞台是 transform-origin:center + 视口 flex 居中，绕中心缩放不用调平移 */
+function onWheel(e: WheelEvent) {
+  if (!e.ctrlKey && !e.metaKey) return
+  e.preventDefault()
+  zoomBy(e.deltaY < 0 ? 1.12 : 1 / 1.12)
 }
 
 // ---- 空格键平移 ----
@@ -406,6 +412,7 @@ defineExpose({ resetView })
     class="canvas-viewport"
     :class="{ 'canvas-viewport--pan': spaceDown }"
     @pointerdown="onViewportDown"
+    @wheel="onWheel"
     @contextmenu.prevent="onCanvasCtx"
   >
     <div ref="stage" class="canvas-stage" :style="stageStyle">
@@ -508,17 +515,6 @@ defineExpose({ resetView })
       <button class="grp-tip__btn" @click="store.exitGroup()">退出组合编辑</button>
     </div>
 
-    <div class="hud">
-      缩放 {{ Math.round(scale * 100) }}%
-      <button class="hud__btn" @click="resetView">复位</button>
-      <span v-if="store.drawTool" class="hud__tip hud__tip--draw">
-        {{ store.drawTool === 'line' ? '绘制直线' : store.drawTool === 'arrow' ? '绘制箭头' : store.drawTool === 'pen' ? '画笔' : '画多边形' }}：{{ store.drawTool === 'poly' ? '点击放角点，双击或点首点闭合，Esc 取消' : '在画布空白处拖拽，Esc 取消' }}
-      </span>
-      <span v-else class="hud__tip">空格/中键拖动可平移</span>
-      <!-- 版权信息：只出现在编辑器里。演示状态整块被全屏覆盖，这里再显式收口一次 -->
-      <span v-if="!presenting" class="hud__copy">{{ COPYRIGHT }}</span>
-    </div>
-
     <!-- 快捷加页：右侧=在当前页后新增一页，底部=在当前页后新增子页；点击打开模板库选模板（「空白模板」= 空白页） -->
     <template v-if="!presenting">
       <button class="add-page-btn add-page-btn--right" title="新增页：打开模板库（含空白页）" @click="openTemplateLibrary('add')"><AppIcon name="plus" :size="20" /></button>
@@ -587,7 +583,7 @@ defineExpose({ resetView })
 .guide--v { top: 0; bottom: 0; width: 1px; }
 .guide--h { left: 0; right: 0; height: 1px; }
 
-/* ---------- 悬浮 HUD ---------- */
+/* ---------- 画布上的浮层 ---------- */
 /* 组内编辑提示条：顶部居中浮出，明确「现在改的是组内单个元素」 */
 .grp-tip {
   position: absolute;
@@ -628,45 +624,7 @@ defineExpose({ resetView })
   from { opacity: 0; transform: translate(-50%, -6px); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
-.hud {
-  position: absolute;
-  right: 14px;
-  bottom: 12px;
-  font-size: 12px;
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.92);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
-  padding: 5px 6px 5px 13px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-variant-numeric: tabular-nums;
-}
-.hud__btn {
-  font-size: 11.5px;
-  font-weight: 500;
-  height: 22px;
-  border: 1px solid var(--border-strong);
-  background: var(--panel);
-  border-radius: var(--radius-full);
-  padding: 0 10px;
-  cursor: pointer;
-  color: var(--gray-700);
-  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease),
-              color var(--dur-1) var(--ease);
-}
-.hud__btn:hover {
-  background: var(--brand-50);
-  border-color: var(--brand-200);
-  color: var(--brand-700);
-}
-.hud__tip { font-size: 11.5px; color: var(--muted); padding-right: 7px; }
-/* 版权：贴状态栏右端（hud 是 flex，margin-left:auto 顶到最右）；演示时不渲染 */
-.hud__copy { margin-left: 14px; padding-right: 7px; font-size: 11px; color: var(--muted); opacity: 0.9; white-space: nowrap; }
+/* 底部状态栏见 components/StatusBar.vue（原来是画布右下角浮着的一颗胶囊，已改成贴底的 footbar） */
 .hud__tip--draw { color: var(--brand-700); font-weight: 600; }
 
 /* ---------- 快捷加页 ---------- */

@@ -19,6 +19,7 @@ import MarkdownSourcePanel from '@/components/MarkdownSourcePanel.vue'
 import { viewMode } from '@/ui/view'
 import { tplOpen, tplMode, openTemplateLibrary, closeTemplateLibrary } from '@/ui/templateLibrary'
 import ContextMenu from '@/components/ContextMenu.vue'
+import StatusBar from '@/components/StatusBar.vue'
 
 const store = useDeckStore()
 const presenting = ref(false)
@@ -118,6 +119,8 @@ function onPresent() {
       <MarkdownSourcePanel v-if="viewMode === 'split' || viewMode === 'source'" />
       <PropertyPanel v-if="viewMode === 'canvas'" />
     </div>
+    <!-- 底部状态栏（footbar）：演示时不渲染 —— 演示是给学生看的内容，不该出现操作条与软件署名 -->
+    <StatusBar v-if="!presenting" />
     <PresentationOverlay
       :deck="presenting ? store.deck : null"
       @close="presenting = false"
