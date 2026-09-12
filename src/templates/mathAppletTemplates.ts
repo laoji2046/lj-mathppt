@@ -2,9 +2,9 @@
  * 高中数学专用模板：例题（组合公式 / +GeoGebra / +Desmos / +内嵌 HTML）。
  * 设计纪律（吸取教训）：
  * 1. build() 一律返回「扁平 SlideElement[]」——任何返回数组的辅助函数都由调用方 ...展开；
- * 2. 例题 / 分析 / 解答 / 结论 一律用「混排元素 richtex：正文 + $...$ 内联公式」——
- *    插进来就是排好版的数学（不是 a^2 这种裸文本），双击还能整段再编辑；
- *    关键推导式单独用居中的 math 元素，右侧「关键公式卡」也是 math。
+ * 2. 全文一律用「混排元素 richtex：正文 + $...$ 内联公式」—— 插进来就是排好版的数学（不是 a^2 这种裸文本），
+ *    双击还能整段再编辑。**本模块不再产出任何 math 元素**：独立成行的关键推导式与右侧「关键公式卡」
+ *    改用 display()（混排 + $\displaystyle ...$），理由见该函数注释。
  * 3. 版式固定栅格：左栏用 leftCol() 游标自上而下排，右栏 1180~1800，全部落在 1920×1080 内。
  */
 import type { SlideElement } from '@/types'
@@ -24,8 +24,17 @@ function txt(x: number, y: number, w: number, h: number, text: string, o: Record
 function shape(x: number, y: number, w: number, h: number, o: Record<string, unknown> = {}): SlideElement {
   return { id: eid(), type: 'shape', x, y, w, h, rot: 0, shape: 'rect', fill: '#f1efeb', stroke: 'transparent', strokeWidth: 0, ...o } as SlideElement
 }
-function math(x: number, y: number, w: number, h: number, latex: string, o: Record<string, unknown> = {}): SlideElement {
-  return { id: eid(), type: 'math', x, y, w, h, rot: 0, latex, color: INK, fontSize: 36, fitMode: 'shrink', ...o } as SlideElement
+/**
+ * 展示公式（独立成行的关键推导式 / 右侧「关键公式卡」）—— 混排元素，不是 math 元素。
+ * 用内联 `$...$` 而不是 `\[...\]`，两个原因：
+ * 1. 前面加 `\displaystyle` 就能拿到「显示公式」的排版样式（分式、求和的上下限与原来的公式元素一致）；
+ * 2. MathJax 会给 `\[...\]` 的 display 公式套 `display:block; text-align:center; margin:1em 0`
+ *    （那是给文档正文设计的），在元素框里会白白撑高约 2em，触发 fitMode:shrink 把公式整体缩小。
+ * 内联写法尺寸只由 fontSize 决定，与正文同源，也不用改任何 CSS。
+ */
+const DISPLAY_STYLE = '\\displaystyle '
+function display(x: number, y: number, w: number, h: number, latex: string, o: Record<string, unknown> = {}): SlideElement {
+  return mix(x, y, w, h, '$' + DISPLAY_STYLE + latex + '$', { fontSize: 36, align: 'center', ...o })
 }
 function ggb(x: number, y: number, w: number, h: number, commands: string[], o: Record<string, unknown> = {}): SlideElement {
   return {
@@ -121,7 +130,7 @@ function leftCol(y0 = 200) {
     },
     /** 居中大公式（关键推导式） */
     formula(latex: string, fontSize = 32, h = 92) {
-      els.push(math(120, y, 1000, h, latex, { fontSize }))
+      els.push(display(120, y, 1000, h, latex, { fontSize }))
       y += h + gap - 6
     },
   }
@@ -131,7 +140,7 @@ function formulaCard(titleText: string, formulas: string[]): SlideElement[] {
   const out: SlideElement[] = []
   out.push(shape(1180, 200, 620, 660, { fill: CARD }))
   out.push(txt(1210, 226, 560, 44, titleText, { fontSize: 26, fontWeight: 700, color: ACCENT }))
-  formulas.forEach((f, i) => out.push(math(1210, 290 + i * 180, 560, 150, f, { fontSize: 32 })))
+  formulas.forEach((f, i) => out.push(display(1210, 290 + i * 180, 560, 150, f, { fontSize: 32 })))
   return out
 }
 function footer(): SlideElement {
