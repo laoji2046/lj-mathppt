@@ -73,7 +73,7 @@ export function loadImageElement(src: string): Promise<HTMLImageElement> {
 }
 
 // ---------- 二值化 ----------
-function toInk(img: HTMLImageElement, crop?: [number, number, number, number]) {
+export function toInk(img: HTMLImageElement, crop?: [number, number, number, number]) {
   const W = img.naturalWidth, H = img.naturalHeight
   const c = document.createElement('canvas')
   c.width = W; c.height = H
@@ -103,7 +103,7 @@ interface Comp {
   ux: number; uy: number; len: number
 }
 
-function components(ink: Uint8Array, W: number, H: number, box: [number, number, number, number]): Comp[] {
+export function components(ink: Uint8Array, W: number, H: number, box: [number, number, number, number]): Comp[] {
   const seen = new Uint8Array(W * H)
   const list: Comp[] = []
   const stack: number[] = []
@@ -169,7 +169,7 @@ function axisOf(c: Comp, W: number) {
  * 注意不能用"实心度（墨迹占 bbox 比例）"来分：对角短划的 bbox 接近正方形，实心度很低，
  * 会被当成字母一起抹掉，整条虚线就没了。
  */
-function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array, opt: VectorizeOpt) {
+export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array, opt: VectorizeOpt) {
   const smallMax = opt.textMax ?? 0.16
   const bars: Comp[] = []
   for (const c of comp) {
@@ -214,7 +214,7 @@ function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array, opt: 
 }
 
 // ---------- Zhang-Suen 细化 ----------
-function thin(src: Uint8Array, W: number, H: number) {
+export function thin(src: Uint8Array, W: number, H: number) {
   const w = W + 2, h = H + 2
   const img = new Uint8Array(w * h)
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) img[(y + 1) * w + (x + 1)] = src[y * W + x]
@@ -268,7 +268,7 @@ function crossNum(sk: Uint8Array, p: number, W: number, H: number) {
 
 interface SkGraph { nodes: { cx: number; cy: number }[]; paths: { pts: [number, number][]; aId: number; bId: number }[]; stubs: Int32Array }
 
-function buildGraph(sk: Uint8Array, W: number, H: number): SkGraph {
+export function buildGraph(sk: Uint8Array, W: number, H: number): SkGraph {
   const nbrs = (i: number) => {
     const x = i % W, y = (i / W) | 0, a: number[] = []
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
@@ -366,7 +366,7 @@ function buildGraph(sk: Uint8Array, W: number, H: number): SkGraph {
 }
 
 // ---------- Douglas-Peucker ----------
-function rdp(pts: [number, number][], eps: number): [number, number][] {
+export function rdp(pts: [number, number][], eps: number): [number, number][] {
   if (pts.length < 3) return pts.slice()
   const dist = (p: [number, number], a: [number, number], b: [number, number]) => {
     const vx = b[0] - a[0], vy = b[1] - a[1]
