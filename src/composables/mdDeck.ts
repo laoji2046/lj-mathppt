@@ -71,65 +71,104 @@ function displayEl(latex: string, y: number): Slide['elements'][number] {
   } as any
 }
 
-/** 把一段 markdown 内容解析成一页的元素与备注 */
-function mdBlockToSlide(lines: string[]): Slide {
-  const elements = { list: [] as Slide['elements'], y: 120, indent: 0 }
+/**
+ * 把一段 markdown 内容解析成一页的元素与备注。
+ *
+ * **块模型**：连续的若干非空行 = 一个「块」= 一个元素框（多行文字在一个框里），空行分隔块。
+ * 为什么不是「一行一个框」：Word 导入时一行往往只是半句话，一行一框会切出几百页（实测真题 83 页、解析版 365 页），
+ * 而且半句话就翻页。改成块模型后「一道题 = 一个框」，页数能压到 1/3 左右，排版也像正文。
+ * 这也是标准 Markdown 的段落语义（连续行属于同一段）。
+ */
+function mdBlockToSlide(lines: string[], opts: { fontSize?: number } = {}): Slide {
+  const elements = { list: [] as Slide['elements'], y: 120 }
   const notes: string[] = []
   let mathBuf = '', inBlock = false
-  // 行距按**元素自身高度**推进：原来固定 80（math 140），而混排元素高 120、图片高 520，
-  // 结果相邻元素在画布上互相重叠 40~440px。改成「自身高度 + 20 间隙」后不再叠。
-  const push = (e: Slide['elements'][number], advance?: number) => { elements.list.push(e); elements.y += advance ?? ((e.h ?? 70) + 20) }
-  for (let raw of lines) {
-    let line = raw.trimEnd()
-    // 块级数学 $$...$$（可跨多行）
+  const baseFs = opts.fontSize ?? 26
+  const TOP = 120, BOTTOM = 1080 - 60            // 正文上边距 / 可用底边
+  // 行距按元素自身高度推进（自身高度 + 20 间隙），不再固定 80px（那会让相邻元素重叠 40~440px）
+  const push = (e: Slide['elements'][number]) => { elements.list.push(e); elements.y += (e.h ?? 70) + 20 }
+
+  /** 落一个块：整块合成一个元素；太高就整体缩字号（最低 14px），别把一页撑爆 */
+  const flushBlock = (buf: string[]) => {
+    if (!buf.length) return
+    const text = buf.join('\n').trim()
+    if (!text) return
+    const avail = BOTTOM - TOP
+    let fs = baseFs
+    let h = estimateTextHeight(text, fs, 1620)
+    if (h > avail) {
+      fs = Math.max(14, Math.floor((baseFs * avail) / h))
+      h = estimateTextHeight(text, fs, 1620)
+    }
+    const base = {
+      id: uid('el'), x: 150, y: elements.y, w: 1620, h, rot: 0, text, fontSize: fs,
+      color: '#1a1a1a', fontWeight: 400, fontFamily: 'sans', align: 'left',
+      bgColor: 'transparent', shadow: 'none',
+    }
+    const isMix = text.includes('$') || text.includes('\\(')
+    push(isMix ? ({ ...base, type: 'richtex', fitMode: 'shrink' } as any) : ({ ...base, type: 'text' } as any))
+  }
+
+  const buf: string[] = []
+  const flush = () => { flushBlock(buf); buf.length = 0 }
+  for (const raw of lines) {
+    const line = raw.trimEnd()
+    // 跨行的块级公式：先落掉已攒的块，收齐后再单独成一个显示公式元素
     if (inBlock) {
       const end = line.indexOf('$$')
-      if (end >= 0) { mathBuf += '\n' + line.slice(0, end); push(displayEl(mathBuf.trim(), elements.y), 140); mathBuf = ''; inBlock = false }
-      else { mathBuf += '\n' + line }
+      if (end >= 0) { mathBuf += '\n' + line.slice(0, end); push(displayEl(mathBuf.trim(), elements.y)); mathBuf = ''; inBlock = false }
+      else mathBuf += '\n' + line
       continue
     }
-    const mstart = line.indexOf('$$')
-    if (mstart >= 0) {
-      const end = line.indexOf('$$', mstart + 2)
-      if (end >= 0) { const latex = line.slice(mstart + 2, end).trim(); push(displayEl(latex, elements.y), 140) }
-      else { mathBuf = line.slice(mstart + 2); inBlock = true }
+    // 只有**整行以 $$ 开头**才算显示公式；夹在行中间的 $$ 当普通内容，
+    // 否则「B.B₁C₁⊥平面AA₁D」这种行会被拦腰截断、剩下的文字被丢掉（这正是 Word 导入踩过的坑）
+    if (line.startsWith('$$')) {
+      const end = line.indexOf('$$', 2)
+      if (end >= 0) { flush(); push(displayEl(line.slice(2, end).trim(), elements.y)) }
+      else { flush(); mathBuf = line.slice(2); inBlock = true }
       continue
     }
     const note = line.match(/^Note:\s*(.*)$/)
     if (note) { notes.push(note[1].trim()); continue }
-    if (!line.trim()) continue
-    // 图片 ![alt](src)
-    const img = line.match(/^!\[[^\]]*\]\(([^)]+)\)/)
-    if (img) { push({ id: uid('el'), type: 'image', x: 150, y: elements.y, w: 900, h: 520, rot: 0, src: img[1].trim(), fit: 'contain' } as any); continue }
-    // 标题 # / ## / ###
+    if (!line.trim()) { flush(); continue }        // 空行 = 块的分界
+    // 独占一行的图片：不能塞进文字块里（应用只认行首的 ![]()）
+    const img = line.match(/^!\[[^\]]*\]\(([^)]+)\)$/)
+    if (img) { flush(); push({ id: uid('el'), type: 'image', x: 150, y: elements.y, w: 900, h: 520, rot: 0, src: img[1].trim(), fit: 'contain' } as any); continue }
+    // 标题：自己成块
     const h = line.match(/^(#{1,3})\s+(.*)$/)
     if (h) {
+      flush()
       const lvl = h[1].length
       const fs = lvl === 1 ? 48 : lvl === 2 ? 40 : 32
       const color = lvl === 1 ? '#1a1a1a' : '#c0392b'
       push({ id: uid('el'), type: 'text', x: 150, y: elements.y, w: 1620, h: estimateTextHeight(h[2].trim(), fs, 1620, 1.3), rot: 0, text: h[2].trim(), fontSize: fs, color, fontWeight: 700, align: 'left', fontFamily: 'hei-bold', bgColor: 'transparent', shadow: 'none' } as any)
       continue
     }
-    // 内联 $...$ → richtex；否则正文文本
-    const hasInline = /\$[^\n]+?\$/.test(line)
-    if (hasInline || line.includes('\\(')) {
-      push({ id: uid('el'), type: 'richtex', x: 150, y: elements.y, w: 1620, h: estimateTextHeight(line, 26, 1620), rot: 0, fitMode: 'shrink', text: line, fontSize: 26, color: '#1a1a1a', fontWeight: 400, fontFamily: 'sans', align: 'left', bgColor: 'transparent', shadow: 'none' } as any)
-    } else {
-      push({ id: uid('el'), type: 'text', x: 150, y: elements.y, w: 1620, h: estimateTextHeight(line, 26, 1620), rot: 0, text: line, fontSize: 26, color: '#1a1a1a', fontWeight: 400, align: 'left', fontFamily: 'sans', bgColor: 'transparent', shadow: 'none' } as any)
-    }
+    buf.push(line)                                  // 其余行攒进当前块
   }
+  flush()
   // 容错：$$ 只写了一半（例如删掉了一个 $）时，也把已收集的公式内容保留下来，避免整块公式凭空消失
   if (inBlock) {
     const rest = mathBuf.replace(/\$+\s*$/, '').trim()
-    if (rest) push(displayEl(rest, elements.y), 140)
+    if (rest) push(displayEl(rest, elements.y))
     mathBuf = ''; inBlock = false
   }
   return { id: uid('slide'), bg: '#ffffff', elements: elements.list, notes: notes.join('\n') || undefined, parentId: undefined }
 }
 
-/** markdown → deck（按 '---' 横切 / '--' 垂直） */
-export function markdownToDeck(md: string): Deck {
-  const src = md.replace(/\r\n/g, '\n')
+/**
+ * markdown → deck（按 '---' 横切 / '--' 垂直）。
+ * opts.fontSize 是正文字号（默认 26）—— Word 导入这类内容长的文档可以调小，一页就能装更多。
+ */
+export function markdownToDeck(md: string, opts: { fontSize?: number } = {}): Deck {
+  let src = md.replace(/\r\n/g, '\n')
+  // 正文字号指令：<!--font:20-->（转换器生成，也可以手写）—— 字号越小一页装得越多
+  const fm = src.match(/<!--\s*font\s*:\s*(\d{2})\s*-->/)
+  if (fm) {
+    const n = parseInt(fm[1], 10)
+    if (n >= 12 && n <= 64) opts = { ...opts, fontSize: n }
+    src = src.replace(fm[0], '')
+  }
   const lines = src.split('\n')
   // 先按顶层 '---' 切成横向块（把每个横向块内再按 '--' 分垂直）
   const horizBlocks: string[][] = []
@@ -151,7 +190,7 @@ export function markdownToDeck(md: string): Deck {
     fvb()
     if (!vert.length) vert.push([])
     vert.forEach((vb2, vi) => {
-      const s = mdBlockToSlide(vb2)
+      const s = mdBlockToSlide(vb2, opts)
       if (vi > 0 && lastRoot) s.parentId = lastRoot.id
       else lastRoot = s
       slides.push(s)
