@@ -322,6 +322,7 @@ function onHandleMove(e: PointerEvent, i: number) {
   if (!moved && downPt && Math.hypot(e.clientX - downPt[0], e.clientY - downPt[1]) > 4) moved = true
   const [nx, ny] = normPt(e)
   const p = [...(pts.value || DEF_POLY)]
+  if (i < 0 || i * 2 + 1 >= p.length) return      // 下标越界就什么都不写，别往 points 里塞 NaN
   p[i * 2] = nx; p[i * 2 + 1] = ny
   emit('update', { points: p } as Partial<SlideElement>)
 }
@@ -451,14 +452,16 @@ function onSvgDbl(e: MouseEvent) {
   <div ref="box" class="mathfig-el">
     <svg :viewBox="`0 0 ${props.el.w} ${props.el.h}`" width="100%" height="100%" :preserveAspectRatio="fit === 'contain' ? 'xMidYMid meet' : 'none'" v-html="innerHtml" @click="onSvgClick" @dblclick="onSvgDbl"></svg>
     <template v-if="showHandles">
+      <!-- 注意：v-for 循环数字时给的是 (值, 下标)，值是 1..n —— 顶点下标必须用 vi（0..n-1）。
+           之前用的是 v，于是**第 0 个顶点没有手柄**、末尾还多出一个下标越界的幽灵手柄（拖它会往 points 里写 NaN）。 -->
       <span
-        v-for="v in (pts ? Math.floor(pts.length / 2) : 0)"
-        :key="v"
+        v-for="(_v, vi) in (pts ? Math.floor(pts.length / 2) : 0)"
+        :key="vi"
         class="mf-handle"
-        :class="{ sel: solidSel.elementId === props.el.id && solidSel.vertex === v - 1 }"
-        :style="{ left: ((pts ? pts[v * 2] : 0) * props.el.w) + 'px', top: ((pts ? pts[v * 2 + 1] : 0) * props.el.h) + 'px' }"
-        @pointerdown.stop="onHandleDown($event, v)"
-        @pointermove="onHandleMove($event, v)"
+        :class="{ sel: solidSel.elementId === props.el.id && solidSel.vertex === vi }"
+        :style="{ left: ((pts ? pts[vi * 2] : 0) * props.el.w) + 'px', top: ((pts ? pts[vi * 2 + 1] : 0) * props.el.h) + 'px' }"
+        @pointerdown.stop="onHandleDown($event, vi)"
+        @pointermove="onHandleMove($event, vi)"
         @pointerup="onHandleUp"
       ></span>
     </template>

@@ -786,7 +786,11 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
         }
         if (used < 2) continue
         const det = a * c - bb * bb
-        if (Math.abs(det) < 1e-9) continue
+        // 病态保护：两条入射边接近平行时，最小二乘的交点会跑到很远的地方，
+        // 实测会把一个顶点甩到另一个顶点身上（相距 3px），手柄直接叠死、那个点就再也点不到了。
+        // 用行列式相对量级判断条件数，太病态就干脆不动这个顶点。
+        const scale = a + c
+        if (Math.abs(det) < 1e-9 || Math.abs(det) < 0.02 * scale * scale) continue
         const X = (c * rx - bb * ry) / det
         const Y = (a * ry - bb * rx) / det
         let ddx = X - verts[v].x, ddy = Y - verts[v].y
@@ -807,6 +811,9 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   dropIsolated()
   dedupe()
   refineCorners((opt.refine ?? 0.03) * diag)
+  // 精修会把顶点挪位置，**挪完必须再合并一次** —— 否则可能留下两个几乎重合的顶点，
+  // 它们的手柄叠在一起，用户会有一个点点不到也拖不动
+  mergeVerts(opt.mergeR ?? 8)
   dropIsolated()
   dedupe()
 
