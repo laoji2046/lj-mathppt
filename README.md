@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1115**（源码快照 `_backup/rollback-20260912-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1116**（源码快照 `_backup/rollback-20260912-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -51,6 +51,10 @@
 >
 > 1115 修复：混排里用「多行显示」写的公式，会被 MathJax 的文档留白（`margin:1em 0`）撑高元素框、再被 `shrink` 折算成整体缩小；
 > 现收成「行内块 + 零边距」，尺寸只由字号决定。宿主标记类自动覆盖画布 / 面板预览 / 编辑弹窗 / 缩略图，导出侧另有同一条规则。
+>
+> 1116 修复：**导出 PDF 时混排公式的第 2、3 行重复** —— 根因是 MathJax 的 `typesetPromise` 不做串行化，
+> 而导出路径对同一页 prepare 了两次，第二次 `reset()` 后把还没渲染完的那几行又渲染了一遍。
+> 现已收敛为单入口串行化排版（画布侧本来就有同类保护）。
 >
 > 按日期的版本变更见文末 **更新日志**。
 
@@ -243,6 +247,23 @@ node ../node_modules/@tauri-apps/cli/tauri.js build   # 生成 NSIS 安装包
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-12（v2026.09.1116）
+
+**1116 · 修「导出 PDF 时公式行重复」（MathJax 并发排版）**
+- 现象：同一页在画布上完全正常，**导出 PDF 时混排里的公式第 2、3 行各被渲染两遍**，撑出元素框被裁掉半截。
+- 根因（代码级确认）：MathJax 3 的 `typesetPromise` 内部是 `document.options.elements = e` → `document.reset()` → `render()`，
+  **既不串行化也不排队**。而 PDF 导出路径对**同一页 prepare 了两次** —— `Reveal.on('ready')` 先 prepare 当前页，
+  紧接着 `prepareAllForPrint()` 又把所有页（含当前页）prepare 一遍。第一次渲染还没跑完，第二次就 `reset()` 后重新扫描 DOM：
+  已经渲染好的第 1 行变成了 `mjx-container`、不再被扫到，而**还是 `\(...\)` 原文的第 2、3 行被渲染了第二遍** ——
+  与「只有第 2、3 行重复」的现象完全吻合。画布侧 `MathElement.vue` / `RichTextElement.vue` 早就有这类串行化保护
+  （`rendering` / `pending` 标志），导出这条路径一直漏着。
+- 处理：导出/放映的引导脚本把排版收敛成**单一入口 + 串行化** —— `pumpMath()` 一次只跑一批（全局唯一一处 `typesetPromise` 调用），
+  同一页**排队中的与正在排的都不重复入队**，收尾后自动接着排剩下的；不再用 `typesetPromise(undefined)`
+  （那会重排整篇文档，是风险最大的一次 reset）；「打印就绪」也开始等排版真正跑完（`mathBusy || mathQueue.length`）。
+- 校验：把生成的引导脚本**原文抠出来**，在 node 里用桩替换 MathJax 直接跑逻辑 —— 复刻打印路径（同一 section 被 prepare 两次 + 另一页一次）后，
+  **排版调用序列 = A → B（每页恰好一次）、最大并发 = 1、收尾空闲**；另有 8 条结构断言；`vue-tsc` 0 错误、`vite build` 通过。
+- 过程记录：第一版修复只查了「待排队列」、没查「正在排版的那一批」，**被这个测试当场抓出来**（序列成了 `A → A+B`，A 被排了两遍）。
 
 ### 2026-09-12（v2026.09.1115）
 

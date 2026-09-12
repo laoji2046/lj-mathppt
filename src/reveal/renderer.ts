@@ -664,6 +664,13 @@ ${slides}
   var GGB_ENGINE = ${JSON.stringify(ggbEngine)};
   // MathJax 是 async 加载的：Reveal ready 时可能尚未就绪，排队轮询直到可排版
   var mathQueue = [];
+  // 串行化标志：MathJax 3 的 typesetPromise 内部是「先 document.reset() 再重排」，**不做串行化**。
+  // 并发对同一个宿主调用会把「还没渲染完的那几行」再渲染一遍 —— 打印/导出 PDF 时公式行重复、
+  // 溢出元素框就是这么来的（画布侧 MathElement.vue 早有同样的串行化保护，导出这条路径之前漏了）。
+  var mathBusy = false;
+  // 正在排版的那一批：只查 mathQueue 不够 —— 某一页可能已经被取走正在排，
+  // 这时再把它入队就会在同一轮或下一轮被排第二遍（测试就是这么抓出来的）。
+  var mathInFlight = [];
   // 排版完成后把每个公式等比缩放到它的元素框内（与编辑器行为一致）
   function fitMath(root){
     if (!root) return;
@@ -709,14 +716,26 @@ ${slides}
       }
     }
   }
-  function typeset(root){
-    if (root) mathQueue.push(root);
-    if (!window.MathJax || !window.MathJax.typesetPromise) return false;
+  /** 排一轮队：忙的时候只入队，等这一轮收尾后再接着排（全局唯一一处 typesetPromise 调用） */
+  function pumpMath(){
+    if (mathBusy) return true;                                            // 正在排版：等它结束
+    if (!window.MathJax || !window.MathJax.typesetPromise) return false;  // 引擎还没就绪
+    if (!mathQueue.length) return true;                                   // 没活干
+    mathBusy = true;
     var items = mathQueue; mathQueue = [];
-    window.MathJax.typesetPromise(items.length ? items : undefined)
+    mathInFlight = items;
+    // 只排明确入队的宿主：不再用 undefined（那会重排整篇文档，正是最危险的一次 reset）
+    window.MathJax.typesetPromise(items)
       .then(function(){ items.forEach(fitMath); items.forEach(fitMixed); })
-      .catch(function(){});
+      .catch(function(){})
+      .then(function(){ mathBusy = false; mathInFlight = []; pumpMath(); });  // 收尾后接着排剩下的
     return true;
+  }
+  function typeset(root){
+    // 同一个宿主只排一次：打印模式会对当前页 prepare 两次（ready 一次 + prepareAllForPrint 一次），
+    // 排队中的和正在排的都要查，否则这一页会被排第二遍。
+    if (root && mathQueue.indexOf(root) < 0 && mathInFlight.indexOf(root) < 0) mathQueue.push(root);
+    return pumpMath();
   }
   var mathPoll = null, mathN = 0;
   function flushMath(){
@@ -948,7 +967,7 @@ ${slides}
       var calm = 0, ticks = 0;
       var pollReady = setInterval(function(){
         // 挂载队列全部排空才算就绪；连续两轮安静 + 400ms 缓冲，保证 MathJax 缩放收尾
-        var busy = !!(mathPoll || ggbPollTimer || pendingGgb.length || pendingDsm.length || pendingPdf.length);
+        var busy = !!(mathBusy || mathQueue.length || mathPoll || ggbPollTimer || pendingGgb.length || pendingDsm.length || pendingPdf.length);
         calm = busy ? 0 : calm + 1;
         if (calm >= 2 || ++ticks > 160) {   // 最长 ~40s 放弃等待，尽力输出
           clearInterval(pollReady);
