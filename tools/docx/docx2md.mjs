@@ -145,7 +145,17 @@ export function convertDocx(file, opts = {}) {
   // 分页：应用的 Markdown 模型是「一行 = 一个元素框、自上而下堆」，
   // 一页塞太多行会堆到画布外（一页按 1080px 高、每行约 90px 算，9 行左右就到头了）。
   // 规则：满 perSlide 行断页；遇到标题且已攒到半页也断（标题尽量起新页）。
-  const paged = paginate(cleaned, { budgetPx: opts.pagePx ?? 900, group: opts.group ?? 'auto' })
+  let paged = paginate(cleaned, { budgetPx: opts.pagePx ?? 900, group: opts.group ?? 'auto' })
+  // --pages N：只保留前 N 页（大文件先切一段预览，别一上来就几百页）
+  if (opts.maxPages > 0) {
+    const kept = []
+    let pages = 1
+    for (const l of paged) {
+      if (l === '---') { pages++; if (pages > opts.maxPages) break }
+      kept.push(l)
+    }
+    paged = kept
+  }
   return { markdown: paged.join('\n'), stats }
 }
 
@@ -339,8 +349,9 @@ function paragraph(p, ctx) {
     // 其中 $ 会被应用的显示公式规则命中 —— 这一行剩下的文字**整段被丢掉**（实测真题第 40 页就是这么丢的）。
     const squashed = []
     for (const it of merged) {
-      // Word 常在相邻公式之间插一个空 run，它会把「相邻」切断 —— 空文本直接丢掉（保留纯换行项）
-      if (it.t === 'text' && it.v.trim() === '' && it.v.indexOf('\n') < 0) continue
+      // Word 常在相邻公式之间插一个空 run（没有任何 w:t），它会把「相邻」切断 —— 只丢**真正为空**的项。
+      // 注意别用 trim() === ''：制表位转出来的空格也满足它，会把「A.-1    B.0」之间的间隔一起吃掉。
+      if (it.t === 'text' && it.v === '') continue
       const prev = squashed[squashed.length - 1]
       if (it.t === 'math' && prev && prev.t === 'math') { prev.v += it.v; continue }
       squashed.push({ ...it })
@@ -437,22 +448,36 @@ function findDeep(n, name) {
 // ---- CLI ----
 if (process.argv[1] && process.argv[1].endsWith('docx2md.mjs')) {
   const args = process.argv.slice(2)
-  const input = args.find((a) => !a.startsWith('-'))
+  // 输入文件：认 .doc/.docx 结尾的那个参数（否则 --pages 4 里的「4」会被当成文件名）
+  const input = args.find((a) => !a.startsWith('-') && /\.docx?$/i.test(a)) || args.find((a) => !a.startsWith('-'))
   if (!input) {
-    console.log('用法: node tools/docx/docx2md.mjs <文件.docx> [-o 输出.md]')
+    console.log('用法: node tools/docx/docx2md.mjs <文件.docx> [-o 输出.md] [--pages N] [--group auto|question|heading|line] [--page-px N] [--wrap N]')
     process.exit(1)
+  }
+  // 可选参数统一在这里解析 —— 别再出现「帮助里写了、代码里没接」的情况
+  const numArg = (flag, def) => {
+    const i = args.indexOf(flag)
+    const v = i >= 0 ? parseInt(args[i + 1], 10) : NaN
+    return Number.isFinite(v) ? v : def
+  }
+  const strArg = (flag, def) => {
+    const i = args.indexOf(flag)
+    return i >= 0 && args[i + 1] && !args[i + 1].startsWith('-') ? args[i + 1] : def
   }
   const oi = args.indexOf('-o')
   const outFile = oi >= 0 ? args[oi + 1] : input.replace(/\.docx$/i, '') + '.md'
-  const pi = args.indexOf('--page-px')
-  const pagePx = pi >= 0 ? parseInt(args[pi + 1], 10) : 900
+  const pagePx = numArg('--page-px', 900)
+  const maxPages = numArg('--pages', 0)
+  const group = strArg('--group', 'auto')
+  const wrap = args.includes('--wrap')
+  const wrapUnits = wrap ? numArg('--wrap', 42) : 0
   const t0 = Date.now()
   fs.mkdirSync(path.dirname(outFile), { recursive: true })
-  const { markdown, stats } = convertDocx(input, { outDir: path.dirname(outFile), pagePx })
+  const { markdown, stats } = convertDocx(input, { outDir: path.dirname(outFile), pagePx, group, wrap, wrapUnits, maxPages })
   fs.writeFileSync(outFile, markdown, 'utf8')
   const linesArr = markdown.split('\n')
   console.log('转换完成：' + outFile)
   console.log('  段落 ' + stats.para + ' · 公式 ' + stats.formulas + ' · 表格 ' + stats.tables + ' · 图片 ' + stats.images + ' · 分页 ' + stats.pageBreaks + ' · 未识别符号 ' + stats.symbols)
   const pages = linesArr.filter((l) => l === '---').length + 1
-  console.log('  输出 ' + linesArr.length + ' 行 → 约 ' + pages + ' 页（每页预算 ' + pagePx + 'px），' + Math.round(markdown.length / 1024) + ' KB，用时 ' + (Date.now() - t0) + 'ms')
+  console.log('  输出 ' + linesArr.length + ' 行 → 约 ' + pages + ' 页（分组 ' + group + ' · 预算 ' + pagePx + 'px · ' + (wrap ? '切行 ' + wrapUnits + ' 字' : '不切行') + (maxPages ? ' · 仅前 ' + maxPages + ' 页' : '') + '），' + Math.round(markdown.length / 1024) + ' KB，用时 ' + (Date.now() - t0) + 'ms')
 }

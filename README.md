@@ -246,6 +246,7 @@ node ../node_modules/@tauri-apps/cli/tauri.js build   # 生成 NSIS 安装包
 node tools/docx/docx2md.mjs 讲义.docx -o out/讲义.md
 
 # 可选参数
+node tools/docx/docx2md.mjs 试卷.docx --pages 4          # 只输出前 4 页（大文件先切一段预览）
 node tools/docx/docx2md.mjs 试卷.docx --group question   # auto(默认) | question | heading | line
 node tools/docx/docx2md.mjs 试卷.docx --page-px 900      # 每页像素预算（画布 1080 高，默认 900）
 node tools/docx/docx2md.mjs 讲义.docx --wrap 42          # 按字数切行（默认不切，一段一行）
