@@ -41,7 +41,6 @@ export const mathBundles: MathBundle[] = [
       })),
       slide('s2', toc(t, {
         eyebrow: '三角函数 · 一轮复习',
-        pageNum: '02',
         items: [
           { no: '01', title: '图像变换的四种方式', page: '03' },
           { no: '02', title: '周期与对称的整体代换', page: '04' },
@@ -54,7 +53,6 @@ export const mathBundles: MathBundle[] = [
       slide('s3', twoCol(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '三角函数 · 图像变换',
-        pageNum: '03',
         title: '图像变换的规则',
         left: {
           title: '四步变换',
@@ -76,7 +74,6 @@ export const mathBundles: MathBundle[] = [
       slide('s4', think(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '三角函数 · 思考',
-        pageNum: '04',
         title: '为什么 $\\omega$ 影响周期',
         question: [
           '$y=\\sin(\\omega x+\\varphi)$（$\\omega>0$）的周期与 $\\omega$ 是什么关系？',
@@ -88,7 +85,6 @@ export const mathBundles: MathBundle[] = [
       slide('s5', twoCol(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '三角函数 · 例题',
-        pageNum: '05',
         title: '例题 · 由变换写解析式',
         left: {
           title: '题目',
@@ -108,7 +104,6 @@ export const mathBundles: MathBundle[] = [
       })),
       slide('s6', practice(t, {
         eyebrow: '三角函数 · 课堂练习',
-        pageNum: '06',
         title: '课堂练习',
         items: [
           '1. 把 $y=\\sin x$ 的图像向右平移 $\\dfrac{\\pi}{4}$ 个单位，再把横坐标缩短到原来的 $\\dfrac{1}{2}$，求所得图像的解析式。',
@@ -119,7 +114,6 @@ export const mathBundles: MathBundle[] = [
       })),
       slide('s7', mistake(t, {
         eyebrow: '三角函数 · 易错',
-        pageNum: '07',
         title: '图像变换的三个易错点',
         wrong: [
           '① 先伸缩后平移时，平移量仍按 $\\varphi$ 计算。',
@@ -135,7 +129,6 @@ export const mathBundles: MathBundle[] = [
       slide('s8', summary(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '三角函数 · 小结',
-        pageNum: '08',
         title: '小结 · 图像变换',
         points: [
           '先把目标解析式写成 $y=A\\sin(\\omega x+\\varphi)$ 的形式，再决定变换步骤与顺序。',
@@ -163,7 +156,6 @@ export const mathBundles: MathBundle[] = [
       })),
       slide('s2', toc(t, {
         eyebrow: '函数 · 新课',
-        pageNum: '02',
         items: [
           { no: '01', title: '指数函数的定义', page: '03' },
           { no: '02', title: '指数函数与对数函数对照', page: '04' },
@@ -175,7 +167,6 @@ export const mathBundles: MathBundle[] = [
       slide('s3', definition(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数 · 概念',
-        pageNum: '03',
         title: '指数函数的定义',
         term: '定义 · 指数函数',
         body: [
@@ -188,7 +179,6 @@ export const mathBundles: MathBundle[] = [
       slide('s4', twoCol(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数 · 图像与性质',
-        pageNum: '04',
         title: '指数函数与对数函数对照',
         left: {
           title: '指数函数',
@@ -212,7 +202,6 @@ export const mathBundles: MathBundle[] = [
       slide('s5', twoCol(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数 · 例题',
-        pageNum: '05',
         title: '例题 · 比较大小',
         left: {
           title: '题目',
@@ -234,7 +223,6 @@ export const mathBundles: MathBundle[] = [
       slide('s6', think(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数 · 思考',
-        pageNum: '06',
         title: '底数为什么有限制',
         question: [
           '指数函数的底数为什么要求 $a>0$ 且 $a\\ne 1$？',
@@ -246,7 +234,6 @@ export const mathBundles: MathBundle[] = [
       slide('s7', summary(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数 · 小结',
-        pageNum: '07',
         title: '小结 · 指数函数与对数函数',
         points: [
           '指数函数与对数函数互为反函数，图像关于直线 $y=x$ 对称。',
@@ -274,7 +261,6 @@ export const mathBundles: MathBundle[] = [
       })),
       slide('s2', toc(t, {
         eyebrow: '立体几何 · 专题',
-        pageNum: '02',
         items: [
           { no: '01', title: '直线与平面平行的判定定理', page: '03' },
           { no: '02', title: '思考：线面垂直怎样判定', page: '04' },
@@ -286,7 +272,6 @@ export const mathBundles: MathBundle[] = [
       slide('s3', theorem(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '立体几何 · 定理',
-        pageNum: '03',
         title: '直线与平面平行的判定定理',
         name: '直线与平面平行的判定定理',
         statement: [
@@ -301,7 +286,6 @@ export const mathBundles: MathBundle[] = [
       slide('s4', think(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '立体几何 · 思考',
-        pageNum: '04',
         title: '线面垂直怎样判定',
         question: [
           '已知直线 $l$ 与平面 $\\alpha$，需要什么条件才能断定 $l\\perp\\alpha$？',
@@ -313,7 +297,6 @@ export const mathBundles: MathBundle[] = [
       slide('s5', steps(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '立体几何 · 方法',
-        pageNum: '05',
         title: '线面位置关系的证明思路',
         steps: [
           '线线平行：中位线、平行四边形、成比例线段。',
@@ -326,7 +309,6 @@ export const mathBundles: MathBundle[] = [
       })),
       slide('s6', practice(t, {
         eyebrow: '立体几何 · 课堂练习',
-        pageNum: '06',
         title: '课堂练习',
         items: [
           '1. 判断：若 $a\\parallel\\alpha$，$b\\subset\\alpha$，则一定有 $a\\parallel b$。',
@@ -338,7 +320,6 @@ export const mathBundles: MathBundle[] = [
       slide('s7', summary(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '立体几何 · 小结',
-        pageNum: '07',
         title: '小结 · 线面位置关系',
         points: [
           '判定定理用来证平行与垂直，性质定理用来由平行与垂直推出新结论，两者成对使用。',

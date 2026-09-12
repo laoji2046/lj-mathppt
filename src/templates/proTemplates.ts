@@ -50,7 +50,6 @@ export const proTemplates: ProTemplate[] = [
     build() {
       return toc(t, {
         eyebrow: '备课组述职 · 高二数学',
-        pageNum: '02',
         items: [
           { no: '01', title: '工作回顾：计划落实与常规教学', page: '03' },
           { no: '02', title: '重点突破：集体备课与课例研讨', page: '05' },
@@ -82,7 +81,6 @@ export const proTemplates: ProTemplate[] = [
     build() {
       return bullets(t, {
         eyebrow: '备课组工作述职',
-        pageNum: '03',
         title: '本学期重点工作',
         bullets: [
           { lead: '集体备课常态化', support: '每周三下午两节课，主备人说课、组内讨论、修改定稿。' },
@@ -103,7 +101,6 @@ export const proTemplates: ProTemplate[] = [
     build() {
       return imageRight(t, {
         eyebrow: '备课组工作述职',
-        pageNum: '04',
         title: '课堂教学与教研活动',
         lines: [
           '本学期组内听课 42 节，每节课记录不少于 3 条改进意见。',
@@ -122,7 +119,6 @@ export const proTemplates: ProTemplate[] = [
     build() {
       return chart(t, {
         eyebrow: '备课组工作述职',
-        pageNum: '07',
         title: '数据看成绩 · 期末数学均分',
         chartTitle: '期末数学均分（分）',
         bars: [
@@ -143,7 +139,6 @@ export const proTemplates: ProTemplate[] = [
     build() {
       return twoCol(t, {
         eyebrow: '备课组工作述职',
-        pageNum: '08',
         title: '三项核心指标',
         left: {
           title: '期末成绩',
@@ -169,7 +164,6 @@ export const proTemplates: ProTemplate[] = [
     build() {
       return timeline(t, {
         eyebrow: '备课组工作述职',
-        pageNum: '05',
         title: '本学期工作节点',
         nodes: [
           { time: '2 月', label: '制定学期计划，统一进度与作业量' },
@@ -186,7 +180,6 @@ export const proTemplates: ProTemplate[] = [
     build() {
       return timeline(t, {
         eyebrow: '备课组工作述职',
-        pageNum: '11',
         title: '下学期工作安排',
         nodes: [
           { time: '8 月', label: '开学前完成一轮复习学案修订' },
@@ -205,7 +198,6 @@ export const proTemplates: ProTemplate[] = [
     build() {
       return twoCol(t, {
         eyebrow: '备课组工作述职',
-        pageNum: '09',
         title: '成绩与不足',
         left: {
           title: '本学期成绩',
@@ -233,7 +225,6 @@ export const proTemplates: ProTemplate[] = [
     build() {
       return twoCol(t, {
         eyebrow: '备课组工作述职',
-        pageNum: '10',
         title: '一轮复习：本学期做法与下学期调整',
         left: {
           title: '本学期做法',
@@ -295,7 +286,6 @@ export const proBundles: ProBundle[] = [
       })),
       slide(toc(t, {
         eyebrow: '备课组述职 · 高二数学',
-        pageNum: '02',
         items: [
           { no: '01', title: '本学期重点工作', page: '03' },
           { no: '02', title: '课堂教学与教研活动', page: '04' },
@@ -306,7 +296,6 @@ export const proBundles: ProBundle[] = [
       })),
       slide(bullets(t, {
         eyebrow: '备课组工作述职',
-        pageNum: '03',
         title: '本学期重点工作',
         bullets: [
           { lead: '集体备课常态化', support: '每周三下午两节课，主备人说课、组内讨论、修改定稿。' },
@@ -322,7 +311,6 @@ export const proBundles: ProBundle[] = [
       })),
       slide(imageRight(t, {
         eyebrow: '备课组工作述职',
-        pageNum: '04',
         title: '课堂教学与教研活动',
         lines: [
           '本学期组内听课 42 节，每节课记录不少于 3 条改进意见。',
@@ -334,7 +322,6 @@ export const proBundles: ProBundle[] = [
       })),
       slide(chart(t, {
         eyebrow: '备课组工作述职',
-        pageNum: '05',
         title: '数据看成绩 · 期末数学均分',
         chartTitle: '期末数学均分（分）',
         bars: [
@@ -350,7 +337,6 @@ export const proBundles: ProBundle[] = [
       })),
       slide(timeline(t, {
         eyebrow: '备课组工作述职',
-        pageNum: '06',
         title: '本学期工作节点',
         nodes: [
           { time: '2 月', label: '制定学期计划，统一进度与作业量' },
@@ -380,7 +366,6 @@ export const proBundles: ProBundle[] = [
       })),
       slide(toc(t, {
         eyebrow: '教研组计划 · 数学',
-        pageNum: '02',
         items: [
           { no: '01', title: '本学期重点任务', page: '03' },
           { no: '02', title: '逐月工作安排', page: '04' },
@@ -390,7 +375,6 @@ export const proBundles: ProBundle[] = [
       })),
       slide(bullets(t, {
         eyebrow: '教研组学期工作计划',
-        pageNum: '03',
         title: '本学期重点任务',
         bullets: [
           { lead: '课堂教学改进', support: '以问题链设计为抓手，每月推出一节组内示范课。' },
@@ -405,7 +389,6 @@ export const proBundles: ProBundle[] = [
       })),
       slide(timeline(t, {
         eyebrow: '教研组学期工作计划',
-        pageNum: '04',
         title: '逐月工作安排',
         nodes: [
           { time: '9 月', label: '开学摸底，确定各年级教学进度' },
@@ -417,7 +400,6 @@ export const proBundles: ProBundle[] = [
       })),
       slide(twoCol(t, {
         eyebrow: '教研组学期工作计划',
-        pageNum: '05',
         title: '保障措施与分工',
         left: {
           title: '保障措施',

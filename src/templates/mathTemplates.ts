@@ -58,7 +58,6 @@ export const mathTemplates: Template[] = [
     build() {
       return toc(t, {
         eyebrow: '高中数学 · 一轮复习',
-        pageNum: '02',
         items: [
           { no: '01', title: '函数的概念与性质', page: '03' },
           { no: '02', title: '导数的概念与运算', page: '11' },
@@ -92,7 +91,6 @@ export const mathTemplates: Template[] = [
       return definition(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数与导数 · 概念',
-        pageNum: '03',
         title: '函数的单调性',
         term: '定义 · 增函数与减函数',
         body: [
@@ -110,7 +108,6 @@ export const mathTemplates: Template[] = [
       return definition(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '数列 · 概念',
-        pageNum: '04',
         title: '等比数列的定义',
         term: '定义 · 等比数列与公比',
         body: [
@@ -130,7 +127,6 @@ export const mathTemplates: Template[] = [
       return theorem(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '解三角形 · 定理',
-        pageNum: '05',
         title: '正弦定理',
         name: '正弦定理',
         statement: [
@@ -150,7 +146,6 @@ export const mathTemplates: Template[] = [
       return theorem(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '解三角形 · 定理',
-        pageNum: '06',
         title: '余弦定理',
         name: '余弦定理',
         statement: [
@@ -170,7 +165,6 @@ export const mathTemplates: Template[] = [
       return theorem(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '不等式 · 定理',
-        pageNum: '07',
         title: '基本不等式',
         name: '基本不等式（均值不等式）',
         statement: [
@@ -192,7 +186,6 @@ export const mathTemplates: Template[] = [
       return think(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '三角函数 · 思考',
-        pageNum: '08',
         title: '为什么 $\\omega$ 影响周期',
         question: [
           '函数 $y=\\sin(\\omega x+\\varphi)$（$\\omega>0$）的图像，可以由 $y=\\sin x$ 的图像经过怎样的变换得到？',
@@ -209,7 +202,6 @@ export const mathTemplates: Template[] = [
       return think(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '立体几何 · 思考',
-        pageNum: '09',
         title: '线面垂直怎样判定',
         question: [
           '已知直线 $l$ 与平面 $\\alpha$，需要什么条件才能断定 $l\\perp\\alpha$？',
@@ -227,7 +219,6 @@ export const mathTemplates: Template[] = [
     build() {
       return bullets(t, {
         eyebrow: '函数与导数 · 知识梳理',
-        pageNum: '10',
         title: '函数与导数的知识框架',
         bullets: [
           { lead: '函数的表示与三要素', support: '定义域、值域、对应关系；讨论性质之前先定定义域。' },
@@ -248,7 +239,6 @@ export const mathTemplates: Template[] = [
     build() {
       return twoCol(t, {
         eyebrow: '概率统计 · 知识梳理',
-        pageNum: '11',
         title: '概率与统计的基本模型',
         left: {
           title: '概率模型',
@@ -277,7 +267,6 @@ export const mathTemplates: Template[] = [
       return twoCol(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '三角函数 · 公式速查',
-        pageNum: '12',
         title: '三角恒等变换公式速查',
         left: {
           title: '和差角与倍角',
@@ -305,7 +294,6 @@ export const mathTemplates: Template[] = [
       return twoCol(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '导数 · 公式速查',
-        pageNum: '13',
         title: '导数公式与运算法则',
         left: {
           title: '基本初等函数的导数',
@@ -336,7 +324,6 @@ export const mathTemplates: Template[] = [
       return twoCol(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数与导数 · 例题',
-        pageNum: '14',
         title: '例题 · 用导数研究函数的单调性',
         left: {
           title: '题目',
@@ -364,7 +351,6 @@ export const mathTemplates: Template[] = [
       return steps(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '解析几何 · 例题推导',
-        pageNum: '15',
         title: '例题 · 椭圆标准方程的推导',
         steps: [
           '建系：以 $F_{1}$、$F_{2}$ 所在直线为 $x$ 轴，线段 $F_{1}F_{2}$ 的中点为原点，设 $\\left|F_{1}F_{2}\\right|=2c$（$c>0$）。',
@@ -384,7 +370,6 @@ export const mathTemplates: Template[] = [
       return bullets(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '数列 · 方法',
-        pageNum: '16',
         title: '求数列通项的四条路',
         bullets: [
           { lead: '公式法', support: '已判断为等差或等比数列，直接代入通项公式。' },
@@ -405,7 +390,6 @@ export const mathTemplates: Template[] = [
       return steps(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '立体几何 · 方法',
-        pageNum: '17',
         title: '线面位置关系的证明思路',
         steps: [
           '线线平行：中位线、平行四边形、成比例线段。',
@@ -425,7 +409,6 @@ export const mathTemplates: Template[] = [
     build() {
       return mistake(t, {
         eyebrow: '函数与导数 · 易错',
-        pageNum: '18',
         title: '导数应用中的三个典型错误',
         wrong: [
           '① 求单调区间时忽略定义域，例如 $f(x)=\\ln x+\\dfrac{1}{x}$ 只在 $x>0$ 上讨论。',
@@ -447,7 +430,6 @@ export const mathTemplates: Template[] = [
     build() {
       return practice(t, {
         eyebrow: '三角函数 · 课堂练习',
-        pageNum: '19',
         title: '练习 · 三角函数的图像与性质',
         items: [
           '1. 求 $y=2\\sin\\left(2x-\\dfrac{\\pi}{3}\\right)$ 的最小正周期、对称轴和单调递增区间。',
@@ -466,7 +448,6 @@ export const mathTemplates: Template[] = [
       return summary(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数与导数 · 小结',
-        pageNum: '20',
         title: '小结 · 函数与导数',
         points: [
           '讨论函数性质一律从定义域出发：单调性、奇偶性、周期性都建立在定义域之上。',
@@ -484,7 +465,6 @@ export const mathTemplates: Template[] = [
       return twoCol(t, {
         animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '讲义 · 公式速查',
-        pageNum: '21',
         title: '小结 · 全章公式速查',
         left: {
           title: '函数与导数',
