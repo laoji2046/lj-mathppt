@@ -15,7 +15,7 @@ import TemplatePicker from '@/components/TemplatePicker.vue'
 import { ggbEdit, openGgbSuite, closeGgbSuite } from '@/ui/ggbEditor'
 import ImageEditorModal from '@/components/ImageEditorModal.vue'
 import VectorizeDialog from '@/components/VectorizeDialog.vue'
-import { vectorizeOpen, vectorizeSrc, vectorizeReplaceId, closeVectorize } from '@/ui/vectorize'
+import { vectorizeOpen, vectorizeSrc, vectorizeReplaceId, vectorizeEditId, closeVectorize } from '@/ui/vectorize'
 import { imageEditOpen, imageEditId, closeImageEditor } from '@/ui/imageEditor'
 import MarkdownSourcePanel from '@/components/MarkdownSourcePanel.vue'
 import { viewMode } from '@/ui/view'
@@ -131,7 +131,7 @@ function onPresent() {
     <PaperModal v-if="paperOpen" @close="paperOpen = false" />
     <GgbSuite v-if="ggbEdit.open" :edit-id="ggbEdit.editId" @close="closeGgbSuite()" />
     <ImageEditorModal v-if="imageEditOpen && imageEditId" :id="imageEditId" @close="closeImageEditor()" />
-    <VectorizeDialog v-if="vectorizeOpen && vectorizeSrc" :src="vectorizeSrc" :replace-id="vectorizeReplaceId" @close="closeVectorize()" />
+    <VectorizeDialog v-if="vectorizeOpen && vectorizeSrc" :src="vectorizeSrc" :replace-id="vectorizeReplaceId" :edit-id="vectorizeEditId" @close="closeVectorize()" />
     <ContextMenu />
   </div>
 </template>

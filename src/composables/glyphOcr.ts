@@ -80,7 +80,9 @@ function dilate(m: Uint8Array) {
 function templates(): Template[] {
   if (TEMPLATES) return TEMPLATES
   const out: Template[] = []
-  const c = document.createElement('canvas')
+  const c: HTMLCanvasElement | OffscreenCanvas = typeof OffscreenCanvas !== 'undefined'
+    ? new OffscreenCanvas(220, 160)
+    : document.createElement('canvas')
   c.width = 220; c.height = 160
   const g = c.getContext('2d', { willReadFrequently: true })
   if (!g) return (TEMPLATES = [])
@@ -115,19 +117,21 @@ function templates(): Template[] {
   return out
 }
 
-/** 容差 IoU：双方各膨胀一次再比，抗笔画粗细差异 */
-/** 候选字符集：按"这块字有多大、处在什么位置"先缩一圈，能挡掉最容易混的两类错
- *  —— 大写 C 认成小写 c（归一化后形状几乎一样）、下标 1 认成大写 I / 小写 l。 */
+/** 候选字符集：主体字按"这块字有多大、处在什么位置"先缩一圈。
+ *  只有两档：主体字（base）与下标（sub）。**主体字不再分大小写** ——
+ *  归一化之后大写 C 和小写 c 几乎一样，硬分档只会把"高度接近大写字母的小写字母"
+ *  （斜体 y 就是，高度 48 与大写字母齐平）推进错误的档位、匹配到数字 7 或大写 I；
+ *  而评分侧 `norm()` 本来就会统一成大写，大小写认混在结果上是无害的。 */
 const SUB_CHARS = '0123456789ijknlm'
-type Kind = 'upper' | 'lower' | 'sub'
+type Kind = 'base' | 'sub'
 
 function matchGlyph(m: Uint8Array, srcN: number, kind: Kind) {
   const srcD = dilate(m)
   let best = '', bs = -1
   for (const t of templates()) {
     if (kind === 'sub') { if (SUB_CHARS.indexOf(t.ch) < 0) continue }
-    else if (kind === 'upper') { if (LOWER.indexOf(t.ch) >= 0) continue }
-    else { if (LETTERS.indexOf(t.ch) >= 0) continue }          // 小写档：不收大写
+    // 主体字是字母（大小写都收），不会是数字 —— 数字只出现在下标里。
+    else { if (DIGITS.indexOf(t.ch) >= 0) continue }
     let inter = 0
     for (let i = 0; i < m.length; i++) if (m[i] && t.d[i]) inter++
     let inter2 = 0
@@ -135,6 +139,10 @@ function matchGlyph(m: Uint8Array, srcN: number, kind: Kind) {
     let s = (inter + inter2) / (srcN + t.n)
     // 下标里的 1 和 l / I 归一化之后几乎一模一样；下标基本都是数字，给字母一点惩罚压下去
     if (kind === 'sub' && DIGITS.indexOf(t.ch) < 0) s *= 0.88
+    // 大小写不参与评分（norm 会统一），但**显示**上要跟原图一致：顶点标注绝大多数是大写，
+    // 而 C/c、O/o、S/s 归一化后几乎一模一样、分数咬得很紧，所以给大写一丝加成来定胜负。
+    // 坐标轴的小写 x/y/z 与 X/Y/Z 形状差别明显，不会被这条影响。
+    if (t.ch >= 'A' && t.ch <= 'Z') s *= 1.01
     if (s > bs) { bs = s; best = t.ch }
   }
   return { ch: best, score: bs }
@@ -160,7 +168,17 @@ function isBarLike(p: GlyphBox, W: number) {
     if (t > maxT) maxT = t
   }
   const len = maxT - minT
-  return len > 6 && n / len < 7
+  if (!(len > 6 && n / len < 7)) return false
+  // 只看"墨迹量 ÷ 主轴长度"不够稳：瘦高的字母（斜体 y）算出来 6.9，正好卡在阈值下面，
+  // 会被当成"一根线"整块丢掉 —— 实测 y 就是这么漏掉的。再看**垂直主轴方向的跨度**：
+  // 真正的细长条（虚线短划）宽度就是笔画宽（几像素），而字母再瘦也有十几像素。
+  let perp = 0
+  for (const i of p.pix) {
+    const t = ((i % W) - cx) * -uy + (((i / W) | 0) - cy) * ux
+    const a = Math.abs(t)
+    if (a > perp) perp = a
+  }
+  return perp <= Math.max(5, 0.16 * len)
 }
 
 /** 相邻的小块并成一条标注 */
@@ -194,14 +212,11 @@ export function recognizeLabels(W: number, boxes: GlyphBox[]): LabelBox[] {
   if (!boxes.length) return []
   const groups = groupBoxes(boxes)
   const out: LabelBox[] = []
-  // 先量一遍"主体块"的高度中位数：明显矮于它的，要么是小写字母要么是下标
   const baseOf = (g: GlyphBox[]) => {
     let base = g[0]
     for (const p of g) if (p.y1 - p.y0 > base.y1 - base.y0) base = p
     return base
   }
-  const heights = groups.map((g) => baseOf(g).y1 - baseOf(g).y0 + 1).sort((a, b) => a - b)
-  const medH = heights.length ? heights[heights.length >> 1] : 0
   for (const g of groups) {
     const parts = g.slice().sort((a, b) => a.x0 - b.x0)
     const base = baseOf(g)
@@ -215,8 +230,7 @@ export function recognizeLabels(W: number, boxes: GlyphBox[]): LabelBox[] {
       let cnt = 0
       for (let i = 0; i < m.length; i++) cnt += m[i]
       if (cnt < 8) return
-      const ph = p.y1 - p.y0 + 1
-      const kind: Kind = role !== 'base' ? 'sub' : (medH && ph < 0.82 * medH ? 'lower' : 'upper')
+      const kind: Kind = role !== 'base' ? 'sub' : 'base'
       const r = matchGlyph(m, cnt, kind)
       confSum += r.score; confN++
       if (role === 'base') text += r.ch
@@ -231,6 +245,10 @@ export function recognizeLabels(W: number, boxes: GlyphBox[]): LabelBox[] {
       const ph = p.y1 - p.y0 + 1
       const pcy = (p.y0 + p.y1) / 2
       if (p.x0 < base.x0) continue                            // 主体左边的块不管
+      // 整个落在主体外框里、而且很小的块 = 主体自己的碎片（衬线断开、笔画缺口之类），不是下标。
+      // 实测：字母 C 右下角的衬线碎块被当成下标，拼出了 "c_2"。
+      if (p.x0 >= base.x0 && p.x1 <= base.x1 && p.y0 >= base.y0 && p.y1 <= base.y1 &&
+        p.pix.length < 0.25 * base.pix.length) continue
       if (ph < 0.8 * bh && pcy > bcy + 0.12 * bh) emit(p, 'sub')
       else if (ph < 0.8 * bh && pcy < bcy - 0.12 * bh) emit(p, 'sup')
     }

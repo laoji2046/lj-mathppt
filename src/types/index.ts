@@ -423,6 +423,17 @@ export interface MathFigureElement extends ElementBase {
   faceStyles?: ({ fill?: string; opacity?: number; hidden?: boolean } | null)[]
   /** 自由建模：自定义拓扑（顶点用 points），启用后覆盖该类型默认的边/面 */
   mesh?: { edges: [number, number, number][]; faces: number[][] }
+  /** 由「图片转图形」生成时的识别上下文 —— 只用来「回到识别弹窗继续编辑」：
+   *  顶点 / 边 / 字母本来就在本元素上（points / mesh.edges / vlabels / labelOffsets），这里不重复存。
+   *  老存档没有这个字段，属性面板会据此隐藏「继续编辑」入口。 */
+  vectorizeCtx?: {
+    /** 原图（data URL 或相对路径） */
+    src: string
+    imgW: number
+    imgH: number
+    /** 识别框在原图里的位置（像素） */
+    box: [number, number, number, number]
+  }
 }
 
 /** 图表类型 */

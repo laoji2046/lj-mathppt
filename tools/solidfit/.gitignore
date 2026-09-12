@@ -1,12 +1,12 @@
+# 生成物（模板文件是 *.tpl.html，要保留）
+*.html
+!*.tpl.html
+*.json
 fit.html
 figs.js
-vectorize.html
 vec.html
 imgs.js
 _bundle.cjs
 _vec.js
 bundle.cjs
 _presets.cjs
-_*.json
-_*.html
-_*.png

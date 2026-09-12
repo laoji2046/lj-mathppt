@@ -44,6 +44,10 @@ export interface VectorizeStats {
   text: number
   bars: number
   dashGroups: number
+  /** 识别框四条边上各有多少墨迹像素 —— 非 0 就说明这个框把图形切掉了一块。
+   *  实测：image16 的框底边正压在字母 x 的腰上，x 只剩半个字形（像个 V），于是被认成了 v。
+   *  只在显式传了 crop 时统计（整图识别时图片边缘本来就可能有内容，报这个没意义）。 */
+  clipped?: { top: number; bottom: number; left: number; right: number }
 }
 
 export interface VectorizeResult {
@@ -75,14 +79,7 @@ export function loadImageElement(src: string): Promise<HTMLImageElement> {
 }
 
 // ---------- 二值化 ----------
-export function toInk(img: HTMLImageElement, crop?: [number, number, number, number]) {
-  const W = img.naturalWidth, H = img.naturalHeight
-  const c = document.createElement('canvas')
-  c.width = W; c.height = H
-  const g = c.getContext('2d', { willReadFrequently: true })
-  if (!g) throw new Error('无法创建画布上下文')
-  g.drawImage(img, 0, 0)
-  const d = g.getImageData(0, 0, W, H).data
+function inkFromRgba(d: ArrayLike<number>, W: number, H: number, crop?: [number, number, number, number]) {
   const ink = new Uint8Array(W * H)
   const box: [number, number, number, number] = crop
     ? [Math.max(0, crop[0] | 0), Math.max(0, crop[1] | 0), Math.min(W, crop[2] | 0), Math.min(H, crop[3] | 0)]
@@ -95,6 +92,21 @@ export function toInk(img: HTMLImageElement, crop?: [number, number, number, num
     }
   }
   return { ink, W, H, box }
+}
+
+/** 主线程入口：把 HTMLImageElement 转成 RGBA，再复用无 DOM 的二值化。 */
+export function toInk(img: HTMLImageElement, crop?: [number, number, number, number]) {
+  const W = img.naturalWidth, H = img.naturalHeight
+  const c = document.createElement('canvas')
+  c.width = W; c.height = H
+  const g = c.getContext('2d', { willReadFrequently: true })
+  if (!g) throw new Error('无法创建画布上下文')
+  g.drawImage(img, 0, 0)
+  return inkFromRgba(g.getImageData(0, 0, W, H).data, W, H, crop)
+}
+
+export function vectorizeImageData(data: ArrayLike<number>, W: number, H: number, opt: VectorizeOpt = {}): VectorizeResult {
+  return vectorizeFromInk(inkFromRgba(data, W, H, opt.crop), opt)
 }
 
 // ---------- 连通域 ----------
@@ -402,12 +414,28 @@ function plen(pts: [number, number][]) {
 }
 
 // ---------- 主流程 ----------
-export function vectorizeImage(img: HTMLImageElement, opt: VectorizeOpt = {}): VectorizeResult {
-  const m = toInk(img, opt.crop)
+
+/** 识别框的四条边上有没有墨迹（用抹掉字母之后的墨迹量，字母贴边不算问题，线条被切断才是） */
+function clippedEdges(ink: Uint8Array, W: number, box: [number, number, number, number]) {
+  const [x0, y0, x1, y1] = box
+  let top = 0, bottom = 0, left = 0, right = 0
+  for (let x = x0; x < x1; x++) {
+    if (ink[y0 * W + x]) top++
+    if (ink[(y1 - 1) * W + x]) bottom++
+  }
+  for (let y = y0; y < y1; y++) {
+    if (ink[y * W + x0]) left++
+    if (ink[y * W + x1 - 1]) right++
+  }
+  return { top, bottom, left, right }
+}
+
+function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [number, number, number, number] }, opt: VectorizeOpt = {}): VectorizeResult {
   const W = m.W, H = m.H, box = m.box
   const diag = Math.hypot(box[2] - box[0], box[3] - box[1])
   const comp = components(m.ink, W, H, box)
   const st = stripText(comp, W, diag, m.ink, opt)
+  const clipped = opt.crop ? clippedEdges(st.ink, W, box) : undefined
   // 被抹掉的那些小块其实是字母 —— 顺手认一下（模板匹配，见 glyphOcr.ts）
   const labels = recognizeLabels(W, st.anchors)
   const sk = thin(st.ink, W, H)
@@ -799,6 +827,11 @@ export function vectorizeImage(img: HTMLImageElement, opt: VectorizeOpt = {}): V
       text: L.text,
       conf: +L.conf.toFixed(3),
     })),
-    stats: { verts: verts.length, edges: outEdges.length, dash: dashN, text: st.textCount, bars: st.barCount, dashGroups: st.dashGroups },
+    stats: { verts: verts.length, edges: outEdges.length, dash: dashN, text: st.textCount, bars: st.barCount, dashGroups: st.dashGroups, clipped },
   }
+}
+
+/** 保留原有同步 API，供模板工具与旧调用方使用；编辑弹窗优先走后台 Worker。 */
+export function vectorizeImage(img: HTMLImageElement, opt: VectorizeOpt = {}): VectorizeResult {
+  return vectorizeFromInk(toInk(img, opt.crop), opt)
 }

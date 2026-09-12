@@ -81,6 +81,12 @@ const arrow = computed(() => el.value as ArrowElement | undefined)
 const pen = computed(() => el.value as PenElement | undefined)
 const mathfig = computed(() => el.value as MathFigureElement | undefined)
 const isEditableFig = computed(() => mathfig.value?.kind === 'polygon' || mathfig.value?.kind === 'bezier')
+/** 「图片转图形」生成的元素：带着原图和识别框回到那个弹窗，继续改顶点 / 边 / 字母 */
+function reopenVectorize() {
+  const m = mathfig.value
+  if (!m?.vectorizeCtx) return
+  openVectorize(m.vectorizeCtx.src, null, m.id)
+}
 
 const isSolid = computed(() => !!mathfig.value && !!SOLID_VCOUNT[mathfig.value.kind])
 const vertCount = computed(() => mathfig.value ? (SOLID_VCOUNT[mathfig.value.kind] || 0) : 0)
@@ -829,6 +835,7 @@ function layerTypeLabel(type: string) {
         </label>
         <button class="quick__btn" style="width:100%;margin-top:4px" @click="patch({ fill: 'transparent' } as Partial<SlideElement>)">无填充</button>
         <button v-if="isEditableFig" class="quick__btn" style="width:100%;margin-top:4px;background:#ede9fb;border-color:#c9b8f0;color:#5b43ad" @click="openShapeEdit(el.id)">✎ 编辑顶点（也可双击图形）</button>
+        <button v-if="mathfig?.vectorizeCtx" class="quick__btn" style="width:100%;margin-top:4px;background:#e6f0fb;border-color:#b9d3f0;color:#2b5b9c" @click="reopenVectorize">✎ 回到识别弹窗继续编辑（顶点 / 边 / 字母）</button>
         <p v-if="mathfig?.kind === 'polygon'" style="margin:6px 0 0;font-size:11px;color:#8a8aa0;line-height:1.55">顶点编辑：拖动顶点即可调整；<b>双击顶点删除</b>；<b>双击边线插入顶点</b>（最少保留 3 个顶点）</p>
         <template v-if="isSolid">
           <div class="solid-prop">

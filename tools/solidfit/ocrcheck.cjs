@@ -11,8 +11,10 @@ const SRC = {
   pabcd: { img: 'image2', w: 709, h: 476 }, cubea1: { img: 'image6', w: 655, h: 696 },
   cube7: { img: 'image7', w: 655, h: 696 }, cubeaxes: { img: 'image8', w: 758, h: 841 },
   pabcdaxes: { img: 'image12', w: 888, h: 659, crop: [0, 0, 888, 580] },
-  pabcdo: { img: 'image15', w: 709, h: 584, crop: [0, 0, 709, 470] },
-  pabcdoaxes: { img: 'image16', w: 888, h: 683, crop: [0, 0, 888, 560] },
+  // 这两张的 crop 底边原先正好压在字形上（0px 余量），字母 C / x 被切掉一截：
+  // C 拼出 "c_2"、x 只剩个 V 形被认成 v。放宽到把字形完整包住（题注仍在框外）。
+  pabcdo: { img: 'image15', w: 709, h: 584, crop: [0, 0, 709, 478] },
+  pabcdoaxes: { img: 'image16', w: 888, h: 683, crop: [0, 0, 888, 582] },
   pabcdc1: { img: 'image17', w: 778, h: 618, crop: [0, 0, 778, 500] },
 };
 const norm = (s) => String(s || '').replace(/[\s'′]/g, '').toUpperCase();

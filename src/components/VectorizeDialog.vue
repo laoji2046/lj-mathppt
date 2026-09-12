@@ -3,19 +3,69 @@
  *
  *  识别是自动的（composables/vectorize），但结果总会有几个"落在直线上的冗余顶点"，
  *  所以这个弹窗的重点不是"识别"，而是**改**：看一眼叠加图，删掉多余的点 / 线，填上顶点字母，
- *  再插进页面。字默认摆在被抹掉的原字母位置上，所以填完就跟原图一样。 */
+ *  再插进页面。字默认摆在被抹掉的原字母位置上，所以填完就跟原图一样。
+ *
+ *  编辑动作（删点 / 删线 / 补线 / 拖点 / 拖线 / 改字母）**都可撤销** —— 自动识别再准也总有要手改的地方，
+ *  而"改错了只能整图重识别"会把手填的字母一起丢掉，所以这里配了独立的历史栈。
+ *  重识别会换掉坐标系（box 变了），所以它是**历史清空点**，且动手前会先问一句。
+ */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
-import type { SlideElement } from '@/types'
-import { loadImageElement, vectorizeImage, type VectorizeResult } from '@/composables/vectorize'
+import type { MathFigureElement, SlideElement } from '@/types'
+import { loadImageElement, type VectorizeOpt, type VectorizeResult } from '@/composables/vectorize'
 
-const props = defineProps<{ src: string; replaceId?: string | null }>()
+type VectorizeWorker = Worker & { __nextId?: number }
+let vectorWorker: VectorizeWorker | null = null
+let vectorRequestId = 0
+
+function getVectorWorker() {
+  if (!vectorWorker) {
+    vectorWorker = new Worker(new URL('../workers/vectorize.worker.ts', import.meta.url), { type: 'module' }) as VectorizeWorker
+  }
+  return vectorWorker
+}
+
+function vectorizeInWorker(im: HTMLImageElement, opt: VectorizeOpt = {}): Promise<VectorizeResult> {
+  const c = document.createElement('canvas')
+  c.width = im.naturalWidth
+  c.height = im.naturalHeight
+  const g = c.getContext('2d', { willReadFrequently: true })
+  if (!g) return Promise.reject(new Error('无法创建图片处理画布'))
+  g.drawImage(im, 0, 0)
+  const rgba = g.getImageData(0, 0, c.width, c.height)
+  const worker = getVectorWorker()
+  const id = ++vectorRequestId
+  return new Promise((resolve, reject) => {
+    const onMessage = (e: MessageEvent<{ id: number; result?: VectorizeResult; error?: string }>) => {
+      if (e.data.id !== id) return
+      worker.removeEventListener('message', onMessage)
+      if (e.data.error) reject(new Error(e.data.error))
+      else if (e.data.result) resolve(e.data.result)
+      else reject(new Error('识别没有返回结果'))
+    }
+    worker.addEventListener('message', onMessage)
+    worker.postMessage({ id, buffer: rgba.data.buffer, width: c.width, height: c.height, opt }, [rgba.data.buffer])
+  })
+}
+
+const props = defineProps<{
+  src: string
+  /** 从图片元素进来：可"替换这张图片" */
+  replaceId?: string | null
+  /** 从已转好的图形元素回来继续编辑（此时不跑识别，直接还原已有顶点/边/字母） */
+  editId?: string | null
+}>()
 const emit = defineEmits<{ close: [] }>()
 const store = useDeckStore()
 
+/** 视口（滚动 + 缩放）与舞台（图片 + 叠加层） */
+const VIEW_W = 560
+const VIEW_H = 450
+
 const img = ref<HTMLImageElement | null>(null)
 const stage = ref<HTMLElement | null>(null)
+const viewport = ref<HTMLElement | null>(null)
 const busy = ref(false)
 const err = ref('')
 
@@ -28,25 +78,116 @@ const labels = ref<string[]>([])
 const lconf = ref<number[]>([])
 /** 字母相对顶点的偏移（识别框归一化坐标）—— 默认取被抹掉的原字母位置 */
 const offs = ref<{ dx: number; dy: number }[]>([])
-const selV = ref<number | null>(null)
+/** 选中的顶点（可多选，最后一个为"主选中"） */
+const selVs = ref<number[]>([])
+const selV = computed(() => (selVs.value.length ? selVs.value[selVs.value.length - 1] : null))
 const selE = ref<number | null>(null)
 /** 补线模式：连着点两个顶点就连一条线；点空白处则先新建一个顶点 */
 const linkMode = ref(false)
 const pendingV = ref<number | null>(null)
-/** 正在拖的顶点（识别偏了可以直接拖回来） */
+/** 正在拖的东西：>=0 = 顶点下标，-1 = 拖整条线 */
 const dragging = ref<number | null>(null)
+/** 一次拖动里"跟着一起动"的点（拖动开始时记下各自的初始归一化坐标） */
+const dragSet = ref<{ i: number; x: number; y: number }[]>([])
+/** 按下时的归一化坐标，用来算拖动位移 */
+const dragOrigin = ref<[number, number] | null>(null)
 
-const scale = ref(1)
+/** 缩放：baseScale 是"适屏"，zoom 是用户倍数 */
+const baseScale = ref(1)
+const zoom = ref(1)
+const panMode = ref(false)
+const panning = ref<{ sx: number; sy: number; sl: number; st: number } | null>(null)
+const scale = computed(() => baseScale.value * zoom.value)
 const viewW = computed(() => Math.round((img.value?.naturalWidth || 300) * scale.value))
 const viewH = computed(() => Math.round((img.value?.naturalHeight || 200) * scale.value))
 const nVerts = computed(() => pts.value.length / 2)
 /** 字母是自动认出来的，低于 0.8 的挑出来让人复核 */
 const unsureN = computed(() => lconf.value.filter((c, i) => c > 0 && c < 0.8 && (labels.value[i] || '').trim()).length)
+/** 识别框的哪几条边切到了图形 —— 切掉一截会让线断开、字母只剩半个（实测 x 被切成了 V 形） */
+const clipSides = computed(() => {
+  const c = res.value?.stats.clipped
+  if (!c) return ''
+  const parts: string[] = []
+  if (c.top) parts.push('上')
+  if (c.bottom) parts.push('下')
+  if (c.left) parts.push('左')
+  if (c.right) parts.push('右')
+  return parts.join(' / ')
+})
 
 // 裁剪：拖动框选识别范围
 const cropping = ref(false)
 const drag = ref<{ x: number; y: number; w: number; h: number } | null>(null)
 const dragStart = ref<{ x: number; y: number } | null>(null)
+// 框选顶点（舞台像素坐标）
+const boxSel = ref<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+
+// ---------------- 历史（撤销 / 重做） ----------------
+interface Snap {
+  pts: number[]
+  edges: [number, number, number][]
+  labels: string[]
+  lconf: number[]
+  offs: { dx: number; dy: number }[]
+}
+const past = ref<Snap[]>([])
+const future = ref<Snap[]>([])
+const canUndo = computed(() => past.value.length > 0)
+const canRedo = computed(() => future.value.length > 0)
+/** 有没有"手工改过"—— 重识别前据此决定要不要提醒 */
+const dirty = computed(() => past.value.length > 0)
+
+function snap(): Snap {
+  return {
+    pts: pts.value.slice(),
+    edges: edges.value.map((e) => [e[0], e[1], e[2]] as [number, number, number]),
+    labels: labels.value.slice(),
+    lconf: lconf.value.slice(),
+    offs: offs.value.map((o) => ({ ...o })),
+  }
+}
+function applySnap(s: Snap) {
+  pts.value = s.pts.slice()
+  edges.value = s.edges.map((e) => [e[0], e[1], e[2]] as [number, number, number])
+  labels.value = s.labels.slice()
+  lconf.value = s.lconf.slice()
+  offs.value = s.offs.map((o) => ({ ...o }))
+  selVs.value = []
+  selE.value = null
+}
+/** 在**改动之前**调用，记下"改之前"的样子 */
+function pushSnap(s: Snap) {
+  past.value.push(s)
+  if (past.value.length > 80) past.value.shift()
+  future.value.length = 0
+}
+function pushUndo() {
+  pushSnap(snap())
+}
+/** 拖动是"按下时先留一份快照，松开时确认真的动了才入栈" —— 单纯点一下选中不该占一格历史 */
+const pendingSnap = ref<Snap | null>(null)
+function commitDrag() {
+  const s = pendingSnap.value
+  pendingSnap.value = null
+  if (!s) return
+  if (s.pts.length === pts.value.length && s.pts.every((v, i) => v === pts.value[i])) return
+  pushSnap(s)
+}
+function undo() {
+  if (!past.value.length) return
+  future.value.push(snap())
+  applySnap(past.value.pop()!)
+}
+function redo() {
+  if (!future.value.length) return
+  past.value.push(snap())
+  applySnap(future.value.pop()!)
+}
+/** 重识别会换坐标系，历史必须清空（否则撤销回去的顶点坐标对不上新框） */
+function resetHistory() {
+  past.value = []
+  future.value = []
+}
 
 function toFull(i: number): [number, number] {
   const r = res.value
@@ -104,6 +245,42 @@ function adopt(r: VectorizeResult) {
   offs.value = out
 }
 
+/** 已转好的图形元素 → 可编辑副本（"继续编辑"入口；顶点/边/字母本来就在元素上，不重跑识别） */
+function restoreFromElement(el: MathFigureElement): boolean {
+  const ctx = el.vectorizeCtx
+  if (!ctx || !el.points || !el.mesh) return false
+  const [bx, by, ex2, ey2] = ctx.box
+  const cw = ex2 - bx, ch = ey2 - by
+  if (!(cw > 0) || !(ch > 0) || !(ctx.imgW > 0) || !(ctx.imgH > 0)) return false
+  res.value = {
+    W: cw, H: ch, box: ctx.box, imgW: ctx.imgW, imgH: ctx.imgH,
+    points: [], edges: [], anchors: [],
+    stats: { verts: 0, edges: 0, dash: 0, text: 0, bars: 0, dashGroups: 0 },
+  }
+  const n = Math.floor(el.points.length / 2)
+  const p: number[] = []
+  for (let i = 0; i < n; i++) {
+    p.push(+(((el.points[i * 2] * ctx.imgW - bx) / cw).toFixed(4)),
+           +(((el.points[i * 2 + 1] * ctx.imgH - by) / ch).toFixed(4)))
+  }
+  pts.value = p
+  edges.value = (el.mesh.edges || []).map((e) => [e[0], e[1], e[2]] as [number, number, number])
+  labels.value = new Array(n).fill('').map((_, i) => el.vlabels?.[i] || '')
+  // 已经人工确认过的结果，不再标"不确定"
+  lconf.value = new Array(n).fill(0)
+  const hh = el.h || 1
+  offs.value = new Array(n).fill(null).map((_, i) => {
+    const lo = el.labelOffsets?.[i]
+    if (!lo) return { dx: 0, dy: 0 }
+    return {
+      dx: +((lo.dx * ctx.imgW) / cw).toFixed(4),
+      // 元素里 labelOffsets 的零点是"顶点上方 12px"，弹窗里是"顶点本身"，差这一项
+      dy: +(((lo.dy - 12 / hh) * ctx.imgH) / ch).toFixed(4),
+    }
+  })
+  return true
+}
+
 async function run(crop?: [number, number, number, number] | null) {
   const im = img.value
   if (!im) return
@@ -111,12 +288,16 @@ async function run(crop?: [number, number, number, number] | null) {
   err.value = ''
   await new Promise((r) => setTimeout(r, 30))   // 让"识别中"先画出来
   try {
-    const r = vectorizeImage(im, crop ? { crop } : {})
+    const r = await vectorizeInWorker(im, crop ? { crop } : {})
     if (!r.stats.verts) throw new Error('没认出来东西 —— 可能不是线稿（灰度图 / 照片都不行）')
     res.value = r
     adopt(r)
-    selV.value = null
+    selVs.value = []
     selE.value = null
+    resetHistory()
+    zoom.value = 1
+    await nextTick()
+    if (viewport.value) { viewport.value.scrollLeft = 0; viewport.value.scrollTop = 0 }
   } catch (e) {
     err.value = (e as Error)?.message || String(e)
   } finally {
@@ -124,104 +305,264 @@ async function run(crop?: [number, number, number, number] | null) {
   }
 }
 
+/** 重识别（会丢掉本次手工修改，先问一句） */
+function rerun(crop?: [number, number, number, number] | null) {
+  if (dirty.value && !confirm('重新识别会丢掉这次的顶点 / 边 / 字母修改（可以用撤销找回，但只在重识别之前有效）。\n\n确定重新识别？')) return
+  void run(crop)
+}
+
+// ---------------- 坐标换算 ----------------
 /** 屏幕坐标 → 识别框归一化坐标（顶点坐标用的是这一套） */
-function toCropNorm(e: PointerEvent): [number, number] | null {
+function toCropNorm(e: { clientX: number; clientY: number }): [number, number] | null {
   const r = stage.value?.getBoundingClientRect()
   const rs = res.value
-  if (!r || !rs) return null
+  if (!r || !rs || !r.width || !r.height) return null
   const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height
   const [bx, by, ex2, ey2] = rs.box
   return [(fx * rs.imgW - bx) / (ex2 - bx), (fy * rs.imgH - by) / (ey2 - by)]
 }
+/** 屏幕坐标 → 舞台像素坐标（框选用） */
+function toStagePx(e: { clientX: number; clientY: number }): { x: number; y: number } | null {
+  const r = stage.value?.getBoundingClientRect()
+  if (!r) return null
+  return { x: e.clientX - r.left, y: e.clientY - r.top }
+}
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
 
+// ---------------- 视口：缩放 / 平移 ----------------
+function zoomAt(f: number, mx: number, my: number) {
+  const vp = viewport.value
+  if (!vp) return
+  const old = zoom.value
+  const next = Math.max(0.5, Math.min(6, old * f))
+  if (Math.abs(next - old) < 1e-4) return
+  zoom.value = next
+  nextTick(() => {
+    const k = next / old
+    vp.scrollLeft = (vp.scrollLeft + mx) * k - mx
+    vp.scrollTop = (vp.scrollTop + my) * k - my
+  })
+}
+function onWheel(e: WheelEvent) {
+  const vp = viewport.value
+  if (!vp) return
+  const r = vp.getBoundingClientRect()
+  zoomAt(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX - r.left, e.clientY - r.top)
+}
+function zoomCenter(f: number) {
+  const vp = viewport.value
+  if (!vp) return
+  zoomAt(f, vp.clientWidth / 2, vp.clientHeight / 2)
+}
+function resetZoom() {
+  zoom.value = 1
+  nextTick(() => {
+    const vp = viewport.value
+    if (vp) { vp.scrollLeft = 0; vp.scrollTop = 0 }
+  })
+}
+function onVpDown(e: PointerEvent) {
+  const vp = viewport.value
+  if (!vp) return
+  if (!panMode.value && e.button !== 1) return
+  e.preventDefault()
+  panning.value = { sx: e.clientX, sy: e.clientY, sl: vp.scrollLeft, st: vp.scrollTop }
+  try { vp.setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
+}
+function onVpMove(e: PointerEvent) {
+  const p = panning.value, vp = viewport.value
+  if (!p || !vp) return
+  vp.scrollLeft = p.sl - (e.clientX - p.sx)
+  vp.scrollTop = p.st - (e.clientY - p.sy)
+}
+function onVpUp() { panning.value = null }
+
+// ---------------- 舞台交互 ----------------
 function onDown(e: PointerEvent) {
+  if (panMode.value) return
   if (cropping.value) {
-    const r = stage.value?.getBoundingClientRect()
-    if (!r) return
-    dragStart.value = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }
+    const p = toStagePx(e)
+    if (!p) return
+    const r = stage.value!.getBoundingClientRect()
+    dragStart.value = { x: p.x / r.width, y: p.y / r.height }
     drag.value = { x: dragStart.value.x, y: dragStart.value.y, w: 0, h: 0 }
     return
   }
   // 补线模式下点空白处 = 新建一个顶点
-  if (!linkMode.value) return
-  const p = toCropNorm(e)
-  if (!p || p[0] < 0 || p[0] > 1 || p[1] < 0 || p[1] > 1) return
-  pts.value.push(+p[0].toFixed(4), +p[1].toFixed(4))
-  labels.value.push('')
-  lconf.value.push(0)
-  offs.value.push({ dx: 0, dy: 0 })
-  pickForLink(nVerts.value - 1)
-}
-function onMove(e: PointerEvent) {
-  const r = stage.value?.getBoundingClientRect()
-  if (!r) return
-  if (dragging.value !== null) {
+  if (linkMode.value) {
     const p = toCropNorm(e)
-    if (!p) return
-    pts.value[dragging.value * 2] = +Math.max(0, Math.min(1, p[0])).toFixed(4)
-    pts.value[dragging.value * 2 + 1] = +Math.max(0, Math.min(1, p[1])).toFixed(4)
+    if (!p || p[0] < 0 || p[0] > 1 || p[1] < 0 || p[1] > 1) return
+    pushUndo()
+    pts.value.push(+p[0].toFixed(4), +p[1].toFixed(4))
+    labels.value.push('')
+    lconf.value.push(0)
+    offs.value.push({ dx: 0, dy: 0 })
+    pickForLink(nVerts.value - 1)
     return
   }
-  if (!cropping.value || !dragStart.value) return
-  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height
+  // 默认模式：空白处拖动 = 框选顶点
+  const p = toStagePx(e)
+  if (!p) return
+  if (!e.shiftKey) { selVs.value = []; selE.value = null }
+  boxSel.value = { x0: p.x, y0: p.y, x1: p.x, y1: p.y }
+}
+
+function onMove(e: PointerEvent) {
+  if (dragging.value !== null) {
+    const p = toCropNorm(e)
+    if (!p || !dragOrigin.value) return
+    const dx = p[0] - dragOrigin.value[0], dy = p[1] - dragOrigin.value[1]
+    for (const d of dragSet.value) {
+      pts.value[d.i * 2] = +clamp01(d.x + dx).toFixed(4)
+      pts.value[d.i * 2 + 1] = +clamp01(d.y + dy).toFixed(4)
+    }
+    return
+  }
+  if (boxSel.value) {
+    const p = toStagePx(e)
+    if (!p) return
+    boxSel.value = { ...boxSel.value, x1: p.x, y1: p.y }
+    return
+  }
+  if (!cropping.value || !dragStart.value || !stage.value) return
+  const p = toStagePx(e)
+  if (!p) return
+  const r = stage.value.getBoundingClientRect()
+  const x = p.x / r.width, y = p.y / r.height
   drag.value = {
     x: Math.min(dragStart.value.x, x), y: Math.min(dragStart.value.y, y),
     w: Math.abs(x - dragStart.value.x), h: Math.abs(y - dragStart.value.y),
   }
 }
 function onUpStage() {
-  dragging.value = null
+  if (dragging.value !== null) {
+    dragging.value = null
+    dragSet.value = []
+    dragOrigin.value = null
+    commitDrag()
+  }
+  if (boxSel.value) { finishBoxSel(); return }
   onUp()
+}
+
+/** 框选结束：把框内的顶点选中（按住 Shift 是追加） */
+function finishBoxSel() {
+  const b = boxSel.value
+  boxSel.value = null
+  if (!b || !stage.value) return
+  const r = stage.value.getBoundingClientRect()
+  if (!r.width || !r.height) return
+  const kx = viewW.value / r.width, ky = viewH.value / r.height   // rect 是 CSS 像素，顶点坐标是舞台像素
+  const x0 = Math.min(b.x0, b.x1) * kx, x1 = Math.max(b.x0, b.x1) * kx
+  const y0 = Math.min(b.y0, b.y1) * ky, y1 = Math.max(b.y0, b.y1) * ky
+  if (x1 - x0 < 4 && y1 - y0 < 4) return    // 只是点了一下空白
+  const hit: number[] = []
+  for (let i = 0; i < nVerts.value; i++) {
+    const x = px(i), y = py(i)
+    if (x >= x0 && x <= x1 && y >= y0 && y <= y1) hit.push(i)
+  }
+  if (!hit.length) return
+  const merged = new Set(selVs.value)
+  for (const i of hit) merged.add(i)
+  selVs.value = [...merged].sort((a, b) => a - b)
+  selE.value = null
 }
 
 /** 顶点按下：补线模式下选点，否则选中并开始拖 */
 function onVertexDown(e: PointerEvent, i: number) {
   e.stopPropagation()
+  if (panMode.value) return
   if (linkMode.value) { pickForLink(i); return }
   if (e.shiftKey && selV.value !== null && selV.value !== i) {
-    connect(selV.value, i)
-    selV.value = i; selE.value = null
+    const s = snap()
+    if (connect(selV.value, i)) pushSnap(s)
+    selVs.value = [i]
+    selE.value = null
     return
   }
-  selV.value = i
+  // 点在已多选的点上 → 整组一起拖；否则只选它
+  if (!selVs.value.includes(i)) selVs.value = [i]
   selE.value = null
+  pendingSnap.value = snap()
+  dragOrigin.value = toCropNorm(e)
+  dragSet.value = selVs.value.map((k) => ({ i: k, x: pts.value[k * 2], y: pts.value[k * 2 + 1] }))
   dragging.value = i
+  try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
+}
+
+/** 边的命中线按下：拖动整条线（两端点同步平移） */
+function onEdgeDown(e: PointerEvent, i: number) {
+  e.stopPropagation()
+  if (panMode.value || linkMode.value || cropping.value) return
+  const ed = edges.value[i]
+  if (!ed) return
+  selE.value = i
+  selVs.value = []
+  pendingSnap.value = snap()
+  dragOrigin.value = toCropNorm(e)
+  dragSet.value = [
+    { i: ed[0], x: pts.value[ed[0] * 2], y: pts.value[ed[0] * 2 + 1] },
+    { i: ed[1], x: pts.value[ed[1] * 2], y: pts.value[ed[1] * 2 + 1] },
+  ]
+  dragging.value = -1
   try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
 }
 
 /** 补线：第一次点记下起点，第二次点连线 */
 function pickForLink(i: number) {
-  if (pendingV.value === null) { pendingV.value = i; selV.value = i; selE.value = null; return }
+  if (pendingV.value === null) { pendingV.value = i; selVs.value = [i]; selE.value = null; return }
   if (pendingV.value === i) { pendingV.value = null; return }
-  connect(pendingV.value, i)
+  const s = snap()
+  if (connect(pendingV.value, i)) pushSnap(s)
   pendingV.value = null
-  selV.value = i
+  selVs.value = [i]
   selE.value = null
 }
-function connect(a: number, b: number, dash: 0 | 1 = 0) {
-  if (a === b || a < 0 || b < 0) return
-  if (edges.value.some((e) => (e[0] === a && e[1] === b) || (e[0] === b && e[1] === a))) return
+function connect(a: number, b: number, dash: 0 | 1 = 0): boolean {
+  if (a === b || a < 0 || b < 0) return false
+  if (edges.value.some((e) => (e[0] === a && e[1] === b) || (e[0] === b && e[1] === a))) return false
   edges.value.push([a, b, dash])
+  return true
 }
 function toggleLink() {
   linkMode.value = !linkMode.value
   pendingV.value = null
+  if (linkMode.value) { panMode.value = false; cropping.value = false }
+}
+function togglePan() {
+  panMode.value = !panMode.value
+  if (panMode.value) { linkMode.value = false; cropping.value = false }
+}
+function toggleCrop() {
+  cropping.value = !cropping.value
+  if (cropping.value) { linkMode.value = false; panMode.value = false }
+}
+/** 顶点坐标微调（按识别框的百分比给，用 change 而不是 input —— 连续敲数字只记一次历史） */
+function onCoord(i: number, axis: 0 | 1, e: Event) {
+  const v = Number((e.target as HTMLInputElement).value)
+  if (!Number.isFinite(v)) return
+  const next = +clamp01(v / 100).toFixed(4)
+  if (pts.value[i * 2 + axis] === next) return
+  pushUndo()
+  pts.value[i * 2 + axis] = next
 }
 function toggleDash() {
   const i = selE.value
   if (i === null) return
   const e = edges.value[i]
-  if (e) e[2] = e[2] ? 0 : 1
+  if (!e) return
+  pushUndo()
+  e[2] = e[2] ? 0 : 1
 }
 function onUp() {
-  if (!cropping.value || !drag.value) return
+  if (!cropping.value || !drag.value || !img.value) return
   const d = drag.value
   dragStart.value = null
   cropping.value = false
-  if (d.w < 0.05 || d.h < 0.05 || !img.value) { drag.value = null; return }
+  if (d.w < 0.05 || d.h < 0.05) { drag.value = null; return }
   const iw = img.value.naturalWidth, ih = img.value.naturalHeight
   drag.value = null
-  run([Math.round(d.x * iw), Math.round(d.y * ih), Math.round((d.x + d.w) * iw), Math.round((d.y + d.h) * ih)])
+  rerun([Math.round(d.x * iw), Math.round(d.y * ih), Math.round((d.x + d.w) * iw), Math.round((d.y + d.h) * ih)])
 }
 
 function finishRemove(i: number) {
@@ -229,11 +570,11 @@ function finishRemove(i: number) {
   labels.value.splice(i, 1)
   lconf.value.splice(i, 1)
   offs.value.splice(i, 1)
-  selV.value = null
+  selVs.value = []
   selE.value = null
 }
-/** 删掉第 i 个顶点并重编号 */
-function delVertex(i: number) {
+/** 删掉第 i 个顶点并重编号（不记历史，由调用方决定） */
+function delVertexRaw(i: number) {
   const keep = (list: [number, number, number][]) =>
     list
       .filter((e) => e[0] !== i && e[1] !== i)
@@ -262,17 +603,44 @@ function delVertex(i: number) {
   edges.value = keep(edges.value)
   finishRemove(i)
 }
+function delVertex(i: number) {
+  pushUndo()
+  delVertexRaw(i)
+}
+/** 批量删掉选中的顶点（倒序删，索引才不会错位） */
+function delSelectedVertices() {
+  if (!selVs.value.length) return
+  pushUndo()
+  const ids = selVs.value.slice().sort((a, b) => b - a)
+  for (const i of ids) delVertexRaw(i)
+}
 function delEdge(i: number) {
+  pushUndo()
   edges.value.splice(i, 1)
   selE.value = null
 }
 
+/** 改字母：一次连续输入只记一次历史 */
+const labelEditing = ref(false)
+function onLabelInput() {
+  if (!labelEditing.value) { pushUndo(); labelEditing.value = true }
+}
+function onLabelBlur() { labelEditing.value = false }
+
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') { emit('close'); return }
   const t = e.target as HTMLElement | null
-  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
+  const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')
+  const mod = e.ctrlKey || e.metaKey
+  if (mod && e.key.toLowerCase() === 'z') {
+    e.preventDefault()
+    if (e.shiftKey) redo(); else undo()
+    return
+  }
+  if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return }
+  if (typing) return
   if (e.key === 'Delete' || e.key === 'Backspace') {
-    if (selV.value !== null) { e.preventDefault(); delVertex(selV.value) }
+    if (selVs.value.length) { e.preventDefault(); delSelectedVertices() }
     else if (selE.value !== null) { e.preventDefault(); delEdge(selE.value) }
   }
 }
@@ -305,29 +673,61 @@ function buildPatch(): Partial<SlideElement> | null {
     fill: 'transparent',
     stroke: '#1a1a1a',
     strokeWidth: 2.8,
+    // 留一份识别上下文，之后还能回到这个弹窗继续改
+    vectorizeCtx: { src: props.src, imgW: iw, imgH: ih, box: [bx, by, ex2, ey2] as [number, number, number, number] },
   } as Partial<SlideElement>
 }
 
-function insert() {
+const findEl = (id: string) => store.currentSlide?.elements.find((e) => e.id === id)
+
+/** 插入一个新图形（不动原图） */
+function insertNew() {
   const patch = buildPatch()
   if (!patch) return
-  const src = props.replaceId ? store.currentSlide?.elements.find((e) => e.id === props.replaceId) : undefined
-  if (src) {
-    store.addElement('mathfig', { ...patch, x: src.x, y: src.y } as Partial<SlideElement>)
-    store.removeElement(src.id)
-  } else {
-    store.addElement('mathfig', patch)
-  }
+  store.addElement('mathfig', patch)
   emit('close')
 }
+/** 替换掉那张图片：位置原地不动，尺寸沿用原元素的（保持用户当时缩放的大小） */
+function insertReplace() {
+  const patch = buildPatch()
+  if (!patch) return
+  const src = props.replaceId ? findEl(props.replaceId) : undefined
+  if (!src) { insertNew(); return }
+  store.addElement('mathfig', { ...patch, x: src.x, y: src.y, w: src.w, h: src.h } as Partial<SlideElement>)
+  store.removeElement(src.id)
+  emit('close')
+}
+/** 继续编辑：把改好的结果写回原元素（保留 id / 位置 / 尺寸） */
+function saveEdit() {
+  const patch = buildPatch()
+  const el = props.editId ? findEl(props.editId) : undefined
+  if (!patch) { emit('close'); return }
+  if (!el) { insertNew(); return }
+  store.pushHistory()
+  store.updateElement(el.id, { ...patch, x: el.x, y: el.y, w: el.w, h: el.h } as Partial<SlideElement>)
+  emit('close')
+}
+function insert() {
+  if (props.editId) saveEdit()
+  else insertReplace()
+}
+
+/** 主按钮文案 */
+const primaryText = computed(() => {
+  if (props.editId) return '保存修改'
+  if (props.replaceId) return '替换这张图片'
+  return '插入当前页'
+})
 
 onMounted(async () => {
   window.addEventListener('keydown', onKey)
   try {
     const im = await loadImageElement(props.src)
     img.value = im
-    scale.value = Math.min(560 / im.naturalWidth, 450 / im.naturalHeight, 2)
+    baseScale.value = Math.min(VIEW_W / im.naturalWidth, VIEW_H / im.naturalHeight, 2)
     await nextTick()
+    const el = props.editId ? (findEl(props.editId) as MathFigureElement | undefined) : undefined
+    if (el && restoreFromElement(el)) return
     await run(null)
   } catch (e) {
     err.value = (e as Error)?.message || String(e)
@@ -340,67 +740,101 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   <div class="vd" @mousedown.self="emit('close')">
     <div class="vd__box">
       <header class="vd__head">
-        <div class="vd__title"><span class="vd__badge">✎</span> 图片转图形</div>
+        <div class="vd__title">
+          <span class="vd__badge">✎</span>
+          {{ props.editId ? '编辑矢量图形' : '图片转图形' }}
+        </div>
         <button class="vd__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </header>
 
       <div class="vd__body">
         <div class="vd__left">
           <div
-            ref="stage"
-            class="vd__stage"
-            :class="{ 'vd__stage--crop': cropping, 'vd__stage--link': linkMode }"
-            :style="{ width: viewW + 'px', height: viewH + 'px' }"
-            @pointerdown="onDown"
-            @pointermove="onMove"
-            @pointerup="onUpStage"
-            @pointerleave="dragging = null"
+            ref="viewport"
+            class="vd__viewport"
+            :class="{ 'vd__vp--pan': panMode, 'vd__vp--crop': cropping, 'vd__vp--link': linkMode }"
+            @wheel.prevent="onWheel"
+            @pointerdown="onVpDown"
+            @pointermove="onVpMove"
+            @pointerup="onVpUp"
+            @pointerleave="onVpUp"
           >
-            <img class="vd__img" :src="props.src" :width="viewW" :height="viewH" draggable="false" alt="">
-            <svg class="vd__ov" :width="viewW" :height="viewH">
-              <g v-for="(e, i) in edges" :key="'e' + i">
-                <line
-                  :x1="ex(i)[0]" :y1="ex(i)[1]" :x2="ex(i)[2]" :y2="ex(i)[3]"
-                  stroke="transparent" stroke-width="11" style="cursor:pointer"
-                  @click="selE = i; selV = null"
-                />
-                <line
-                  :x1="ex(i)[0]" :y1="ex(i)[1]" :x2="ex(i)[2]" :y2="ex(i)[3]"
-                  :stroke="selE === i ? '#ff8f1f' : '#1668e0'"
-                  :stroke-width="selE === i ? 3.6 : 2.2"
-                  :stroke-dasharray="e[2] ? '6 5' : ''"
-                  stroke-linecap="round"
-                />
-              </g>
-              <g v-for="i in nVerts" :key="'v' + (i - 1)">
-                <circle
-                  :cx="px(i - 1)" :cy="py(i - 1)" r="10" fill="transparent" style="cursor:pointer"
-                  @pointerdown="onVertexDown($event, i - 1)"
-                />
-                <circle
-                  :cx="px(i - 1)" :cy="py(i - 1)" :r="pendingV === i - 1 ? 6.5 : 4.5"
-                  :fill="pendingV === i - 1 ? '#12b76a' : (selV === i - 1 ? '#ff8f1f' : '#e02020')"
-                  stroke="#fff" stroke-width="1.2"
-                  style="pointer-events:none"
-                />
-                <text
-                  :x="px(i - 1) + 7" :y="py(i - 1) - 6" font-size="13" font-weight="700"
-                  fill="#c02020" stroke="#fff" stroke-width="3" paint-order="stroke"
-                  style="pointer-events:none"
-                >{{ i - 1 }}</text>
-              </g>
-            </svg>
             <div
-              v-if="drag" class="vd__drag"
-              :style="{ left: (drag.x * 100) + '%', top: (drag.y * 100) + '%', width: (drag.w * 100) + '%', height: (drag.h * 100) + '%' }"
-            ></div>
-            <div v-if="busy" class="vd__busy">识别中…</div>
+              ref="stage"
+              class="vd__stage"
+              :style="{ width: viewW + 'px', height: viewH + 'px' }"
+              @pointerdown="onDown"
+              @pointermove="onMove"
+              @pointerup="onUpStage"
+              @pointerleave="onUpStage"
+            >
+              <img class="vd__img" :src="props.src" :width="viewW" :height="viewH" draggable="false" alt="">
+              <svg class="vd__ov" :width="viewW" :height="viewH">
+                <g v-for="(e, i) in edges" :key="'e' + i">
+                  <line
+                    :x1="ex(i)[0]" :y1="ex(i)[1]" :x2="ex(i)[2]" :y2="ex(i)[3]"
+                    stroke="transparent" stroke-width="11" style="cursor:move"
+                    @pointerdown="onEdgeDown($event, i)"
+                    @click="selE = i; selVs = []"
+                  />
+                  <line
+                    :x1="ex(i)[0]" :y1="ex(i)[1]" :x2="ex(i)[2]" :y2="ex(i)[3]"
+                    :stroke="selE === i ? '#ff8f1f' : '#1668e0'"
+                    :stroke-width="selE === i ? 3.6 : 2.2"
+                    :stroke-dasharray="e[2] ? '6 5' : ''"
+                    stroke-linecap="round"
+                    style="pointer-events:none"
+                  />
+                </g>
+                <g v-for="i in nVerts" :key="'v' + (i - 1)">
+                  <circle
+                    :cx="px(i - 1)" :cy="py(i - 1)" r="10" fill="transparent" style="cursor:pointer"
+                    @pointerdown="onVertexDown($event, i - 1)"
+                  />
+                  <circle
+                    :cx="px(i - 1)" :cy="py(i - 1)" :r="pendingV === i - 1 ? 6.5 : 4.5"
+                    :fill="pendingV === i - 1 ? '#12b76a' : (selVs.includes(i - 1) ? '#ff8f1f' : '#e02020')"
+                    stroke="#fff" stroke-width="1.2"
+                    style="pointer-events:none"
+                  />
+                  <text
+                    :x="px(i - 1) + 7" :y="py(i - 1) - 6" font-size="13" font-weight="700"
+                    fill="#c02020" stroke="#fff" stroke-width="3" paint-order="stroke"
+                    style="pointer-events:none"
+                  >{{ i - 1 }}</text>
+                </g>
+              </svg>
+              <div
+                v-if="drag" class="vd__drag"
+                :style="{ left: (drag.x * 100) + '%', top: (drag.y * 100) + '%', width: (drag.w * 100) + '%', height: (drag.h * 100) + '%' }"
+              ></div>
+              <div
+                v-if="boxSel" class="vd__selbox"
+                :style="{
+                  left: Math.min(boxSel.x0, boxSel.x1) + 'px',
+                  top: Math.min(boxSel.y0, boxSel.y1) + 'px',
+                  width: Math.abs(boxSel.x1 - boxSel.x0) + 'px',
+                  height: Math.abs(boxSel.y1 - boxSel.y0) + 'px',
+                }"
+              ></div>
+              <div v-if="busy" class="vd__busy">识别中…</div>
+            </div>
           </div>
+
+          <div class="vd__viewbar">
+            <button class="vd__ico" title="缩小" @click="zoomCenter(1 / 1.25)"><AppIcon name="minus" :size="12" /></button>
+            <span class="vd__pct">{{ Math.round(zoom * 100) }}%</span>
+            <button class="vd__ico" title="放大" @click="zoomCenter(1.25)"><AppIcon name="plus" :size="12" /></button>
+            <button class="vd__btn vd__btn--sm" @click="resetZoom">适屏</button>
+            <button class="vd__btn vd__btn--sm" :class="{ 'vd__btn--on': panMode }" @click="togglePan">抓手</button>
+            <span class="vd__viewtip">滚轮缩放 · 中键或抓手拖动平移</span>
+          </div>
+
           <p class="vd__hint">
             {{ cropping
               ? '在图上拖一个框，松开后按这个范围重新识别（用来切掉下方的「图 1」这类题注）'
-              : '顶点可以按住拖动；点顶点选中 → Delete 删掉（只连一条线的点会并到最近的顶点上，线不会丢）；' +
-                '点线选中 → Delete 删掉 / 切换虚实；少了一条线就用右边的「＋ 补一条线」' }}
+              : '顶点可以按住拖动（框选多个可整组拖）；点顶点选中 → Delete 删掉（只连一条线的点会并到最近的顶点上，线不会丢）；' +
+                '点线可以拖动整条线、选中后 Delete 删掉 / 切换虚实；少了一条线就用右边的「＋ 补一条线」。' }}
           </p>
         </div>
 
@@ -410,21 +844,43 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             <div class="vd__stat">
               顶点 <b>{{ nVerts }}</b> · 边 <b>{{ edges.length }}</b> · 虚线 <b>{{ edges.filter((e) => e[2]).length }}</b>
             </div>
-            <div class="vd__row">
-              <button class="vd__btn" :class="{ 'vd__btn--on': cropping }" @click="cropping = !cropping">框选识别范围</button>
-              <button class="vd__btn" :disabled="busy" @click="run(null)">整图重识别</button>
+            <div v-if="clipSides" class="vd__clip">
+              识别框的<b>{{ clipSides }}</b>边切到了图形 —— 框里的线会断开、字母可能只剩半个。
+              点「框选识别范围」把框放宽一点再识别。
             </div>
+            <div class="vd__row">
+              <button class="vd__ico" :disabled="!canUndo" title="撤销 (Ctrl+Z)" @click="undo"><AppIcon name="undo" :size="12" /></button>
+              <button class="vd__ico" :disabled="!canRedo" title="重做 (Ctrl+Shift+Z)" @click="redo"><AppIcon name="redo" :size="12" /></button>
+              <button class="vd__btn" :class="{ 'vd__btn--on': cropping }" @click="toggleCrop">框选识别范围</button>
+              <button class="vd__btn" :disabled="busy" @click="rerun(null)">整图重识别</button>
+            </div>
+
+            <div v-if="selVs.length === 1" class="vd__coord">
+              <span class="vd__coordlab">顶点 #{{ selVs[0] }} 位置</span>
+              <label>x <input :value="Math.round(pts[selVs[0] * 2] * 100)" type="number" min="0" max="100" @change="onCoord(selVs[0], 0, $event)"></label>
+              <label>y <input :value="Math.round(pts[selVs[0] * 2 + 1] * 100)" type="number" min="0" max="100" @change="onCoord(selVs[0], 1, $event)"></label>
+              <span class="vd__coordtip">%</span>
+            </div>
+
+            <div v-if="selVs.length > 1" class="vd__row vd__row--sel">
+              <span class="vd__selnum">已选中 {{ selVs.length }} 个顶点</span>
+              <button class="vd__btn vd__btn--danger" @click="delSelectedVertices">全部删掉</button>
+              <button class="vd__btn" @click="selVs = []">取消选择</button>
+            </div>
+
             <div class="vd__label">
               顶点字母 —— 已自动填 <b>{{ labels.filter((s) => s.trim()).length }}</b> 个<template v-if="unsureN">，其中 <b class="vd__warn">{{ unsureN }}</b> 个不太确定，请对一眼</template>
             </div>
             <div class="vd__list">
-              <div v-for="i in nVerts" :key="'l' + (i - 1)" class="vd__item" :class="{ 'vd__item--on': selV === i - 1 }">
-                <span class="vd__idx" @click="selV = i - 1; selE = null">{{ i - 1 }}</span>
+              <div v-for="i in nVerts" :key="'l' + (i - 1)" class="vd__item" :class="{ 'vd__item--on': selVs.includes(i - 1) }">
+                <span class="vd__idx" @click="selVs = [i - 1]; selE = null">{{ i - 1 }}</span>
                 <input
                   v-model="labels[i - 1]" class="vd__input"
                   :class="{ 'vd__input--unsure': lconf[i - 1] > 0 && lconf[i - 1] < 0.8 }"
                   :title="lconf[i - 1] > 0 ? ('识别置信度 ' + Math.round(lconf[i - 1] * 100) + '%') : '没配上字母，手动填或留空'"
-                  placeholder="如 A / A_1" @focus="selV = i - 1; selE = null"
+                  placeholder="如 A / A_1"
+                  @input="onLabelInput" @blur="onLabelBlur"
+                  @focus="selVs = [i - 1]; selE = null"
                 >
                 <button class="vd__del" title="删掉这个顶点（只连一条线的点会并到最近的顶点上，线不会丢）" @click="delVertex(i - 1)">
                   <AppIcon name="trash" :size="13" />
@@ -453,9 +909,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
       <footer class="vd__foot">
         <button class="vd__btn" @click="emit('close')">取消</button>
-        <button v-if="props.replaceId" class="vd__btn" :disabled="!res || busy" @click="insert()">插入为新图形</button>
+        <button v-if="props.replaceId && !props.editId" class="vd__btn" :disabled="!res || busy" @click="insertNew()">插入为新图形</button>
         <button class="vd__btn vd__btn--primary" :disabled="!res || busy" @click="insert()">
-          {{ props.replaceId ? '替换这张图片' : '插入当前页' }}
+          {{ primaryText }}
         </button>
       </footer>
     </div>
@@ -472,25 +928,44 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .vd__close:hover { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); }
 .vd__body { display: flex; gap: 14px; padding: 14px; overflow: auto; }
 .vd__left { flex: none; }
-.vd__stage { position: relative; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; background: #fff; touch-action: none; }
-.vd__stage--crop { cursor: crosshair; }
-.vd__stage--link { cursor: copy; }
-.vd__tip--on { color: var(--brand-800); background: var(--brand-soft); border: 1px solid var(--brand-400); border-radius: var(--radius-sm); padding: 5px 8px; font-size: 12px; line-height: 1.5; }
+.vd__viewport { width: 560px; height: 450px; overflow: auto; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: #fff; touch-action: none; }
+.vd__vp--crop { cursor: crosshair; }
+.vd__vp--link { cursor: copy; }
+.vd__vp--pan { cursor: grab; }
+.vd__stage { position: relative; margin: 0 auto; background: #fff; touch-action: none; }
 .vd__img { display: block; user-select: none; }
 .vd__ov { position: absolute; left: 0; top: 0; }
 .vd__drag { position: absolute; border: 1px dashed var(--brand-600); background: rgba(90, 120, 240, 0.12); pointer-events: none; }
+.vd__selbox { position: absolute; border: 1px dashed #1668e0; background: rgba(22, 104, 224, 0.1); pointer-events: none; }
 .vd__busy { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.72); font-size: 13px; color: var(--muted); }
+.vd__viewbar { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.vd__pct { min-width: 42px; text-align: center; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.vd__viewtip { font-size: 12px; color: var(--gray-500); }
 .vd__hint { margin: 8px 0 0; font-size: 12px; color: var(--muted); max-width: 560px; line-height: 1.5; }
 .vd__right { flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 8px; }
 .vd__stat { font-size: 13px; color: var(--muted); }
 .vd__stat b { color: var(--text); }
-.vd__row { display: flex; gap: 6px; flex-wrap: wrap; }
+.vd__clip { font-size: 12px; line-height: 1.55; color: #8a5a00; background: #fff7e6; border: 1px solid #e8c07a; border-radius: var(--radius-sm); padding: 6px 8px; }
+.vd__clip b { color: #b25b00; }
+.vd__row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.vd__row--sel { background: var(--brand-soft); border: 1px solid var(--brand-400); border-radius: var(--radius-sm); padding: 5px 7px; }
+.vd__selnum { font-size: 12px; color: var(--brand-800); }
 .vd__btn { padding: 6px 12px; font-size: 13px; cursor: pointer; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--gray-700); transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+.vd__btn--sm { padding: 4px 9px; font-size: 12px; }
 .vd__btn:hover:not(:disabled) { background: var(--brand-soft); border-color: var(--brand-400); color: var(--brand-800); }
 .vd__btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .vd__btn--on { background: var(--brand-600); border-color: var(--brand-600); color: #fff; }
 .vd__btn--primary { background: var(--brand-600); border-color: var(--brand-600); color: #fff; font-weight: 600; }
 .vd__btn--danger { border-color: var(--danger-border); color: var(--danger); }
+.vd__ico { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; cursor: pointer; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--gray-700); }
+.vd__ico:hover:not(:disabled) { background: var(--brand-soft); border-color: var(--brand-400); color: var(--brand-800); }
+.vd__ico:disabled { opacity: 0.4; cursor: not-allowed; }
+.vd__coord { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.vd__coordlab { color: var(--gray-600); }
+.vd__coord label { display: inline-flex; align-items: center; gap: 3px; }
+.vd__coord input { width: 54px; padding: 3px 5px; font-size: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: #fff; color: var(--text); }
+.vd__coord input:focus { outline: none; border-color: var(--brand-400); box-shadow: 0 0 0 2px var(--brand-soft); }
+.vd__coordtip { color: var(--gray-500); }
 .vd__label { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .vd__list { flex: 1; min-height: 90px; max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px; }
 .vd__item { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: var(--radius-sm); border: 1px solid transparent; }
@@ -503,6 +978,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .vd__del { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; flex: none; padding: 0; cursor: pointer; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--gray-600); }
 .vd__del:hover { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); }
 .vd__tip { margin: 0; font-size: 12px; color: var(--gray-500); line-height: 1.5; }
+.vd__tip--on { color: var(--brand-800); background: var(--brand-soft); border: 1px solid var(--brand-400); border-radius: var(--radius-sm); padding: 5px 8px; font-size: 12px; line-height: 1.5; }
 .vd__err { font-size: 13px; color: var(--danger); background: var(--danger-soft); border: 1px solid var(--danger-border); border-radius: var(--radius-sm); padding: 8px 10px; line-height: 1.5; }
 .vd__foot { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--panel-2, #fafafd); }
 </style>

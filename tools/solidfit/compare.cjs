@@ -10,8 +10,8 @@ const SRC = {
   cube7: { img: 'image7', w: 655, h: 696, crop: null },
   cubeaxes: { img: 'image8', w: 758, h: 841, crop: null },
   pabcdaxes: { img: 'image12', w: 888, h: 659, crop: [0, 0, 888, 580] },
-  pabcdo: { img: 'image15', w: 709, h: 584, crop: [0, 0, 709, 470] },
-  pabcdoaxes: { img: 'image16', w: 888, h: 683, crop: [0, 0, 888, 560] },
+  pabcdo: { img: 'image15', w: 709, h: 584, crop: [0, 0, 709, 478] },
+  pabcdoaxes: { img: 'image16', w: 888, h: 683, crop: [0, 0, 888, 582] },
   pabcdc1: { img: 'image17', w: 778, h: 618, crop: [0, 0, 778, 500] },
 };
 

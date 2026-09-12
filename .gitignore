@@ -26,3 +26,6 @@ npm-debug.log*
 pnpm-debug.log*
 # docx 转换产物（生成的 .md 与抽出的图片）
 _docx-out/
+# 并行 agent 会话的工作目录（WorkBuddy 的笔记 / 记忆，属个人工具产物，不进仓库）
+.workbuddy/
+.workbuddy-ai/
