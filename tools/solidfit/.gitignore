@@ -1,8 +1,10 @@
 fit.html
 figs.js
 vectorize.html
+vec.html
 imgs.js
 _bundle.cjs
+_vec.js
 bundle.cjs
 _presets.cjs
 _*.json

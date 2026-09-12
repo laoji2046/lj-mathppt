@@ -1,5 +1,9 @@
 # solidfit —— 把一张线稿插图"量"成可编辑的数学图形
 
+> 算法只有一份：`src/composables/vectorize.ts`。这个目录先把应用里的算法切成两部分：CLI 工具和应用**共用同一份**，
+> `vectorize.cjs` 会用 esbuild 把 `src/composables/vectorize.ts` 打成 `_vec.js` 给页面用，不会再各存一份副本。
+> 应用内的入口：「数学图形 → 复刻图形 → ＋ 从图片复刻…」，或选中图片元素后的属性面板「✎ 转成矢量图形」。
+
 用途：试卷 / 讲义里的立体几何插图是位图，想变成能拖顶点、能改线型的图形元素，
 就需要把顶点坐标和边表量出来。人眼在放大图上读，误差常有十几像素，还要来回好几轮；
 这套工具把它变成**自动矢量化**：一张图进去，顶点 + 边表 + 虚实线出来。
@@ -86,7 +90,7 @@ node tools/solidfit/overlay.cjs spec.json out.html 1.0   # 叠回原图核对
 
 | 文件 | 作用 |
 |---|---|
-| `vectorize.js` | 自动矢量化主流程（纯浏览器 JS，用 canvas 解 PNG，无依赖） |
+| `vec-entry.ts` | 把应用里的算法挂到 window（工具与应用共用同一份实现） |
 | `vectorize.cjs` | 把图片内联成 imgs.js 并生成 vectorize.html |
 | `annotate.cjs` | 结果叠原图 + 顶点序号标注 |
 | `tofig.cjs` | 结果 → 可直接粘贴的 fig(...) 代码 |
