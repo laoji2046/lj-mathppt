@@ -17,8 +17,9 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
-    // 备份 / 构建产物 / 探针目录不触发文件监听，避免 EBUSY 或误刷新
-    watch: { ignored: ['**/node_modules/**', '**/_backup/**', '**/dist/**', '**/.probe/**', '**/参考/**', '**/.*.tmpdir/**', '**/src-tauri/target/**'] },
+    // 备份 / 构建产物 / 探针 / 工具产物不触发文件监听，避免 EBUSY 或误刷新
+    // （tools/ 下的量图工具会在跑的过程中不停生成又删掉 html，watcher 抢不到句柄会直接把 dev server 打挂）
+    watch: { ignored: ['**/node_modules/**', '**/_backup/**', '**/dist/**', '**/.probe/**', '**/参考/**', '**/.*.tmpdir/**', '**/src-tauri/target/**', '**/tools/**', '**/_docx-out/**'] },
   },
   // Tauri 环境变量以 TAURI_ 为前缀，默认已含 VITE_，无需额外配置
   envPrefix: ['VITE_', 'TAURI_'],
