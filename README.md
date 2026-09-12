@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1108**（源码快照 `_backup/rollback-20260911-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1109**（源码快照 `_backup/rollback-20260911-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -25,6 +25,10 @@
 >
 > 1108 整合：混排公式面板右侧并入**预制公式库**（带滚动条 + 搜索 + 分类 + 标签）——
 > **单击**卡片把 LaTeX 追加进输入框（可连点多个、逐行排列），**双击**直接插入当前页；左栏布局保持不变。
+>
+> 1109 修复+功能：**混排与公式恢复「拖动外框无级放大」**（`fitMode: fill` 默认；插入时 `autoBox` 自动贴合内容；
+> 属性面板新增「充满外框」开关）；修复「拖动放大后内容被截断」——根因是**缩放原点与 flex 对齐不一致**；
+> 混排面板新增「＋ 加入预设组合」；新增 `clean-dist.cjs`（构建前清理陈旧产物，exe 58→30 MB）。
 >
 > 按日期的版本变更见文末 **更新日志**。
 
@@ -153,6 +157,9 @@ node node_modules/vite/bin/vite.js build    # 构建到 dist/
 ```bash
 # 1. 构建前端（dist/）
 node node_modules/vite/bin/vite.js build
+# 1b. 清理 dist/assets 里 index.html 已不再引用的历史产物
+#     （vite.config 里 emptyOutDir:false，构建不会自动清理；Tauri 会把整个 dist 打进 exe）
+node clean-dist.cjs
 
 # 2. 编译 + 打包（需要 Rust 工具链；本机 cargo 在 ~/.cargo/bin，需先加进 PATH）
 export PATH="/c/Users/老冀/.cargo/bin:$PATH"
@@ -210,7 +217,21 @@ node ../node_modules/@tauri-apps/cli/tauri.js build   # 生成 NSIS 安装包
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
 
-### 2026-09-12（v2026.09.1108）
+### 2026-09-12（v2026.09.1108 / 1109）
+
+**1109 · 自由缩放回归修复 + 预设组合**
+- **恢复「拖动外框 → 内容无级放大」**：元素新增 `fitMode`（`fill` 默认 / `shrink` 只缩不放）；
+  画布与导出（PDF·PNG·HTML·放映）两侧通过 `data-cap` 保持一致；模板与 Markdown 导入的元素标记为 `shrink`（保持已校准版式）
+- **插入即贴合内容**：新插入的公式/混排带 `autoBox`，渲染后把外框收成刚好包住内容（一次性），
+  所以不会再出现"框大公式小被撑成 4 倍"；属性面板新增「充满外框」开关可随时切换
+- **修复「拖动放大后混排内容被截断」**：根因是 `transform-origin` 与 flex 对齐不一致 ——
+  左对齐（`justify-content: flex-start`）的内容贴左边缘，却按 `center` 放大 → 放大后一半跑到左边框外被 `overflow: hidden` 裁掉。
+  现在缩放原点跟随对齐（left/right/center），画布与导出一致（导出侧 `data-align`）
+- 配套加固：内容真实占位按 `max(offset, scroll)` 量、兜底按"绘制范围并集"（含溢出父盒的 MathJax SVG）复核、
+  渲染后等一帧并在 120/420ms 复量、`ResizeObserver` 同时盯内容节点
+- 混排面板新增「**＋ 加入预设组合**」：把输入框内容存为预设（localStorage 持久化、自动命名、可删除、防重复）
+- 构建：新增 `clean-dist.cjs`，构建前清理 `dist/assets` 里未被 `index.html` 引用的历史产物
+  （曾堆积 157 个 / 87 MB，Tauri 会把整个 dist 打进 exe → exe 从 58 MB 降到 30 MB）
 
 **1108 · 预制公式整合进混排面板**
 - 「插入 → 公式 → 混排公式」面板改为左右两栏：左栏布局**一字未动**，右侧新增「预制公式库」栏

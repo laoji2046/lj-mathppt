@@ -543,7 +543,7 @@ function elementToHtml(el: SlideElement, thumb = false): string {
       if (ls) { st = ' style="'; if (ls.color) st += 'color:' + esc(ls.color) + ';'; if (ls.fontFamily) st += 'font-family:' + esc(fontStack(ls.fontFamily)) + ';'; st += '"' }
       return ls ? '<span' + st + '>' + esc(normalizeMixed(ln)) + '</span>' : esc(normalizeMixed(ln))
     }).join('\n')
-    return `<div style="${box}${rot}"${cls}${fragIdx}><div class="fx-mixed" data-cap="${el.fitMode === 'shrink' ? 1 : 4}" style="${inner}"><div class="fx-mixed-inner" style="width:fit-content;max-width:100%;transform-origin:center center;text-align:${el.align};">${lineHtml}</div></div></div>`
+    return `<div style="${box}${rot}"${cls}${fragIdx}><div class="fx-mixed" data-cap="${el.fitMode === 'shrink' ? 1 : 4}" data-align="${el.align}" style="${inner}"><div class="fx-mixed-inner" style="width:fit-content;max-width:100%;transform-origin:${el.align === 'left' ? 'left' : el.align === 'right' ? 'right' : 'center'} center;text-align:${el.align};">${lineHtml}</div></div></div>`
   }
 
   // image
@@ -693,7 +693,9 @@ ${slides}
       if (!(nw > 0 && nh > 0 && bw > 0 && bh > 0)) continue;
       var cap = parseFloat(box.getAttribute('data-cap') || '4') || 4;   // 与编辑器画布一致
       var f = Math.min(bw / nw, bh / nh, cap);
-      inner.style.transformOrigin = 'center center';
+      // 原点必须与 flex 对齐一致：左对齐的内容贴左边缘，按 center 放大会有一半跑到框外被裁
+      var al = box.getAttribute('data-align') || 'center';
+      inner.style.transformOrigin = (al === 'left' ? 'left' : al === 'right' ? 'right' : 'center') + ' center';
       inner.style.transform = 'scale(' + f + ')';
       // 兜底：MathJax 异步重排后内容可能变大，按实际矩形复核，超了就缩回去
       var hr2 = box.getBoundingClientRect(), ir2 = inner.getBoundingClientRect();

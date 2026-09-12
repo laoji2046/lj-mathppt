@@ -98,7 +98,11 @@ function fitContent() {
   // 用一次性标记：拖动过程中 ResizeObserver 会连发多次，不能反复改外框跟用户抢。
   if (props.el.autoBox && !autoBoxDone) { autoBoxDone = true; fitBoxToContent(nw, nh) }
   let f = Math.min(boxW / nw, boxH / nh, cap.value)
-  inner.style.transformOrigin = 'center center'
+  // 关键：缩放原点必须与 flex 对齐方式一致！
+  // 宿主是 justify-content: flex-start（左对齐），内容贴左边缘；若仍按 center 放大，
+  // 放大后有一半会跑到左侧框外被 overflow:hidden 裁掉（右侧却没事）—— 这就是"拖动放大后公式被截断"的真凶。
+  const ax = props.el.align === 'left' ? 'left' : props.el.align === 'right' ? 'right' : 'center'
+  inner.style.transformOrigin = ax + ' center'
   inner.style.transform = 'scale(' + f + ')'
   // 兜底：按"真实绘制范围"（含溢出子节点）复核，超出宿主就按实际比例缩回去
   const hr = box.getBoundingClientRect()
