@@ -56,7 +56,7 @@ watch(() => JSON.stringify(store.deck.slides), () => {
   if (applying || Date.now() < suppressUntil) return
   regen()
 })
-watch(sourceMode, (m) => { clearTimeout(timer); regen() })
+watch(sourceMode, () => { clearTimeout(timer); regen() })
 watch(curIdx, () => { if (sourceMode.value === 'html') srcHtml.value = curSlide.value ? slideToSourceHtml(curSlide.value) : '' })
 </script>
 

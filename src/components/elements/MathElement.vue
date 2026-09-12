@@ -39,7 +39,7 @@ function watchSize() {
 }
 
 /** 新建元素（autoBox）：把外框收成刚好包住公式，之后拖动外框即可自由缩放 */
-function fitBoxToContent(node: HTMLElement, nw: number, nh: number) {
+function fitBoxToContent(nw: number, nh: number) {
   if (autoBoxDone || !props.el.autoBox || !(nw > 0 && nh > 0)) return
   autoBoxDone = true
   const w = Math.max(60, Math.min(1800, Math.round(nw + 24)))
@@ -77,7 +77,7 @@ async function run() {
       await nextTick()
       try {
         const { nw, nh } = await renderLatex(node, latex, props.el.fontSize, cap.value)
-        fitBoxToContent(node, nw, nh)
+        fitBoxToContent(nw, nh)
         watchSize()   // 新渲染出的 SVG 也纳入观察（异步重排 → 重算缩放）
         // 再补两次延迟复核：MathJax 落位是异步的，量早了比例会算错
         refitTimers.forEach((t) => clearTimeout(t))

@@ -13,7 +13,7 @@ import { openTemplateLibrary } from '@/ui/templateLibrary'
 
 const store = useDeckStore()
 const { openMenu } = useContextMenu()
-const props = defineProps<{ presenting?: boolean }>()
+defineProps<{ presenting?: boolean }>()
 
 const viewport = ref<HTMLElement | null>(null)
 const stage = ref<HTMLElement | null>(null)
@@ -42,7 +42,8 @@ const draw = ref<DrawState | null>(null)
 
 function startDraw(e: PointerEvent) {
   const tool = store.drawTool
-  if (!tool) return
+  // poly 由画布上的 poly-overlay 单独处理（点击放角点），不走这里的拖拽态
+  if (!tool || tool === 'poly') return
   const p = toStage(e.clientX, e.clientY)
   draw.value = { tool, start: p, cur: p, points: [p] }
   bindDraw()

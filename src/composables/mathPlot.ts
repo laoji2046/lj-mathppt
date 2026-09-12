@@ -258,6 +258,8 @@ export const FUNCTIONS: Record<string, FunctionDef> = {
       { key: 'phi', label: '初相 φ', def: PI / 6, step: 0.5236, min: -PI, max: PI },
     ],
     f: (x, p) => p.A * Math.sin(p.w * x + p.phi),
+    // 默认视图（A=2 时与 viewOf 一致）；实际绘制一律走 viewOf
+    view: { xmin: -3.7, xmax: 3.7, ymin: -3, ymax: 3 },
     viewOf: (p) => ({ xmin: -3.7, xmax: 3.7, ymin: -(p.A * 1.3 + 0.4), ymax: p.A * 1.3 + 0.4 }),
     tickOf: (p) => ({ step: PI / 2, pi: true, yLabels: [p.A, -p.A] }),
     extra: (c) => {

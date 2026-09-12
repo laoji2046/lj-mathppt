@@ -1046,7 +1046,7 @@ function layerTypeLabel(type: string) {
         </label>
         <div class="field"><span>行属性（颜色 / 字体）</span>
           <div style="display:flex;flex-direction:column;gap:4px;width:100%">
-            <div v-for="(ln, i) in (richtex?.text || '').split('\n')" :key="i" style="display:flex;align-items:center;gap:6px">
+            <div v-for="(_, i) in (richtex?.text || '').split('\n')" :key="i" style="display:flex;align-items:center;gap:6px">
               <span style="width:16px;font-size:11px;color:#999;flex:none">{{ i + 1 }}</span>
               <input type="color" style="width:26px;height:26px;border:none;padding:0;background:none;flex:none" :value="richtex?.lineStyles?.[i]?.color || '#1a1a1a'" @input="setLineStyle(i, 'color', ($event.target as HTMLInputElement).value)" />
               <select style="flex:1" :value="richtex?.lineStyles?.[i]?.fontFamily || 'default'" @change="setLineStyle(i, 'fontFamily', ($event.target as HTMLSelectElement).value)">

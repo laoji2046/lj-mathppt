@@ -267,7 +267,7 @@ export function steps(t: Theme, o: StepsOpts): SlideElement[] {
 export interface ColSpec { title: string; lines: string[] }
 export interface TwoColOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; left: ColSpec; right: ColSpec }
 export function twoCol(t: Theme, o: TwoColOpts): SlideElement[] {
-  const cv = o.canvas ?? CANVAS; const col = c(t); const m = t.grid.margin;
+  const cv = o.canvas ?? CANVAS; const col = c(t);
   const els: SlideElement[] = [...header(t, cv, o.eyebrow ?? '', o.brand ?? ''), ...pageTitle(t, cv, o.title)];
   const l = gridCell(cv, t, 1, 6, BODY_TOP, 0); const r = gridCell(cv, t, 8, 5, BODY_TOP, 0);
   els.push(txt({ x: l.x, y: BODY_TOP, w: l.w, h: 46, text: o.left.title, fontSize: t.type.h3, color: col.primary, fontFamily: t.fontTitle, fontWeight: 700 }));

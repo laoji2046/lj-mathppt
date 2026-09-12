@@ -37,7 +37,7 @@ async function renderAll() {
   const box = previewWrap.value
   if (!box) return
   const nodes = box.querySelectorAll<HTMLElement>('[data-latex]')
-  const jobs: Promise<void>[] = []
+  const jobs: Promise<unknown>[] = []
   for (const node of Array.from(nodes)) {
     const latex = node.getAttribute('data-latex') || ''
     node.innerHTML = ''

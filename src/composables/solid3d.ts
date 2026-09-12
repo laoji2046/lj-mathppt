@@ -160,7 +160,7 @@ function labelSvg(s: string, x: number, y: number, color: string): string {
 }
 
 /** 依据归一化顶点渲染该立体。可见边实线、隐藏边虚线；支持逐边覆盖与顶点字母。 */
-export function renderSolid(kind: string, pts: number[], w: number, h: number, stroke: string, strokeWidth: number, fillColor: string, dsh: string, vlabels?: (string | null)[], edgeStyles?: (EdgeStyle | null)[], selVertex?: number, selEdge?: number, labelOffsets?: { dx: number; dy: number }[], faceStyles?: (FaceStyle | null)[], selFace?: number, mesh?: SolidMesh | null): string {
+export function renderSolid(kind: string, pts: number[], w: number, h: number, stroke: string, strokeWidth: number, fillColor: string, _dsh: string, vlabels?: (string | null)[], edgeStyles?: (EdgeStyle | null)[], selVertex?: number, selEdge?: number, labelOffsets?: { dx: number; dy: number }[], faceStyles?: (FaceStyle | null)[], selFace?: number, mesh?: SolidMesh | null): string {
   const n = Math.floor(pts.length / 2)
   const s = strokeWidth || 2
   const P: [number, number][] = []

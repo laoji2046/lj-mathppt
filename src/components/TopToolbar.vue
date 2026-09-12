@@ -94,8 +94,6 @@ function openFig() {
 function toggleShapeMenu() { toggleShown(shapeMenuOpen) }
 function addRect() { shapeMenuOpen.value = false; store.clearDrawTool(); store.addElement('shape', { shape: 'rect' } as Partial<SlideElement>) }
 function addEllipse() { shapeMenuOpen.value = false; store.clearDrawTool(); store.addElement('shape', { shape: 'ellipse' } as Partial<SlideElement>) }
-function addLine() { shapeMenuOpen.value = false; store.clearDrawTool(); store.addElement('line', { stroke: '#1a1a1a', strokeWidth: 3, w: 360, h: 200, rot: 0, points: [0.08, 0.5, 0.92, 0.5] } as Partial<SlideElement>) }
-function addArrow() { shapeMenuOpen.value = false; store.clearDrawTool(); store.addElement('arrow', { stroke: '#1a1a1a', strokeWidth: 3, w: 360, h: 200, rot: 0, points: [0.08, 0.5, 0.92, 0.5] } as Partial<SlideElement>) }
 /** 关闭所有下拉菜单（互斥：打开一个时关闭其它，避免叠在一起） */
 function closeAllDropdowns() {
   fileOpen.value = false
@@ -357,7 +355,6 @@ function flashToast() {
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { fileToast.value = '' }, 2500) as unknown as number
 }
-function toggleDrawMenu() { toggleShown(drawOpen) }
 function toggleMoreMenu() { toggleShown(moreOpen) }
 function toggleFormulaMenu() { toggleShown(formulaMenuOpen) }
 function openFormulaModal() { formulaMenuOpen.value = false; store.clearDrawTool(); formulaModalOpen.value = true }

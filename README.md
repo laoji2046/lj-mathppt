@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1111**（源码快照 `_backup/rollback-20260912-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1112**（源码快照 `_backup/rollback-20260912-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -37,6 +37,10 @@
 > 1111 补全：**模板库三个页签全部填满（41 套）** —— 数学讲义 23 套（新增 **定理 / 定义 / 思考** 等 13 个分类）、
 > 专业汇报 13 套 + 2 套整套、数学整套 3 套；全部走新的版式引擎（17 个版式 + 3 套主题，锁定配色/字号阶/12 栏网格），
 > **凡出现数学式一律混排 `$...$`**。
+>
+> 1112 还债：`vue-tsc` **41 处报错清零**，`npm run build` 恢复可用 —— 顺带挖出两个真 bug：
+> 右键「拆分为多个公式」调用了**不存在的** store 动作（必然抛错、原元素删不掉），
+> 以及 `elementToHtml` 的废参数正好被 `Array.map` 的下标顶替。
 >
 > 按日期的版本变更见文末 **更新日志**。
 
@@ -163,8 +167,9 @@ node node_modules/vite/bin/vite.js build    # 构建到 dist/
 ## 桌面端（Tauri 2）
 
 ```bash
-# 1. 构建前端（dist/）
-node node_modules/vite/bin/vite.js build
+# 1. 构建前端（dist/）—— npm run build 已可用（会先跑 vue-tsc --noEmit 类型检查）
+#    只想跳过类型检查时用：node node_modules/vite/bin/vite.js build
+npm run build
 # 1b. 清理 dist/assets 里 index.html 已不再引用的历史产物
 #     （vite.config 里 emptyOutDir:false，构建不会自动清理；Tauri 会把整个 dist 打进 exe）
 node clean-dist.cjs
@@ -199,31 +204,57 @@ node ../node_modules/@tauri-apps/cli/tauri.js build   # 生成 NSIS 安装包
 
 **版面与整体**
 - 主题：一键切换整套配色（背景/强调/文字），应用于全部页面
-- 动画版模板（fragment 渐显）：例题 / 推导 / 小结等分类，演示时逐条出现
+- 逐条渐显（fragment）：元素打上标记后，演示时点一下出一条；顶栏「逐条」可一键给整页打标，属性面板里也能单个勾
 - 幻灯片管理增强：拖拽排序、复制页、上移 / 下移、`Ctrl+Shift+N` 新建
 - 版本历史：保存快照 / 恢复 / 删除（localStorage 独立存储，最多 20 个）
 
 ## 尚未实现 / 待验证
 
-- 模板库只有「高中数学例题」8 套；常用 / 数学讲义 / 专业 三个标签页是空的
+- **模板都不带逐条渐显**：41 套模板（数学讲义 23 / 专业 13 + 2 整套 / 数学整套 3）里没有任何元素带 `fragment` 标记，
+  演示时整页一起出现；要做「点一下出一条」得手工给元素勾「逐条」，或按顶栏「逐条」给整页打标
+- **例题模板里还留着 12 个 `math` 元素**（`ex-formula-quadratic` / `ex-formula-sequence` 各 3 个，其余 5 套各 1 个居中的核心公式）：
+  正文早已改成混排，但这些独立成行的展示公式仍是「公式」元素 —— 与「出现数学式一律混排」的约定不一致。
+  注意 1101 那条「例题 8 套全部改用混排公式」的说法因此并不完全成立（正文成立、展示公式不成立）
+- 模板库卡片里画的是**色块示意图**（按元素的矩形与颜色渲染），不是真排版的缩略图 —— 字与公式怎么折行看不出来
 - 演示层：激光笔/批注激活时全屏画布会捕获整屏点击（含右下角 Reveal 翻页箭头），如需保留可给画布"挖角"
 - 模板折行、行距等**像素级排版只能人工肉眼验收**（开发环境看不到浏览器）
 - 带子页（垂直堆叠）deck 的 PDF 分页顺序未测
 - exe 内嵌图片 data URL 链路只做了进程冒烟，待真机确认
 
-## 验证状态（2026-09-11）
+## 验证状态（2026-09-12）
 
-- `vite build` ✅ 205 模块；JS 982 KB / gzip 336 KB，CSS 102 KB / gzip 16 KB
-- `cargo build --release` ✅ 产物 `src-tauri/target/release/lj-mathslides.exe`（约 50 MB，前端已内嵌）
-- `vue-tsc --noEmit` ⚠️ 仍有若干历史类型错误（store / TableElement / TextElement / ElementFrame 等旧代码），
-  不影响 esbuild 构建 —— 所以构建请用 `node node_modules/vite/bin/vite.js build`，不要用 `npm run build`
-- 模板结构自动校验（esbuild 打包 + node 脚本）：8 套例题模板全部通过
-  —— 扁平数组 / id 唯一 / 不越界 / 文字元素互不重叠 / `$` 成对 / 花括号与 `\left\right` 配对 / 只用已知 LaTeX 命令
+- `vue-tsc --noEmit` ✅ **0 错误、0 行输出**（2026-09-12 从 41 处清到 0）—— `npm run build`（= vue-tsc + vite build）恢复可用
+- `vite build` ✅ 208 模块；JS 1068.6 KB / gzip 362.8 KB，CSS 108.2 KB / gzip 17.5 KB
+- `cargo build --release` ✅ 产物 `src-tauri/target/release/lj-mathslides.exe`（29.8 MB，前端已内嵌；构建前记得跑 `clean-dist.cjs`）
+- 模板结构自动校验（esbuild 打包 + node 脚本）：41 套模板 + 8 套例题，共 **79 页全部通过**
+  —— 无嵌套数组 / id 唯一 / 不越界 1920×1080 / 文字框互不重叠 / `$` 逐行成对 / 纯文本元素不含 `$` / 无 Unicode 上下标
+- 几何断言：函数图像 17 种 + 圆锥曲线 14 种（无 NaN / 曲线存在 / 正弦型默认视图与 A=2 一致）
+- 无头回归：「多公式元素拆分」拆出 2 条公式，且原混排元素确实被删除（修复前这一步抛 TypeError）
+- 需人工验收：画布与演示的像素级排版、Tauri 打印对话框行为、真机图片链路
 - 需人工验收：画布与演示的像素级排版、Tauri 打印对话框行为、真机图片链路
 ## 更新日志
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-12（v2026.09.1112）
+
+**1112 · 还技术债：类型检查归零 + 两处真 bug**
+- `vue-tsc --noEmit` **从 41 处报错清到 0**，`npm run build`（= vue-tsc + vite build）恢复可用
+- **真 bug ①**：右键混排元素 →「多公式元素（拆分为多个公式）」，收尾时调用了**根本不存在的** `store.removeElement`，
+  执行到这一步必然抛 TypeError —— 症状是公式拆出来了、原元素却删不掉，页面上留下一份重复内容。现补上 store 动作 `removeElement(id)`
+- **真 bug ②**：`renderer.elementToHtml(el, thumb)` 的 `thumb` 参数从没被用过，而 `s.elements.map(elementToHtml)` 会把**数组下标**当成 `thumb` 传进去
+  （第 0 个元素 false、其余全 true）。当前只是参数没用才没出事，已删掉该参数
+- 其余是「类型没跟上实现」的对齐：`drawTool` 多了 `poly` 而 `DrawState` 没加（多边形其实走另一套 overlay，改成在 `startDraw` 里显式排除）；
+  正弦型 y=Asin(ωx+φ) 只有 `viewOf` 没有 `view`，与 `FunctionDef` 的定义矛盾（补默认 view，A=2 时与 viewOf 一致）；
+  `applyBundle` 的 slide 缺必需字段 `bg`（改用 `{ ...emptySlide(), ...s }` 合并）；三处 `currentSlide.value` 可能为 undefined（补 `?.`）；
+  `TableElement.cellStyle` 补 `CSSProperties` 返回类型；Markdown 导入生成的 deck 带 `id` 但 `Deck` 类型里没有（去掉，与 store 自建的 deck 保持一致）
+- 工程：新增 `src/types/node-shim.d.ts` —— 只补声明 `vite.config.ts` 用到的 `node:url` 与 `process.env`。
+  **故意不装 `@types/node`**：它会把 Node 全局类型混进这个 DOM 项目（例如 `setTimeout` 的返回值从 number 变成 NodeJS.Timeout），引发一批无关的新报错
+- 校验：函数图像 17 种 + 圆锥曲线 14 种的几何断言（无 NaN / 曲线存在 / 正弦型默认视图与 A=2 一致）·
+  「拆多公式」无头回归（拆出 2 条公式、且原元素确实被删除）· 模板结构断言重跑：41 套模板 + 8 套例题共 79 页
+- **顺带发现**：那 8 套例题模板里仍有 12 个 `math` 元素（正文已是混排，但独立成行的展示公式还是公式元素），
+  所以 1101 那条「例题 8 套全部改用混排公式」的说法并不完全成立 —— 已记入「尚未实现 / 待验证」
 
 ### 2026-09-12（v2026.09.1111）
 

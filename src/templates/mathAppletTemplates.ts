@@ -7,7 +7,7 @@
  *    关键推导式单独用居中的 math 元素，右侧「关键公式卡」也是 math。
  * 3. 版式固定栅格：左栏用 leftCol() 游标自上而下排，右栏 1180~1800，全部落在 1920×1080 内。
  */
-import type { SlideElement, GeoGebraElement, DesmosElement, EmbedElement } from '@/types'
+import type { SlideElement } from '@/types'
 
 const INK = '#1a1a1a'
 const ACCENT = '#c0392b'

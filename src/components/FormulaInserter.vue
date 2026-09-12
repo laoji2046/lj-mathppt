@@ -170,7 +170,7 @@ async function renderLib() {
   await nextTick()
   const box = libWrap.value
   if (!box) return
-  const jobs: Promise<void>[] = []
+  const jobs: Promise<unknown>[] = []
   for (const node of Array.from(box.querySelectorAll<HTMLElement>('[data-latex]'))) {
     node.innerHTML = ''
     jobs.push(renderLatex(node, node.getAttribute('data-latex') || '', 20, 1).catch(() => {}))

@@ -1,8 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import type {
-  AlignMode, Deck, DesmosElement, DistributeAxis, EmbedElement, ElementType, GeoGebraElement, Rect, Slide, SlideElement,
-  TextElement, ZOrderAction,
+  AlignMode, Deck, DistributeAxis, ElementType, Rect, Slide, SlideElement, ZOrderAction,
 } from '@/types'
 import { createElement, findTheme, GRAPHIC_TYPES } from '@/types'
 import { findTemplate } from '@/templates/mathTemplates'
@@ -333,7 +332,7 @@ export const useDeckStore = defineStore('deck', () => {
     if (!tpl) return
     pushHistory()
     let parent: Slide | undefined
-    if (asSubpage) parent = currentSlide.value.parentId ? deck.value.slides.find((s) => s.id === currentSlide.value.parentId) : currentSlide.value
+    if (asSubpage) parent = currentSlide.value?.parentId ? deck.value.slides.find((s) => s.id === currentSlide.value?.parentId) : currentSlide.value
     const s: Slide = { ...emptySlide(), elements: (tpl.build() as SlideElement[]).flat() as SlideElement[] }
     if (asSubpage && parent) s.parentId = parent.id
     deck.value.slides.splice(currentIndex.value + 1, 0, s)
@@ -352,7 +351,7 @@ export const useDeckStore = defineStore('deck', () => {
     if (!currentSlide.value) return
     pushHistory()
     let parent: Slide | undefined
-    if (asSubpage) parent = currentSlide.value.parentId ? deck.value.slides.find((s) => s.id === currentSlide.value.parentId) : currentSlide.value
+    if (asSubpage) parent = currentSlide.value?.parentId ? deck.value.slides.find((s) => s.id === currentSlide.value?.parentId) : currentSlide.value
     const s = emptySlide()
     if (asSubpage && parent) s.parentId = parent.id
     deck.value.slides.splice(currentIndex.value + 1, 0, s)
@@ -367,7 +366,7 @@ export const useDeckStore = defineStore('deck', () => {
     pushHistory()
     try { saveVersion('整套插入前') } catch { /* 忽略 */ }
     let parent: Slide | undefined
-    if (asSubpage) parent = currentSlide.value.parentId ? deck.value.slides.find((s) => s.id === currentSlide.value.parentId) : currentSlide.value
+    if (asSubpage) parent = currentSlide.value?.parentId ? deck.value.slides.find((s) => s.id === currentSlide.value?.parentId) : currentSlide.value
     const insertAt = currentIndex.value + 1
     const news = b.slides.map((s: any) => {
       const ns: Slide = { ...(JSON.parse(JSON.stringify(s)) as Slide), id: uid('slide') }
@@ -561,6 +560,15 @@ export const useDeckStore = defineStore('deck', () => {
     currentSlide.value.elements = currentSlide.value.elements.filter((e) => !drop.has(e.id))
     clearSelection()
   }
+  /** 按 id 删除单个元素（「把混排拆成多条公式」等场景：先建新元素，再丢掉原元素） */
+  function removeElement(id: string) {
+    if (!currentSlide.value) return
+    const i = currentSlide.value.elements.findIndex((e) => e.id === id)
+    if (i < 0) return
+    pushHistory()
+    currentSlide.value.elements.splice(i, 1)
+    if (selectedIds.value.includes(id)) selectedIds.value = selectedIds.value.filter((x) => x !== id)
+  }
 
   // ---- 元素复制 / 剪切 / 粘贴 ----
   const clipboard = ref<SlideElement[]>([])
@@ -639,6 +647,7 @@ export const useDeckStore = defineStore('deck', () => {
     try { saveVersion('整套替换前') } catch { /* 忽略 */ }
     deck.value.title = b.name
     deck.value.slides = b.slides.map((s) => ({
+      ...emptySlide(),
       ...s,
       id: 'sl_' + Math.random().toString(36).slice(2, 10),
       elements: s.elements.map((e) => ({ ...e, id: 'el_' + Math.random().toString(36).slice(2, 10) })) as typeof s.elements,
@@ -835,7 +844,7 @@ export const useDeckStore = defineStore('deck', () => {
     editingGroupId, enterGroup, exitGroup,
     addSlide, addSubpageAfterCurrent, addPageWithTemplate, addBundlePages, applyBlank, addBlankPage, removeSlide, setSlideSubpage, gotoSlide, insertSlides, replaceDeck, importDeck, copySlide, moveSlide, reorderSlide,
     versions, saveVersion, restoreVersion, deleteVersion,
-    addElement, updateElement, switchGraphic, commitElements, setAllFragments, removeSelected, copyElements, cutElements, pasteElements, canPaste, setSlideBg, setSlideBgGradient, setSlideBgImage, setSlideTransition, setSlideNotes, applyTemplate, applyBundle,
+    addElement, updateElement, switchGraphic, commitElements, setAllFragments, removeSelected, removeElement, copyElements, cutElements, pasteElements, canPaste, setSlideBg, setSlideBgGradient, setSlideBgImage, setSlideTransition, setSlideNotes, applyTemplate, applyBundle,
     groupSelection, ungroup,
     alignSelection, distributeSelection, reorderZ, setElementIndex,
     resetDeck, undo, redo, pushHistory, saveNow,

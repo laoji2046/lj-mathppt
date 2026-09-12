@@ -42,7 +42,7 @@ export function deckToMarkdown(deck: Deck): string {
   roots.forEach((root, ri) => {
     if (ri > 0) out.push('---')
     out.push(slideToMd(root))
-    deck.slides.filter((s) => s.parentId === root.id).forEach((child, ci) => {
+    deck.slides.filter((s) => s.parentId === root.id).forEach((child) => {
       out.push('--')
       out.push(slideToMd(child))
     })
@@ -50,7 +50,6 @@ export function deckToMarkdown(deck: Deck): string {
   return out.join('\n')
 }
 
-let sid = 0
 function uid(prefix: string) { return prefix + '_' + Math.random().toString(36).slice(2, 10) }
 
 /** 把一段 markdown 内容解析成一页的元素与备注 */
@@ -137,5 +136,5 @@ export function markdownToDeck(md: string): Deck {
       slides.push(s)
     })
   })
-  return { id: uid('deck'), title: 'Markdown 导入', width: 1920, height: 1080, slides }
+  return { title: 'Markdown 导入', width: 1920, height: 1080, slides }
 }

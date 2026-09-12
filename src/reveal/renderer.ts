@@ -366,7 +366,7 @@ function chartInner(
   return out
 }
 
-function elementToHtml(el: SlideElement, thumb = false): string {
+function elementToHtml(el: SlideElement): string {
   const box = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.w}px;height:${el.h}px;` +
     (el.shadowOn ? `box-shadow:${el.shadowX ?? 0}px ${el.shadowY ?? 6}px ${el.shadowBlur ?? 18}px ${el.shadowColor || '#000000'}55;` : '')
   const rot = el.rot ? `transform:rotate(${el.rot}deg);` : ''

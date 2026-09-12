@@ -2,50 +2,12 @@
 import { ref } from 'vue'
 import { useDeckStore } from '@/stores/deck'
 import { useContextMenu, type MenuItem } from '@/composables/useContextMenu'
-import type { SlideElement } from '@/types'
 import SlideThumb from './SlideThumb.vue'
 
 const store = useDeckStore()
 const { openMenu } = useContextMenu()
 
 const THUMB_W = 168
-const THUMB_H = 94.5 // 16:9
-
-/** 把元素的设计坐标等比映射到缩略图尺寸 */
-function thumbStyle(el: SlideElement) {
-  const k = THUMB_W / store.deck.width
-  const base = {
-    position: 'absolute' as const,
-    left: `${el.x * k}px`,
-    top: `${el.y * k}px`,
-    width: `${el.w * k}px`,
-    height: `${el.h * k}px`,
-    overflow: 'hidden' as const,
-  }
-  if (el.type === 'text') {
-    return { ...base, background: 'transparent', color: el.color, fontSize: `${Math.max(3, el.fontSize * k)}px` }
-  }
-  if (el.type === 'shape') {
-    return {
-      ...base,
-      background: el.fill,
-      borderRadius: el.shape === 'ellipse' ? '50%' : '1px',
-    }
-  }
-  if (el.type === 'math') {
-    return { ...base, background: 'repeating-linear-gradient(45deg,#e8e4f0,#e8e4f0 3px,#f2effa 3px,#f2effa 6px)', color: '#534ab7' }
-  }
-  if (el.type === 'geogebra') {
-    return { ...base, background: '#ffffff', border: '1px solid #cfcbd8' }
-  }
-  if (el.type === 'desmos') {
-    return { ...base, background: '#f2fbf6', border: '1px solid #bcd9c8' }
-  }
-  if (el.type === 'image') {
-    return { ...base, background: el.src ? `url(${el.src}) center/cover` : '#f1efe8' }
-  }
-  return base
-}
 
 // ---- 拖拽排序 ----
 const dragFrom = ref<number | null>(null)

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import type { TextElement } from '@/types'
-import { fontStack, shadowCss, textEffectCss, textShadowCss } from '@/types'
+import { fontStack, textEffectCss, textShadowCss } from '@/types'
 import { inlineEditReq } from '@/ui/inlineEdit'
 
 const props = defineProps<{ el: TextElement }>()

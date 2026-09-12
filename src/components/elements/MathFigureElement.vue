@@ -29,7 +29,7 @@ const pts = computed(() => {
     const ok = !!p && p.length >= 4 && p.length % 2 === 0 && (!!props.el.mesh || p.length === n * 2)
     return ok ? (p as number[]) : solidVerts(props.el.kind, props.el.w, props.el.h, props.el.depth)
   }
-  return p
+  return p ?? []
 })
 
 const innerHtml = computed(() => {
@@ -38,7 +38,6 @@ const innerHtml = computed(() => {
   const dash = lineDashCss(props.el.strokeDash)
   const strokeAttrs = `stroke="${stroke}" stroke-width="${s}" stroke-linecap="round" stroke-linejoin="round"` + (dash ? ` stroke-dasharray="${dash}"` : '')
   const fillColor = fill && fill !== 'transparent' ? fill : 'none'
-  const thin = Math.max(1, s * 0.55)
   const dashed = `stroke-dasharray="6 5"`
   const cx = w / 2, cy = h / 2, m = Math.min(w, h)
 

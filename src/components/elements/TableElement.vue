@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import type { CSSProperties } from 'vue'
 import type { TableElement } from '@/types'
 import type { SlideElement } from '@/types'
 import { useDeckStore } from '@/stores/deck'
@@ -27,7 +28,7 @@ const gridStyle = computed(() => ({
   fontSize: props.el.fontSize + 'px',
   width: '100%',
 }))
-function cellStyle(item: { r: number }) {
+function cellStyle(item: { r: number }): CSSProperties {
   const isH = item.r === 0
   const pad = props.el.cellPad ?? 6
   const bg = isH ? props.el.headerColor : (props.el.altRowColor && item.r % 2 === 0 ? props.el.altRowColor : '#ffffff')
