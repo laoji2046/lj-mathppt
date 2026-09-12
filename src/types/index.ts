@@ -251,9 +251,11 @@ export type MathFigureKind =
   // ---- 函数图像（含新增：一次 / 三次 / 绝对值 / 根式 / 反比例 / 双钩 / 正切 / 正弦型 / 指数递减） ----
   | 'linear' | 'parabola' | 'cubic' | 'absolute' | 'sqrt' | 'reciprocal' | 'hook'
   | 'tangent' | 'sine' | 'cosine' | 'sinusoid' | 'exponential' | 'expDecay' | 'logarithm'
+  | 'piecewise' | 'paramQuadratic' | 'paramAbs'
   // ---- 圆锥曲线 ----
   | 'conicCircle' | 'ellipse' | 'hyperbola' | 'conicParabola' | 'conicFocusDir'
   | 'ellipseV' | 'hyperbolaV' | 'conicParabolaV' | 'conicCircleY'
+  | 'ellipseDirectrix' | 'hyperbolaDirectrix' | 'ellipseFamily' | 'hyperbolaFamily' | 'eccAnim'
   // ---- 平面图形 ----
   | 'coordinate' | 'numberline' | 'venn' | 'righttriangle' | 'angle' | 'semicircle'
   | 'triangle' | 'rectangle' | 'circle' | 'pentagon' | 'hexagon' | 'rhombus'
@@ -280,7 +282,10 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   { v: 'hook', label: '双钩 y=x+1/x', cat: '函数图像' },
   { v: 'sine', label: '正弦 y=sin x', cat: '函数图像' },
   { v: 'cosine', label: '余弦 y=cos x', cat: '函数图像' },
-  { v: 'sinusoid', label: '正弦型 y=2sin(2x+π/6)', cat: '函数图像' },
+  { v: 'sinusoid', label: '正弦型 y=Asin(ωx+φ)（可调参数）', cat: '函数图像' },
+  { v: 'piecewise', label: '分段函数（实心/空心点）', cat: '函数图像' },
+  { v: 'paramQuadratic', label: '含参二次 y=x²−2ax+1（可调 a）', cat: '函数图像' },
+  { v: 'paramAbs', label: '含参绝对值 y=|x−a|（可调 a）', cat: '函数图像' },
   { v: 'tangent', label: '正切 y=tan x', cat: '函数图像' },
   { v: 'exponential', label: '指数 y=2ˣ', cat: '函数图像' },
   { v: 'expDecay', label: '指数 y=(1/2)ˣ', cat: '函数图像' },
@@ -295,6 +300,11 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   { v: 'conicParabola', label: '抛物线 y²=2px（焦点在 x 轴）', cat: '圆锥曲线' },
   { v: 'conicParabolaV', label: '抛物线 x²=2py（焦点在 y 轴）', cat: '圆锥曲线' },
   { v: 'conicFocusDir', label: '圆锥曲线统一定义（焦点·准线）', cat: '圆锥曲线' },
+  { v: 'ellipseDirectrix', label: '椭圆（焦点·准线）', cat: '圆锥曲线' },
+  { v: 'hyperbolaDirectrix', label: '双曲线（焦点·准线）', cat: '圆锥曲线' },
+  { v: 'ellipseFamily', label: '椭圆族（离心率 e 变化）', cat: '圆锥曲线' },
+  { v: 'hyperbolaFamily', label: '双曲线族（离心率 e 变化）', cat: '圆锥曲线' },
+  { v: 'eccAnim', label: '椭圆离心率变化（动画）', cat: '圆锥曲线' },
   // ---- 平面图形 ----
   { v: 'coordinate', label: '坐标系', cat: '平面图形' },
   { v: 'numberline', label: '数轴', cat: '平面图形' },
@@ -379,6 +389,8 @@ export interface MathFigureElement extends ElementBase {
   strokeWidth: number
   /** 可编辑图形（贝塞尔/自定义多边形）的归一化顶点，扁平 [x0,y0,x1,y1,...]，0~1 */
   points?: number[]
+  /** 可调参数（如 y=Asin(ωx+φ) 的 A/ω/φ、含参二次的 a），属性面板可改 */
+  params?: Record<string, number>
   /** 3D 立体的投影深度(0~1) */
   depth?: number
   /** 每个顶点的字母标注（下标/上标用 _ 和 ^，如 "A_1" "B^2"、\' 加撇），长度与顶点数一致 */

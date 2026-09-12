@@ -11,6 +11,7 @@ import { captureDesmosState } from '@/composables/useDesmos'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
 import { openShapeEdit } from '@/ui/shapeEditor'
+import { figureParams } from '@/composables/mathPlot'
 import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type EdgeStyle, type FaceStyle } from '@/composables/solid3d'
 import { solidSel } from '@/composables/solidSel'
 import { openImageEditor } from '@/ui/imageEditor'
@@ -42,6 +43,16 @@ const isArrow = computed(() => el.value?.type === 'arrow')
 const arrowEl = computed(() => el.value as ArrowElement | undefined)
 const isPen = computed(() => el.value?.type === 'pen')
 const isMathFig = computed(() => el.value?.type === 'mathfig')
+
+/** 当前数学图形的可调参数（正弦型的 A/ω/φ、含参二次的 a…），无参数则为空 */
+const figParams = computed(() => (mathfig.value ? figureParams(mathfig.value.kind) : []))
+function figParamVal(key: string, def: number) {
+  const v = mathfig.value?.params?.[key]
+  return typeof v === 'number' ? v : def
+}
+function setFigParam(key: string, v: number) {
+  patch({ params: { ...(mathfig.value?.params || {}), [key]: v } } as Partial<SlideElement>)
+}
 const isGraphic = computed(() => isShape.value || isLine.value || isArrow.value || isPen.value || isMathFig.value)
 function isCurrentGraphic(g: { v: string; cat: string }) {
   const t = el.value
@@ -788,6 +799,19 @@ function layerTypeLabel(type: string) {
             </optgroup>
           </select>
         </label>
+        <!-- 可调参数（正弦型 A/ω/φ、含参二次的 a…） -->
+        <label v-for="pr in figParams" :key="pr.key" class="field">
+          <span>{{ pr.label }}</span>
+          <input
+            type="number"
+            :step="pr.step ?? 0.1"
+            :min="pr.min"
+            :max="pr.max"
+            :value="figParamVal(pr.key, pr.def)"
+            @input="setFigParam(pr.key, num(($event.target as HTMLInputElement).value, pr.def))"
+          />
+        </label>
+        <p v-if="figParams.length" class="panel__hint">改参数后图形立即重绘（适合讲"图象变换 / 含参讨论"）。</p>
         <label class="field"><span>线条颜色<span v-if="edgeTarget != null" class="panel__tag">▶ 边{{ edgeTarget + 1 }}</span></span>
           <ColorSwatches :model-value="strokeColorVal" @update:model-value="(v) => onStrokeColor(v as string)" />
         </label>

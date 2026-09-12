@@ -88,7 +88,22 @@ export function lineSvg(x1: number, y1: number, x2: number, y2: number, stroke: 
 }
 
 /** 直角坐标轴（带箭头 + 整数刻度；0 不在窗口内时贴边） */
-export function axesSvg(view: View, w: number, h: number, stroke: string, sw: number, withTicks = true): string {
+/** 刻度配置：step=刻度间隔（数学单位）；pi=按弧度标注（π/2、π、3π/2…）；yLabels=要标数字的 y 值 */
+export interface TickCfg { step?: number; pi?: boolean; yLabels?: number[] }
+
+/** 把弧度值写成课本样式：π/2、π、3π/2、2π（负号用数学减号） */
+export function piLabel(v: number): string {
+  const k = Math.round(v / (Math.PI / 2))
+  if (!k) return ''
+  const sign = k < 0 ? '−' : ''
+  const a = Math.abs(k)
+  if (a === 1) return sign + 'π/2'
+  if (a === 2) return sign + 'π'
+  if (a % 2 === 1) return sign + a + 'π/2'
+  return sign + (a / 2) + 'π'
+}
+
+export function axesSvg(view: View, w: number, h: number, stroke: string, sw: number, withTicks = true, cfg: TickCfg = {}): string {
   const { X, Y } = mapper(view, w, h)
   const y0 = Math.min(h, Math.max(0, Y(0)))
   const x0 = Math.min(w, Math.max(0, X(0)))
@@ -99,19 +114,33 @@ export function axesSvg(view: View, w: number, h: number, stroke: string, sw: nu
   s += '<polygon points="' + n1(w) + ',' + n1(y0) + ' ' + n1(w - head) + ',' + n1(y0 - head * 0.42) + ' ' + n1(w - head) + ',' + n1(y0 + head * 0.42) + '" fill="' + stroke + '"/>'
   s += '<line x1="' + n1(x0) + '" y1="' + n1(h) + '" x2="' + n1(x0) + '" y2="0" stroke="' + stroke + '" stroke-width="' + n1(thin) + '"/>'
   s += '<polygon points="' + n1(x0) + ',0 ' + n1(x0 - head * 0.42) + ',' + n1(head) + ' ' + n1(x0 + head * 0.42) + ',' + n1(head) + '" fill="' + stroke + '"/>'
+  const tickFs = Math.max(10, Math.min(w, h) * 0.05)
   if (withTicks) {
     const span = view.xmax - view.xmin
-    const step = span <= 6 ? 1 : span <= 14 ? 2 : 4
+    const step = cfg.step || (span <= 6 ? 1 : span <= 14 ? 2 : 4)
     const t = Math.max(4, Math.min(w, h) * 0.018)
-    for (let x = Math.ceil(view.xmin / step) * step; x <= view.xmax; x += step) {
-      if (Math.abs(x) < 1e-9) continue
+    for (let x = Math.ceil(view.xmin / step - 1e-6) * step; x <= view.xmax; x += step) {
+      if (Math.abs(x) < 1e-6) continue
       const px = X(x)
       s += '<line x1="' + n1(px) + '" y1="' + n1(y0 - t) + '" x2="' + n1(px) + '" y2="' + n1(y0 + t) + '" stroke="' + stroke + '" stroke-width="' + n1(thin) + '"/>'
+      // 弧度刻度（三角函数）：在轴下方标出 π/2、π、3π/2…（贴边的不标，避免被裁）
+      if (cfg.pi && px > tickFs * 1.7 && px < w - tickFs * 1.7) {
+        s += textSvg(px, y0 + tickFs * 1.05, piLabel(x), tickFs, stroke, 'middle')
+      }
     }
-    for (let y = Math.ceil(view.ymin / step) * step; y <= view.ymax; y += step) {
-      if (Math.abs(y) < 1e-9) continue
+    if (!cfg.pi) {
+      for (let y = Math.ceil(view.ymin / step) * step; y <= view.ymax; y += step) {
+        if (Math.abs(y) < 1e-6) continue
+        const py = Y(y)
+        s += '<line x1="' + n1(x0 - t) + '" y1="' + n1(py) + '" x2="' + n1(x0 + t) + '" y2="' + n1(py) + '" stroke="' + stroke + '" stroke-width="' + n1(thin) + '"/>'
+      }
+    }
+    // 指定的 y 值：画刻度 + 左侧数字（如三角函数标 ±1）
+    for (const y of cfg.yLabels || []) {
+      if (y <= view.ymin || y >= view.ymax) continue
       const py = Y(y)
       s += '<line x1="' + n1(x0 - t) + '" y1="' + n1(py) + '" x2="' + n1(x0 + t) + '" y2="' + n1(py) + '" stroke="' + stroke + '" stroke-width="' + n1(thin) + '"/>'
+      s += textSvg(x0 - t - tickFs * 0.35, py, (y < 0 ? '−' : '') + Math.abs(y), tickFs, stroke, 'end')
     }
   }
   // 轴标放在轴的末端（x 在右端上方、y 在上端右侧），不要贴在原点旁边
@@ -126,16 +155,65 @@ export function axesSvg(view: View, w: number, h: number, stroke: string, sw: nu
 // 函数图像
 // ---------------------------------------------------------------------------
 
-export interface Ctx { w: number; h: number; stroke: string; sw: number; view: View; m: Mapper }
+export interface Ctx { w: number; h: number; stroke: string; sw: number; fs: number; view: View; m: Mapper }
+
+/** 关键点标记：小圆点 + 坐标文字（如指数函数的 (0,1)、对数函数的 (1,0)） */
+export function keyPointSvg(c: Ctx, x: number, y: number, text: string): string {
+  const px = c.m.X(x), py = c.m.Y(y)
+  const r = Math.max(2.6, Math.min(c.w, c.h) * 0.014)
+  return dotSvg(px, py, r, c.stroke) +
+    textSvg(px + c.fs * 0.45, py - c.fs * 0.9, text, c.fs, c.stroke, 'start')
+}
+
+/** 可调参数的描述（属性面板据此生成输入框） */
+export interface ParamSpec { key: string; label: string; def: number; step?: number; min?: number; max?: number }
+
+/** 分段函数的一段：f 在 [from, to] 上 */
+export interface Piece { f: (x: number, p: Record<string, number>) => number; from: number; to: number }
+
+/** 空心点（分段函数断点处"取不到"的那个端点） */
+export function openDotSvg(c: Ctx, x: number, y: number): string {
+  const px = c.m.X(x), py = c.m.Y(y)
+  const r = Math.max(2.6, Math.min(c.w, c.h) * 0.014)
+  return '<circle cx="' + n1(px) + '" cy="' + n1(py) + '" r="' + n1(r) + '" fill="#fff" stroke="' + c.stroke +
+    '" stroke-width="' + n1(Math.max(1.2, c.sw * 0.7)) + '"/>'
+}
+
+/** 参数值格式化（整数不带小数点） */
+export function fmt2(n: number): string {
+  const s = Math.abs(n - Math.round(n)) < 1e-9 ? String(Math.round(n)) : n.toFixed(2)
+  return s.replace('-', '−')   // 用数学减号，和 π 刻度保持一致
+}
 
 export interface FunctionDef {
   label: string
-  f: (x: number) => number
+  f: (x: number, p: Record<string, number>) => number
   view: View
-  /** 额外元素（虚线渐近线等） */
-  extra?: (c: Ctx) => string
+  /** 视图随参数变化（如振幅 A 变了，y 轴范围跟着变） */
+  viewOf?: (p: Record<string, number>) => View
+  /** 分段函数：按段分别采样（各段端点各自取到，免去人为断点） */
+  pieces?: Piece[]
+  /** 可调参数（属性面板生成输入框，如 y=Asin(ωx+φ) 的 A/ω/φ） */
+  params?: ParamSpec[]
+  /** 额外元素（虚线渐近线、关键点等） */
+  extra?: (c: Ctx, p: Record<string, number>) => string
   /** 不画坐标轴（个别图自带） */
   noAxes?: boolean
+  /** 刻度配置（三角函数用 π 弧度、指数/对数标 y 值）；tickOf 随参数变化 */
+  tick?: TickCfg
+  tickOf?: (p: Record<string, number>) => TickCfg
+}
+
+/** 取某个图形的可调参数说明（无参数返回空数组） */
+export function figureParams(kind: string): ParamSpec[] {
+  return FUNCTIONS[kind]?.params ?? []
+}
+
+/** 把外部参数与默认值合并 */
+export function withParams(kind: string, params?: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const sp of figureParams(kind)) out[sp.key] = typeof params?.[sp.key] === 'number' ? (params as any)[sp.key] : sp.def
+  return out
 }
 
 const TAU = Math.PI * 2
@@ -150,7 +228,8 @@ export const FUNCTIONS: Record<string, FunctionDef> = {
   reciprocal: { label: '反比例 y=1/x', f: (x) => 1 / x, view: { xmin: -6, xmax: 6, ymin: -6, ymax: 6 } },
   hook: { label: '双钩 y=x+1/x', f: (x) => x + 1 / x, view: { xmin: -5.5, xmax: 5.5, ymin: -6, ymax: 6 } },
   tangent: {
-    label: '正切 y=tan x', f: Math.tan, view: { xmin: -TAU, xmax: TAU, ymin: -4, ymax: 4 },
+    label: '正切 y=tan x', f: Math.tan, view: { xmin: -7, xmax: 7, ymin: -4, ymax: 4 },
+    tick: { step: PI / 2, pi: true },
     extra: (c) => {
       let s = ''
       for (const k of [-1.5, -0.5, 0.5, 1.5]) {
@@ -160,26 +239,101 @@ export const FUNCTIONS: Record<string, FunctionDef> = {
       return s
     },
   },
-  sine: { label: '正弦 y=sin x', f: Math.sin, view: { xmin: -TAU, xmax: TAU, ymin: -1.7, ymax: 1.7 } },
-  cosine: { label: '余弦 y=cos x', f: Math.cos, view: { xmin: -TAU, xmax: TAU, ymin: -1.7, ymax: 1.7 } },
-  sinusoid: { label: '正弦型 y=2sin(2x+π/6)', f: (x) => 2 * Math.sin(2 * x + PI / 6), view: { xmin: -PI, xmax: PI, ymin: -2.7, ymax: 2.7 } },
-  exponential: { label: '指数 y=2ˣ', f: (x) => Math.pow(2, x), view: { xmin: -4, xmax: 4, ymin: -1.2, ymax: 8.5 } },
-  expDecay: { label: '指数 y=(1/2)ˣ', f: (x) => Math.pow(0.5, x), view: { xmin: -4, xmax: 4, ymin: -1.2, ymax: 8.5 } },
-  logarithm: { label: '对数 y=log₂x', f: (x) => Math.log2(x), view: { xmin: -1.2, xmax: 8.5, ymin: -3.2, ymax: 3.4 } },
+  // 三角函数：x 轴按弧度标注（π/2、π、3π/2、2π），y 轴标 ±1；
+  // 视图左右各留一点余量，免得 π 刻度贴边被裁
+  sine: {
+    label: '正弦 y=sin x', f: Math.sin, view: { xmin: -7, xmax: 7, ymin: -1.7, ymax: 1.7 },
+    tick: { step: PI / 2, pi: true, yLabels: [1, -1] },
+  },
+  cosine: {
+    label: '余弦 y=cos x', f: Math.cos, view: { xmin: -7, xmax: 7, ymin: -1.7, ymax: 1.7 },
+    tick: { step: PI / 2, pi: true, yLabels: [1, -1] },
+  },
+  // 可调参数版：A / ω / φ 都能在属性面板里改；虚线画出参考正弦 y=sin x，方便看变换
+  sinusoid: {
+    label: '正弦型 y=Asin(ωx+φ)（可调参数）',
+    params: [
+      { key: 'A', label: '振幅 A', def: 2, step: 0.5, min: 0.2, max: 5 },
+      { key: 'w', label: '角频率 ω', def: 2, step: 0.5, min: 0.5, max: 6 },
+      { key: 'phi', label: '初相 φ', def: PI / 6, step: 0.5236, min: -PI, max: PI },
+    ],
+    f: (x, p) => p.A * Math.sin(p.w * x + p.phi),
+    viewOf: (p) => ({ xmin: -3.7, xmax: 3.7, ymin: -(p.A * 1.3 + 0.4), ymax: p.A * 1.3 + 0.4 }),
+    tickOf: (p) => ({ step: PI / 2, pi: true, yLabels: [p.A, -p.A] }),
+    extra: (c) => {
+      const d = plotFunction((x) => Math.sin(x), c.view, c.w, c.h)
+      return d
+        ? '<path d="' + d + '" fill="none" stroke="' + c.stroke + '" stroke-width="' + (c.sw * 0.6).toFixed(2) +
+          '" stroke-dasharray="6 5" opacity="0.5"/>'
+        : ''
+    },
+  },
+  // 分段函数：x<0 取 x²、x≥0 取 x+1；断点处实心点表示"取到"、空心点表示"取不到"
+  piecewise: {
+    label: '分段函数（实心/空心点）',
+    f: (x) => (x < 0 ? x * x : x + 1),
+    pieces: [
+      { f: (x) => x * x, from: -2.6, to: 0 },
+      { f: (x) => x + 1, from: 0, to: 3.4 },
+    ],
+    view: { xmin: -2.9, xmax: 3.7, ymin: -1.4, ymax: 4.9 },
+    extra: (c) => keyPointSvg(c, 0, 1, '(0,1)') + openDotSvg(c, 0, 0),
+  },
+  // 含参二次函数：对称轴随 a 移动，讲"区间最值 / 含参讨论"用
+  paramQuadratic: {
+    label: '含参二次函数 y=x²−2ax+1（可调 a）',
+    params: [{ key: 'a', label: '参数 a', def: 1, step: 0.5, min: -3, max: 3 }],
+    f: (x, p) => x * x - 2 * p.a * x + 1,
+    view: { xmin: -4.6, xmax: 4.6, ymin: -4.5, ymax: 9.5 },
+    extra: (c, p) => {
+      const vy = 1 - p.a * p.a
+      let s = lineSvg(c.m.X(p.a), c.m.Y(c.view.ymin), c.m.X(p.a), c.m.Y(c.view.ymax), c.stroke, Math.max(1, c.sw * 0.55), '6 5')
+      s += keyPointSvg(c, p.a, vy, '(' + fmt2(p.a) + ',' + fmt2(vy) + ')')
+      s += textSvg(c.m.X(p.a) + c.fs * 0.4, c.m.Y(c.view.ymax) + c.fs * 1.1, 'x=a', c.fs, c.stroke, 'start')
+      return s
+    },
+  },
+  // 含参绝对值：顶点沿 x 轴平移
+  paramAbs: {
+    label: '含参绝对值 y=|x−a|（可调 a）',
+    params: [{ key: 'a', label: '参数 a', def: 1, step: 0.5, min: -3, max: 3 }],
+    f: (x, p) => Math.abs(x - p.a),
+    view: { xmin: -4.6, xmax: 4.6, ymin: -1.4, ymax: 5 },
+    extra: (c, p) => keyPointSvg(c, p.a, 0, '(' + fmt2(p.a) + ',0)'),
+  },
+  // 指数 / 对数：教科书都要标出定点 (0,1) / (1,0)
+  exponential: {
+    label: '指数 y=2ˣ', f: (x) => Math.pow(2, x), view: { xmin: -4, xmax: 4, ymin: -1.2, ymax: 8.5 },
+    extra: (c) => keyPointSvg(c, 0, 1, '(0,1)'),
+  },
+  expDecay: {
+    label: '指数 y=(1/2)ˣ', f: (x) => Math.pow(0.5, x), view: { xmin: -4, xmax: 4, ymin: -1.2, ymax: 8.5 },
+    extra: (c) => keyPointSvg(c, 0, 1, '(0,1)'),
+  },
+  logarithm: {
+    label: '对数 y=log₂x', f: (x) => Math.log2(x), view: { xmin: -1.2, xmax: 8.5, ymin: -3.2, ymax: 3.4 },
+    extra: (c) => keyPointSvg(c, 1, 0, '(1,0)'),
+  },
 }
 
-export function functionFigure(kind: string, w: number, h: number, stroke: string, sw: number): string {
+export function functionFigure(kind: string, w: number, h: number, stroke: string, sw: number, params?: Record<string, number>): string {
   const def = FUNCTIONS[kind]
   if (!def) return ''
-  const view = def.view
+  const p = withParams(kind, params)
+  const view = def.viewOf ? def.viewOf(p) : def.view
   const m = mapper(view, w, h)
-  const ctx: Ctx = { w, h, stroke, sw, view, m }
-  let s = def.noAxes ? '' : axesSvg(view, w, h, stroke, sw)
-  if (def.extra) s += def.extra(ctx)
-  const d = plotFunction(def.f, view, w, h)
-  if (d) {
-    s += '<path d="' + d + '" fill="none" stroke="' + stroke + '" stroke-width="' + n1(sw) +
+  const ctx: Ctx = { w, h, stroke, sw, fs: Math.max(11, Math.min(w, h) * 0.055), view, m }
+  const tick = def.tickOf ? def.tickOf(p) : def.tick
+  let s = def.noAxes ? '' : axesSvg(view, w, h, stroke, sw, true, tick)
+  if (def.extra) s += def.extra(ctx, p)
+  const curve = (d: string) => d
+    ? '<path d="' + d + '" fill="none" stroke="' + stroke + '" stroke-width="' + n1(sw) +
       '" stroke-linecap="round" stroke-linejoin="round"/>'
+    : ''
+  if (def.pieces) {
+    for (const pc of def.pieces) s += curve(plotFunction((x) => pc.f(x, p), { ...view, xmin: pc.from, xmax: pc.to }, w, h))
+  } else {
+    s += curve(plotFunction((x) => def.f(x, p), view, w, h))
   }
   return s
 }
@@ -195,6 +349,12 @@ export const CONICS: Record<string, { label: string; view: View }> = {
   hyperbola: { label: '双曲线（焦点在 x 轴）', view: { xmin: -6.6, xmax: 6.6, ymin: -4.8, ymax: 4.8 } },
   conicParabola: { label: '抛物线 y²=2px（焦点在 x 轴）', view: { xmin: -4.6, xmax: 8.2, ymin: -6, ymax: 6 } },
   conicFocusDir: { label: '圆锥曲线统一定义（焦点·准线）', view: { xmin: -4.6, xmax: 8.2, ymin: -6, ymax: 6 } },
+  // —— 带准线 / 离心率 ——
+  ellipseDirectrix: { label: '椭圆（焦点·准线）', view: { xmin: -7.6, xmax: 7.6, ymin: -4.1, ymax: 4.1 } },
+  hyperbolaDirectrix: { label: '双曲线（焦点·准线）', view: { xmin: -6.9, xmax: 6.9, ymin: -4.9, ymax: 4.9 } },
+  ellipseFamily: { label: '椭圆族（离心率 e 变化）', view: { xmin: -5, xmax: 5, ymin: -4.7, ymax: 4.7 } },
+  hyperbolaFamily: { label: '双曲线族（离心率 e 变化）', view: { xmin: -6.2, xmax: 6.2, ymin: -6.2, ymax: 6.2 } },
+  eccAnim: { label: '椭圆离心率变化（动画）', view: { xmin: -5.3, xmax: 5.3, ymin: -4.5, ymax: 4.5 } },
   // —— 焦点在 y 轴 ——
   ellipseV: { label: '椭圆（焦点在 y 轴）', view: { xmin: -4.4, xmax: 4.4, ymin: -5.6, ymax: 5.6 } },
   hyperbolaV: { label: '双曲线（焦点在 y 轴）', view: { xmin: -5.6, xmax: 5.6, ymin: -6.4, ymax: 6.4 } },
@@ -301,6 +461,76 @@ export function conicFigure(kind: string, w: number, h: number, stroke: string, 
     s += lineSvg(X(view.xmin), Y(-p / 2), X(view.xmax), Y(-p / 2), stroke, thin, dash)
     s += dot(0, p / 2) + label(0, p / 2, 'F', -fs * 0.95, fs * 0.2)
     s += label(view.xmax * 0.86, -p / 2, '准线', 0, -fs * 0.9)
+  } else if (kind === 'ellipseDirectrix') {
+    // 椭圆 x²/a²+y²/b²=1：焦点 F(±c,0)、准线 x=±a²/c；第二定义 PF/PH = e（图中画出 PF₂ 与 PH）
+    const a = 4, b = 3, c = Math.sqrt(a * a - b * b), dx = (a * a) / c
+    s += curve(plotParametric((t) => a * Math.cos(t), (t) => b * Math.sin(t), 0, TAU, view, w, h))
+    s += lineSvg(X(dx), Y(view.ymin), X(dx), Y(view.ymax), stroke, thin, dash)
+    s += lineSvg(X(-dx), Y(view.ymin), X(-dx), Y(view.ymax), stroke, thin, dash)
+    s += dot(-c, 0) + dot(c, 0)
+    s += label(-c, 0, 'F₁', 0, fs * 1.2) + label(c, 0, 'F₂', 0, fs * 1.2)
+    s += dot(0, 0)   // 原点：O 由坐标轴统一标注，不重复标
+    s += label(dx, view.ymax * 0.87, 'l₂', fs * 0.75, 0)
+    s += label(-dx, view.ymax * 0.87, 'l₁', -fs * 0.75, 0)
+    const pu = 2.1, px2 = a * Math.cos(pu), py2 = b * Math.sin(pu)
+    s += lineSvg(X(c), Y(0), X(px2), Y(py2), stroke, thin)
+    s += lineSvg(X(px2), Y(py2), X(dx), Y(py2), stroke, thin)
+    s += dot(px2, py2) + label(px2, py2, 'P', fs * 0.9, -fs * 0.95)
+    s += dot(dx, py2, 0.85) + label(dx, py2, 'H', fs * 0.8, -fs * 0.85)
+  } else if (kind === 'hyperbolaDirectrix') {
+    // 双曲线 x²/a²−y²/b²=1：焦点 F(±c,0)、准线 x=±a²/c、渐近线 y=±(b/a)x
+    const a = 2.5, b = 2, c = Math.sqrt(a * a + b * b), dx = (a * a) / c
+    const u = 1.28
+    s += curve(plotParametric((t) => a * Math.cosh(t), (t) => b * Math.sinh(t), -u, u, view, w, h))
+    s += curve(plotParametric((t) => -a * Math.cosh(t), (t) => b * Math.sinh(t), -u, u, view, w, h))
+    const xa = view.xmax * 0.98
+    s += lineSvg(X(-xa), Y((b / a) * -xa), X(xa), Y((b / a) * xa), stroke, thin, dash)
+    s += lineSvg(X(-xa), Y(-(b / a) * -xa), X(xa), Y(-(b / a) * xa), stroke, thin, dash)
+    s += lineSvg(X(dx), Y(view.ymin), X(dx), Y(view.ymax), stroke, thin, dash)
+    s += lineSvg(X(-dx), Y(view.ymin), X(-dx), Y(view.ymax), stroke, thin, dash)
+    s += dot(-c, 0) + dot(c, 0)
+    s += label(-c, 0, 'F₁', 0, fs * 1.2) + label(c, 0, 'F₂', 0, fs * 1.2)
+    s += dot(-a, 0, 0.9) + dot(a, 0, 0.9)
+    s += label(-a, 0, 'A₁', -fs * 0.75, -fs * 0.95) + label(a, 0, 'A₂', fs * 0.75, -fs * 0.95)
+    s += label(dx, view.ymax * 0.9, 'l₂', fs * 0.7, 0)
+    s += label(-dx, view.ymax * 0.9, 'l₁', -fs * 0.7, 0)
+  } else if (kind === 'ellipseFamily') {
+    // 同一长半轴 a，离心率 e 越大越扁（e=0 即圆）
+    const a = 4
+    for (const e of [0, 0.4, 0.7, 0.9, 0.96]) {
+      const b = a * Math.sqrt(Math.max(0.02, 1 - e * e))
+      s += curve(plotParametric((t) => a * Math.cos(t), (t) => b * Math.sin(t), 0, TAU, view, w, h))
+      s += label(0, b, 'e=' + e, fs * 0.62, -fs * 0.85)
+    }
+    s += dot(0, 0)   // 原点：O 由坐标轴统一标注，不重复标
+  } else if (kind === 'hyperbolaFamily') {
+    // 同一实半轴 a，离心率 e 越大开口越"张"（渐近线越陡）
+    const a = 2
+    for (const e of [1.3, 2, 3]) {
+      const b = a * Math.sqrt(e * e - 1)
+      const u = 1.35
+      s += curve(plotParametric((t) => a * Math.cosh(t), (t) => b * Math.sinh(t), -u, u, view, w, h))
+      s += curve(plotParametric((t) => -a * Math.cosh(t), (t) => b * Math.sinh(t), -u, u, view, w, h))
+      s += label(a * Math.cosh(0.85), b * Math.sinh(0.85), 'e=' + e, fs * 0.55, -fs * 0.7)
+    }
+    s += dot(-a, 0, 0.9) + dot(a, 0, 0.9)
+    s += dot(0, 0)   // 原点：O 由坐标轴统一标注，不重复标
+  } else if (kind === 'eccAnim') {
+    // 离心率变化的动画：SMIL 在若干关键帧之间补间（图形结构一致，浏览器可平滑插值）
+    const a = 4
+    const es = [0.05, 0.3, 0.55, 0.78, 0.92]
+    const ds = es.map((e) => plotParametric((t) => a * Math.cos(t), (t) => a * Math.sqrt(1 - e * e) * Math.sin(t), 0, TAU, view, w, h, 96))
+    const loop = ds.concat(ds.slice(0, -1).reverse())
+    s += '<path d="' + ds[0] + '" fill="none" stroke="' + stroke + '" stroke-width="' + n1(sw) + '">' +
+      '<animate attributeName="d" values="' + loop.join(';') + '" dur="9s" repeatCount="indefinite"/></path>'
+    const cxList = es.map((e) => X(a * e))
+    const cxLoop = cxList.concat(cxList.slice(0, -1).reverse())
+    for (const side of [1, -1]) {
+      s += '<circle cx="' + n1(side * cxList[0]) + '" cy="' + n1(Y(0)) + '" r="' + n1(r) + '" fill="' + stroke + '">' +
+        '<animate attributeName="cx" values="' + cxLoop.map((v) => n1(side * v)).join(';') + '" dur="9s" repeatCount="indefinite"/></circle>'
+    }
+    s += textSvg(X(view.xmin) + fs * 0.8, Y(view.ymax) + fs * 1.3, 'e 增大 → 椭圆越扁', fs * 0.8, stroke, 'start')
+    s += dot(0, 0)   // 原点：O 由坐标轴统一标注，不重复标
   }
   return s
 }

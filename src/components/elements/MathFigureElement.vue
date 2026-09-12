@@ -57,7 +57,7 @@ const innerHtml = computed(() => {
   }
 
   // 函数图像 / 圆锥曲线：走纯几何模块 mathPlot（真采样，非手工贝塞尔）
-  if (FUNCTION_KINDS.includes(kind)) return functionFigure(kind, w, h, stroke, s)
+  if (FUNCTION_KINDS.includes(kind)) return functionFigure(kind, w, h, stroke, s, props.el.params)
   if (CONIC_KINDS.includes(kind)) return conicFigure(kind, w, h, stroke, s, fillColor)
 
   // 三维多面体统一走顶点模型渲染（支持拖拽顶点编辑）
