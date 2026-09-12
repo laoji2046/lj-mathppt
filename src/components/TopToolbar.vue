@@ -85,7 +85,10 @@ async function onDocxPicked(e: Event) {
     const deck = markdownToDeck(markdown)
     const ok2 = store.importDeck(deck)
     if (!ok2) throw new Error('生成的演示无效（已取消，未影响当前内容）')
-    fileToast.value = 'Word 导入完成：' + deck.slides.length + ' 页 · 公式 ' + stats.formulas + ' · 图片 ' + stats.images
+    const oleWarn = stats.oleFormulas > 0
+      ? ' · 注意：另有 ' + stats.oleFormulas + ' 个公式是 MathType 对象，读不到内容 —— 请先在该文档里「MathType → 转换公式 → Office Math」转成 Word 原生公式再导入'
+      : ''
+    fileToast.value = 'Word 导入完成：' + deck.slides.length + ' 页 · 公式 ' + stats.formulas + ' · 图片 ' + stats.images + oleWarn
   } catch (err) {
     fileToast.value = 'Word 导入失败：' + (err instanceof Error ? err.message : String(err))
   }

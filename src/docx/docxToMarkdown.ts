@@ -11,7 +11,15 @@ import { listEntries, readEntry, readText, type ZipEntry } from './zip'
 import { parseXml, kids, first, type XmlNode } from './xml'
 import { ommlToLatex } from './omml'
 
-export interface DocxStats { paragraphs: number; formulas: number; images: number; tables: number; pageBreaks: number }
+export interface DocxStats {
+  paragraphs: number
+  formulas: number
+  images: number
+  tables: number
+  pageBreaks: number
+  /** MathType / OLE 对象公式的个数：这类公式是嵌入对象，读不到内容（不是 Word 原生公式） */
+  oleFormulas: number
+}
 export interface DocxOptions {
   /** 正文字号（默认 22：比手动排版小一点，一页能装更多） */
   fontPx?: number
@@ -111,6 +119,10 @@ async function paragraph(p: XmlNode, ctx: Ctx): Promise<string[] | null> {
       else if (k.name === 'w:br') {
         if (k.attrs['w:type'] === 'page') items.push({ t: 'text', v: '\u0000PAGE' })
         else items.push({ t: 'text', v: '\n' })
+      } else if (k.name === 'w:object') {
+        // MathType / 老式公式编辑器：公式是嵌入的 OLE 对象（word/embeddings/*.bin），
+        // 文本层读不到内容，预览图又是 wmf/emf（浏览器不认）——只能计数并提示用户先在 Word 里转换
+        ctx.stats.oleFormulas++
       } else if (k.name === 'w:drawing' || k.name === 'w:pict') {
         const blip = first(k, 'a:blip')
         const rid = blip && (blip.attrs['r:embed'] || blip.attrs['r:link'])
@@ -313,7 +325,7 @@ export async function docxToMarkdown(buf: Uint8Array, opts: DocxOptions = {}): P
   const doc = parseXml(docXml)
   const body = first(doc, 'w:body')
   if (!body) throw new Error('document.xml 里没有 w:body')
-  const stats: DocxStats = { paragraphs: 0, formulas: 0, images: 0, tables: 0, pageBreaks: 0 }
+  const stats: DocxStats = { paragraphs: 0, formulas: 0, images: 0, tables: 0, pageBreaks: 0, oleFormulas: 0 }
   const ctx: Ctx = { rels, entries: new Map(entries.map((e) => [e.name, e])), buf, stats }
 
   const content: string[] = []
