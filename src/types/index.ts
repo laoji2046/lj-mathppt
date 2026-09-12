@@ -199,6 +199,26 @@ export function shadowCss(key: string | undefined): string {
 }
 
 /**
+ * 估算一段文字在给定宽度 / 字号下需要的高度（Markdown 导入时给元素框定高用）。
+ * 口径与模板层一致：中文（含全角）算 1 字宽、西文 0.55、`$...$` 公式按源码长度的一半折算。
+ * 为什么要按内容算：导入器原本把框高写死 120px —— 稍长的一段话塞进 120px 会被 shrink 缩到看不清，
+ * 而短句又白占 120px。按内容定高后，长段落自然不会「半句话就翻页」。
+ */
+export function estimateTextHeight(text: string, fontSize: number, width: number, lineHeight = 1.55): number {
+  const perLine = Math.max(8, width / fontSize)
+  const marked = String(text).replace(/\$[^$]*\$/g, (m) => '\u0001'.repeat(Math.max(2, Math.round((m.length - 2) * 0.5))))
+  let units = 0
+  let lines = 1
+  for (const ch of marked) {
+    if (ch === '\n') { lines++; units = 0; continue }
+    const w = ch === '\u0001' ? 1 : /[\u2e80-\u9fff\uff00-\uffef\u3000-\u303f]/.test(ch) ? 1 : 0.55
+    units += w
+    if (units > perLine) { lines++; units = w }
+  }
+  return Math.round(lines * fontSize * lineHeight) + 12
+}
+
+/**
  * 把文本里常见的 $...$ / $$...$$ 数学定界归一化成无歧义的 \(...\) / \[...\]。
  * 规避 MathJax 对「$ 与数字相邻」时的跳过规则（例如 \frac{\sqrt6}{2}$ 的结尾 $ 紧挨数字，
  * 会被当作普通字符，导致配对错乱、$ 原样显示）。

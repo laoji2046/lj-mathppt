@@ -6,6 +6,7 @@
  *   反向导出时再还原成 $$...$$，来回不丢内容、也不产出 math 元素。
  */
 import type { Deck, Slide, TextElement, MathElement, RichTextElement, ImageElement } from '@/types'
+import { estimateTextHeight } from '@/types'
 
 function isText(e: { type: string }): e is TextElement { return e.type === 'text' }
 function isMath(e: { type: string }): e is MathElement { return e.type === 'math' }
@@ -75,7 +76,9 @@ function mdBlockToSlide(lines: string[]): Slide {
   const elements = { list: [] as Slide['elements'], y: 120, indent: 0 }
   const notes: string[] = []
   let mathBuf = '', inBlock = false
-  const push = (e: Slide['elements'][number], advance?: number) => { elements.list.push(e); elements.y += advance ?? (isMath(e) ? 140 : 80) }
+  // 行距按**元素自身高度**推进：原来固定 80（math 140），而混排元素高 120、图片高 520，
+  // 结果相邻元素在画布上互相重叠 40~440px。改成「自身高度 + 20 间隙」后不再叠。
+  const push = (e: Slide['elements'][number], advance?: number) => { elements.list.push(e); elements.y += advance ?? ((e.h ?? 70) + 20) }
   for (let raw of lines) {
     let line = raw.trimEnd()
     // 块级数学 $$...$$（可跨多行）
@@ -104,15 +107,15 @@ function mdBlockToSlide(lines: string[]): Slide {
       const lvl = h[1].length
       const fs = lvl === 1 ? 48 : lvl === 2 ? 40 : 32
       const color = lvl === 1 ? '#1a1a1a' : '#c0392b'
-      push({ id: uid('el'), type: 'text', x: 150, y: elements.y, w: 1620, h: 70, rot: 0, text: h[2].trim(), fontSize: fs, color, fontWeight: 700, align: 'left', fontFamily: 'hei-bold', bgColor: 'transparent', shadow: 'none' } as any)
+      push({ id: uid('el'), type: 'text', x: 150, y: elements.y, w: 1620, h: estimateTextHeight(h[2].trim(), fs, 1620, 1.3), rot: 0, text: h[2].trim(), fontSize: fs, color, fontWeight: 700, align: 'left', fontFamily: 'hei-bold', bgColor: 'transparent', shadow: 'none' } as any)
       continue
     }
     // 内联 $...$ → richtex；否则正文文本
     const hasInline = /\$[^\n]+?\$/.test(line)
     if (hasInline || line.includes('\\(')) {
-      push({ id: uid('el'), type: 'richtex', x: 150, y: elements.y, w: 1620, h: 120, rot: 0, fitMode: 'shrink', text: line, fontSize: 26, color: '#1a1a1a', fontWeight: 400, fontFamily: 'sans', align: 'left', bgColor: 'transparent', shadow: 'none' } as any)
+      push({ id: uid('el'), type: 'richtex', x: 150, y: elements.y, w: 1620, h: estimateTextHeight(line, 26, 1620), rot: 0, fitMode: 'shrink', text: line, fontSize: 26, color: '#1a1a1a', fontWeight: 400, fontFamily: 'sans', align: 'left', bgColor: 'transparent', shadow: 'none' } as any)
     } else {
-      push({ id: uid('el'), type: 'text', x: 150, y: elements.y, w: 1620, h: 70, rot: 0, text: line, fontSize: 26, color: '#1a1a1a', fontWeight: 400, align: 'left', fontFamily: 'sans', bgColor: 'transparent', shadow: 'none' } as any)
+      push({ id: uid('el'), type: 'text', x: 150, y: elements.y, w: 1620, h: estimateTextHeight(line, 26, 1620), rot: 0, text: line, fontSize: 26, color: '#1a1a1a', fontWeight: 400, align: 'left', fontFamily: 'sans', bgColor: 'transparent', shadow: 'none' } as any)
     }
   }
   // 容错：$$ 只写了一半（例如删掉了一个 $）时，也把已收集的公式内容保留下来，避免整块公式凭空消失

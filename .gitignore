@@ -24,3 +24,5 @@ Thumbs.db
 *.log
 npm-debug.log*
 pnpm-debug.log*
+# docx 转换产物（生成的 .md 与抽出的图片）
+_docx-out/

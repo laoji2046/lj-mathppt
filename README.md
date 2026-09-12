@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1124**（源码快照 `_backup/rollback-20260912-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1125**（源码快照 `_backup/rollback-20260912-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -239,6 +239,44 @@ node ../node_modules/@tauri-apps/cli/tauri.js build   # 生成 NSIS 安装包
 - 幻灯片管理增强：拖拽排序、复制页、上移 / 下移、`Ctrl+Shift+N` 新建
 - 版本历史：保存快照 / 恢复 / 删除（localStorage 独立存储，最多 20 个）
 
+## 把 Word 文档变成幻灯片（docx → Markdown）
+
+```bash
+# 转换（.md 与同名 images/ 目录会生成在 -o 指定的位置）
+node tools/docx/docx2md.mjs 讲义.docx -o out/讲义.md
+
+# 可选参数
+node tools/docx/docx2md.mjs 试卷.docx --group question   # auto(默认) | question | heading | line
+node tools/docx/docx2md.mjs 试卷.docx --page-px 900      # 每页像素预算（画布 1080 高，默认 900）
+node tools/docx/docx2md.mjs 讲义.docx --wrap 42          # 按字数切行（默认不切，一段一行）
+
+# 端到端验收：把产出交给应用自己的导入器，检查越界/重叠/内容丢失
+node tools/docx/verify-import.mjs out/讲义.md
+```
+
+然后在应用里打开 **MD 源码面板**（顶栏「MD 源码」），把生成的 .md 粘进去、点应用即可。
+
+**实现**（`tools/docx/`，不依赖任何第三方库，离线可用）：
+
+| 文件 | 作用 |
+|---|---|
+| `zip.mjs` | 自己解析 zip（docx 就是个 zip），只用到 deflate |
+| `xml.mjs` | 极简 OOXML 解析器（属性尊重引号、文本解实体） |
+| `omml.mjs` | **Word 公式 OMML → LaTeX**：分式 / 根式 / 上下标 / 括号 / 求和 / 矩阵 / 重音 / 函数名 / Unicode 符号映射 |
+| `docx2md.mjs` | 主转换器 + CLI：段落 / 标题 / 表格 / 图片 / 分页 |
+| `verify-import.mjs` | 端到端验收：过一遍 `src/composables/mdDeck.ts`，断言不越界、不重叠、不丢内容 |
+
+**踩过的坑（都写进了断言，防止回归）**：
+
+- 相邻公式必须合并成一个 `$…$`：Word 里 `A₁`、`B₁` 常是分开的 OMML，拼出来会得到 `$A_{1}$$B_{1}$`，
+  中间那两个美元符会被应用的**显示公式**规则命中，**整行剩下的文字被丢掉**（真题里有 27 行中招）。
+  而且 Word 会在相邻公式间插**空 run**，合并时要跳过空文本项。`verify-import.mjs` 里有专门的反向断言。
+- 分页要按**像素**而不是行数：应用里一行一个元素框（文本 70+20、混排 120+20、图片 520+20），
+  权重口径必须与 `src/types/index.ts` 的 `estimateTextHeight` 一致，否则公式多的页会堆出画布。
+- 图片必须独占一行：应用只认行首的 `![]()`。
+
+**已知限制**：文本框 / 浮动对象 / 分栏只按顺序取正文，位置关系丢失；公式若是图片（MathType 截图）不会被识别；
+老式 `.doc` 需要先另存为 `.docx`（本机装了 Word，可加一步 COM 转换）。
 ## 尚未实现 / 待验证
 
 - **渐显只给了「讲解型」**：数学讲义的定义 / 定理 / 思考 / 公式 / 例题 / 方法 / 小结（15 套）与整套里的同类型页（13 页）默认带逐条渐显；
@@ -264,6 +302,29 @@ node ../node_modules/@tauri-apps/cli/tauri.js build   # 生成 NSIS 安装包
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-12（v2026.09.1125）
+
+**1125 · Word 导入通道（docx → Markdown → 幻灯片）**
+- 新增 `tools/docx/`：`zip.mjs`（自己读 zip，无第三方依赖）· `xml.mjs`（极简 OOXML 解析器）·
+  `omml.mjs`（**Word 公式 OMML → LaTeX**）· `docx2md.mjs`（主转换器 + CLI）· `verify-import.mjs`（端到端验收）
+- 用法：`node tools/docx/docx2md.mjs 讲义.docx -o out/讲义.md`，然后在应用里开 **MD 源码面板**粘进去点应用。
+  可选 `--group auto|question|heading|line`、`--page-px 900`、`--wrap 42`（默认不切行：一段一行）
+- 实测（桌面「高三暑假」真实文件，端到端全绿）：
+
+  | 文件 | 段落 | 公式 | 图 | 输出 | 页数 |
+  |---|---|---|---|---|---|
+  | 2025 高考真题（全国Ⅰ卷） | 488 | 504 | 18 | 582 行 | 83 页 |
+  | 专题18 点线面（原卷版） | 145 | 332 | 23 | 224 行 | 59 页 |
+  | 专题21 空间向量（解析版） | 1825 | 4190 | 229 | 2342 行 | 365 页 |
+
+  三份全部：**元素越界 0 · 文字框重叠 0 · 纯文本残留 `$` 0 · 行内连续美元符 0**；单份转换 30~280ms
+- **顺带修掉导入管线里的两个真实缺陷**：
+  1. `mdDeck` 的行距原本固定 80px（公式 140），而混排元素高 120、图片高 520 —— 相邻元素在画布上**互相重叠 40~440px**；
+     改成「元素自身高度 + 20 间隙」，并按内容估算框高（`src/types/index.ts` 新增 `estimateTextHeight`）
+  2. 相邻公式之间的**空 run** 会把公式切开，输出成 `$A_{1}$$B_{1}$` —— 中间那两个美元符命中应用的显示公式规则，
+     **整行剩余文字被丢弃**（真题里 27 行中招，页面看着正常、只是少了几句）。已合并相邻公式并在校验里加了反向断言
+- 校验：`vue-tsc` 0 错误 · `vite build` 通过 · `verify-import.mjs` 三份全过
 
 ### 2026-09-12（v2026.09.1124）
 
