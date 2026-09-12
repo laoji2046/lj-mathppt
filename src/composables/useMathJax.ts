@@ -185,15 +185,33 @@ export function fitMath(host: HTMLElement, maxScale = 4) {
 
 /** 把「混排」文本（正文 + \(...\) 内联公式）排版进宿主；
  *  正文与公式都随宿主的 font-size / color / font-family。 */
+/**
+ * MathJax 排版队列：**必须串行**。
+ * MathJax 3 的 typesetPromise 内部是「document.options.elements = e → document.reset() → render()」，
+ * 既不排队也不串行化；并发调用会互相清掉对方待排版的项（表现为公式不渲染 / 重复 / 错位）。
+ * 画布元素、缩略图、面板预览都走这里，所以在这一层统一排队。
+ * （导出/放映是另一份文档，同样的串行化写在 reveal/renderer.ts 的引导脚本里：改一处务必改两处。）
+ */
+let mjChain: Promise<unknown> = Promise.resolve()
+function typesetSerial(hosts: HTMLElement[]): Promise<unknown> {
+  const run = () => {
+    const mj = window.MathJax
+    if (!mj || typeof mj.typesetPromise !== 'function') return Promise.resolve()
+    return mj.typesetPromise(hosts).catch(() => { /* 忽略单次排版错误，别卡住队列 */ })
+  }
+  mjChain = mjChain.then(run, run)
+  return mjChain
+}
+
+/** 把「混排」文本（正文 + \(...\) 内联公式）排版进宿主；
+ *  正文与公式都随宿主的 font-size / color / font-family。 */
 export async function typesetMixed(host: HTMLElement, text: string) {
-  await loadMathJax()
-  const mj = window.MathJax
+  // 先落内容再等引擎：内容不该依赖 MathJax 是否就绪/成功，
+  // 否则引擎一慢或一失败，宿主就整块空白（缩略图踩过这个坑）。
   host.innerHTML = normalizeMixed(text)
   // 标记类：混排里 \[...\] 的 display 公式要收掉 MathJax 默认的 1em 上下外边距（规则在 styles/main.css）。
   // 所有走本函数的宿主 —— 画布 richtex、混排面板预览、编辑弹窗、缩略图 —— 自动获得，不必逐处配 CSS。
-  // 导出/放映是另一份文档，同样的规则写在 reveal/renderer.ts 的样式表里：**改一处务必改两处**。
   host.classList.add('fx-mixed-host')
-  if (mj && typeof mj.typesetPromise === 'function') {
-    try { await mj.typesetPromise([host]) } catch { /* 忽略排版错误 */ }
-  }
+  await loadMathJax()
+  await typesetSerial([host])
 }

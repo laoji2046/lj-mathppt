@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1116**（源码快照 `_backup/rollback-20260912-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1117**（源码快照 `_backup/rollback-20260912-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -55,6 +55,10 @@
 > 1116 修复：**导出 PDF 时混排公式的第 2、3 行重复** —— 根因是 MathJax 的 `typesetPromise` 不做串行化，
 > 而导出路径对同一页 prepare 了两次，第二次 `reset()` 后把还没渲染完的那几行又渲染了一遍。
 > 现已收敛为单入口串行化排版（画布侧本来就有同类保护）。
+>
+> 1117 修复：**应用例题模板后左侧缩略图空白** —— 缩略图监听的是幻灯片**对象引用**，而 store 全是原地改（对象身份不变），
+> 监听器永不触发；整套模板因为整体换 `deck.slides`（新对象 + 新 id）会重挂载，所以「成套正常、单套空白」。
+> 同时把应用侧 MathJax 排版也串行化、并改成先落内容再等引擎。
 >
 > 按日期的版本变更见文末 **更新日志**。
 
@@ -247,6 +251,22 @@ node ../node_modules/@tauri-apps/cli/tauri.js build   # 生成 NSIS 安装包
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-12（v2026.09.1117）
+
+**1117 · 修「应用例题模板后左侧缩略图空白」+ 应用侧 MathJax 排版也串行化**
+- 现象：应用**例题模板**后，左侧页列表的缩略图一直空白；而**整套模板**应用后各页缩略图正常。
+- 根因：`SlideThumb` 监听的是 `() => props.slide`（**对象引用**），而 store 里的改动绝大多数是**原地改** ——
+  `applyTemplate()` 直接换 `elements` 数组、`addElement()` 原地 `push`、`updateElement()` 原地 `Object.assign`，
+  幻灯片对象身份**始终不变** → 监听器永不触发 → 缩略图停在挂载那一版（空白）。
+  而 `applyBundle()` 是 `deck.value.slides = b.slides.map(...)`，**整体换成新对象 + 新 id** → `:key` 变化 → 组件重新挂载 → `onMounted` 刷新。
+  所以「成套正常、单套空白」不是巧合，正是这两条路径的差异。（`pushHistory()` 只是 `JSON.stringify` 存快照、**不替换** `deck.value`，也救不了这个监听器。）
+- 修法：`SlideThumb` 改为**监听内容签名**（`id / bg / elements`，`deep`）+ 110ms 防抖（属性面板连续微调不必每帧重排）+ `onUnmounted` 清理定时器；
+  出错不再静默（原来是 `catch {}`，把失败藏起来了，改 `console.warn`）。
+- 顺带（同类根因）：**应用侧 `typesetMixed` 也串行化** —— MathJax 3 的 `typesetPromise` 内部先 `document.reset()` 再重排、不排队，
+  画布元素 / 缩略图 / 面板预览并发调用会互相清掉对方待排版的项（1116 修的导出侧是同一个坑，这次是应用侧）。
+  同时改成**先落内容再等引擎**：内容不该依赖 MathJax 是否就绪/成功，否则引擎一慢一失败宿主就整块空白。
+- 校验：`vue-tsc` 0 错误 · `vite build` 通过 · 结构断言（`useMathJax` 里 `typesetPromise` 只剩唯一一处串行调用；缩略图监听内容 + 防抖 + 卸载清理）
 
 ### 2026-09-12（v2026.09.1116）
 
