@@ -94,6 +94,7 @@ node tools/solidfit/overlay.cjs spec.json out.html 1.0   # 叠回原图核对
 | `vectorize.cjs` | 把图片内联成 imgs.js 并生成 vectorize.html |
 | `annotate.cjs` | 结果叠原图 + 顶点序号标注 |
 | `tofig.cjs` | 结果 → 可直接粘贴的 fig(...) 代码 |
-| `compare.cjs` | 与 solidFigures.ts 的真值打分 |
+| `compare.cjs` | 与 solidFigures.ts 的真值打分（顶点 / 边） |
+| `ocrcheck.cjs` | 字母识别准确率（同样是拿真值打分） |
 | `fit.cjs` / `overlay.cjs` | 手工精修 / 叠加核对 |
 | `debug.tpl.html` | 骨架 + 节点 + 路径可视化（排查用） |
