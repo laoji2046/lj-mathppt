@@ -310,9 +310,10 @@ node tools/docx/verify-import.mjs out/讲义.md
 **坐标轴箭头**：带坐标系的两幅图需要在边的终点画箭头，于是给边样式加了 `arrow` 字段
 （`EdgeStyle = { dash, width, color, arrow }`），只作用于那一条边，其余图形不受影响。
 
-**想加新图**：量图的工具留在 `tools/solidfit/`（详见其中的 README：二值化 → 顶点分辨率无关地吸附到线条交点），
-量好后往 `src/templates/solidFigures.ts` 的 `SOLID_FIGURE_PRESETS` 里加一条即可 ——
-`fig(id, 名称, 原图宽, 原图高, points, edges, labels)` 会自动算插入尺寸（保持原图宽高比）与字母偏移。
+**想加新图**：`tools/solidfit/` 里有**自动矢量化**工具 —— 一张线稿进去，顶点 + 边表 + 虚实线出来，
+再叠回原图看一眼、按序号填上字母，就能生成可直接粘贴的 `fig(...)` 代码（详见其中的 README）。
+拿已经人工核对过的这 8 套当真值实测：**顶点召回 89%、平均误差 1.3%、虚实线判定 100% 对**；
+代价是会多出几个落在直线上的冗余顶点，删掉即可 —— 比纯手工量快一个数量级。
 
 ## 尚未实现 / 待验证
 
