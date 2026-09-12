@@ -25,7 +25,7 @@ type Entry =
   | { kind: 'single'; id: string; name: string; cat: string; desc: string }
 
 // ---- 高中数学讲义模板（原有） ----
-const mathCats = ['全部', '整套', '封面', '目录', '章节', '知识', '公式', '例题', '动画', '方法', '易错', '高考', '导图', '练习', '小结']
+const mathCats = ['全部', '整套', '封面', '目录', '章节', '定义', '定理', '思考', '知识', '公式', '例题', '方法', '易错', '练习', '小结']
 const activeMathCat = ref('全部')
 const filtered = computed<Entry[]>(() => {
   if (activeMathCat.value === '整套') return []
