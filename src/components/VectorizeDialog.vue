@@ -28,6 +28,11 @@ const labels = ref<string[]>([])
 const offs = ref<{ dx: number; dy: number }[]>([])
 const selV = ref<number | null>(null)
 const selE = ref<number | null>(null)
+/** 补线模式：连着点两个顶点就连一条线；点空白处则先新建一个顶点 */
+const linkMode = ref(false)
+const pendingV = ref<number | null>(null)
+/** 正在拖的顶点（识别偏了可以直接拖回来） */
+const dragging = ref<number | null>(null)
 
 const scale = ref(1)
 const viewW = computed(() => Math.round((img.value?.naturalWidth || 300) * scale.value))
@@ -103,22 +108,93 @@ async function run(crop?: [number, number, number, number] | null) {
   }
 }
 
-function onDown(e: PointerEvent) {
-  if (!cropping.value) return
+/** 屏幕坐标 → 识别框归一化坐标（顶点坐标用的是这一套） */
+function toCropNorm(e: PointerEvent): [number, number] | null {
   const r = stage.value?.getBoundingClientRect()
-  if (!r) return
-  dragStart.value = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }
-  drag.value = { x: dragStart.value.x, y: dragStart.value.y, w: 0, h: 0 }
+  const rs = res.value
+  if (!r || !rs) return null
+  const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height
+  const [bx, by, ex2, ey2] = rs.box
+  return [(fx * rs.imgW - bx) / (ex2 - bx), (fy * rs.imgH - by) / (ey2 - by)]
+}
+
+function onDown(e: PointerEvent) {
+  if (cropping.value) {
+    const r = stage.value?.getBoundingClientRect()
+    if (!r) return
+    dragStart.value = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }
+    drag.value = { x: dragStart.value.x, y: dragStart.value.y, w: 0, h: 0 }
+    return
+  }
+  // 补线模式下点空白处 = 新建一个顶点
+  if (!linkMode.value) return
+  const p = toCropNorm(e)
+  if (!p || p[0] < 0 || p[0] > 1 || p[1] < 0 || p[1] > 1) return
+  pts.value.push(+p[0].toFixed(4), +p[1].toFixed(4))
+  labels.value.push('')
+  offs.value.push({ dx: 0, dy: 0 })
+  pickForLink(nVerts.value - 1)
 }
 function onMove(e: PointerEvent) {
-  if (!cropping.value || !dragStart.value) return
   const r = stage.value?.getBoundingClientRect()
   if (!r) return
+  if (dragging.value !== null) {
+    const p = toCropNorm(e)
+    if (!p) return
+    pts.value[dragging.value * 2] = +Math.max(0, Math.min(1, p[0])).toFixed(4)
+    pts.value[dragging.value * 2 + 1] = +Math.max(0, Math.min(1, p[1])).toFixed(4)
+    return
+  }
+  if (!cropping.value || !dragStart.value) return
   const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height
   drag.value = {
     x: Math.min(dragStart.value.x, x), y: Math.min(dragStart.value.y, y),
     w: Math.abs(x - dragStart.value.x), h: Math.abs(y - dragStart.value.y),
   }
+}
+function onUpStage() {
+  dragging.value = null
+  onUp()
+}
+
+/** 顶点按下：补线模式下选点，否则选中并开始拖 */
+function onVertexDown(e: PointerEvent, i: number) {
+  e.stopPropagation()
+  if (linkMode.value) { pickForLink(i); return }
+  if (e.shiftKey && selV.value !== null && selV.value !== i) {
+    connect(selV.value, i)
+    selV.value = i; selE.value = null
+    return
+  }
+  selV.value = i
+  selE.value = null
+  dragging.value = i
+  try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
+}
+
+/** 补线：第一次点记下起点，第二次点连线 */
+function pickForLink(i: number) {
+  if (pendingV.value === null) { pendingV.value = i; selV.value = i; selE.value = null; return }
+  if (pendingV.value === i) { pendingV.value = null; return }
+  connect(pendingV.value, i)
+  pendingV.value = null
+  selV.value = i
+  selE.value = null
+}
+function connect(a: number, b: number, dash: 0 | 1 = 0) {
+  if (a === b || a < 0 || b < 0) return
+  if (edges.value.some((e) => (e[0] === a && e[1] === b) || (e[0] === b && e[1] === a))) return
+  edges.value.push([a, b, dash])
+}
+function toggleLink() {
+  linkMode.value = !linkMode.value
+  pendingV.value = null
+}
+function toggleDash() {
+  const i = selE.value
+  if (i === null) return
+  const e = edges.value[i]
+  if (e) e[2] = e[2] ? 0 : 1
 }
 function onUp() {
   if (!cropping.value || !drag.value) return
@@ -255,11 +331,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <div
             ref="stage"
             class="vd__stage"
-            :class="{ 'vd__stage--crop': cropping }"
+            :class="{ 'vd__stage--crop': cropping, 'vd__stage--link': linkMode }"
             :style="{ width: viewW + 'px', height: viewH + 'px' }"
             @pointerdown="onDown"
             @pointermove="onMove"
-            @pointerup="onUp"
+            @pointerup="onUpStage"
+            @pointerleave="dragging = null"
           >
             <img class="vd__img" :src="props.src" :width="viewW" :height="viewH" draggable="false" alt="">
             <svg class="vd__ov" :width="viewW" :height="viewH">
@@ -279,12 +356,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               </g>
               <g v-for="i in nVerts" :key="'v' + (i - 1)">
                 <circle
-                  :cx="px(i - 1)" :cy="py(i - 1)" r="9" fill="transparent" style="cursor:pointer"
-                  @click="selV = i - 1; selE = null"
+                  :cx="px(i - 1)" :cy="py(i - 1)" r="10" fill="transparent" style="cursor:pointer"
+                  @pointerdown="onVertexDown($event, i - 1)"
                 />
                 <circle
-                  :cx="px(i - 1)" :cy="py(i - 1)" r="4.5"
-                  :fill="selV === i - 1 ? '#ff8f1f' : '#e02020'" stroke="#fff" stroke-width="1.2"
+                  :cx="px(i - 1)" :cy="py(i - 1)" :r="pendingV === i - 1 ? 6.5 : 4.5"
+                  :fill="pendingV === i - 1 ? '#12b76a' : (selV === i - 1 ? '#ff8f1f' : '#e02020')"
+                  stroke="#fff" stroke-width="1.2"
                   style="pointer-events:none"
                 />
                 <text
@@ -303,7 +381,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <p class="vd__hint">
             {{ cropping
               ? '在图上拖一个框，松开后按这个范围重新识别（用来切掉下方的「图 1」这类题注）'
-              : '点顶点选中 → Delete 删掉；只连一条线的点会**并到最近的顶点**上（线不会丢）；点线选中 → Delete 删掉多余的线' }}
+              : '顶点可以按住拖动；点顶点选中 → Delete 删掉（只连一条线的点会并到最近的顶点上，线不会丢）；' +
+                '点线选中 → Delete 删掉 / 切换虚实；少了一条线就用右边的「＋ 补一条线」' }}
           </p>
         </div>
 
@@ -327,6 +406,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 </button>
               </div>
             </div>
+            <div class="vd__row">
+              <button class="vd__btn" :class="{ 'vd__btn--on': linkMode }" @click="toggleLink">
+                {{ linkMode ? '结束补线' : '＋ 补一条线' }}
+              </button>
+              <button v-if="selE !== null" class="vd__btn" @click="toggleDash">实线 / 虚线 切换</button>
+            </div>
+            <p v-if="linkMode" class="vd__tip vd__tip--on">
+              {{ pendingV === null
+                ? '补线中：点一个顶点作为起点；点空白处会新建一个顶点'
+                : '已选起点 #' + pendingV + ' —— 再点另一个顶点就连上了（点同一个点取消）' }}
+            </p>
             <div v-if="selE !== null" class="vd__row">
               <button class="vd__btn vd__btn--danger" @click="delEdge(selE)">删掉选中的这条线（#{{ selE }}）</button>
             </div>
@@ -359,6 +449,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .vd__left { flex: none; }
 .vd__stage { position: relative; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; background: #fff; touch-action: none; }
 .vd__stage--crop { cursor: crosshair; }
+.vd__stage--link { cursor: copy; }
+.vd__tip--on { color: var(--brand-800); background: var(--brand-soft); border: 1px solid var(--brand-400); border-radius: var(--radius-sm); padding: 5px 8px; font-size: 12px; line-height: 1.5; }
 .vd__img { display: block; user-select: none; }
 .vd__ov { position: absolute; left: 0; top: 0; }
 .vd__drag { position: absolute; border: 1px dashed var(--brand-600); background: rgba(90, 120, 240, 0.12); pointer-events: none; }
