@@ -310,7 +310,8 @@ node tools/docx/verify-import.mjs out/讲义.md
 **坐标轴箭头**：带坐标系的两幅图需要在边的终点画箭头，于是给边样式加了 `arrow` 字段
 （`EdgeStyle = { dash, width, color, arrow }`），只作用于那一条边，其余图形不受影响。
 
-**想加新图**：把新图量一遍，往 `src/templates/solidFigures.ts` 的 `SOLID_FIGURE_PRESETS` 里加一条即可 ——
+**想加新图**：量图的工具留在 `tools/solidfit/`（详见其中的 README：二值化 → 顶点分辨率无关地吸附到线条交点），
+量好后往 `src/templates/solidFigures.ts` 的 `SOLID_FIGURE_PRESETS` 里加一条即可 ——
 `fig(id, 名称, 原图宽, 原图高, points, edges, labels)` 会自动算插入尺寸（保持原图宽高比）与字母偏移。
 
 ## 尚未实现 / 待验证
