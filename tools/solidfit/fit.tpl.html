@@ -1,0 +1,98 @@
+<!doctype html><html><head><meta charset="utf-8"><title>fit</title></head><body>
+<pre id="out">running</pre>
+<script src="figs.js"></script>
+<script>
+const FIGS = window.__FIGS__;
+const R = 3;
+const WINDOW = 48;
+const STEP0 = 6;
+const ROUNDS = 16;
+
+function loadImg(src){ return new Promise(res=>{ const im=new Image(); im.onload=()=>res(im); im.src=src; }); }
+
+function buildMask(img){
+  const c=document.createElement('canvas'); c.width=img.width; c.height=img.height;
+  const g=c.getContext('2d'); g.drawImage(img,0,0);
+  const d=g.getImageData(0,0,c.width,c.height).data;
+  const W=c.width,H=c.height;
+  const near=new Uint8Array(W*H);
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const p=(y*W+x)*4;
+    const lum=0.299*d[p]+0.587*d[p+1]+0.114*d[p+2];
+    if(d[p+3]>100 && lum<150){
+      for(let dy=-R;dy<=R;dy++){ const yy=y+dy; if(yy<0||yy>=H) continue;
+        for(let dx=-R;dx<=R;dx++){ const xx=x+dx; if(xx<0||xx>=W) continue; near[yy*W+xx]=1; } }
+    }
+  }
+  return {near,W,H};
+}
+
+function edgeScore(mask, ax, ay, bx, by, minLen){
+  const L0=Math.hypot(bx-ax,by-ay);
+  if(minLen && L0 < minLen) return -0.6;
+  const {near,W,H}=mask;
+  const n=Math.max(6, Math.round(L0/3));
+  let hit=0;
+  for(let k=0;k<n;k++){
+    const t=k/n; const x=Math.round(ax+(bx-ax)*t), y=Math.round(ay+(by-ay)*t);
+    if(x>=0&&x<W&&y>=0&&y<H&&near[y*W+x]) hit++;
+  }
+  return hit/n;
+}
+function minLens(initPx, edges){
+  return edges.map(e=>0.5*Math.hypot(initPx[e[1]*2]-initPx[e[0]*2], initPx[e[1]*2+1]-initPx[e[0]*2+1]));
+}
+function total(mask, pts, edges, ml){
+  let s=0;
+  for(let i=0;i<edges.length;i++){ const e=edges[i]; s+=edgeScore(mask, pts[e[0]*2],pts[e[0]*2+1], pts[e[1]*2],pts[e[1]*2+1], ml[i]); }
+  return s;
+}
+function fit(mask, initPx, edges, W, H){
+  const nv=initPx.length/2;
+  const inc=Array.from({length:nv},()=>[]);   // [edgeIndex, otherVertex]
+  edges.forEach((e,i)=>{ inc[e[0]].push([i,e[1]]); if(e[1]!==e[0]) inc[e[1]].push([i,e[0]]); });
+  const ml=minLens(initPx, edges);
+  const pts=initPx.slice();
+  let cur=total(mask,pts,edges,ml);
+  for(let r=0;r<ROUNDS;r++){
+    const step=Math.max(1, Math.round(STEP0*Math.pow(0.72,r)));
+    let moved=false;
+    for(let v=0;v<nv;v++){
+      const x0=pts[v*2], y0=pts[v*2+1];
+      const local=(x,y)=>{ let s=0; for(const [ei,o] of inc[v]) s+=edgeScore(mask,x,y,pts[o*2],pts[o*2+1],ml[ei]); return s; };
+      const cur0=local(x0,y0);
+      let bx=x0, by=y0, bs=cur0;
+      for(let dx=-WINDOW; dx<=WINDOW; dx+=step){
+        for(let dy=-WINDOW; dy<=WINDOW; dy+=step){
+          const nx=x0+dx, ny=y0+dy;
+          if(nx<1||nx>=W-1||ny<1||ny>=H-1) continue;
+          const s=local(nx,ny);
+          if(s>bs+1e-9){ bs=s; bx=nx; by=ny; }
+        }
+      }
+      if(bx!==x0||by!==y0){ pts[v*2]=bx; pts[v*2+1]=by; moved=true; }
+    }
+    cur=total(mask,pts,edges,ml);
+    if(!moved && step<=1) break;
+  }
+  return {pts, score:cur, ml, edges};
+}
+
+(async()=>{
+  const lines=[];
+  for(const f of FIGS){
+    const img=await loadImg(f.src);
+    const mask=buildMask(img);
+    const W=img.width, H=img.height;
+    const initPx=f.points.map((v,i)=> v*(i%2===0?W:H));
+    const ne=f.edges.length;
+    const s0=total(mask,initPx,f.edges,minLens(initPx,f.edges))/ne;
+    const r=fit(mask,initPx,f.edges,W,H);
+    const norm=r.pts.map((v,i)=> +(v/(i%2===0?W:H)).toFixed(4));
+    const per=r.edges.map((e,i)=>({e, s:+edgeScore(mask, r.pts[e[0]*2],r.pts[e[0]*2+1], r.pts[e[1]*2],r.pts[e[1]*2+1], 0).toFixed(2)}));
+    lines.push(JSON.stringify({name:f.name, before:+s0.toFixed(3), after:+(r.score/ne).toFixed(3), points:norm,
+      worst: per.filter(x=>x.s<0.6)}));
+  }
+  document.getElementById('out').textContent='@@BEGIN@@\n'+lines.join('\n')+'\n@@END@@';
+})();
+</script></body></html>
