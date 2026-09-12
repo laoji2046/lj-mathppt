@@ -55,7 +55,36 @@ const contentStyle = computed(() => ({
   whiteSpace: props.el.wrap === false ? 'pre' : 'pre-wrap',
 }))
 
-/** 把 content 块（正文 + 内联公式）按自然尺寸缩放，填满宿主；像 math 元素那样无级缩放 */
+/** 缩放上限：'fill'（默认，拖动外框无级放大，最多 4 倍）；'shrink' 只缩小不放大 */
+const cap = computed(() => (props.el.fitMode === 'shrink' ? 1 : 4))
+
+/**
+ * 内容"真实占位"：布局尺寸与滚动尺寸取大。
+ * 为什么不能只用 offsetWidth/Height：MathJax 的 SVG 经常**溢出父盒但不撑大父盒**，
+ * 只看父盒尺寸会低估内容 —— 于是缩放比例偏大、内容被 overflow:hidden 裁掉。
+ */
+function extentOf(el: HTMLElement) {
+  return {
+    w: Math.max(el.offsetWidth, el.scrollWidth),
+    h: Math.max(el.offsetHeight, el.scrollHeight),
+  }
+}
+
+/** 内容实际绘制范围：自身矩形 + 所有公式节点的并集（含溢出到父盒之外的部分） */
+function paintedRect(el: HTMLElement) {
+  const r = el.getBoundingClientRect()
+  let x0 = r.left, y0 = r.top, x1 = r.right, y1 = r.bottom
+  const kids = el.querySelectorAll('mjx-container, svg')
+  for (let i = 0; i < kids.length; i++) {
+    const b = kids[i].getBoundingClientRect()
+    if (!b.width && !b.height) continue
+    x0 = Math.min(x0, b.left); y0 = Math.min(y0, b.top)
+    x1 = Math.max(x1, b.right); y1 = Math.max(y1, b.bottom)
+  }
+  return { width: x1 - x0, height: y1 - y0 }
+}
+
+/** 把 content 块（正文 + 内联公式）按真实占位缩放，填满宿主；像 math 元素那样无级缩放 */
 function fitContent() {
   const box = host.value
   const inner = content.value
@@ -63,15 +92,43 @@ function fitContent() {
   const boxW = box.clientWidth
   const boxH = box.clientHeight
   inner.style.transform = ''
-  const nw = inner.offsetWidth
-  const nh = inner.offsetHeight
+  const { w: nw, h: nh } = extentOf(inner)
   if (!(nw > 0 && nh > 0 && boxW > 0 && boxH > 0)) return
-  // maxScale=1：只缩小不放大（与公式元素一致）。混排文字大小由「字号」决定，
-  // 元素框变大不再把文字撑大，否则宽框里的短句会被放大到 4 倍。
-  const f = Math.min(boxW / nw, boxH / nh, 1)
+  // 新建元素（autoBox）：先把外框收成刚好包住内容，之后拖动外框即可自由缩放。
+  // 用一次性标记：拖动过程中 ResizeObserver 会连发多次，不能反复改外框跟用户抢。
+  if (props.el.autoBox && !autoBoxDone) { autoBoxDone = true; fitBoxToContent(nw, nh) }
+  let f = Math.min(boxW / nw, boxH / nh, cap.value)
   inner.style.transformOrigin = 'center center'
   inner.style.transform = 'scale(' + f + ')'
+  // 兜底：按"真实绘制范围"（含溢出子节点）复核，超出宿主就按实际比例缩回去
+  const hr = box.getBoundingClientRect()
+  const ir = paintedRect(inner)
+  if (hr.width > 0 && hr.height > 0 && ir.width > 0 && ir.height > 0 &&
+      (ir.width > hr.width + 1 || ir.height > hr.height + 1)) {
+    f = Math.max(0.02, f * Math.min(hr.width / ir.width, hr.height / ir.height))
+    inner.style.transform = 'scale(' + f + ')'
+  }
 }
+
+/** MathJax 落位是异步的：渲染完成后再补两次复核，防止"量早了" */
+let refitTimers: number[] = []
+function laterRefit() {
+  refitTimers.forEach((t) => clearTimeout(t))
+  refitTimers = [120, 420].map((ms) => window.setTimeout(() => fitContent(), ms) as unknown as number)
+}
+
+/** 新建元素：把外框调成刚好包住内容（随后清掉标记，不再自动改动） */
+function fitBoxToContent(nw: number, nh: number) {
+  const w = Math.max(60, Math.min(1800, Math.round(nw + 16)))
+  const h = Math.max(32, Math.min(900, Math.round(nh + 12)))
+  if (w === Math.round(props.el.w) && h === Math.round(props.el.h)) {
+    emit('update', { autoBox: false } as Partial<RichTextElement>)
+    return
+  }
+  emit('update', { w, h, autoBox: false } as Partial<RichTextElement>)
+}
+
+let autoBoxDone = false
 
 function watchSize() {
   ro?.disconnect()
@@ -82,6 +139,8 @@ function watchSize() {
     raf = requestAnimationFrame(() => fitContent())
   })
   ro.observe(node)
+  // 内容尺寸变化也要重算：MathJax 异步重排后内容会变大，光看宿主尺寸是发现不了的
+  if (content.value) ro.observe(content.value)
 }
 
 async function run() {
@@ -97,7 +156,10 @@ async function run() {
       try {
         await typesetMixed(node, mixed.value)
         await nextTick()
+        // 再等一帧：MathJax 的 SVG 布局是异步落位的，不等就量不准（会偏小 → 缩放偏大 → 被裁）
+        await new Promise((r) => requestAnimationFrame(r))
         fitContent()
+        laterRefit()
       } catch (e) {
         error.value = e instanceof Error ? e.message : String(e)
       }
@@ -113,9 +175,9 @@ function schedule(delay = 160) {
 }
 
 onMounted(() => { watchSize(); run() })
-onBeforeUnmount(() => { clearTimeout(timer); ro?.disconnect() })
+onBeforeUnmount(() => { clearTimeout(timer); refitTimers.forEach((t) => clearTimeout(t)); ro?.disconnect() })
 watch(
-  () => [props.el.text, props.el.fontSize, props.el.color, props.el.fontFamily, props.el.wrap, JSON.stringify(props.el.lineStyles || []), Math.round(props.el.w), Math.round(props.el.h)],
+  () => [props.el.text, props.el.fontSize, props.el.color, props.el.fontFamily, props.el.wrap, props.el.fitMode, props.el.autoBox, JSON.stringify(props.el.lineStyles || []), Math.round(props.el.w), Math.round(props.el.h)],
   () => schedule(),
 )
 

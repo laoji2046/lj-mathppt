@@ -91,7 +91,7 @@ export function hasRendered(host: HTMLElement) {
  * 把 LaTeX 渲染进宿主元素，并等比缩放以适配宿主尺寸。
  * MathJax 产出的是固定尺寸 SVG，改 font-size 无效，只能用 transform: scale()。
  */
-export async function renderLatex(host: HTMLElement, latex: string, fontSize: number, maxScale = 4) {
+export async function renderLatex(host: HTMLElement, latex: string, fontSize: number, maxScale = 4): Promise<{ nw: number; nh: number }> {
   await loadMathJax()
   const mj = window.MathJax
   if (!mj?.tex2svg) throw new Error('MathJax 未就绪')
@@ -140,8 +140,30 @@ export async function renderLatex(host: HTMLElement, latex: string, fontSize: nu
       target.dataset.nh = String(naturalH)
     }
     fitMath(host, maxScale)
+    // 把自然尺寸回传：新建元素据此把外框收成刚好包住公式
+    return { nw: naturalW, nh: naturalH }
   } finally {
     probe.remove()
+  }
+}
+
+/**
+ * 兜底：按"实际渲染出来的矩形"复核一次缩放。
+ * 为什么需要：缩放比例是拿"量到的自然尺寸"算的，而 MathJax 排版是**异步**的 ——
+ * 量完之后公式还可能再排一次版，实际占位变大，transform 后就会溢出宿主，
+ * 被 overflow:hidden 裁掉（表现就是"拖动放大后公式被截断"）。
+ * 这里用含 transform 的 getBoundingClientRect 复核，超了就按实际比例缩回去。
+ */
+function clampIntoBox(host: HTMLElement, target: HTMLElement, f: number) {
+  target.dataset.scale = String(f)
+  const hr = host.getBoundingClientRect()
+  const tr = target.getBoundingClientRect()
+  if (!(hr.width > 0 && hr.height > 0 && tr.width > 0 && tr.height > 0)) return
+  if (tr.width > hr.width + 1 || tr.height > hr.height + 1) {
+    const k = Math.min(hr.width / tr.width, hr.height / tr.height)
+    const nf = Math.max(0.02, f * k)
+    target.style.transform = `scale(${nf})`
+    target.dataset.scale = String(nf)
   }
 }
 
@@ -158,7 +180,7 @@ export function fitMath(host: HTMLElement, maxScale = 4) {
   const f = Math.min(boxW / nw, boxH / nh, maxScale)
   target.style.transformOrigin = 'center center'
   target.style.transform = `scale(${f})`
-  target.dataset.scale = String(f)
+  clampIntoBox(host, target, f)
 }
 
 /** 把「混排」文本（正文 + \(...\) 内联公式）排版进宿主；

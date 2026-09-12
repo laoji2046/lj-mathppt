@@ -64,14 +64,14 @@ function mdBlockToSlide(lines: string[]): Slide {
     // 块级数学 $$...$$（可跨多行）
     if (inBlock) {
       const end = line.indexOf('$$')
-      if (end >= 0) { mathBuf += '\n' + line.slice(0, end); push({ id: uid('el'), type: 'math', x: 150, y: elements.y, w: 1620, h: 140, rot: 0, latex: mathBuf.trim(), color: '#1a1a1a', fontSize: 32, align: 'center' } as any); mathBuf = ''; inBlock = false }
+      if (end >= 0) { mathBuf += '\n' + line.slice(0, end); push({ id: uid('el'), type: 'math', x: 150, y: elements.y, w: 1620, h: 140, rot: 0, fitMode: 'shrink', latex: mathBuf.trim(), color: '#1a1a1a', fontSize: 32, align: 'center' } as any); mathBuf = ''; inBlock = false }
       else { mathBuf += '\n' + line }
       continue
     }
     const mstart = line.indexOf('$$')
     if (mstart >= 0) {
       const end = line.indexOf('$$', mstart + 2)
-      if (end >= 0) { const latex = line.slice(mstart + 2, end).trim(); push({ id: uid('el'), type: 'math', x: 150, y: elements.y, w: 1620, h: 140, rot: 0, latex, color: '#1a1a1a', fontSize: 32, align: 'center' } as any) }
+      if (end >= 0) { const latex = line.slice(mstart + 2, end).trim(); push({ id: uid('el'), type: 'math', x: 150, y: elements.y, w: 1620, h: 140, rot: 0, fitMode: 'shrink', latex, color: '#1a1a1a', fontSize: 32, align: 'center' } as any) }
       else { mathBuf = line.slice(mstart + 2); inBlock = true }
       continue
     }
@@ -93,7 +93,7 @@ function mdBlockToSlide(lines: string[]): Slide {
     // 内联 $...$ → richtex；否则正文文本
     const hasInline = /\$[^\n]+?\$/.test(line)
     if (hasInline || line.includes('\\(')) {
-      push({ id: uid('el'), type: 'richtex', x: 150, y: elements.y, w: 1620, h: 120, rot: 0, text: line, fontSize: 26, color: '#1a1a1a', fontWeight: 400, fontFamily: 'sans', align: 'left', bgColor: 'transparent', shadow: 'none' } as any)
+      push({ id: uid('el'), type: 'richtex', x: 150, y: elements.y, w: 1620, h: 120, rot: 0, fitMode: 'shrink', text: line, fontSize: 26, color: '#1a1a1a', fontWeight: 400, fontFamily: 'sans', align: 'left', bgColor: 'transparent', shadow: 'none' } as any)
     } else {
       push({ id: uid('el'), type: 'text', x: 150, y: elements.y, w: 1620, h: 70, rot: 0, text: line, fontSize: 26, color: '#1a1a1a', fontWeight: 400, align: 'left', fontFamily: 'sans', bgColor: 'transparent', shadow: 'none' } as any)
     }
@@ -101,7 +101,7 @@ function mdBlockToSlide(lines: string[]): Slide {
   // 容错：$$ 只写了一半（例如删掉了一个 $）时，也把已收集的公式内容保留下来，避免整块公式凭空消失
   if (inBlock) {
     const rest = mathBuf.replace(/\$+\s*$/, '').trim()
-    if (rest) push({ id: uid('el'), type: 'math', x: 150, y: elements.y, w: 1620, h: 140, rot: 0, latex: rest, color: '#1a1a1a', fontSize: 32, align: 'center' } as any)
+    if (rest) push({ id: uid('el'), type: 'math', x: 150, y: elements.y, w: 1620, h: 140, rot: 0, fitMode: 'shrink', latex: rest, color: '#1a1a1a', fontSize: 32, align: 'center' } as any)
     mathBuf = ''; inBlock = false
   }
   return { id: uid('slide'), bg: '#ffffff', elements: elements.list, notes: notes.join('\n') || undefined, parentId: undefined }

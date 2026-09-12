@@ -402,7 +402,7 @@ function elementToHtml(el: SlideElement, thumb = false): string {
     // 交给 MathJax 排版；源码用 \( ... \) 包裹，避免与页面其它内容冲突
     const inner = `width:100%;height:100%;display:flex;align-items:center;justify-content:center;` +
       `overflow:hidden;color:${el.color};font-size:${el.fontSize}px;`
-    return `<div style="${box}${rot}"${cls}${fragIdx}><div class="fx-math" style="${inner}">\\(${esc(el.latex)}\\)</div></div>`
+    return `<div style="${box}${rot}"${cls}${fragIdx}><div class="fx-math" data-cap="${el.fitMode === 'shrink' ? 1 : 4}" style="${inner}">\\(${esc(el.latex)}\\)</div></div>`
   }
 
   if (el.type === 'geogebra') {
@@ -543,7 +543,7 @@ function elementToHtml(el: SlideElement, thumb = false): string {
       if (ls) { st = ' style="'; if (ls.color) st += 'color:' + esc(ls.color) + ';'; if (ls.fontFamily) st += 'font-family:' + esc(fontStack(ls.fontFamily)) + ';'; st += '"' }
       return ls ? '<span' + st + '>' + esc(normalizeMixed(ln)) + '</span>' : esc(normalizeMixed(ln))
     }).join('\n')
-    return `<div style="${box}${rot}"${cls}${fragIdx}><div class="fx-mixed" style="${inner}"><div class="fx-mixed-inner" style="width:fit-content;max-width:100%;transform-origin:center center;text-align:${el.align};">${lineHtml}</div></div></div>`
+    return `<div style="${box}${rot}"${cls}${fragIdx}><div class="fx-mixed" data-cap="${el.fitMode === 'shrink' ? 1 : 4}" style="${inner}"><div class="fx-mixed-inner" style="width:fit-content;max-width:100%;transform-origin:center center;text-align:${el.align};">${lineHtml}</div></div></div>`
   }
 
   // image
@@ -668,11 +668,17 @@ ${slides}
       if (!mjx) return;
       var nw = mjx.offsetWidth, nh = mjx.offsetHeight;
       if (!nw || !nh) return;
-      // 与编辑器画布一致：只缩小不放大（上限 1），公式大小由 font-size 决定
-      var f = Math.min(box.clientWidth / nw, box.clientHeight / nh, 1);
+      // 缩放上限由元素的 data-cap 决定（fill=4 拖动放大 / shrink=1 只缩小），与编辑器画布一致
+      var cap = parseFloat(box.getAttribute('data-cap') || '4') || 4;
+      var f = Math.min(box.clientWidth / nw, box.clientHeight / nh, cap);
       if (!(f > 0)) return;
       mjx.style.transformOrigin = 'center center';
       mjx.style.transform = 'scale(' + f + ')';
+      // 兜底：MathJax 异步重排后实际占位可能变大，按实际矩形复核，超了就缩回去（否则被裁）
+      var hr = box.getBoundingClientRect(), tr = mjx.getBoundingClientRect();
+      if (hr.width > 0 && hr.height > 0 && tr.width > 0 && tr.height > 0 && (tr.width > hr.width + 1 || tr.height > hr.height + 1)) {
+        mjx.style.transform = 'scale(' + Math.max(0.02, f * Math.min(hr.width / tr.width, hr.height / tr.height)) + ')';
+      }
     });
   }
   function fitMixed(root){
@@ -685,9 +691,15 @@ ${slides}
       var bw = box.clientWidth, bh = box.clientHeight;
       var nw = inner.offsetWidth, nh = inner.offsetHeight;
       if (!(nw > 0 && nh > 0 && bw > 0 && bh > 0)) continue;
-      var f = Math.min(bw / nw, bh / nh, 1);   // 与编辑器一致：只缩小不放大
+      var cap = parseFloat(box.getAttribute('data-cap') || '4') || 4;   // 与编辑器画布一致
+      var f = Math.min(bw / nw, bh / nh, cap);
       inner.style.transformOrigin = 'center center';
       inner.style.transform = 'scale(' + f + ')';
+      // 兜底：MathJax 异步重排后内容可能变大，按实际矩形复核，超了就缩回去
+      var hr2 = box.getBoundingClientRect(), ir2 = inner.getBoundingClientRect();
+      if (hr2.width > 0 && hr2.height > 0 && ir2.width > 0 && ir2.height > 0 && (ir2.width > hr2.width + 1 || ir2.height > hr2.height + 1)) {
+        inner.style.transform = 'scale(' + Math.max(0.02, f * Math.min(hr2.width / ir2.width, hr2.height / ir2.height)) + ')';
+      }
     }
   }
   function typeset(root){

@@ -1012,6 +1012,8 @@ function layerTypeLabel(type: string) {
             <option :value="700">加粗 700</option>
           </select>
         </label>
+        <label class="prop-check"><input type="checkbox" :checked="(richtex?.fitMode ?? 'fill') === 'fill'"
+          @change="patch({ fitMode: ($event.target as HTMLInputElement).checked ? 'fill' : 'shrink' } as Partial<SlideElement>)"><span>充满外框（拖动外框时整块跟着无级放大）</span></label>
         <label class="field"><span>颜色</span>
           <input type="color" :value="richtex?.color" @input="patch({ color: ($event.target as HTMLInputElement).value } as Partial<SlideElement>)" />
         </label>
@@ -1103,9 +1105,11 @@ function layerTypeLabel(type: string) {
           <input type="color" :value="math?.color"
             @input="patch({ color: ($event.target as HTMLInputElement).value } as Partial<SlideElement>)" />
         </label>
+        <label class="prop-check"><input type="checkbox" :checked="(math?.fitMode ?? 'fill') === 'fill'"
+          @change="patch({ fitMode: ($event.target as HTMLInputElement).checked ? 'fill' : 'shrink' } as Partial<SlideElement>)"><span>充满外框（拖动外框时公式跟着无级放大）</span></label>
         <button class="quick__btn" style="width:100%;margin-top:6px" @click="openFormulaLibrary()">📚 预制公式库（点击卡片替换当前公式）</button>
         <p class="panel__hint">
-          已内置宏：<code>\R \N \Z \Q \C \E</code>（数集）、<code>\abs{x}</code> 绝对值、<code>\norm{x}</code> 范数、<code>\dd</code> 微分、<code>\ee</code> 自然常数、<code>\ii</code> 虚数单位、<code>\comb{n}{k}</code> 组合、<code>\perm{n}{k}</code> 排列、<code>\half</code> ½。公式按「字号」显示，元素框不够大时自动缩小以完整显示（不再放大撑满框）。
+          已内置宏：<code>\R \N \Z \Q \C \E</code>（数集）、<code>\abs{x}</code> 绝对值、<code>\norm{x}</code> 范数、<code>\dd</code> 微分、<code>\ee</code> 自然常数、<code>\ii</code> 虚数单位、<code>\comb{n}{k}</code> 组合、<code>\perm{n}{k}</code> 排列、<code>\half</code> ½。勾选「充满外框」时拖动外框即可无级缩放公式；取消勾选则按「字号」显示、只在装不下时缩小。
         </p>
       </div>
 

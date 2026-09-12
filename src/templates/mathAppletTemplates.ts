@@ -25,7 +25,7 @@ function shape(x: number, y: number, w: number, h: number, o: Record<string, unk
   return { id: eid(), type: 'shape', x, y, w, h, rot: 0, shape: 'rect', fill: '#f1efeb', stroke: 'transparent', strokeWidth: 0, ...o } as SlideElement
 }
 function math(x: number, y: number, w: number, h: number, latex: string, o: Record<string, unknown> = {}): SlideElement {
-  return { id: eid(), type: 'math', x, y, w, h, rot: 0, latex, color: INK, fontSize: 36, ...o } as SlideElement
+  return { id: eid(), type: 'math', x, y, w, h, rot: 0, latex, color: INK, fontSize: 36, fitMode: 'shrink', ...o } as SlideElement
 }
 function ggb(x: number, y: number, w: number, h: number, commands: string[], o: Record<string, unknown> = {}): SlideElement {
   return {
@@ -66,7 +66,7 @@ function mix(x: number, y: number, w: number, h: number, text: string, o: Record
   return {
     id: eid(), type: 'richtex', x, y, w, h, rot: 0, text,
     fontSize: 26, color: INK, fontWeight: 400, align: 'left', fontFamily: 'sans',
-    bgColor: 'transparent', shadow: 'none', wrap: true, ...o,
+    bgColor: 'transparent', shadow: 'none', wrap: true, fitMode: 'shrink', ...o,
   } as SlideElement
 }
 /**

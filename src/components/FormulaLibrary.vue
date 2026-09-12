@@ -56,7 +56,8 @@ function insert(item: FormulaItem) {
   if (sel && sel.type === 'math') {
     store.updateElement(sel.id, { latex: item.latex } as Partial<SlideElement>)
   } else {
-    store.addElement('math', { latex: item.latex, w: 620, h: 168 } as Partial<SlideElement>)
+    // autoBox：渲染后把外框收成刚好包住公式（之后拖动即无级放大）
+    store.addElement('math', { latex: item.latex, w: 620, h: 168, autoBox: true } as Partial<SlideElement>)
   }
 }
 </script>

@@ -43,6 +43,54 @@ const PRESETS: { label: string; latex: string }[] = [
   { label: '指数平均链', latex: '\\mu\\le\\sigma' },
 ]
 
+/* ---------- 预设组合：内置 + 用户自定义（localStorage 持久化） ---------- */
+const PRESET_KEY = 'lj-mathslides-vue:formula-presets'
+interface Preset { label: string; latex: string }
+
+/** 自动起名：取首行前 14 个字符 */
+function presetName(raw: string) {
+  const first = raw.split('\n').map((s) => s.trim()).filter(Boolean)[0] || raw
+  const t = first.replace(/\s+/g, ' ')
+  return t.length > 14 ? t.slice(0, 14) + '…' : t
+}
+function loadUserPresets(): Preset[] {
+  try {
+    const arr = JSON.parse(localStorage.getItem(PRESET_KEY) || '[]')
+    if (!Array.isArray(arr)) return []
+    return arr
+      .filter((p) => p && typeof p.latex === 'string' && p.latex.trim())
+      .map((p) => ({ label: String(p.label || '').trim() || presetName(String(p.latex)), latex: String(p.latex) }))
+  } catch { return [] }
+}
+const userPresets = ref<Preset[]>(loadUserPresets())
+function persistUserPresets() {
+  try { localStorage.setItem(PRESET_KEY, JSON.stringify(userPresets.value)) } catch { /* 忽略 */ }
+}
+/** 操作反馈（2.2 秒后自动消失） */
+const presetTip = ref('')
+let presetTipTimer: number | undefined
+function flashPresetTip(t: string) {
+  presetTip.value = t
+  clearTimeout(presetTipTimer)
+  presetTipTimer = window.setTimeout(() => { presetTip.value = '' }, 2200) as unknown as number
+}
+/** 把当前输入框内容存成预设组合 */
+function addToPresets() {
+  const raw = latex.value.trim()
+  if (!raw) { flashPresetTip('输入框还是空的 —— 先写一条或从右侧公式库点一条'); return }
+  if (PRESETS.some((p) => p.latex === raw) || userPresets.value.some((p) => p.latex === raw)) {
+    flashPresetTip('这条已经在预设组合里了')
+    return
+  }
+  userPresets.value = [...userPresets.value, { label: presetName(raw), latex: raw }]
+  persistUserPresets()
+  flashPresetTip('已加入预设组合')
+}
+function removePreset(i: number) {
+  userPresets.value = userPresets.value.filter((_, k) => k !== i)
+  persistUserPresets()
+}
+
 function fontStackLabel(k: string) {
   return FONT_OPTIONS.find((f) => f.v === k)?.stack ?? 'inherit'
 }
@@ -136,7 +184,7 @@ let clickTimer: number | undefined
 let pendingKey = ''
 let pendingAt = 0
 let lastAppend = { text: '', at: 0 }
-onBeforeUnmount(() => clearTimeout(clickTimer))
+onBeforeUnmount(() => { clearTimeout(clickTimer); clearTimeout(presetTipTimer) })
 
 function keyOf(f: FormulaItem) { return f.latex + '|' + f.label }
 
@@ -165,6 +213,7 @@ function insertDirect(f: FormulaItem) {
   } else {
     store.addElement('math', {
       latex: f.latex, w: 620, h: 168, color: color.value, fontSize: Math.max(24, fontSize.value + 14),
+      autoBox: true,   // 渲染后外框自动贴合公式，之后拖动即无级放大
     } as Partial<SlideElement>)
   }
 }
@@ -196,6 +245,7 @@ function insert() {
   store.addElement('richtex', {
     text: t, fontSize: fontSize.value, color: color.value,
     fontFamily: fontFamily.value, bgColor: bgColor.value, w: 640, h: 160, align: 'left',
+    autoBox: true,   // 外框自动收成刚好包住内容，之后拖动即无级放大
   } as Partial<SlideElement>)
   emit('close')
 }
@@ -246,9 +296,24 @@ function insertHardBreak() {
             </div>
           </div>
 
-          <div class="lbl">预设组合 <em>（点击填入上方输入框）</em></div>
+          <div class="lbl lbl--row">
+            <span>预设组合 <em>（点击填入上方输入框{{ userPresets.length ? '；带 × 的是你自己存的' : '' }}）</em></span>
+            <span class="lbl__tools">
+              <span v-if="presetTip" class="chip-tip">{{ presetTip }}</span>
+              <button class="chip chip--xs chip--add" title="把上方输入框里的内容存为预设组合，之后一点即填" @click="addToPresets">＋ 加入预设组合</button>
+            </span>
+          </div>
           <div class="chips">
-            <button v-for="p in PRESETS" :key="p.label" class="chip" @click="latex = p.latex">{{ p.label }}</button>
+            <button v-for="p in PRESETS" :key="p.label" class="chip" :title="p.latex" @click="latex = p.latex">{{ p.label }}</button>
+            <span
+              v-for="(p, i) in userPresets"
+              :key="'u' + i"
+              class="chip chip--mine"
+              :title="p.latex + '\n单击填入输入框 · 点右侧 × 删除'"
+            >
+              <span class="chip__t" @click="latex = p.latex">{{ p.label }}</span>
+              <button class="chip__x" title="从预设组合里删除这一条" @click.stop="removePreset(i)">×</button>
+            </span>
           </div>
         </div>
 
@@ -328,6 +393,15 @@ function insertHardBreak() {
 .chip { padding: 4px 10px; border: 1px solid #d7d3e6; background: #fff; border-radius: 6px; font-size: 12px; color: #5a5770; cursor: pointer; transition: background .12s, border-color .12s, color .12s; }
 .chip:hover { background: #f1eeff; border-color: #b9a9f0; color: var(--brand-700); }
 .chip--xs { padding: 2px 8px; font-size: 11px; }
+.chip--add { border-color: var(--brand-400); color: var(--brand-700); }
+.chip--add:hover { background: var(--brand-soft); border-color: var(--brand-500); }
+.chip-tip { font-size: 11.5px; color: var(--brand-700); margin-right: 4px; }
+/* 用户自己存下来的预设：浅紫底 + 右侧 × 删除 */
+.chip--mine { display: inline-flex; align-items: center; gap: 1px; padding: 0 4px 0 10px; border-color: var(--brand-300, #c4b5fd); background: #f7f5ff; color: var(--brand-800, #5b21b6); }
+.chip--mine:hover { background: var(--brand-soft); }
+.chip__t { cursor: pointer; padding: 4px 0; }
+.chip__x { border: none; background: transparent; color: #a99ecb; cursor: pointer; font-size: 13px; line-height: 1; padding: 2px 4px; border-radius: 5px; }
+.chip__x:hover { background: #fee4e2; color: var(--danger, #d92d20); }
 .ctrls { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; }
 .ctrl { display: flex; align-items: flex-start; gap: 10px; }
 .ctrl__lbl { flex: none; font-size: 12px; color: var(--muted); line-height: 24px; min-width: 30px; }

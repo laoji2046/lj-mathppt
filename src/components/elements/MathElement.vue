@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { MathElement } from '@/types'
 import { fitMath, renderLatex } from '@/composables/useMathJax'
 import { inlineEditReq } from '@/ui/inlineEdit'
@@ -20,18 +20,41 @@ let raf = 0
 
 /** 拖动外框缩放时（useDragResize 直写 DOM 尺寸、不更新 store），
  *  宿主实际尺寸变化即重新缩放公式，实现“拖动中实时放大/缩小”。 */
+/** 缩放上限：'fill'（默认，拖动外框无级放大）最多放大到 4 倍；'shrink' 只缩小不放大 */
+const cap = computed(() => (props.el.fitMode === 'shrink' ? 1 : 4))
+
 function watchSize() {
   ro?.disconnect()
   const node = host.value
   if (!node || typeof ResizeObserver === 'undefined') return
   ro = new ResizeObserver(() => {
     cancelAnimationFrame(raf)
-    // maxScale=1：只缩小不放大。公式大小由「字号」决定；元素框变大不再把公式撑大，
-    // 否则宽框里的短公式会被放大到 4 倍，跟页面正文（26~32px）严重不成比例。
-    raf = requestAnimationFrame(() => { if (host.value) fitMath(host.value, 1) })
+    raf = requestAnimationFrame(() => { if (host.value) fitMath(host.value, cap.value) })
   })
   ro.observe(node)
+  // 公式 SVG 自身的尺寸变化也要监听：MathJax 是异步排版的，宿主尺寸没变但内容可能变大，
+  // 那样就发现不了（结果就是 transform 后溢出、被 overflow:hidden 裁掉）
+  const inner = node.firstElementChild
+  if (inner) ro.observe(inner)
 }
+
+/** 新建元素（autoBox）：把外框收成刚好包住公式，之后拖动外框即可自由缩放 */
+function fitBoxToContent(node: HTMLElement, nw: number, nh: number) {
+  if (autoBoxDone || !props.el.autoBox || !(nw > 0 && nh > 0)) return
+  autoBoxDone = true
+  const w = Math.max(60, Math.min(1800, Math.round(nw + 24)))
+  const h = Math.max(40, Math.min(900, Math.round(nh + 20)))
+  if (w === Math.round(props.el.w) && h === Math.round(props.el.h)) {
+    emit('update', { autoBox: false } as Partial<MathElement>)
+    return
+  }
+  emit('update', { w, h, autoBox: false } as Partial<MathElement>)
+}
+
+/** autoBox 只做一次：拖动时 ResizeObserver 会连发多次，反复改外框会跟用户抢 */
+let autoBoxDone = false
+/** 延迟复核用的定时器（MathJax 异步落位） */
+let refitTimers: number[] = []
 
 async function run() {
   if (rendering) {
@@ -53,7 +76,12 @@ async function run() {
       // 等一帧确保宿主节点已挂载（元素宿主绝不能 v-if 卸载）
       await nextTick()
       try {
-        await renderLatex(node, latex, props.el.fontSize, 1)
+        const { nw, nh } = await renderLatex(node, latex, props.el.fontSize, cap.value)
+        fitBoxToContent(node, nw, nh)
+        watchSize()   // 新渲染出的 SVG 也纳入观察（异步重排 → 重算缩放）
+        // 再补两次延迟复核：MathJax 落位是异步的，量早了比例会算错
+        refitTimers.forEach((t) => clearTimeout(t))
+        refitTimers = [120, 420].map((ms) => window.setTimeout(() => { if (host.value) fitMath(host.value, cap.value) }, ms) as unknown as number)
       } catch (e) {
         error.value = e instanceof Error ? e.message : String(e)
       }
@@ -70,7 +98,7 @@ function schedule(delay = 160) {
 }
 
 onMounted(() => { watchSize(); run() })
-onBeforeUnmount(() => { clearTimeout(timer); ro?.disconnect() })
+onBeforeUnmount(() => { clearTimeout(timer); refitTimers.forEach((t) => clearTimeout(t)); ro?.disconnect() })
 
 // ---- 双击编辑 LaTeX：大弹窗（编辑区 + 实时预览）----
 function beginEdit() { editing.value = true }
@@ -85,6 +113,8 @@ watch(
     props.el.latex,
     props.el.fontSize,
     props.el.color,
+    props.el.fitMode,
+    props.el.autoBox,
     Math.round(props.el.w),
     Math.round(props.el.h),
   ],

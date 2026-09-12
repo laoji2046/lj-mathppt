@@ -45,6 +45,14 @@ interface ElementBase extends Rect {
   shadowBlur?: number
   /** 描边线型（见 LINE_STYLES）：solid/dashed/dotted/长虚线/点划线 */
   strokeDash?: string
+  /**
+   * 公式 / 混排元素的缩放方式：
+   * - 'fill'（默认）：等比缩放填满元素框 —— 拖动外框放大，内容跟着无级放大；
+   * - 'shrink'：只缩小不放大（模板里版式经过校准，避免被撑大）。
+   */
+  fitMode?: 'fill' | 'shrink'
+  /** 新建元素：渲染出自然尺寸后，把外框调整成刚好包住内容（随后自动清除此标记） */
+  autoBox?: boolean
 }
 
 /** 对齐方式：相对选区（或单个元素时相对页面）的外接框 */
@@ -738,6 +746,9 @@ export function createElement(type: ElementType, rect: Partial<Rect> = {}): Slid
         latex: 'x=\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}',
         color: '#1a1a1a',
         fontSize: 40,
+        // 插入后自动把外框收成刚好包住公式：立即看到的字号就是 40px，
+        // 之后拖动外框即按 fitMode='fill' 无级放大
+        autoBox: true,
       }
     case 'geogebra':
       return {
