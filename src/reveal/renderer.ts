@@ -399,10 +399,12 @@ function elementToHtml(el: SlideElement): string {
   }
 
   if (el.type === 'math') {
-    // 交给 MathJax 排版；源码用 \( ... \) 包裹，避免与页面其它内容冲突
+    // 交给 MathJax 排版；用 \[ ... \]（display）包裹 —— 与画布侧 MathElement 的
+    // tex2svg(latex, { display: true }) 保持一致。若用 \( ... \) 内联包裹，导出/放映时
+    // \frac、\sum 的上下限会按 textstyle 排版，比画布上小一圈
     const inner = `width:100%;height:100%;display:flex;align-items:center;justify-content:center;` +
       `overflow:hidden;color:${el.color};font-size:${el.fontSize}px;`
-    return `<div style="${box}${rot}"${cls}${fragIdx}><div class="fx-math" data-cap="${el.fitMode === 'shrink' ? 1 : 4}" style="${inner}">\\(${esc(el.latex)}\\)</div></div>`
+    return `<div style="${box}${rot}"${cls}${fragIdx}><div class="fx-math" data-cap="${el.fitMode === 'shrink' ? 1 : 4}" style="${inner}">\\[${esc(el.latex)}\\]</div></div>`
   }
 
   if (el.type === 'geogebra') {
@@ -634,7 +636,7 @@ export function renderDeckToRevealHtml(deck: Deck, opts: RenderOptions = {}): st
 </style>
 ${hasMath ? `<script>
   window.MathJax = {
-    tex: { inlineMath: [['\\\\(','\\\\)']], displayMath: [['$$','$$']],
+    tex: { inlineMath: [['\\\\(','\\\\)']], displayMath: [['$$','$$'], ['\\\\[','\\\\]']],
            macros: { R:'\\\\mathbb{R}', N:'\\\\mathbb{N}', Z:'\\\\mathbb{Z}', Q:'\\\\mathbb{Q}', C:'\\\\mathbb{C}', E:'\\\\mathbb{E}', comb:'\\\\binom{#1}{#2}', perm:'\\\\frac{#1!}{(#1-#2)!}', abs:'\\\\left|#1\\\\right|', norm:'\\\\left\\\\|#1\\\\right\\\\|', dd:'\\\\mathrm{d}', ee:'\\\\mathrm{e}', ii:'\\\\mathrm{i}', half:'\\\\frac{1}{2}' } },
     startup: { typeset: false }, svg: { fontCache: 'none' }
   };

@@ -2,6 +2,8 @@
  * Markdown 双向转换（Reveal.js 规范）：
  * - '---' 切割横向幻灯片；'--' 切割垂直子页面；'Note: ' 标识演讲者备注。
  * - deckToMarkdown / markdownToDeck 互为逆操作（内容级：文本/标题/公式/图片/备注；其它元素类型不保真）。
+ * - 块级公式 $$...$$ 导入后是**混排元素**（$\\displaystyle ...$，与模板库同一套约定），
+ *   反向导出时再还原成 $$...$$，来回不丢内容、也不产出 math 元素。
  */
 import type { Deck, Slide, TextElement, MathElement, RichTextElement, ImageElement } from '@/types'
 
@@ -26,7 +28,10 @@ function slideToMd(s: Slide): string {
       if (l) lines.push('$$' + l + '$$')
     } else if (isRichtex(e)) {
       const t = e.text.trim()
-      if (t) lines.push(t)
+      if (!t) return
+      // 独立成行的展示公式（$\displaystyle X$）在 markdown 里还原成块级 $$X$$
+      const disp = t.match(/^\$\s*\\displaystyle\s+([\s\S]+)\$$/)
+      lines.push(disp ? '$$' + disp[1].trim() + '$$' : t)
     } else if (isImage(e)) {
       if (e.src) lines.push('![](' + e.src + ')')
     }
@@ -52,25 +57,38 @@ export function deckToMarkdown(deck: Deck): string {
 
 function uid(prefix: string) { return prefix + '_' + Math.random().toString(36).slice(2, 10) }
 
+/**
+ * 展示公式元素（Markdown 的 $$...$$）：**混排元素 + $\displaystyle ...$**，不是 math 元素 ——
+ * 与模板库同一套约定（见 templates/mathAppletTemplates.ts 的 display()）。
+ * 用内联写法而不是 \[...\]：MathJax 会给 display 公式套 margin:1em 0，在元素框里白白撑高。
+ */
+function displayEl(latex: string, y: number): Slide['elements'][number] {
+  return {
+    id: uid('el'), type: 'richtex', x: 150, y, w: 1620, h: 140, rot: 0, fitMode: 'shrink',
+    text: '$' + '\\displaystyle ' + latex + '$', fontSize: 32, color: '#1a1a1a', fontWeight: 400,
+    fontFamily: 'sans', align: 'center', bgColor: 'transparent', shadow: 'none',
+  } as any
+}
+
 /** 把一段 markdown 内容解析成一页的元素与备注 */
 function mdBlockToSlide(lines: string[]): Slide {
   const elements = { list: [] as Slide['elements'], y: 120, indent: 0 }
   const notes: string[] = []
   let mathBuf = '', inBlock = false
-  const push = (e: Slide['elements'][number]) => { elements.list.push(e); elements.y += (isMath(e) ? 140 : 80) }
+  const push = (e: Slide['elements'][number], advance?: number) => { elements.list.push(e); elements.y += advance ?? (isMath(e) ? 140 : 80) }
   for (let raw of lines) {
     let line = raw.trimEnd()
     // 块级数学 $$...$$（可跨多行）
     if (inBlock) {
       const end = line.indexOf('$$')
-      if (end >= 0) { mathBuf += '\n' + line.slice(0, end); push({ id: uid('el'), type: 'math', x: 150, y: elements.y, w: 1620, h: 140, rot: 0, fitMode: 'shrink', latex: mathBuf.trim(), color: '#1a1a1a', fontSize: 32, align: 'center' } as any); mathBuf = ''; inBlock = false }
+      if (end >= 0) { mathBuf += '\n' + line.slice(0, end); push(displayEl(mathBuf.trim(), elements.y), 140); mathBuf = ''; inBlock = false }
       else { mathBuf += '\n' + line }
       continue
     }
     const mstart = line.indexOf('$$')
     if (mstart >= 0) {
       const end = line.indexOf('$$', mstart + 2)
-      if (end >= 0) { const latex = line.slice(mstart + 2, end).trim(); push({ id: uid('el'), type: 'math', x: 150, y: elements.y, w: 1620, h: 140, rot: 0, fitMode: 'shrink', latex, color: '#1a1a1a', fontSize: 32, align: 'center' } as any) }
+      if (end >= 0) { const latex = line.slice(mstart + 2, end).trim(); push(displayEl(latex, elements.y), 140) }
       else { mathBuf = line.slice(mstart + 2); inBlock = true }
       continue
     }
@@ -100,7 +118,7 @@ function mdBlockToSlide(lines: string[]): Slide {
   // 容错：$$ 只写了一半（例如删掉了一个 $）时，也把已收集的公式内容保留下来，避免整块公式凭空消失
   if (inBlock) {
     const rest = mathBuf.replace(/\$+\s*$/, '').trim()
-    if (rest) push({ id: uid('el'), type: 'math', x: 150, y: elements.y, w: 1620, h: 140, rot: 0, fitMode: 'shrink', latex: rest, color: '#1a1a1a', fontSize: 32, align: 'center' } as any)
+    if (rest) push(displayEl(rest, elements.y), 140)
     mathBuf = ''; inBlock = false
   }
   return { id: uid('slide'), bg: '#ffffff', elements: elements.list, notes: notes.join('\n') || undefined, parentId: undefined }
