@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1120**（源码快照 `_backup/rollback-20260912-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1121**（源码快照 `_backup/rollback-20260912-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -264,6 +264,12 @@ node ../node_modules/@tauri-apps/cli/tauri.js build   # 生成 NSIS 安装包
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-12（v2026.09.1121）
+
+**1121 · 版权署名改为 LTJ Studio**
+- 版权行改为「© 2026 LJ-MathSlides · **LTJ Studio** 保留所有权利」；署名抽成 `COMPANY` 常量（`src/ui/appInfo.ts`），以后改归属只动一处
+- 覆盖范围不变：只在编辑器显示（底部 footbar + 设置面板「关于」），**演示与导出都不带**
 
 ### 2026-09-12（v2026.09.1120）
 
@@ -552,7 +558,7 @@ node ../node_modules/@tauri-apps/cli/tauri.js build   # 生成 NSIS 安装包
 
 ## 版权
 
-**LJ-MathSlides © 2026 · 保留所有权利**
+**© 2026 LJ-MathSlides · LTJ Studio 保留所有权利**
 
 - 软件界面上只在两处显示版权：**画布右下状态栏**与**设置面板底部的「关于」**
 - **演示状态与导出的 HTML / PDF 一律不带**（那是给学生看的内容，不该出现软件署名）——

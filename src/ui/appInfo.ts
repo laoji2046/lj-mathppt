@@ -7,8 +7,11 @@
  */
 export const APP_NAME = 'LJ-MathSlides'
 
+/** 版权归属方（要改署名只动这里） */
+export const COMPANY = 'LTJ Studio'
+
 /** 一句话版权（界面上显示的就是它） */
-export const COPYRIGHT = `© ${new Date().getFullYear()} ${APP_NAME} · 保留所有权利`
+export const COPYRIGHT = `© ${new Date().getFullYear()} ${APP_NAME} · ${COMPANY} 保留所有权利`
 
 /** 设置面板里的补充说明 */
 export const COPYRIGHT_NOTE = '课件内容（文字 / 图形 / 公式）的著作权归制作者本人所有。'
