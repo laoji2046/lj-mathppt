@@ -52,6 +52,7 @@ export const mathBundles: MathBundle[] = [
         ],
       })),
       slide('s3', twoCol(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '三角函数 · 图像变换',
         pageNum: '03',
         title: '图像变换的规则',
@@ -73,6 +74,7 @@ export const mathBundles: MathBundle[] = [
         },
       })),
       slide('s4', think(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '三角函数 · 思考',
         pageNum: '04',
         title: '为什么 $\\omega$ 影响周期',
@@ -84,6 +86,7 @@ export const mathBundles: MathBundle[] = [
         note: '振幅由系数 A 决定，周期由横坐标的系数决定，两者互不影响。',
       })),
       slide('s5', twoCol(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '三角函数 · 例题',
         pageNum: '05',
         title: '例题 · 由变换写解析式',
@@ -130,6 +133,7 @@ export const mathBundles: MathBundle[] = [
         ],
       })),
       slide('s8', summary(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '三角函数 · 小结',
         pageNum: '08',
         title: '小结 · 图像变换',
@@ -169,6 +173,7 @@ export const mathBundles: MathBundle[] = [
         ],
       })),
       slide('s3', definition(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数 · 概念',
         pageNum: '03',
         title: '指数函数的定义',
@@ -181,6 +186,7 @@ export const mathBundles: MathBundle[] = [
         note: ['底数必须同时满足 $a>0$ 与 $a\\ne 1$；$y=2\\cdot 3^{x}$ 的形式不是指数函数。'],
       })),
       slide('s4', twoCol(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数 · 图像与性质',
         pageNum: '04',
         title: '指数函数与对数函数对照',
@@ -204,6 +210,7 @@ export const mathBundles: MathBundle[] = [
         },
       })),
       slide('s5', twoCol(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数 · 例题',
         pageNum: '05',
         title: '例题 · 比较大小',
@@ -225,6 +232,7 @@ export const mathBundles: MathBundle[] = [
         },
       })),
       slide('s6', think(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数 · 思考',
         pageNum: '06',
         title: '底数为什么有限制',
@@ -236,6 +244,7 @@ export const mathBundles: MathBundle[] = [
         note: '对数函数的底数有同样的限制，指数函数与对数函数互为反函数。',
       })),
       slide('s7', summary(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数 · 小结',
         pageNum: '07',
         title: '小结 · 指数函数与对数函数',
@@ -275,6 +284,7 @@ export const mathBundles: MathBundle[] = [
         ],
       })),
       slide('s3', theorem(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '立体几何 · 定理',
         pageNum: '03',
         title: '直线与平面平行的判定定理',
@@ -289,6 +299,7 @@ export const mathBundles: MathBundle[] = [
         ],
       })),
       slide('s4', think(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '立体几何 · 思考',
         pageNum: '04',
         title: '线面垂直怎样判定',
@@ -300,6 +311,7 @@ export const mathBundles: MathBundle[] = [
         note: '只与一条直线垂直不能判定线面垂直，这条直线可能与平面斜交。',
       })),
       slide('s5', steps(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '立体几何 · 方法',
         pageNum: '05',
         title: '线面位置关系的证明思路',
@@ -324,6 +336,7 @@ export const mathBundles: MathBundle[] = [
         note: '第 1 题举反例即可，两直线也可能异面；第 2 题先证线线平行；第 3 题用线面垂直的性质定理，两直线垂直。',
       })),
       slide('s7', summary(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '立体几何 · 小结',
         pageNum: '07',
         title: '小结 · 线面位置关系',

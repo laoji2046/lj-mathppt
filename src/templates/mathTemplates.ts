@@ -90,6 +90,7 @@ export const mathTemplates: Template[] = [
     id: 'def-monotonic', name: '定义 · 函数的单调性', cat: '定义',
     build() {
       return definition(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数与导数 · 概念',
         pageNum: '03',
         title: '函数的单调性',
@@ -107,6 +108,7 @@ export const mathTemplates: Template[] = [
     id: 'def-gp', name: '定义 · 等比数列', cat: '定义',
     build() {
       return definition(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '数列 · 概念',
         pageNum: '04',
         title: '等比数列的定义',
@@ -126,6 +128,7 @@ export const mathTemplates: Template[] = [
     id: 'thm-sine', name: '定理 · 正弦定理', cat: '定理',
     build() {
       return theorem(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '解三角形 · 定理',
         pageNum: '05',
         title: '正弦定理',
@@ -145,6 +148,7 @@ export const mathTemplates: Template[] = [
     id: 'thm-cosine', name: '定理 · 余弦定理', cat: '定理',
     build() {
       return theorem(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '解三角形 · 定理',
         pageNum: '06',
         title: '余弦定理',
@@ -164,6 +168,7 @@ export const mathTemplates: Template[] = [
     id: 'thm-amgm', name: '定理 · 基本不等式', cat: '定理',
     build() {
       return theorem(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '不等式 · 定理',
         pageNum: '07',
         title: '基本不等式',
@@ -185,6 +190,7 @@ export const mathTemplates: Template[] = [
     id: 'think-omega', name: '思考 · 为什么 ω 影响周期', cat: '思考',
     build() {
       return think(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '三角函数 · 思考',
         pageNum: '08',
         title: '为什么 $\\omega$ 影响周期',
@@ -201,6 +207,7 @@ export const mathTemplates: Template[] = [
     id: 'think-perp', name: '思考 · 线面垂直怎样判定', cat: '思考',
     build() {
       return think(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '立体几何 · 思考',
         pageNum: '09',
         title: '线面垂直怎样判定',
@@ -268,6 +275,7 @@ export const mathTemplates: Template[] = [
     id: 'formula', name: '公式 · 三角恒等变换', cat: '公式',
     build() {
       return twoCol(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '三角函数 · 公式速查',
         pageNum: '12',
         title: '三角恒等变换公式速查',
@@ -295,6 +303,7 @@ export const mathTemplates: Template[] = [
     id: 'formula-deriv', name: '公式 · 导数公式与运算法则', cat: '公式',
     build() {
       return twoCol(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '导数 · 公式速查',
         pageNum: '13',
         title: '导数公式与运算法则',
@@ -325,6 +334,7 @@ export const mathTemplates: Template[] = [
     id: 'example', name: '例题 · 用导数研究单调性', cat: '例题',
     build() {
       return twoCol(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数与导数 · 例题',
         pageNum: '14',
         title: '例题 · 用导数研究函数的单调性',
@@ -352,6 +362,7 @@ export const mathTemplates: Template[] = [
     id: 'example-conic', name: '例题 · 椭圆标准方程的推导', cat: '例题',
     build() {
       return steps(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '解析几何 · 例题推导',
         pageNum: '15',
         title: '例题 · 椭圆标准方程的推导',
@@ -371,6 +382,7 @@ export const mathTemplates: Template[] = [
     id: 'method', name: '方法 · 求数列通项的四条路', cat: '方法',
     build() {
       return bullets(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '数列 · 方法',
         pageNum: '16',
         title: '求数列通项的四条路',
@@ -391,6 +403,7 @@ export const mathTemplates: Template[] = [
     id: 'method-solid', name: '方法 · 线面位置关系的证明', cat: '方法',
     build() {
       return steps(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '立体几何 · 方法',
         pageNum: '17',
         title: '线面位置关系的证明思路',
@@ -451,6 +464,7 @@ export const mathTemplates: Template[] = [
     id: 'summary', name: '小结 · 函数与导数', cat: '小结',
     build() {
       return summary(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '函数与导数 · 小结',
         pageNum: '20',
         title: '小结 · 函数与导数',
@@ -468,6 +482,7 @@ export const mathTemplates: Template[] = [
     id: 'math-summary', name: '小结 · 全章公式速查', cat: '小结',
     build() {
       return twoCol(t, {
+        animate: true,   // 讲解型：演示时逐条渐显
         eyebrow: '讲义 · 公式速查',
         pageNum: '21',
         title: '小结 · 全章公式速查',

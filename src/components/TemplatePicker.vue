@@ -74,13 +74,24 @@ function blocksOf(els: any[]): PBlock[] {
   return out
 }
 const previewMap = new Map<string, PBlock[]>()
-function regPreview(id: string, els: any[]) { previewMap.set(id, blocksOf(els)) }
+/** 带「逐条渐显」的模板 id：注册预览时顺手记下来，卡片右上角给个标记 */
+const animatedIds = new Set<string>()
+function regPreview(id: string, els: any[]) {
+  previewMap.set(id, blocksOf(els))
+  if (els.some((e) => e && e.fragment)) animatedIds.add(id)
+}
+/** 整套：缩略图取第一页，但「是否带动画」要看整套所有页（封面从不带动画，动画在讲解页） */
+function regBundlePreview(id: string, slides: any[]) {
+  regPreview(id, slides[0]?.elements ?? [])
+  if (slides.some((s) => (s.elements ?? []).some((e: any) => e && e.fragment))) animatedIds.add(id)
+}
 for (const t of mathTemplates) { try { regPreview(t.id, (t.build() as any[]).flat()) } catch {} }
 for (const t of proTemplates) { try { regPreview(t.id, (t.build() as any[]).flat()) } catch {} }
-for (const b of mathBundles) { try { regPreview(b.id, (b.slides[0] as any)?.elements ?? []) } catch {} }
-for (const b of proBundles) { try { regPreview(b.id, (b.slides[0] as any)?.elements ?? []) } catch {} }
+for (const b of mathBundles) { try { regBundlePreview(b.id, b.slides as any[]) } catch {} }
+for (const b of proBundles) { try { regBundlePreview(b.id, b.slides as any[]) } catch {} }
 for (const t of mathAppletTemplates) { try { regPreview(t.id, (t.build() as any[]).flat()) } catch {} }
 function previewOf(id: string) { return previewMap.get(id) ?? [] }
+function animatedOf(id: string) { return animatedIds.has(id) }
 
 function apply(id: string) {
   const m = props.mode ?? 'replace'
@@ -127,6 +138,7 @@ function applyBundle(id: string) {
                 <div v-else-if="t.id === 'blank'" class="card__thumb-blank"></div>
                 <div v-else class="card__thumb-none"></div>
                 <span v-if="t.kind === 'bundle'" class="card__tag">整套</span>
+                <span v-if="animatedOf(t.id)" class="card__tag card__tag--anim" title="演示时点一下出一条">渐显</span>
               </div>
               <div class="card__info">
                 <span class="card__badge">{{ t.cat }}<span v-if="t.kind === 'bundle'"> · {{ t.pages }} 页</span></span>
@@ -149,6 +161,7 @@ function applyBundle(id: string) {
                 <svg v-if="previewOf(b.id).length" viewBox="0 0 1920 1080" preserveAspectRatio="none"><rect v-for="(bl, i) in previewOf(b.id)" :key="i" :x="bl.x" :y="bl.y" :width="bl.w" :height="bl.h" :fill="bl.c" :opacity="bl.o" rx="10" /></svg>
                 <div v-else class="card__thumb-none"></div>
                 <span class="card__tag">整套</span>
+                <span v-if="animatedOf(b.id)" class="card__tag card__tag--anim" title="演示时点一下出一条">渐显</span>
               </div>
               <div class="card__info">
                 <span class="card__badge">整套 · {{ b.slides.length }} 页</span>
@@ -164,6 +177,7 @@ function applyBundle(id: string) {
                 <svg v-if="previewOf(t.id).length" viewBox="0 0 1920 1080" preserveAspectRatio="none"><rect v-for="(bl, i) in previewOf(t.id)" :key="i" :x="bl.x" :y="bl.y" :width="bl.w" :height="bl.h" :fill="bl.c" :opacity="bl.o" rx="10" /></svg>
                 <div v-else class="card__thumb-none"></div>
                 <span v-if="t.kind === 'bundle'" class="card__tag">整套</span>
+                <span v-if="animatedOf(t.id)" class="card__tag card__tag--anim" title="演示时点一下出一条">渐显</span>
               </div>
               <div class="card__info">
                 <span class="card__badge">{{ t.cat }}<span v-if="t.kind === 'bundle'"> · {{ t.pages }} 页</span></span>
@@ -202,6 +216,7 @@ function applyBundle(id: string) {
               <div class="card__thumb">
                 <svg v-if="previewOf(t.id).length" viewBox="0 0 1920 1080" preserveAspectRatio="none"><rect v-for="(bl, i) in previewOf(t.id)" :key="i" :x="bl.x" :y="bl.y" :width="bl.w" :height="bl.h" :fill="bl.c" :opacity="bl.o" rx="10" /></svg>
                 <div v-else class="card__thumb-none"></div>
+                <span v-if="animatedOf(t.id)" class="card__tag card__tag--anim" title="演示时点一下出一条">渐显</span>
               </div>
               <div class="card__info">
                 <span class="card__badge">{{ t.cat }}</span>
@@ -213,6 +228,7 @@ function applyBundle(id: string) {
                 <svg v-if="previewOf(b.id).length" viewBox="0 0 1920 1080" preserveAspectRatio="none"><rect v-for="(bl, i) in previewOf(b.id)" :key="i" :x="bl.x" :y="bl.y" :width="bl.w" :height="bl.h" :fill="bl.c" :opacity="bl.o" rx="10" /></svg>
                 <div v-else class="card__thumb-none"></div>
                 <span class="card__tag">整套</span>
+                <span v-if="animatedOf(b.id)" class="card__tag card__tag--anim" title="演示时点一下出一条">渐显</span>
               </div>
               <div class="card__info">
                 <span class="card__badge">整套 · {{ b.slides.length }} 页</span>
@@ -254,6 +270,8 @@ function applyBundle(id: string) {
 .card__thumb-blank { width: 100%; height: 100%; background: #fff; }
 .card__thumb-blank::after { content: ''; position: absolute; inset: 0; margin: auto; width: 34px; height: 34px; border: 2px dashed #cfcbd8; border-radius: 6px; }
 .card__tag { position: absolute; top: 8px; left: 8px; font-size: 10px; font-weight: 600; color: #fff; background: rgba(83, 74, 183, 0.85); border-radius: 6px; padding: 2px 7px; }
+/* 「渐显」标记放右上，避免和左上的「整套」叠在一起 */
+.card__tag--anim { left: auto; right: 8px; background: rgba(232, 135, 30, 0.92); }
 .card__info { display: flex; flex-direction: column; gap: 6px; padding: 11px 13px 13px; }
 .card__badge { font-size: 10px; color: var(--brand); border: 1px solid var(--brand-soft-2); border-radius: 4px; padding: 1px 6px; align-self: flex-start; }
 .card__name { font-size: 14px; color: var(--text); line-height: 1.4; font-weight: 600; }

@@ -90,6 +90,29 @@ function pageTitle(t: Theme, cv: Canvas, title: string): SlideElement[] {
 /** 内容页正文起始 y（页标题 106~206 之后） */
 const BODY_TOP = 252
 
+/**
+ * 逐条渐显收集器（fragment）：演示时点一下出一条，编辑器里始终全显。
+ * 版式里按「点」分组 —— 同一个 next() 之后 add() 的元素算一组、同一次出现（同一个 fragmentIndex）。
+ * 只有显式开了 animate 的版式才打标：twoCol / bullets 也被「知识」这类不渐显的页复用，所以必须是开关而不是默认行为。
+ * 页眉、页标题、页码这些框架元素一律不加（它们任何时候都该在场）。
+ */
+function stepper(animate?: boolean) {
+  let idx = -1
+  const out: SlideElement[] = []
+  return {
+    /** 开始下一个要点 */
+    next() { idx++ },
+    /** 当前要点包含的元素（一起出现） */
+    add(...els: SlideElement[]) {
+      const i = Math.max(0, idx)
+      for (const el of els) out.push(animate ? ({ ...el, fragment: true, fragmentIndex: i } as SlideElement) : el)
+    },
+    /** 不参与渐显的元素（留白、分隔线等） */
+    plain(...els: SlideElement[]) { out.push(...els) },
+    get list(): SlideElement[] { return out },
+  }
+}
+
 // ── 1 封面（左色块 + 标题；右侧底部作者/单位/日期）──────────────────────────
 export interface CoverOpts { canvas?: Canvas; title: string; subtitle?: string; author?: string; unit?: string; date?: string }
 export function cover(t: Theme, o: CoverOpts): SlideElement[] {
@@ -143,138 +166,165 @@ export function section(t: Theme, o: SectionOpts): SlideElement[] {
 
 // ── 4 要点页（主张 + 支撑；右侧可选速记卡）──────────────────────────────────
 export interface Bullet { lead: string; support?: string }
-export interface BulletsOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; bullets: Bullet[]; aside?: { title: string; lines: string[] } }
+export interface BulletsOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; bullets: Bullet[]; aside?: { title: string; lines: string[] }; /** 逐条渐显（演示时点一下出一条） */ animate?: boolean }
 export function bullets(t: Theme, o: BulletsOpts): SlideElement[] {
   const cv = o.canvas ?? CANVAS; const col = c(t); const m = t.grid.margin;
   const els: SlideElement[] = [...header(t, cv, o.eyebrow ?? '', o.brand ?? ''), ...pageTitle(t, cv, o.title)];
+  const st = stepper(o.animate);
   const w = o.aside ? gridCell(cv, t, 1, 8, 0, 0).w : gridCell(cv, t, 1, 12, 0, 0).w;
   let y = BODY_TOP;
   o.bullets.forEach((b) => {
-    els.push(rect({ x: m, y: y + 16, w: 10, h: 10 }, col.primary));
-    els.push(para({ x: m + 30, y, w: w - 30, h: 54, text: b.lead, fontSize: t.type.h3, color: col.text, fontFamily: t.fontTitle, fontWeight: 700 }));
+    st.next();   // 一个要点 = 一条：标记 + 主句 + 支撑句一起出现
+    st.add(rect({ x: m, y: y + 16, w: 10, h: 10 }, col.primary));
+    st.add(para({ x: m + 30, y, w: w - 30, h: 54, text: b.lead, fontSize: t.type.h3, color: col.text, fontFamily: t.fontTitle, fontWeight: 700 }));
     if (b.support) {
       const h = blockHeight([b.support], w - 30, { fontSize: t.type.body, color: col.muted });
-      els.push(block(m + 30, y + 54, w - 30, [b.support], { fontSize: t.type.body, color: col.muted }));
+      st.add(block(m + 30, y + 54, w - 30, [b.support], { fontSize: t.type.body, color: col.muted }));
       y += 54 + h + 22;
     } else y += 78;
   });
   if (o.aside) {
     const ax = gridCell(cv, t, 9, 4, 0, 0).x; const aw = gridCell(cv, t, 9, 4, 0, 0).w;
     const cardH = blockHeight(o.aside.lines, aw - 48, { fontSize: t.type.h3, color: col.text, pad: 60 });
-    els.push(txt({ x: ax, y: BODY_TOP - 54, w: aw, h: 44, text: o.aside.title, fontSize: t.type.h3, color: col.primary, fontFamily: t.fontTitle, fontWeight: 700 }));
-    els.push(rect({ x: ax, y: BODY_TOP, w: aw, h: cardH }, col.formulaBg, t.radius));
-    els.push(block(ax + 24, BODY_TOP + 28, aw - 48, o.aside.lines, { fontSize: t.type.h3, color: col.text }));
+    st.next();   // 右侧卡片最后出现
+    st.add(txt({ x: ax, y: BODY_TOP - 54, w: aw, h: 44, text: o.aside.title, fontSize: t.type.h3, color: col.primary, fontFamily: t.fontTitle, fontWeight: 700 }));
+    st.add(rect({ x: ax, y: BODY_TOP, w: aw, h: cardH }, col.formulaBg, t.radius));
+    st.add(block(ax + 24, BODY_TOP + 28, aw - 48, o.aside.lines, { fontSize: t.type.h3, color: col.text }));
   }
+  els.push(...st.list);
   els.push(pageNum(t, cv, o.pageNum ?? '03'));
   return els;
 }
 
 // ── 5 定义页（术语条 + 定义正文 + 注意）──────────────────────────────────────
-export interface DefinitionOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; term: string; body: string[]; note?: string[] }
+export interface DefinitionOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; term: string; body: string[]; note?: string[]; /** 逐条渐显 */ animate?: boolean }
 export function definition(t: Theme, o: DefinitionOpts): SlideElement[] {
   const cv = o.canvas ?? CANVAS; const col = c(t); const m = t.grid.margin;
   const els: SlideElement[] = [...header(t, cv, o.eyebrow ?? '', o.brand ?? ''), ...pageTitle(t, cv, o.title)];
   const full = gridCell(cv, t, 1, 12, 0, 0).w;
-  els.push(rect({ x: m, y: BODY_TOP, w: full, h: 82 }, col.formulaBg, t.radius));
-  els.push(rect({ x: m, y: BODY_TOP, w: 6, h: 82 }, col.primary));
-  els.push(para({ x: m + 30, y: BODY_TOP + 18, w: full - 60, h: 52, text: o.term, fontSize: t.type.h2, color: col.text, fontFamily: t.fontTitle, fontWeight: 700 }));
+  const st = stepper(o.animate);
+  st.next();   // 要点 1：术语卡（卡底 + 竖条 + 术语名一起出现）
+  st.add(rect({ x: m, y: BODY_TOP, w: full, h: 82 }, col.formulaBg, t.radius));
+  st.add(rect({ x: m, y: BODY_TOP, w: 6, h: 82 }, col.primary));
+  st.add(para({ x: m + 30, y: BODY_TOP + 18, w: full - 60, h: 52, text: o.term, fontSize: t.type.h2, color: col.text, fontFamily: t.fontTitle, fontWeight: 700 }));
   const bw = gridCell(cv, t, 1, 9, 0, 0).w;
   let y = BODY_TOP + 130;
-  els.push(block(m, y, bw, o.body, { fontSize: t.type.body, color: col.text }));
+  st.next();   // 要点 2：定义正文
+  st.add(block(m, y, bw, o.body, { fontSize: t.type.body, color: col.text }));
   y += blockHeight(o.body, bw, { fontSize: t.type.body, color: col.text }) + 44;
   if (o.note && o.note.length) {
-    els.push(rect({ x: m, y: y + 4, w: 4, h: 28 }, col.accent));
-    els.push(txt({ x: m + 16, y, w: 80, h: 34, text: '注意', fontSize: t.type.small, color: col.accent, fontFamily: t.fontTitle, fontWeight: 700 }));
-    els.push(block(m + 100, y - 4, bw - 100, o.note, { fontSize: t.type.small, color: col.muted }));
+    st.next();   // 要点 3：注意
+    st.add(rect({ x: m, y: y + 4, w: 4, h: 28 }, col.accent));
+    st.add(txt({ x: m + 16, y, w: 80, h: 34, text: '注意', fontSize: t.type.small, color: col.accent, fontFamily: t.fontTitle, fontWeight: 700 }));
+    st.add(block(m + 100, y - 4, bw - 100, o.note, { fontSize: t.type.small, color: col.muted }));
   }
+  els.push(...st.list);
   els.push(pageNum(t, cv, o.pageNum ?? '03'));
   return els;
 }
 
 // ── 6 定理页（定理名 + 陈述卡 + 证明思路 + 右侧图示位）────────────────────────
-export interface TheoremOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; name: string; statement: string[]; proof?: string[]; figure?: string }
+export interface TheoremOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; name: string; statement: string[]; proof?: string[]; figure?: string; /** 逐条渐显 */ animate?: boolean }
 export function theorem(t: Theme, o: TheoremOpts): SlideElement[] {
   const cv = o.canvas ?? CANVAS; const col = c(t); const m = t.grid.margin;
   const els: SlideElement[] = [...header(t, cv, o.eyebrow ?? '', o.brand ?? ''), ...pageTitle(t, cv, o.title)];
-  els.push(para({ x: m, y: BODY_TOP, w: 560, h: 48, text: o.name, fontSize: t.type.h2, color: col.primary, fontFamily: t.fontTitle, fontWeight: 700 }));
+  const st = stepper(o.animate);
+  st.next();   // 要点 1：定理名 + 陈述卡（一起出现）
+  st.add(para({ x: m, y: BODY_TOP, w: 560, h: 48, text: o.name, fontSize: t.type.h2, color: col.primary, fontFamily: t.fontTitle, fontWeight: 700 }));
   const sw = o.figure ? gridCell(cv, t, 1, 7, 0, 0).w : gridCell(cv, t, 1, 12, 0, 0).w;
   const sh = blockHeight(o.statement, sw - 60, { fontSize: t.type.body, color: col.text, pad: 60 });
-  els.push(rect({ x: m, y: BODY_TOP + 58, w: sw, h: sh }, col.formulaBg, t.radius));
-  els.push(rect({ x: m, y: BODY_TOP + 58, w: 6, h: sh }, col.primary));
-  els.push(block(m + 30, BODY_TOP + 86, sw - 60, o.statement, { fontSize: t.type.body, color: col.text }));
+  st.add(rect({ x: m, y: BODY_TOP + 58, w: sw, h: sh }, col.formulaBg, t.radius));
+  st.add(rect({ x: m, y: BODY_TOP + 58, w: 6, h: sh }, col.primary));
+  st.add(block(m + 30, BODY_TOP + 86, sw - 60, o.statement, { fontSize: t.type.body, color: col.text }));
   if (o.proof && o.proof.length) {
     const y = BODY_TOP + 58 + sh + 40;
-    els.push(txt({ x: m, y, w: 200, h: 34, text: '证明思路', fontSize: t.type.small, color: col.accent, fontFamily: t.fontTitle, fontWeight: 700 }));
-    els.push(block(m, y + 42, sw, o.proof, { fontSize: t.type.small, color: col.muted }));
+    st.next();   // 要点 2：证明思路
+    st.add(txt({ x: m, y, w: 200, h: 34, text: '证明思路', fontSize: t.type.small, color: col.accent, fontFamily: t.fontTitle, fontWeight: 700 }));
+    st.add(block(m, y + 42, sw, o.proof, { fontSize: t.type.small, color: col.muted }));
   }
   if (o.figure) {
     const g = gridCell(cv, t, 9, 4, BODY_TOP + 58, 400);
-    els.push(rect({ x: g.x, y: g.y, w: g.w, h: g.h }, col.formulaBg, t.radius));
-    els.push(txt({ x: g.x + 16, y: g.y + g.h - 44, w: g.w - 32, h: 34, text: o.figure, fontSize: t.type.label, color: col.muted, align: 'center' }));
+    st.next();   // 要点 3：右侧图示位
+    st.add(rect({ x: g.x, y: g.y, w: g.w, h: g.h }, col.formulaBg, t.radius));
+    st.add(txt({ x: g.x + 16, y: g.y + g.h - 44, w: g.w - 32, h: 34, text: o.figure, fontSize: t.type.label, color: col.muted, align: 'center' }));
   }
+  els.push(...st.list);
   els.push(pageNum(t, cv, o.pageNum ?? '03'));
   return els;
 }
 
 // ── 7 思考页（问题 + 提示 + 留白）────────────────────────────────────────────
-export interface ThinkOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; question: string[]; hint?: string; note?: string }
+export interface ThinkOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; question: string[]; hint?: string; note?: string; /** 逐条渐显 */ animate?: boolean }
 export function think(t: Theme, o: ThinkOpts): SlideElement[] {
   const cv = o.canvas ?? CANVAS; const col = c(t); const m = t.grid.margin;
   const els: SlideElement[] = [...header(t, cv, o.eyebrow ?? '', o.brand ?? ''), ...pageTitle(t, cv, o.title)];
   const w = gridCell(cv, t, 1, 12, 0, 0).w;
-  els.push(block(m, BODY_TOP, w, o.question, { fontSize: t.type.h2, color: col.text }));
+  const st = stepper(o.animate);
+  st.next();   // 要点 1：问题
+  st.add(block(m, BODY_TOP, w, o.question, { fontSize: t.type.h2, color: col.text }));
   let y = BODY_TOP + blockHeight(o.question, w, { fontSize: t.type.h2, color: col.text }) + 34;
   if (o.hint) {
     const hh = blockHeight([o.hint], w - 150, { fontSize: t.type.body, color: col.primary, pad: 44 });
-    els.push(rect({ x: m, y, w, h: hh }, col.formulaBg, t.radius));
-    els.push(rect({ x: m, y, w: 6, h: hh }, col.accent));
-    els.push(txt({ x: m + 26, y: y + 14, w: 90, h: 34, text: '提示', fontSize: t.type.small, color: col.accent, fontFamily: t.fontTitle, fontWeight: 700 }));
-    els.push(block(m + 120, y + 8, w - 150, [o.hint], { fontSize: t.type.body, color: col.primary }));
+    st.next();   // 要点 2：提示卡
+    st.add(rect({ x: m, y, w, h: hh }, col.formulaBg, t.radius));
+    st.add(rect({ x: m, y, w: 6, h: hh }, col.accent));
+    st.add(txt({ x: m + 26, y: y + 14, w: 90, h: 34, text: '提示', fontSize: t.type.small, color: col.accent, fontFamily: t.fontTitle, fontWeight: 700 }));
+    st.add(block(m + 120, y + 8, w - 150, [o.hint], { fontSize: t.type.body, color: col.primary }));
     y += hh + 30;
   }
   const bh = Math.max(140, cv.height - m - 66 - y);
-  els.push(rect({ x: m, y, w, h: bh }, '#FFFFFF'));
-  els.push(rect({ x: m, y, w, h: 1 }, col.line));
-  els.push(rect({ x: m, y: y + bh - 1, w, h: 1 }, col.line));
-  els.push(txt({ x: m + 12, y: y + 12, w: w - 24, h: 34, text: o.note ?? '（留白：学生思考 / 板演）', fontSize: t.type.label, color: col.muted }));
+  // 留白区任何时候都在，不参与渐显
+  st.plain(rect({ x: m, y, w, h: bh }, '#FFFFFF'));
+  st.plain(rect({ x: m, y, w, h: 1 }, col.line));
+  st.plain(rect({ x: m, y: y + bh - 1, w, h: 1 }, col.line));
+  st.plain(txt({ x: m + 12, y: y + 12, w: w - 24, h: 34, text: o.note ?? '（留白：学生思考 / 板演）', fontSize: t.type.label, color: col.muted }));
+  els.push(...st.list);
   els.push(pageNum(t, cv, o.pageNum ?? '03'));
   return els;
 }
 // ── 8 推导页（编号步骤 + 结论条）────────────────────────────────────────────
-export interface StepsOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; steps: string[]; conclusion?: string }
+export interface StepsOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; steps: string[]; conclusion?: string; /** 逐条渐显 */ animate?: boolean }
 export function steps(t: Theme, o: StepsOpts): SlideElement[] {
   const cv = o.canvas ?? CANVAS; const col = c(t); const m = t.grid.margin;
   const els: SlideElement[] = [...header(t, cv, o.eyebrow ?? '', o.brand ?? ''), ...pageTitle(t, cv, o.title)];
   const w = gridCell(cv, t, 1, 11, 0, 0).w;
+  const st = stepper(o.animate);
   let y = BODY_TOP;
   o.steps.forEach((s, i) => {
     const h = Math.max(46, blockHeight([s], w - 62, { fontSize: t.type.body, color: col.text }));
-    els.push(rect({ x: m, y: y + 2, w: 38, h: 38 }, col.primary, 4));
-    els.push(txt({ x: m, y: y + 5, w: 38, h: 32, text: String(i + 1), fontSize: t.type.small, color: '#FFFFFF', fontFamily: t.fontMono, fontWeight: 700, align: 'center' }));
-    els.push(block(m + 62, y, w - 62, [s], { fontSize: t.type.body, color: col.text }));
+    st.next();   // 一个要点 = 一步（序号方块 + 序号 + 正文一起出现）
+    st.add(rect({ x: m, y: y + 2, w: 38, h: 38 }, col.primary, 4));
+    st.add(txt({ x: m, y: y + 5, w: 38, h: 32, text: String(i + 1), fontSize: t.type.small, color: '#FFFFFF', fontFamily: t.fontMono, fontWeight: 700, align: 'center' }));
+    st.add(block(m + 62, y, w - 62, [s], { fontSize: t.type.body, color: col.text }));
     y += h + 24;
   });
   if (o.conclusion) {
     const h = blockHeight([o.conclusion], w - 60, { fontSize: t.type.h3, color: '#FFFFFF', pad: 48 });
-    els.push(rect({ x: m, y, w, h }, col.primary, t.radius));
-    els.push(block(m + 30, y + 22, w - 60, [o.conclusion], { fontSize: t.type.h3, color: '#FFFFFF' }));
+    st.next();   // 最后一个要点：结论条
+    st.add(rect({ x: m, y, w, h }, col.primary, t.radius));
+    st.add(block(m + 30, y + 22, w - 60, [o.conclusion], { fontSize: t.type.h3, color: '#FFFFFF' }));
   }
+  els.push(...st.list);
   els.push(pageNum(t, cv, o.pageNum ?? '03'));
   return els;
 }
 
 // ── 9 两栏对比（左 6 列 / 右 5 列，中间细线）────────────────────────────────
 export interface ColSpec { title: string; lines: string[] }
-export interface TwoColOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; left: ColSpec; right: ColSpec }
+export interface TwoColOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; left: ColSpec; right: ColSpec; /** 逐条渐显（左栏 → 右栏） */ animate?: boolean }
 export function twoCol(t: Theme, o: TwoColOpts): SlideElement[] {
   const cv = o.canvas ?? CANVAS; const col = c(t);
   const els: SlideElement[] = [...header(t, cv, o.eyebrow ?? '', o.brand ?? ''), ...pageTitle(t, cv, o.title)];
   const l = gridCell(cv, t, 1, 6, BODY_TOP, 0); const r = gridCell(cv, t, 8, 5, BODY_TOP, 0);
-  els.push(txt({ x: l.x, y: BODY_TOP, w: l.w, h: 46, text: o.left.title, fontSize: t.type.h3, color: col.primary, fontFamily: t.fontTitle, fontWeight: 700 }));
-  els.push(block(l.x, BODY_TOP + 58, l.w, o.left.lines, { fontSize: t.type.body, color: col.text }));
-  els.push(txt({ x: r.x, y: BODY_TOP, w: r.w, h: 46, text: o.right.title, fontSize: t.type.h3, color: col.primary, fontFamily: t.fontTitle, fontWeight: 700 }));
-  els.push(block(r.x, BODY_TOP + 58, r.w, o.right.lines, { fontSize: t.type.body, color: col.text }));
-  els.push(rect({ x: r.x - 60, y: BODY_TOP, w: 1, h: 520 }, col.line));
+  const st = stepper(o.animate);
+  st.next();   // 要点 1：左栏（栏标题 + 正文一起出现）
+  st.add(txt({ x: l.x, y: BODY_TOP, w: l.w, h: 46, text: o.left.title, fontSize: t.type.h3, color: col.primary, fontFamily: t.fontTitle, fontWeight: 700 }));
+  st.add(block(l.x, BODY_TOP + 58, l.w, o.left.lines, { fontSize: t.type.body, color: col.text }));
+  st.next();   // 要点 2：右栏
+  st.add(txt({ x: r.x, y: BODY_TOP, w: r.w, h: 46, text: o.right.title, fontSize: t.type.h3, color: col.primary, fontFamily: t.fontTitle, fontWeight: 700 }));
+  st.add(block(r.x, BODY_TOP + 58, r.w, o.right.lines, { fontSize: t.type.body, color: col.text }));
+  st.plain(rect({ x: r.x - 60, y: BODY_TOP, w: 1, h: 520 }, col.line));   // 分栏细线始终在场
+  els.push(...st.list);
   els.push(pageNum(t, cv, o.pageNum ?? '03'));
   return els;
 }
@@ -347,23 +397,27 @@ export function mistake(t: Theme, o: MistakeOpts): SlideElement[] {
 
 
 // ── 13 小结页（要点回收 + 核心句条）──────────────────────────────────────────
-export interface SummaryOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; points: string[]; core?: string }
+export interface SummaryOpts { canvas?: Canvas; eyebrow?: string; brand?: string; pageNum?: string; title: string; points: string[]; core?: string; /** 逐条渐显 */ animate?: boolean }
 export function summary(t: Theme, o: SummaryOpts): SlideElement[] {
   const cv = o.canvas ?? CANVAS; const col = c(t); const m = t.grid.margin;
   const els: SlideElement[] = [...header(t, cv, o.eyebrow ?? '', o.brand ?? ''), ...pageTitle(t, cv, o.title)];
   const w = gridCell(cv, t, 1, 11, 0, 0).w;
+  const st = stepper(o.animate);
   let y = BODY_TOP;
   o.points.forEach((s) => {
     const h = Math.max(44, blockHeight([s], w - 30, { fontSize: t.type.body, color: col.text }));
-    els.push(rect({ x: m, y: y + 16, w: 10, h: 10 }, col.primary));
-    els.push(block(m + 30, y, w - 30, [s], { fontSize: t.type.body, color: col.text }));
+    st.next();   // 一个要点 = 一条（方点 + 正文一起出现）
+    st.add(rect({ x: m, y: y + 16, w: 10, h: 10 }, col.primary));
+    st.add(block(m + 30, y, w - 30, [s], { fontSize: t.type.body, color: col.text }));
     y += h + 18;
   });
   if (o.core) {
     const h = blockHeight([o.core], w - 60, { fontSize: t.type.h3, color: '#FFFFFF', pad: 50 });
-    els.push(rect({ x: m, y: y + 14, w, h }, col.primary, t.radius));
-    els.push(block(m + 30, y + 36, w - 60, [o.core], { fontSize: t.type.h3, color: '#FFFFFF' }));
+    st.next();   // 最后：核心句条
+    st.add(rect({ x: m, y: y + 14, w, h }, col.primary, t.radius));
+    st.add(block(m + 30, y + 36, w - 60, [o.core], { fontSize: t.type.h3, color: '#FFFFFF' }));
   }
+  els.push(...st.list);
   els.push(pageNum(t, cv, o.pageNum ?? '03'));
   return els;
 }
