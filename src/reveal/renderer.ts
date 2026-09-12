@@ -627,6 +627,9 @@ export function renderDeckToRevealHtml(deck: Deck, opts: RenderOptions = {}): st
   .reveal .slides section { width: ${deck.width}px; height: ${deck.height}px; }
   ${deck.font ? `.reveal { font-family: "${esc(deck.font)}", sans-serif !important; }` : ''}
   .fx-math mjx-container { max-width: 100%; margin: 0 !important; }
+  /* 混排里的「显示公式」：收掉 MathJax 默认的 display:block + margin:1em 0（理由见 src/styles/main.css，
+     那边是画布侧的同一条规则 —— 改一处务必改两处，导出/放映是独立文档） */
+  .fx-mixed mjx-container[display="true"] { display: inline-flex !important; margin: 0 !important; }
   .fx-ggb .ggb-host { position: relative; }
   .fx-dsm .dsm-host { position: relative; }
   #fx-boot { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;

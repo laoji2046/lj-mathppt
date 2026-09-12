@@ -189,6 +189,10 @@ export async function typesetMixed(host: HTMLElement, text: string) {
   await loadMathJax()
   const mj = window.MathJax
   host.innerHTML = normalizeMixed(text)
+  // 标记类：混排里 \[...\] 的 display 公式要收掉 MathJax 默认的 1em 上下外边距（规则在 styles/main.css）。
+  // 所有走本函数的宿主 —— 画布 richtex、混排面板预览、编辑弹窗、缩略图 —— 自动获得，不必逐处配 CSS。
+  // 导出/放映是另一份文档，同样的规则写在 reveal/renderer.ts 的样式表里：**改一处务必改两处**。
+  host.classList.add('fx-mixed-host')
   if (mj && typeof mj.typesetPromise === 'function') {
     try { await mj.typesetPromise([host]) } catch { /* 忽略排版错误 */ }
   }

@@ -174,3 +174,16 @@ body.is-panning {
     scroll-behavior: auto !important;
   }
 }
+
+/* ---- 混排（richtex）里的「显示公式」 ----
+   MathJax 自带的样式表里有
+     mjx-container[jax="SVG"][display="true"] { display:block; text-align:center; margin:1em 0 }
+   —— 那是按「文档正文」的排版习惯定的。在幻灯片元素框里，这上下各 1em 的留白只会把元素框撑高，
+   再被 fitMode:shrink 折算成「整体缩小」，公式白白小一圈。
+   这里统一收成「行内块 + 零外边距」：公式尺寸只由字号决定，高公式靠自身行盒自然撑开，
+   居中/靠边跟随元素自己的「对齐」属性（与公式元素 MathElement 的处理一致）。
+   宿主类 .fx-mixed-host 由 useMathJax.typesetMixed() 自动打上，覆盖画布 / 混排面板预览 / 编辑弹窗 / 缩略图。 */
+.fx-mixed-host mjx-container[display="true"] {
+  display: inline-flex !important;
+  margin: 0 !important;
+}
