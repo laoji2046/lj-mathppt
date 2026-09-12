@@ -384,7 +384,7 @@ function labelHtml(s: string): string {
 function labelOffAt(i: number) { const o = props.el.labelOffsets && props.el.labelOffsets[i]; return o || { dx: 0, dy: 0 } }
 function setLabelOff(i: number, off: { dx: number; dy: number }) {
   const arr = [...(props.el.labelOffsets || [])]
-  const n = SOLID_VCOUNT[props.el.kind] || 0
+  const n = Math.floor((pts.value || []).length / 2) || (SOLID_VCOUNT[props.el.kind] || 0)
   while (arr.length < n) arr.push({ dx: 0, dy: 0 })
   arr[i] = off
   emit('update', { labelOffsets: arr } as Partial<SlideElement>)

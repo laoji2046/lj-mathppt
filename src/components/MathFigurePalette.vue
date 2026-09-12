@@ -6,15 +6,19 @@ import { useDeckStore } from '@/stores/deck'
 import type { MathFigureCat, MathFigureKind } from '@/types'
 import { MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS } from '@/types'
 import { figureBox, viewAspect } from '@/composables/mathPlot'
+import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
 import FigurePreview from './elements/MathFigureElement.vue'
 
 const store = useDeckStore()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
+/** 复刻图形：从原图逐个描下来的立体几何图，插入后仍是可编辑的矢量图形 */
+const RECAST = '复刻图形' as MathFigureCat
+
 const groups = computed(() => MATH_FIGURE_CATS.map((c) => ({
   cat: c,
   list: MATH_FIGURE_OPTIONS.filter((f) => f.cat === c),
-})).filter((g) => g.list.length))
+})).filter((g) => g.list.length || g.cat === RECAST))
 
 /** 默认停在「函数图像」：备课里用得最多 */
 const cat = ref<MathFigureCat>('函数图像')
@@ -44,6 +48,35 @@ function insert(kind: MathFigureKind) {
   store.addElement('mathfig', box ? { kind, ...box } : { kind } as any)
   emit('close')
 }
+
+/** 复刻图：连同顶点 / 边拓扑 / 字母一起插入，并按原图宽高比给尺寸 */
+function insertPreset(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
+  store.addElement('mathfig', {
+    ...p.el,
+    w: p.w,
+    h: p.h,
+    fill: 'transparent',
+    stroke: '#1a1a1a',
+    strokeWidth: 2.8,
+  } as any)
+  emit('close')
+}
+
+/** 复刻图缩略图用的"假元素"（按卡片等比缩放，不拉变形） */
+function presetPreview(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
+  return {
+    id: 'pv_' + p.id, type: 'mathfig', x: 0, y: 0, rot: 0,
+    ...p.el,
+    w: p.w, h: p.h,
+    fill: 'transparent', stroke: '#3b3b46', strokeWidth: 2.6,
+  } as any
+}
+const THUMB_W = 108
+const THUMB_H = 108
+/** 缩略图里把原始尺寸等比缩到卡片内 */
+function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
+  return Math.min(THUMB_W / p.w, THUMB_H / p.h)
+}
 </script>
 
 <template>
@@ -62,13 +95,32 @@ function insert(kind: MathFigureKind) {
           :class="{ 'tab--on': current && current.cat === g.cat }"
           @click="cat = g.cat"
         >
-          {{ g.cat }}<em>{{ g.list.length }}</em>
+          {{ g.cat }}<em>{{ g.cat === RECAST ? SOLID_FIGURE_PRESETS.length : g.list.length }}</em>
         </button>
       </div>
 
       <div class="palette__grid">
+        <template v-if="current && current.cat === RECAST">
+          <button
+            v-for="p in SOLID_FIGURE_PRESETS"
+            :key="p.id"
+            class="card card--recast"
+            :title="p.note ? p.name + ' ｜ ' + p.note : p.name"
+            @click="insertPreset(p)"
+          >
+            <span class="card__thumb">
+              <span
+                class="recast"
+                :style="{ width: p.w + 'px', height: p.h + 'px', transform: 'translate(-50%, -50%) scale(' + recastScale(p) + ')' }"
+              >
+                <FigurePreview :el="presetPreview(p)" fit="stretch" />
+              </span>
+            </span>
+            <span class="card__name">{{ p.name }}</span>
+          </button>
+        </template>
         <button
-          v-for="f in current?.list ?? []"
+          v-for="f in (current && current.cat === RECAST ? [] : current?.list ?? [])"
           :key="f.v"
           class="card"
           :title="f.label"
@@ -150,6 +202,9 @@ function insert(kind: MathFigureKind) {
   transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease);
 }
 .card:hover { background: var(--brand-soft); border-color: var(--brand-400); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+/* 复刻图：原始尺寸的图形整体等比缩到卡片里 */
+.recast { position: absolute; left: 50%; top: 50%; transform-origin: center center; display: block; }
+.card--recast .card__thumb { aspect-ratio: 1 / 1; }
 .card__thumb {
   position: relative;
   display: block;

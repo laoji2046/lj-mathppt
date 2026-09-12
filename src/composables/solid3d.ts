@@ -10,7 +10,7 @@ export const SOLID_VCOUNT: Record<string, number> = {
 }
 
 type Edge = [number, number, 0 | 1]
-export type EdgeStyle = { dash?: 'solid' | 'dash' | 'dot'; width?: number; color?: string }
+export type EdgeStyle = { dash?: 'solid' | 'dash' | 'dot'; width?: number; color?: string; /** 在该边终点画箭头（坐标轴用） */ arrow?: boolean }
 export type FaceStyle = { fill?: string; opacity?: number; hidden?: boolean }
 export type SolidMesh = { edges: [number, number, number][]; faces: number[][] }
 
@@ -192,9 +192,24 @@ export function renderSolid(kind: string, pts: number[], w: number, h: number, s
     if (ov && ov.dash) da = ov.dash === 'dash' ? '6 5' : ov.dash === 'dot' ? '2 3' : ''
     else if (hid) da = '6 5'
     const x1 = P[a][0], y1 = P[a][1], x2 = P[b][0], y2 = P[b][1]
+    // 箭头：线画到箭头根部，再补一个实心三角，箭头尖正好落在终点顶点上
+    const arrow = !!(ov && ov.arrow) && (x1 !== x2 || y1 !== y2)
+    const ang = arrow ? Math.atan2(y2 - y1, x2 - x1) : 0
+    const al = arrow ? Math.max(9, wd * 3.4) : 0
+    const ex = arrow ? x2 - al * Math.cos(ang) : x2
+    const ey = arrow ? y2 - al * Math.sin(ang) : y2
     let attrs = 'stroke="' + col + '" stroke-width="' + wd + '" stroke-linecap="round" stroke-linejoin="round"'
     if (da) attrs += ' stroke-dasharray="' + da + '"'
-    out += '<line ' + attrs + ' x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) + '" x2="' + x2.toFixed(1) + '" y2="' + y2.toFixed(1) + '"/>'
+    out += '<line ' + attrs + ' x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) + '" x2="' + ex.toFixed(1) + '" y2="' + ey.toFixed(1) + '"/>'
+    if (arrow) {
+      const aw = al * 0.42
+      const px = (sign: number) => [
+        x2 - al * Math.cos(ang) + sign * aw * Math.sin(ang),
+        y2 - al * Math.sin(ang) - sign * aw * Math.cos(ang),
+      ]
+      const a1 = px(1), a2 = px(-1)
+      out += '<polygon points="' + x2.toFixed(1) + ',' + y2.toFixed(1) + ' ' + a1[0].toFixed(1) + ',' + a1[1].toFixed(1) + ' ' + a2[0].toFixed(1) + ',' + a2[1].toFixed(1) + '" fill="' + col + '" stroke="none"/>'
+    }
   })
   if (vlabels) for (let i = 0; i < vlabels.length && i < n; i++) {
     if (selVertex === i) continue

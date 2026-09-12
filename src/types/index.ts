@@ -288,8 +288,8 @@ export type MathFigureKind =
   | 'auxLine' | 'rightAngle' | 'equalMark' | 'parallelMark' | 'angleArc' | 'section'
 
 /** 数学图形分类（面板按这个分组显示） */
-export type MathFigureCat = '平面图形' | '立体几何' | '函数图像' | '圆锥曲线' | '辅助标注'
-export const MATH_FIGURE_CATS: MathFigureCat[] = ['平面图形', '立体几何', '函数图像', '圆锥曲线', '辅助标注']
+export type MathFigureCat = '平面图形' | '立体几何' | '复刻图形' | '函数图像' | '圆锥曲线' | '辅助标注'
+export const MATH_FIGURE_CATS: MathFigureCat[] = ['平面图形', '立体几何', '复刻图形', '函数图像', '圆锥曲线', '辅助标注']
 
 export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathFigureCat }[] = [
   // ---- 函数图像 ----
@@ -416,7 +416,7 @@ export interface MathFigureElement extends ElementBase {
   /** 每个顶点的字母标注（下标/上标用 _ 和 ^，如 "A_1" "B^2"、\' 加撇），长度与顶点数一致 */
   vlabels?: (string | null)[]
   /** 每条边的样式覆盖（实线/虚线/点线、粗细、颜色），索引与立体边表一致 */
-  edgeStyles?: ({ dash?: 'solid' | 'dash' | 'dot'; width?: number; color?: string } | null)[]
+  edgeStyles?: ({ dash?: 'solid' | 'dash' | 'dot'; width?: number; color?: string; arrow?: boolean } | null)[]
   /** 每个顶点字母相对默认位置(顶点上方)的拖拽偏移(归一化)，用于避免遮挡 */
   labelOffsets?: { dx: number; dy: number }[]
   /** 每个面的样式覆盖（填充色/透明度/隐藏该面），索引与面表一致 */
