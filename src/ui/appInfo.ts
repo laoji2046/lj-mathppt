@@ -10,8 +10,10 @@ export const APP_NAME = 'LJ-MathSlides'
 /** 版权归属方（要改署名只动这里） */
 export const COMPANY = 'LTJ Studio'
 
+// 版权行里只放署名方，不再重复软件名 —— 软件名与版本号在设置面板「关于」里紧挨着显示，重复反而啰嗦
+
 /** 一句话版权（界面上显示的就是它） */
-export const COPYRIGHT = `© ${new Date().getFullYear()} ${APP_NAME} · ${COMPANY} 保留所有权利`
+export const COPYRIGHT = `© ${new Date().getFullYear()} ${COMPANY} · 保留所有权利`
 
 /** 设置面板里的补充说明 */
 export const COPYRIGHT_NOTE = '课件内容（文字 / 图形 / 公式）的著作权归制作者本人所有。'
