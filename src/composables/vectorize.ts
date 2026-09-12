@@ -12,6 +12,8 @@
  * 虚实线判定 100% 对；会多出几个落在直线上的冗余顶点，由调用方（VectorizeDialog）让用户删。
  */
 
+import { recognizeLabels } from './glyphOcr'
+
 export interface VectorizeOpt {
   /** 识别范围（原图像素），不传 = 整图。用来切掉图片下方的「图 1」这类题注 */
   crop?: [number, number, number, number]
@@ -57,8 +59,8 @@ export interface VectorizeResult {
   points: number[]
   /** 边：[起点, 终点, 是否虚线] */
   edges: [number, number, number][]
-  /** 被抹掉的字母位置（归一化，相对识别框）—— 用来把字母摆回原图的位置 */
-  anchors: { x: number; y: number }[]
+  /** 被抹掉的字母：位置（归一化，相对识别框）+ 自动认出来的文本 */
+  anchors: { x: number; y: number; text: string; conf: number }[]
   stats: VectorizeStats
 }
 
@@ -209,7 +211,7 @@ export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array
   }
   const out = ink.slice()
   for (const c of texts) for (const p of c.pix) out[p] = 0
-  const anchors = texts.map((c) => ({ x: c.cx, y: c.cy }))
+  const anchors = texts.map((c) => ({ x: c.cx, y: c.cy, pix: c.pix, x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1 }))
   return { ink: out, anchors, dashGroups: groups.length, barCount: bars.length, textCount: texts.length }
 }
 
@@ -406,6 +408,8 @@ export function vectorizeImage(img: HTMLImageElement, opt: VectorizeOpt = {}): V
   const diag = Math.hypot(box[2] - box[0], box[3] - box[1])
   const comp = components(m.ink, W, H, box)
   const st = stripText(comp, W, diag, m.ink, opt)
+  // 被抹掉的那些小块其实是字母 —— 顺手认一下（模板匹配，见 glyphOcr.ts）
+  const labels = recognizeLabels(W, st.anchors)
   const sk = thin(st.ink, W, H)
   const G = buildGraph(sk, W, H)
 
@@ -789,7 +793,12 @@ export function vectorizeImage(img: HTMLImageElement, opt: VectorizeOpt = {}): V
     W: bw, H: bh, box, imgW: W, imgH: H,
     points,
     edges: outEdges,
-    anchors: st.anchors.map((an) => ({ x: +((an.x - box[0]) / bw).toFixed(4), y: +((an.y - box[1]) / bh).toFixed(4) })),
+    anchors: labels.map((L) => ({
+      x: +((L.cx - box[0]) / bw).toFixed(4),
+      y: +((L.cy - box[1]) / bh).toFixed(4),
+      text: L.text,
+      conf: +L.conf.toFixed(3),
+    })),
     stats: { verts: verts.length, edges: outEdges.length, dash: dashN, text: st.textCount, bars: st.barCount, dashGroups: st.dashGroups },
   }
 }

@@ -24,6 +24,8 @@ const res = ref<VectorizeResult | null>(null)
 const pts = ref<number[]>([])
 const edges = ref<[number, number, number][]>([])
 const labels = ref<string[]>([])
+/** 每个顶点字母的识别置信度（0 = 没配上字母、是空着的） */
+const lconf = ref<number[]>([])
 /** 字母相对顶点的偏移（识别框归一化坐标）—— 默认取被抹掉的原字母位置 */
 const offs = ref<{ dx: number; dy: number }[]>([])
 const selV = ref<number | null>(null)
@@ -38,6 +40,8 @@ const scale = ref(1)
 const viewW = computed(() => Math.round((img.value?.naturalWidth || 300) * scale.value))
 const viewH = computed(() => Math.round((img.value?.naturalHeight || 200) * scale.value))
 const nVerts = computed(() => pts.value.length / 2)
+/** 字母是自动认出来的，低于 0.8 的挑出来让人复核 */
+const unsureN = computed(() => lconf.value.filter((c, i) => c > 0 && c < 0.8 && (labels.value[i] || '').trim()).length)
 
 // 裁剪：拖动框选识别范围
 const cropping = ref(false)
@@ -61,29 +65,41 @@ function adopt(r: VectorizeResult) {
   edges.value = r.edges.map((e) => [e[0], e[1], e[2]] as [number, number, number])
   const n = pts.value.length / 2
   labels.value = new Array(n).fill('')
-  const taken = new Array(r.anchors.length).fill(false)
-  const out: { dx: number; dy: number }[] = []
-  // 先算出每个顶点的重心方向，作为"附近没有原字母"时的兜底
+  lconf.value = new Array(n).fill(0)
+  // 字母 → 顶点：**全局按距离贪心配对**（而不是每个顶点各找各的最近字母）——
+  // 后者会让某个顶点把旁边另一个顶点真正的字母抢走
+  const cand: { i: number; k: number; d: number }[] = []
+  for (let i = 0; i < n; i++) {
+    const vx = pts.value[i * 2], vy = pts.value[i * 2 + 1]
+    for (let k = 0; k < r.anchors.length; k++) {
+      const an = r.anchors[k]
+      if (!an.text || an.conf < 0.7) continue         // 没认出来 / 认得很虚的不管
+      const d = Math.hypot(an.x - vx, an.y - vy)
+      if (d <= 0.16) cand.push({ i, k, d })
+    }
+  }
+  cand.sort((a, b) => a.d - b.d)
+  const vTake = new Array(n).fill(false)
+  const aTake = new Array(r.anchors.length).fill(false)
+  const out: { dx: number; dy: number }[] = new Array(n).fill(null).map(() => ({ dx: 0, dy: 0 }))
+  for (const c of cand) {
+    if (vTake[c.i] || aTake[c.k]) continue
+    vTake[c.i] = true; aTake[c.k] = true
+    const vx = pts.value[c.i * 2], vy = pts.value[c.i * 2 + 1]
+    out[c.i] = { dx: r.anchors[c.k].x - vx, dy: r.anchors[c.k].y - vy }
+    labels.value[c.i] = r.anchors[c.k].text
+    lconf.value[c.i] = r.anchors[c.k].conf
+  }
+  // 没配上字母的顶点：字母按"从重心往外推"给个兜底位置
   let cx = 0, cy = 0
   for (let i = 0; i < n; i++) { cx += pts.value[i * 2]; cy += pts.value[i * 2 + 1] }
   cx /= n || 1; cy /= n || 1
   for (let i = 0; i < n; i++) {
-    const vx = pts.value[i * 2], vy = pts.value[i * 2 + 1]
-    let best = -1, bd = 0.16
-    for (let k = 0; k < r.anchors.length; k++) {
-      if (taken[k]) continue
-      const d = Math.hypot(r.anchors[k].x - vx, r.anchors[k].y - vy)
-      if (d < bd) { bd = d; best = k }
-    }
-    if (best >= 0) {
-      taken[best] = true
-      out.push({ dx: r.anchors[best].x - vx, dy: r.anchors[best].y - vy })
-    } else {
-      const ux = vx - cx, uy = vy - cy
-      const L = Math.hypot(ux, uy)
-      if (L < 1e-6) out.push({ dx: 0, dy: 0 })
-      else out.push({ dx: (ux / L) * 0.06 * (r.W / r.H > 1 ? 1 : 0.8), dy: (uy / L) * 0.06 })
-    }
+    if (vTake[i]) continue
+    const ux = pts.value[i * 2] - cx, uy = pts.value[i * 2 + 1] - cy
+    const L = Math.hypot(ux, uy)
+    if (L < 1e-6) continue
+    out[i] = { dx: (ux / L) * 0.06 * (r.W / r.H > 1 ? 1 : 0.8), dy: (uy / L) * 0.06 }
   }
   offs.value = out
 }
@@ -132,6 +148,7 @@ function onDown(e: PointerEvent) {
   if (!p || p[0] < 0 || p[0] > 1 || p[1] < 0 || p[1] > 1) return
   pts.value.push(+p[0].toFixed(4), +p[1].toFixed(4))
   labels.value.push('')
+  lconf.value.push(0)
   offs.value.push({ dx: 0, dy: 0 })
   pickForLink(nVerts.value - 1)
 }
@@ -210,6 +227,7 @@ function onUp() {
 function finishRemove(i: number) {
   pts.value.splice(i * 2, 2)
   labels.value.splice(i, 1)
+  lconf.value.splice(i, 1)
   offs.value.splice(i, 1)
   selV.value = null
   selE.value = null
@@ -396,11 +414,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <button class="vd__btn" :class="{ 'vd__btn--on': cropping }" @click="cropping = !cropping">框选识别范围</button>
               <button class="vd__btn" :disabled="busy" @click="run(null)">整图重识别</button>
             </div>
-            <div class="vd__label">顶点字母（{{ selV !== null ? '已选 ' + selV : '点画布上的点选中' }}）</div>
+            <div class="vd__label">
+              顶点字母 —— 已自动填 <b>{{ labels.filter((s) => s.trim()).length }}</b> 个<template v-if="unsureN">，其中 <b class="vd__warn">{{ unsureN }}</b> 个不太确定，请对一眼</template>
+            </div>
             <div class="vd__list">
               <div v-for="i in nVerts" :key="'l' + (i - 1)" class="vd__item" :class="{ 'vd__item--on': selV === i - 1 }">
                 <span class="vd__idx" @click="selV = i - 1; selE = null">{{ i - 1 }}</span>
-                <input v-model="labels[i - 1]" class="vd__input" placeholder="如 A / A_1" @focus="selV = i - 1; selE = null">
+                <input
+                  v-model="labels[i - 1]" class="vd__input"
+                  :class="{ 'vd__input--unsure': lconf[i - 1] > 0 && lconf[i - 1] < 0.8 }"
+                  :title="lconf[i - 1] > 0 ? ('识别置信度 ' + Math.round(lconf[i - 1] * 100) + '%') : '没配上字母，手动填或留空'"
+                  placeholder="如 A / A_1" @focus="selV = i - 1; selE = null"
+                >
                 <button class="vd__del" title="删掉这个顶点（只连一条线的点会并到最近的顶点上，线不会丢）" @click="delVertex(i - 1)">
                   <AppIcon name="trash" :size="13" />
                 </button>
@@ -473,6 +498,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .vd__idx { width: 22px; text-align: center; font-size: 12px; color: var(--muted); cursor: pointer; flex: none; }
 .vd__input { flex: 1; min-width: 0; padding: 4px 7px; font-size: 13px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: #fff; color: var(--text); }
 .vd__input:focus { outline: none; border-color: var(--brand-400); box-shadow: 0 0 0 2px var(--brand-soft); }
+.vd__input--unsure { border-color: #e8a33d; background: #fffaf0; }
+.vd__warn { color: #c77700; }
 .vd__del { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; flex: none; padding: 0; cursor: pointer; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--gray-600); }
 .vd__del:hover { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); }
 .vd__tip { margin: 0; font-size: 12px; color: var(--gray-500); line-height: 1.5; }
