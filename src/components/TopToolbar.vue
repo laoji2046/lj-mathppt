@@ -498,7 +498,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
       <span class="brand__mark">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 19c3.4 0 3.4-15 7-15s3.6 15 7 15 3.4-7 6-7"/></svg>
       </span>
-      <span class="brand__text">LJ-MathSlides <small>Vue</small></span>
+      <span class="brand__text">LJ-MathSlides</span>
     </span>
 
     <div class="group">
@@ -773,18 +773,6 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   color: var(--text);
   white-space: nowrap;
 }
-.brand small {
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--brand-700);
-  background: var(--brand-50);
-  border: 1px solid var(--brand-100);
-  border-radius: var(--radius-full);
-  padding: 1px 6px;
-  margin-left: 5px;
-  vertical-align: 1px;
-}
-
 /* ---------- 分组与分隔 ---------- */
 .group { display: flex; gap: 6px; align-items: center; }
 .group + .group { position: relative; }

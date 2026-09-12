@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1122**（源码快照 `_backup/rollback-20260912-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1123**（源码快照 `_backup/rollback-20260912-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -264,6 +264,13 @@ node ../node_modules/@tauri-apps/cli/tauri.js build   # 生成 NSIS 安装包
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-12（v2026.09.1123）
+
+**1123 · 去掉产品名上的「Vue」**
+- 左上角品牌从「LJ-MathSlides `Vue`」改为只留 **LJ-MathSlides**（连 `<small>Vue</small>` 的徽标样式一起删掉）
+- 顺带把浏览器标题 `LJ-MathSlides（Vue 版）` 改成 `LJ-MathSlides — 幻灯片编辑器`，与桌面端窗口标题（`tauri.conf.json`）保持一致
+- 骨架期的痕迹到此清干净：界面与标题里都不再出现「Vue 版」；README 里仍按技术文档如实记录它是 Vue 3 重写版
 
 ### 2026-09-12（v2026.09.1122）
 
