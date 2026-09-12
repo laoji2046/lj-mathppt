@@ -17,6 +17,7 @@ import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type E
 import { solidSel } from '@/composables/solidSel'
 import { openImageEditor } from '@/ui/imageEditor'
 import { openVectorize } from '@/ui/vectorize'
+import { openAsyExport } from '@/ui/asyExport'
 import ColorSwatches from './ColorSwatches.vue'
 import { saveTextFile } from '@/composables/useTauri'
 
@@ -86,6 +87,13 @@ function reopenVectorize() {
   const m = mathfig.value
   if (!m?.vectorizeCtx) return
   openVectorize(m.vectorizeCtx.src, null, m.id)
+}
+
+/** 导出 Asymptote（二维）：代码在弹窗里给，可复制 / 存 .asy */
+function openAsy() {
+  const m = mathfig.value
+  if (!m) return
+  openAsyExport(m)
 }
 
 const isSolid = computed(() => !!mathfig.value && !!SOLID_VCOUNT[mathfig.value.kind])
@@ -836,6 +844,7 @@ function layerTypeLabel(type: string) {
         <button class="quick__btn" style="width:100%;margin-top:4px" @click="patch({ fill: 'transparent' } as Partial<SlideElement>)">无填充</button>
         <button v-if="isEditableFig" class="quick__btn" style="width:100%;margin-top:4px;background:#ede9fb;border-color:#c9b8f0;color:#5b43ad" @click="openShapeEdit(el.id)">✎ 编辑顶点（也可双击图形）</button>
         <button v-if="mathfig?.vectorizeCtx" class="quick__btn" style="width:100%;margin-top:4px;background:#e6f0fb;border-color:#b9d3f0;color:#2b5b9c" @click="reopenVectorize">✎ 回到识别弹窗继续编辑（顶点 / 边 / 字母）</button>
+        <button class="quick__btn" style="width:100%;margin-top:4px;background:#eef7ee;border-color:#bfe0bf;color:#2f6b34" @click="openAsy">⌘ 导出 Asymptote 代码</button>
         <p v-if="mathfig?.kind === 'polygon'" style="margin:6px 0 0;font-size:11px;color:#8a8aa0;line-height:1.55">顶点编辑：拖动顶点即可调整；<b>双击顶点删除</b>；<b>双击边线插入顶点</b>（最少保留 3 个顶点）</p>
         <template v-if="isSolid">
           <div class="solid-prop">
