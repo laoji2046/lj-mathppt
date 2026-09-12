@@ -14,6 +14,7 @@ import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type { MathFigureElement, SlideElement } from '@/types'
 import { loadImageElement, type VectorizeOpt, type VectorizeResult } from '@/composables/vectorize'
+import { labelFontSize, labelGap } from '@/composables/solid3d'
 
 type VectorizeWorker = Worker & { __nextId?: number }
 let vectorWorker: VectorizeWorker | null = null
@@ -64,6 +65,13 @@ const VIEW_W = 560
 const VIEW_H = 450
 
 const img = ref<HTMLImageElement | null>(null)
+/** 存进元素 vectorizeCtx 的那一份原图（降采样过）。
+ *  deck 是**自动存 localStorage** 的，配额只有几 MB —— 直接把扫描件的完整 data URL 塞进去，
+ *  转十张图就能把配额撑爆（超了是静默存不上）。弹窗里叠加显示、重新识别都用得到原图，
+ *  但 1400px 足够，没必要留整张。 */
+const storeSrc = ref('')
+/** 存下来的副本相对原图的缩放系数（1 = 没缩） */
+const storeK = ref(1)
 const stage = ref<HTMLElement | null>(null)
 const viewport = ref<HTMLElement | null>(null)
 const busy = ref(false)
@@ -274,8 +282,8 @@ function restoreFromElement(el: MathFigureElement): boolean {
     if (!lo) return { dx: 0, dy: 0 }
     return {
       dx: +((lo.dx * ctx.imgW) / cw).toFixed(4),
-      // 元素里 labelOffsets 的零点是"顶点上方 12px"，弹窗里是"顶点本身"，差这一项
-      dy: +(((lo.dy - 12 / hh) * ctx.imgH) / ch).toFixed(4),
+      // 元素里 labelOffsets 的零点是"顶点上方 labelGap 像素"（见 buildPatch），弹窗里是"顶点本身"，差这一项
+      dy: +(((lo.dy - labelGap(labelFontSize(hh)) / hh) * ctx.imgH) / ch).toFixed(4),
     }
   })
   return true
@@ -659,9 +667,11 @@ function buildPatch(): Partial<SlideElement> | null {
   }
   const sc = Math.min(440 / iw, 470 / ih)
   const w = Math.max(90, Math.round(iw * sc)), h = Math.max(70, Math.round(ih * sc))
+  // offs 是"字母相对顶点"的偏移；渲染时字母默认还要再往上抬 labelGap，这里把那一段补回去
+  const gapRatio = labelGap(labelFontSize(h)) / h
   const labelOffsets = offs.value.map((o) => ({
     dx: +((o.dx * cw) / iw).toFixed(4),
-    dy: +((o.dy * ch) / ih + 12 / h).toFixed(4),
+    dy: +((o.dy * ch) / ih + gapRatio).toFixed(4),
   }))
   return {
     w, h,
@@ -674,7 +684,13 @@ function buildPatch(): Partial<SlideElement> | null {
     stroke: '#1a1a1a',
     strokeWidth: 2.8,
     // 留一份识别上下文，之后还能回到这个弹窗继续改
-    vectorizeCtx: { src: props.src, imgW: iw, imgH: ih, box: [bx, by, ex2, ey2] as [number, number, number, number] },
+    // 注意：这份 ctx 要跟"存下来的那张图"对得上，所以尺寸 / 识别框都乘上同一个 k
+    vectorizeCtx: {
+      src: storeSrc.value || props.src,
+      imgW: Math.round(iw * storeK.value),
+      imgH: Math.round(ih * storeK.value),
+      box: [Math.round(bx * storeK.value), Math.round(by * storeK.value), Math.round(ex2 * storeK.value), Math.round(ey2 * storeK.value)] as [number, number, number, number],
+    },
   } as Partial<SlideElement>
 }
 
@@ -719,11 +735,34 @@ const primaryText = computed(() => {
   return '插入当前页'
 })
 
+/** 原图降采样成一份小的 data URL（本来就不大就原样返回）。
+ *  返回的 k 是缩放系数 —— 存进元素的那份是缩过的，所以 **box / imgW / imgH 必须一起乘 k**，
+ *  否则「回到弹窗继续编辑」时会拿原图尺寸去解释一张缩小了的图，叠加图整整错位一个比例。
+ *  跨域图导出会失败，失败就原样返回（k=1）。 */
+function shrinkSrc(im: HTMLImageElement, maxSide = 1400): { url: string; k: number } {
+  try {
+    const k = Math.min(1, maxSide / Math.max(im.naturalWidth, im.naturalHeight))
+    if (k >= 1) return { url: props.src, k: 1 }
+    const c = document.createElement('canvas')
+    c.width = Math.max(1, Math.round(im.naturalWidth * k))
+    c.height = Math.max(1, Math.round(im.naturalHeight * k))
+    const g = c.getContext('2d')
+    if (!g) return { url: props.src, k: 1 }
+    g.drawImage(im, 0, 0, c.width, c.height)
+    return { url: c.toDataURL('image/png'), k }
+  } catch {
+    return { url: props.src, k: 1 }
+  }
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', onKey)
   try {
     const im = await loadImageElement(props.src)
     img.value = im
+    const shrunk = shrinkSrc(im)
+    storeSrc.value = shrunk.url
+    storeK.value = shrunk.k
     baseScale.value = Math.min(VIEW_W / im.naturalWidth, VIEW_H / im.naturalHeight, 2)
     await nextTick()
     const el = props.editId ? (findEl(props.editId) as MathFigureElement | undefined) : undefined

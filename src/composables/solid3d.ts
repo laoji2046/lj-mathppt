@@ -148,11 +148,31 @@ export function decodeLabel(s: string): { base: string; sub?: string; sup?: stri
   const m = s.match(/^([^_^]*?)(?:_([^_^]*?))?(?:\^([^_^]*?))?$/)
   return m ? { base: m[1] || '', sub: m[2], sup: m[3] } : { base: s }
 }
+/** 顶点字母用的字体：教材 / 试卷上的数学字母是**衬线斜体**。
+ *  不指定字体的话会落到界面默认的无衬线体上，看着像 UI 文字而不是数学标注，跟图形完全不搭。 */
+export const LABEL_FONT = "'Times New Roman','Nimbus Roman','Liberation Serif',Cambria,Georgia,serif"
+
+/** 顶点字母字号：跟着元素高度走 —— 原图里字母大多是图高的 7%~10%。
+ *  固定 22px 在小图形上大得离谱、在大图形上又小得像注释。 */
+export function labelFontSize(h: number) {
+  return Math.max(11, Math.min(34, Math.round(h * 0.085)))
+}
+/** 字母默认压在顶点上方这么多像素（跟字号成比例，不然字号一大就贴到线上了） */
+export function labelGap(fs: number) {
+  return Math.round(fs * 0.62)
+}
+/** 一条标注大致占多宽（用来把它夹在框内，别被框裁掉） */
+function labelHalfWidth(lab: string, fs: number, w: number) {
+  return Math.min(w / 2, fs * 0.36 * Math.max(1, lab.length))
+}
+
 /** 顶点字母标注：A、A_1（下标）、B^2（上标）、A'…… 用 SVG tspan 排版 */
-function labelSvg(s: string, x: number, y: number, color: string): string {
+function labelSvg(s: string, x: number, y: number, color: string, fs: number): string {
   const { base, sub, sup } = decodeLabel(s)
-  const fs = Math.max(14, 22)
-  let t = '<text x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" font-size="' + fs + '" font-style="italic" fill="' + color + '" text-anchor="middle">' + esc(base)
+  // 白色描边当垫底（paint-order: stroke = 先描边后填字），压在线上也读得清 ——
+  // 原图里 A 就是直接压在 AB / AD 那两条虚线上的
+  const halo = ' font-family="' + LABEL_FONT + '" stroke="#fff" stroke-width="' + (fs * 0.14).toFixed(1) + '" stroke-linejoin="round" paint-order="stroke"'
+  let t = '<text x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" font-size="' + fs + '" font-style="italic" fill="' + color + '" text-anchor="middle"' + halo + '>' + esc(base)
   if (sub) t += '<tspan dy="' + (fs * 0.4).toFixed(1) + '" font-size="' + (fs * 0.72).toFixed(1) + '">' + esc(sub) + '</tspan>'
   if (sup) t += '<tspan dy="' + (sub ? (-1 * fs).toFixed(1) : (-fs * 0.42).toFixed(1)) + '" font-size="' + (fs * 0.72).toFixed(1) + '">' + esc(sup) + '</tspan>'
   t += '</text>'
@@ -211,14 +231,21 @@ export function renderSolid(kind: string, pts: number[], w: number, h: number, s
       out += '<polygon points="' + x2.toFixed(1) + ',' + y2.toFixed(1) + ' ' + a1[0].toFixed(1) + ',' + a1[1].toFixed(1) + ' ' + a2[0].toFixed(1) + ',' + a2[1].toFixed(1) + '" fill="' + col + '" stroke="none"/>'
     }
   })
-  if (vlabels) for (let i = 0; i < vlabels.length && i < n; i++) {
-    if (selVertex === i) continue
-    const lab = vlabels[i]
-    if (!lab) continue
-    const off = labelOffsets && labelOffsets[i]
-    const lx = P[i][0] + ((off && off.dx) || 0) * w
-    const ly = P[i][1] - 12 + ((off && off.dy) || 0) * h
-    out += labelSvg(lab, lx, ly, stroke)
+  if (vlabels) {
+    const fs = labelFontSize(h)
+    const gap = labelGap(fs)
+    for (let i = 0; i < vlabels.length && i < n; i++) {
+      if (selVertex === i) continue
+      const lab = vlabels[i]
+      if (!lab) continue
+      const off = labelOffsets && labelOffsets[i]
+      // 夹在元素框内：原图里字母本来就在图内，但"从重心往外推"的默认偏移会把边上的字母推出去，
+      // 推出去就被 SVG 裁掉（预设里 P 就是这么整块消失的）
+      const half = labelHalfWidth(lab, fs, w)
+      const lx = Math.max(half, Math.min(w - half, P[i][0] + ((off && off.dx) || 0) * w))
+      const ly = Math.max(fs * 0.85, Math.min(h - fs * 0.12, P[i][1] - gap + ((off && off.dy) || 0) * h))
+      out += labelSvg(lab, lx, ly, stroke, fs)
+    }
   }
   if (selEdge != null && selEdge >= 0 && selEdge < edges.length) {
     const a = edges[selEdge][0], b = edges[selEdge][1]

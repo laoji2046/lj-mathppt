@@ -6,6 +6,7 @@
 // 自动吸附到线条交点（最终对原图黑线的覆盖率 ≥ 0.98），所以插进页面里和原图基本重合。
 // 每个预设都带原图宽高比，按建议尺寸插入不会被拉变形。
 import type { MathFigureElement } from '@/types'
+import { labelFontSize, labelGap } from '@/composables/solid3d'
 
 /** 顶点字母；null = 该顶点不标注 */
 type Label = string | null
@@ -29,8 +30,11 @@ function box(sw: number, sh: number, maxW = 440, maxH = 470) {
 }
 
 /**
- * 顶点字母默认贴在顶点正上方 12px；这里统一按「从重心向外推开」再给一点偏移，
+ * 顶点字母默认压在顶点正上方（间距见 labelGap）；这里按「从重心向外推开」再给一点偏移，
  * 让字母落到图形外侧、不压线。d 是期望的推开距离（按插入尺寸的像素算）。
+ *
+ * 推完还要**按渲染规则夹回框内** —— 最外侧的顶点（比如四棱锥的 P）一推就出框，
+ * 渲染时会被 SVG 裁掉，字母整块消失。
  */
 function spread(points: number[], labels: Label[], w: number, h: number, d = 26) {
   const n = points.length / 2
@@ -39,13 +43,25 @@ function spread(points: number[], labels: Label[], w: number, h: number, d = 26)
   let cy = 0
   for (let i = 0; i < n; i++) { cx += points[i * 2]; cy += points[i * 2 + 1] }
   cx /= n; cy /= n
+  const fs = labelFontSize(h)
+  const gap = labelGap(fs)
   return labels.map((lab, i) => {
     if (!lab) return { dx: 0, dy: 0 }
     const ux = points[i * 2] - cx
     const uy = points[i * 2 + 1] - cy
     const len = Math.hypot(ux, uy)
     if (len < 1e-6) return { dx: 0, dy: 0 }
-    return { dx: +((ux / len) * d / w).toFixed(4), dy: +((uy / len) * d / h).toFixed(4) }
+    let dx = (ux / len) * d / w
+    let dy = (uy / len) * d / h
+    // 复刻 renderSolid 的落点公式，把结果夹在框内后反推偏移
+    const vx = points[i * 2] * w
+    const vy = points[i * 2 + 1] * h
+    const half = Math.min(w / 2, fs * 0.36 * lab.length)
+    const lx = Math.max(half, Math.min(w - half, vx + dx * w))
+    const ly = Math.max(fs * 0.85, Math.min(h - fs * 0.12, vy - gap + dy * h))
+    dx = (lx - vx) / w
+    dy = (ly - (vy - gap)) / h
+    return { dx: +dx.toFixed(4), dy: +dy.toFixed(4) }
   })
 }
 
