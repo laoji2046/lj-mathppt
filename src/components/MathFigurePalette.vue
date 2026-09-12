@@ -7,6 +7,7 @@ import type { MathFigureCat, MathFigureKind } from '@/types'
 import { MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS } from '@/types'
 import { figureBox, viewAspect } from '@/composables/mathPlot'
 import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
+import { openVectorize } from '@/ui/vectorize'
 import FigurePreview from './elements/MathFigureElement.vue'
 
 const store = useDeckStore()
@@ -73,6 +74,19 @@ function presetPreview(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
 }
 const THUMB_W = 108
 const THUMB_H = 108
+
+/** 从图片复刻：选一张线稿，转到「图片转图形」弹窗里识别 + 改 */
+const fileInput = ref<HTMLInputElement | null>(null)
+function pickImage() { fileInput.value?.click() }
+function onPicked(e: Event) {
+  const input = e.target as HTMLInputElement
+  const f = input.files && input.files[0]
+  input.value = ''
+  if (!f) return
+  const r = new FileReader()
+  r.onload = () => { openVectorize(String(r.result || '')); emit('close') }
+  r.readAsDataURL(f)
+}
 /** 缩略图里把原始尺寸等比缩到卡片内 */
 function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
   return Math.min(THUMB_W / p.w, THUMB_H / p.h)
@@ -101,6 +115,10 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
 
       <div class="palette__grid">
         <template v-if="current && current.cat === RECAST">
+          <button class="card card--recast card--pick" title="选一张线稿（几何插图 / 函数图），自动识别成可拖顶点的数学图形" @click="pickImage">
+            <span class="card__thumb"><span class="recast__plus">＋</span></span>
+            <span class="card__name">从图片复刻…</span>
+          </button>
           <button
             v-for="p in SOLID_FIGURE_PRESETS"
             :key="p.id"
@@ -134,6 +152,7 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
       </div>
 
       <div class="palette__hint">点击插入；插入后可在画布拖动缩放到合适大小，属性面板可改颜色 / 线宽 / 填充</div>
+      <input ref="fileInput" type="file" accept="image/*" style="display:none" @change="onPicked">
     </div>
   </div>
 </template>
@@ -205,6 +224,8 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
 /* 复刻图：原始尺寸的图形整体等比缩到卡片里 */
 .recast { position: absolute; left: 50%; top: 50%; transform-origin: center center; display: block; }
 .card--recast .card__thumb { aspect-ratio: 1 / 1; }
+.card--pick { border-style: dashed; }
+.recast__plus { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; font-size: 30px; font-weight: 300; color: var(--brand-600); }
 .card__thumb {
   position: relative;
   display: block;

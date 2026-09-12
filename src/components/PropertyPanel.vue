@@ -16,6 +16,7 @@ import { figureParams } from '@/composables/mathPlot'
 import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type EdgeStyle, type FaceStyle } from '@/composables/solid3d'
 import { solidSel } from '@/composables/solidSel'
 import { openImageEditor } from '@/ui/imageEditor'
+import { openVectorize } from '@/ui/vectorize'
 import ColorSwatches from './ColorSwatches.vue'
 import { saveTextFile } from '@/composables/useTauri'
 
@@ -1090,6 +1091,8 @@ function layerTypeLabel(type: string) {
           </select>
         </label>
         <button class="quick__btn" style="width:100%;margin-top:4px;background:#ede9fb;border-color:#c9b8f0;color:#5b43ad" @click="openImageEditor(el.id)">✂ 图片编辑器（裁剪 / 旋转 / 翻转 / 滤镜）</button>
+        <button class="quick__btn" style="width:100%;margin-top:4px;background:#e6f0fb;border-color:#b9d3f0;color:#2b5b9c" @click="openVectorize(image?.src || '', el.id)">✎ 转成矢量图形（几何插图 → 可拖顶点）</button>
+        <p class="panel__hint">线稿类插图（几何图、函数图）可以识别成数学图形元素：顶点能拖、线能改虚实粗细、字母能改。</p>
         <h3 class="panel__title">图片特效（PowerPoint 风格）</h3>
         <label class="field"><span>发光颜色</span>
           <ColorSwatches :model-value="image?.glowColor || ''" allow-transparent @update:model-value="(v) => patch({ glowColor: v } as Partial<SlideElement>)" />
