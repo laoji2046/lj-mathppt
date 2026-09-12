@@ -59,7 +59,13 @@ function figureInner(
     return a.join(' ')
   }
   if (SOLID_VCOUNT[kind]) {
-    const pv = points && points.length === SOLID_VCOUNT[kind] * 2 ? points : solidVerts(kind, w, h, depth)
+    // 顶点数判定必须和画布（MathFigureElement.vue）一致：
+    // **带 mesh 的图形顶点数是任意的**（「图片转图形」/复刻图都是），不能再要求等于该类型的默认顶点数 ——
+    // 否则这里会退化成该类型的默认顶点，再去套那条有十几个下标的边表，直接越界（缩略图 / 演示 / 导出全中）。
+    const need = SOLID_VCOUNT[kind] * 2
+    const pv = points && points.length >= 4 && points.length % 2 === 0 && (mesh || points.length === need)
+      ? points
+      : solidVerts(kind, w, h, depth)
     return renderSolid(kind, pv, w, h, stroke, s, fc, dsh, vlabels, edgeStyles, undefined, undefined, labelOffsets, faceStyles, undefined, mesh)
   }
   switch (kind) {
