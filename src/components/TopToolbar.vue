@@ -18,6 +18,8 @@ import SaveAsDialog from './SaveAsDialog.vue'
 import { isTauri } from '@/composables/useTauri'
 import SettingsPanel from './SettingsPanel.vue'
 import { ICONS as I } from '@/ui/icons'
+import { docxToMarkdown } from '@/docx/docxToMarkdown'
+import { markdownToDeck } from '@/composables/mdDeck'
 
 const store = useDeckStore()
 const emit = defineEmits<{ (e: 'present'): void; (e: 'open-templates'): void; (e: 'open-paper'): void; (e: 'open-ggb-suite'): void }>()
@@ -67,6 +69,29 @@ function onDeckJsonPicked(e: Event) {
   reader.readAsText(file)
   input.value = ''
 }
+/** 导入 Word（.docx）：本地解析 → Markdown → 走应用自己的 Markdown 导入管线（图片内嵌成 data URL） */
+const docxInput = ref<HTMLInputElement | null>(null)
+function pickDocx() { fileOpen.value = false; docxInput.value?.click() }
+async function onDocxPicked(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  fileToast.value = '正在解析 Word 文档…'
+  flashToast()
+  try {
+    const buf = new Uint8Array(await file.arrayBuffer())
+    const { markdown, stats } = await docxToMarkdown(buf)
+    const deck = markdownToDeck(markdown)
+    const ok2 = store.importDeck(deck)
+    if (!ok2) throw new Error('生成的演示无效（已取消，未影响当前内容）')
+    fileToast.value = 'Word 导入完成：' + deck.slides.length + ' 页 · 公式 ' + stats.formulas + ' · 图片 ' + stats.images
+  } catch (err) {
+    fileToast.value = 'Word 导入失败：' + (err instanceof Error ? err.message : String(err))
+  }
+  flashToast()
+}
+
 const drawOpen = ref(false)
 const drawWrap = ref<HTMLElement | null>(null)
 const moreOpen = ref(false)
@@ -515,6 +540,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           <button class="dropdown__item" title="当前页截图为 PNG（2 倍分辨率）" @click="exportPng"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.png"></svg></span>导出 PNG（当前页）</button>
           <button class="dropdown__item" title="Markdown 源码：导出或导入（--- 横向 / -- 垂直 / Note: 备注）" @click="setViewMode('split')"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>MD 源码（导出/导入 Markdown）</button>
           <button class="dropdown__item" title="导入之前导出的演示 JSON（.json）" @click="pickDeckJson"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>导入演示 JSON</button>
+        <button class="dropdown__item" title="导入 Word 文档（.docx）：本地解析、图片内嵌，一题一页" @click="pickDocx"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>导入 Word 文档（.docx）</button>
         </div>
       </div>
     </div>
@@ -583,6 +609,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
       </div>
       <input ref="imgFileInput" type="file" accept="image/*" style="display:none" @change="onImgPicked" />
       <input ref="deckJsonInput" type="file" accept=".json,application/json" style="display:none" @change="onDeckJsonPicked" />
+    <input ref="docxInput" type="file" accept=".docx" style="display:none" @change="onDocxPicked" />
 
       <!-- 公式下拉：混排公式（粘贴 LaTeX）/ 空白公式 -->
       <div ref="formulaWrap" class="dropdown">
