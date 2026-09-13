@@ -469,7 +469,7 @@ function onMove(e: PointerEvent) {
   }
 }
 function onUpStage() {
-  if (arcDrag >= 0) { arcDrag = -1; onUp(); return }
+  if (arcDrag >= 0) { const i = arcDrag; arcDrag = -1; absorbForArc(i); onUp(); return }
   if (dragging.value !== null) {
     dragging.value = null
     dragSet.value = []
@@ -587,19 +587,12 @@ function toggleEllipseArc() {
   pendingV.value = null
   if (ellipseMode.value) { linkMode.value = false; panMode.value = false; cropping.value = false }
 }
-/** 画椭圆弧：点两个顶点（= 椭圆长轴的两端），出来就是一条半椭圆 */
+/** 画椭圆弧：点两个顶点（= 椭圆长轴的两端），出来就是一条半椭圆。
+ *  默认扁平度 0.2（短半轴 = 0.4 × 长半轴）—— 立体几何插图的底面差不多就这么扁。 */
 function pickForEllipseArc(i: number) {
   if (pendingV.value === null) { pendingV.value = i; selVs.value = [i]; selE.value = null; selArc.value = null; return }
   if (pendingV.value === i) { pendingV.value = null; return }
-  const s = snap()
-  const a = pendingV.value, b = i
-  // 默认扁平度 0.2（短半轴 = 0.4 × 长半轴）—— 立体几何插图的底面差不多就这么扁
-  arcs.value.push({ pts: [a, b], bulge: defaultBulge(a, b, 0.2), ellipse: 1, dash: 0 })
-  selArc.value = arcs.value.length - 1
-  pushSnap(s)
-  pendingV.value = null
-  selVs.value = [b]
-  selE.value = null
+  createArc(pendingV.value, i, true)
 }
 /** 把选中的弧翻面（开口方向反过来） */
 function flipArc(i: number) {
@@ -646,18 +639,110 @@ function needsBulgeHandle(i: number): boolean {
   const idx = a ? arcIdxOf(a) : null
   return !!idx && idx.length === 2
 }
+/** 画一条曲线，并**顺手把底下被盖住的折线吃掉**。
+ *  识别出来的椭圆本来就是一串折线，再手画一条椭圆弧就会两层重叠 ——
+ *  不这么做，用户得一条条删那些折线，很烦。
+ *  判据保守：一条边取 3 个采样点，**全都**落在新曲线 7px 内才吃；被吃得孤立的顶点也一起清掉。 */
+function createArc(a: number, b: number, ellipse: boolean) {
+  const r = res.value
+  const bulge = defaultBulge(a, b, ellipse ? 0.2 : 0.25)
+  const s0 = snap()
+  const del: number[] = []
+  let gone = 0
+  if (r) {
+    const sc = viewW.value / r.imgW
+    const list = arcPolyline({ pts: [a, b], bulge, ellipse: ellipse ? 1 : undefined }, pts.value, sc * r.W, sc * r.H)
+    if (list.length >= 2) {
+      const ox = sc * r.box[0], oy = sc * r.box[1]
+      const cur = list.map(([x, y]) => [x + ox, y + oy] as [number, number])
+      const res2 = absorbCurve(cur, a, b, false)
+      gone = res2.gone
+      del.push(...res2.del)
+    }
+  }
+  // 删过点之后下标会移位，新的两个端点要跟着挪
+  const shift = (k: number) => k - del.filter((d) => d < k).length
+  const na = shift(a), nb = shift(b)
+  arcs.value.push({ pts: [na, nb], bulge, ellipse: ellipse ? 1 : undefined, dash: 0 })
+  selArc.value = arcs.value.length - 1
+  if (gone || del.length) pushSnap(s0)
+  note.value = gone ? ('已吃掉 ' + gone + ' 条重合的线' + (del.length ? ' 、' + del.length + ' 个多余的点' : '')) : ''
+  pendingV.value = null
+  selVs.value = [nb]
+  selE.value = null
+}
+const note = ref('')
+
+/** 把"已经被这条曲线盖住"的折线吃掉（识别出来的椭圆是一串折线，手画椭圆弧会两层重叠）。
+ *  判据：一条边取 3 个采样点**都**落在曲线附近才吃，且**只吃比这条弧的弦短很多的碎线段** ——
+ *  否则会把结构线（比如 B–C 那条长直边）一起吃掉。
+ *  返回被吃掉的边数和"因此变孤立"的点；点用倒序删，调用方负责 pushSnap。 */
+function absorbCurve(cur: [number, number][], a: number, b: number, quiet: boolean) {
+  const near = (x: number, y: number, tol: number) => {
+    for (let i = 1; i < cur.length; i++) {
+      const x0 = cur[i - 1][0], y0 = cur[i - 1][1]
+      const dx = cur[i][0] - x0, dy = cur[i][1] - y0
+      const L2 = dx * dx + dy * dy || 1e-9
+      let t = ((x - x0) * dx + (y - y0) * dy) / L2
+      t = Math.max(0, Math.min(1, t))
+      if (Math.hypot(x - (x0 + t * dx), y - (y0 + t * dy)) < tol) return true
+    }
+    return false
+  }
+  // 手画的椭圆弧和识别出来的椭圆总有十几像素差（实测最近一条差 10.3px），门槛太紧就吃不着；
+  // 太松又会误伤结构线 —— 所以配合下面的长度限制一起用。
+  const TOL = 32
+  const chord = Math.hypot(px(b) - px(a), py(b) - py(a))
+  const maxEdge = chord * 0.25
+  const drop: number[] = []
+  edges.value.forEach((e, i) => {
+    if (Math.hypot(px(e[1]) - px(e[0]), py(e[1]) - py(e[0])) > maxEdge) return
+    for (const t of [0.2, 0.5, 0.8]) {
+      const x = px(e[0]) + (px(e[1]) - px(e[0])) * t
+      const y = py(e[0]) + (py(e[1]) - py(e[0])) * t
+      if (!near(x, y, TOL)) return
+    }
+    drop.push(i)
+  })
+  if (!drop.length) return { gone: 0, del: [] as number[] }
+  const keep = edges.value.filter((_, i) => !drop.includes(i))
+  const used = new Set<number>()
+  keep.forEach((e) => { used.add(e[0]); used.add(e[1]) })
+  const del: number[] = []
+  for (let i = 0; i < nVerts.value; i++) {
+    if (i === a || i === b || used.has(i)) continue
+    if (edges.value.some((e) => e[0] === i || e[1] === i)) del.push(i)
+  }
+  edges.value = keep
+  del.sort((x, y) => y - x).forEach((i) => finishRemove(i))
+  if (!quiet) note.value = '已吃掉 ' + drop.length + ' 条重合的线' + (del.length ? ' 、' + del.length + ' 个多余的点' : '')
+  return { gone: drop.length, del }
+}
+
+/** 拖完拱高手柄（形状对齐了）再吃一次 —— 手画时拱高是默认值，跟识别出来的椭圆对不齐，吃不着。 */
+function absorbForArc(i: number) {
+  const a = arcs.value[i]
+  const idx = a ? arcIdxOf(a) : null
+  const r = res.value
+  if (!a || !idx || idx.length !== 2 || !r) return
+  const cur = arcSamples(i)
+  if (cur.length < 2) return
+  const s0 = snap()
+  const out = absorbCurve(cur, idx[0], idx[1], false)
+  if (out.gone || out.del.length) {
+    pushSnap(s0)
+    // 点被删掉后这条曲线自己的下标也要跟着挪
+    const shift = (k: number) => k - out.del.filter((d) => d < k).length
+    a.pts = [shift(idx[0]), shift(idx[1])]
+    selVs.value = []
+  }
+}
+
 /** 画弧：第一次点记起点，第二次点成弧。默认拱高 0.25，且**朝图形外侧鼓**（免得弧切进图形里） */
 function pickForArc(i: number) {
   if (pendingV.value === null) { pendingV.value = i; selVs.value = [i]; selE.value = null; selArc.value = null; return }
   if (pendingV.value === i) { pendingV.value = null; return }
-  const s = snap()
-  const a = pendingV.value, b = i
-  arcs.value.push({ pts: [a, b], bulge: defaultBulge(a, b), dash: 0 })
-  selArc.value = arcs.value.length - 1
-  pushSnap(s)
-  pendingV.value = null
-  selVs.value = [b]
-  selE.value = null
+  createArc(pendingV.value, i, false)
 }
 /** 默认拱向：让拱顶落在"图形重心"的反面，弧就不会切进图形内部 */
 function defaultBulge(i0: number, i1: number, mag = 0.25): number {
@@ -1216,6 +1301,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 ? '画弧中：点一个顶点作为弧的起点'
                 : '起点 #' + pendingV + ' —— 再点一个顶点就画出这段弧（点同一个点取消）' }}
             </p>
+            <p v-if="note" class="vd__tip vd__tip--on">{{ note }}</p>
             <p v-if="ellipseMode" class="vd__tip vd__tip--on">
               {{ pendingV === null
                 ? '画椭圆弧中：点一个顶点作为长轴的一端（圆台底面就点左右两端）'
