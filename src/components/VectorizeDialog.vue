@@ -258,6 +258,31 @@ function adopt(r: VectorizeResult) {
     out[i] = { dx: (ux / L) * 0.06 * (r.W / r.H > 1 ? 1 : 0.8), dy: (uy / L) * 0.06 }
   }
   offs.value = out
+  inferCorrespondingEdges()
+}
+
+/** 按字母补线：图上只要有 **X 和 X_1**（同底字母 + 下标 1，下标用 _1 或 ^1 都认）这种一对，
+ *  它们之间就一定有一条线（立体图里的侧棱，C–C₁、B–B₁…），识别漏了要补上 —— 用户明确说"这条线必画"。
+ *  重名只取第一个；已经连了的跳过；补出来的默认实线，不对的话在图上点一下就能改虚实。
+ *  返回补了几条。 */
+function inferCorrespondingEdges(): number {
+  const byLabel = new Map<string, number>()
+  labels.value.forEach((t, i) => {
+    const s = (t || '').trim()
+    if (s && !byLabel.has(s)) byLabel.set(s, i)
+  })
+  let added = 0
+  for (const [txt, i] of byLabel) {
+    const m = /^([A-Za-z])[_^]1$/.exec(txt)
+    if (!m) continue
+    const j = byLabel.get(m[1])
+    if (j === undefined || j === i) continue
+    if (edges.value.some((e) => (e[0] === i && e[1] === j) || (e[0] === j && e[1] === i))) continue
+    edges.value.push([j, i, 0])
+    added++
+  }
+  if (added) note.value = '按字母补了 ' + added + ' 条必画的线（X–X₁ 这类侧棱）'
+  return added
 }
 
 /** 已转好的图形元素 → 可编辑副本（"继续编辑"入口；顶点/边/字母本来就在元素上，不重跑识别） */
@@ -1366,6 +1391,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <button class="vd__btn" :class="{ 'vd__btn--on': ellipseMode }" @click="toggleEllipseArc">
                 {{ ellipseMode ? '结束画椭圆弧' : '＋ 画椭圆弧' }}
               </button>
+              <button class="vd__btn" title="同底字母配下标 1 的一对（C 和 C₁）之间一定有线，识别漏了就补上"
+                @click="inferCorrespondingEdges()">按字母补侧棱</button>
               <button v-if="selE !== null" class="vd__btn" @click="toggleDash">实线 / 虚线 切换</button>
             </div>
             <p v-if="linkMode" class="vd__tip vd__tip--on">
