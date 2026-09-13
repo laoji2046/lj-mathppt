@@ -707,7 +707,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   const diag = Math.hypot(box[2] - box[0], box[3] - box[1])
   const comp = components(m.ink, W, H, box)
   const st = stripText(comp, W, diag, m.ink, opt)
-  const inkPre = st.ink                    // 抹掉字母之后的墨迹，用来判断一条弧是实线还是虚线
+  // st.ink = 抹掉字母之后的墨迹（自动拟合弧时需要它判虚实；现在拟合关掉了，先不取别名）
   const clipped = opt.crop ? clippedEdges(st.ink, W, box) : undefined
   // 被抹掉的那些小块其实是字母 —— 顺手认一下（模板匹配，见 glyphOcr.ts）
   const labels = recognizeLabels(W, st.anchors)
@@ -733,32 +733,12 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     let plen2 = 0
     for (let k = 1; k < P.pts.length; k++) plen2 += Math.hypot(P.pts[k][0] - P.pts[k - 1][0], P.pts[k][1] - P.pts[k - 1][1])
     const isCurve = poly.length >= 3 && plen2 > maxPiece
-    if (isCurve) {
-      // 在整条路径里找"确实是弧"的连续段（一条路常是「弧 + 顺路追下去的直线」）
-      const runs = fitArcRuns(P.pts)
-      if (runs.length) {
-        for (const run of runs) {
-          // 虚线？沿弧采样看墨迹覆盖率（跟直线那边一个思路）
-          let hit = 0
-          const N = 40
-          for (let k = 0; k <= N; k++) {
-            const t = run.a0 + (run.a1 - run.a0) * (k / N)
-            const px = Math.round(run.cx + run.rx * Math.cos(t)), py = Math.round(run.cy + run.ry * Math.sin(t))
-            let ok = 0
-            for (let dy = -2; dy <= 2 && !ok; dy++) for (let dx = -2; dx <= 2; dx++) {
-              const xx = px + dx, yy = py + dy
-              if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue
-              if (inkPre[yy * W + xx]) { ok = 1; break }
-            }
-            hit += ok
-          }
-          fittedArcs.push({ cx: run.cx, cy: run.cy, rx: run.rx, ry: run.ry, a0: run.a0, a1: run.a1, dash: hit / (N + 1) < 0.85 ? 1 : 0 })
-        }
-        // 弧覆盖了这条路径的大部分：整条都交给弧表示，不再出折线
-        const covered = runs.reduce((s, r) => s + (r.i1 - r.i0 + 1), 0)
-        if (covered >= P.pts.length * 0.6) continue
-      }
-    }
+    // 【自动拟合弧：暂时关掉】
+    // v1142 试过在识别时自动把曲线拟合成弧图元。结果是**指标一点没涨**（覆盖/顶点数逐项一致），
+    // 却会在图上凭空多画出一段弧（实测有用户反馈）。收益为零、还会出错，所以先关掉：
+    // 弧改成完全由用户手工画（弹窗「＋ 画一段弧」，见 v1143），确定性高得多。
+    // fitArcRuns / fitEllipse / fitCircle 这三个函数留着，将来要做"可靠的自动拟合"时接着用。
+    void isCurve
     for (let k = 0; k < poly.length - 1; k++) {
       const a = poly[k], b = poly[k + 1]
       const len = Math.hypot(b[0] - a[0], b[1] - a[1])

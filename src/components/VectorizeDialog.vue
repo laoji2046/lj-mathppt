@@ -639,6 +639,53 @@ function onArcCtrlDown(e: PointerEvent, i: number) {
   try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
 }
 
+/** 双击弧上：在那一点把弧切成两段，各带一个控制点 —— 想要几个控制点就双击几次。
+ *  切点落成一个真顶点（在弧上），两段的拱高按"同一条圆"精确算出来，形状不变。 */
+function splitArcAt(i: number, e: MouseEvent) {
+  const a = arcs.value[i]
+  const g = arcGeo(i)
+  if (!a || !g || a.i0 === undefined || a.i1 === undefined) return
+  const p = toCropNorm(e)
+  if (!p) return
+  const mx = p[0] * viewW.value, my = p[1] * viewH.value
+  // 在弧上找离点击最近的那个参数
+  const span = g.a1 - g.a0
+  let bt = g.a0 + span / 2, bd = 1e9
+  for (let k = 0; k <= 60; k++) {
+    const t = g.a0 + span * (k / 60)
+    const dd = Math.hypot(g.cx + g.rx * Math.cos(t) - mx, g.cy + g.ry * Math.sin(t) - my)
+    if (dd < bd) { bd = dd; bt = t }
+  }
+  if (bd > 26) return                                    // 离弧太远，当误点
+  // 父弧的半径（弦式弧一定是圆）
+  const ax0 = px(a.i0), ay0 = py(a.i0), bx0 = px(a.i1), by0 = py(a.i1)
+  const c0 = Math.hypot(bx0 - ax0, by0 - ay0)
+  const s0 = Math.abs(a.bulge || 0) * c0
+  if (c0 < 1 || s0 < 0.5) return
+  const R = (c0 * c0 / 4 + s0 * s0) / (2 * s0)
+  const sign = (a.bulge || 0) >= 0 ? 1 : -1
+  const subBulge = (t0: number, t1: number) => {
+    const x0 = g.cx + g.rx * Math.cos(t0), y0 = g.cy + g.ry * Math.sin(t0)
+    const x1 = g.cx + g.rx * Math.cos(t1), y1 = g.cy + g.ry * Math.sin(t1)
+    const c = Math.hypot(x1 - x0, y1 - y0) || 1
+    const sag = R - Math.sqrt(Math.max(0, R * R - (c * c) / 4))
+    return +((sign * sag) / c).toFixed(4)
+  }
+  const b1 = subBulge(g.a0, bt)
+  const b2 = subBulge(bt, g.a1)
+  const s = snap()
+  const idx = nVerts.value
+  pts.value.push(+((g.cx + g.rx * Math.cos(bt)) / viewW.value).toFixed(4), +((g.cy + g.ry * Math.sin(bt)) / viewH.value).toFixed(4))
+  labels.value.push('')
+  lconf.value.push(0)
+  offs.value.push({ dx: 0, dy: 0 })
+  arcs.value.splice(i, 1, { i0: a.i0, i1: idx, bulge: b1, dash: a.dash }, { i0: idx, i1: a.i1, bulge: b2, dash: a.dash })
+  pushSnap(s)
+  selArc.value = i                                        // 选中前一段，它的控制点接着可拖
+  selVs.value = []
+  selE.value = null
+}
+
 function toggleArcDash(i: number) {
   const a = arcs.value[i]
   if (!a) return
@@ -949,7 +996,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                     :d="arcPath(i)" fill="none" stroke="transparent" stroke-width="14"
                     style="cursor:pointer"
                     @click="selArc = i; selVs = []; selE = null"
-                    @dblclick.stop="selArc = i; selVs = []; selE = null"
+                    @dblclick.stop="splitArcAt(i, $event)"
                   />
                   <path
                     :d="arcPath(i)" fill="none"
@@ -1090,7 +1137,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 : '起点 #' + pendingV + ' —— 再点一个顶点就画出这段弧（点同一个点取消）' }}
             </p>
             <div v-if="selArc !== null" class="vd__row">
-              <span class="vd__selnum">弧 #{{ selArc }}：拖弧上的绿点改曲率</span>
+              <span class="vd__selnum">弧 #{{ selArc }}：拖绿点改曲率 · 双击弧上可再加控制点</span>
               <button class="vd__btn" @click="toggleArcDash(selArc)">{{ arcs[selArc]?.dash ? '改成实线' : '改成虚线' }}</button>
               <button class="vd__btn vd__btn--danger" @click="delArc(selArc)">删掉这段弧</button>
             </div>
