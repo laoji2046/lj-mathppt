@@ -380,22 +380,31 @@ function inferCorrespondingEdges(): number {
     cand.push({ i, j, dx: ax - bx, dy: ay - by })
   }
   if (!cand.length) return 0
+  // 位移向量只用来**提示可疑**，不再拿来否决 —— 用户明确说"C–C₁、B–B₁ 等必有线"，
+  // 而且识别出来的顶点本身有抖动，硬卡位移会把真线也挡掉。
   const mx = cand.reduce((s, c) => s + c.dx, 0) / cand.length
   const my = cand.reduce((s, c) => s + c.dy, 0) / cand.length
   const tol = Math.max(8, 0.2 * Math.hypot(mx, my))
-  let added = 0, dashed = 0, skipped = 0
+  // **只连"端点"**：一条边都没有的孤立点不参与补线（用户：不是端点就不需要连）。
+  // 在补之前先取一次快照，免得后补的边把孤立点"变成"端点。
+  const isEnd = (v: number) => edges.value.some((e) => e[0] === v || e[1] === v)
+  const end0 = new Set<number>()
+  for (let v = 0; v < nVerts.value; v++) if (isEnd(v)) end0.add(v)
+  let added = 0, dashed = 0, odd = 0, notEnd = 0
   const hull = vertHull()
   for (const c of cand) {
-    if (Math.hypot(c.dx - mx, c.dy - my) > tol) { skipped++; continue }
+    if (!end0.has(c.i) || !end0.has(c.j)) { notEnd++; continue }
+    if (Math.hypot(c.dx - mx, c.dy - my) > tol) odd++
     if (edges.value.some((e) => (e[0] === c.i && e[1] === c.j) || (e[0] === c.j && e[1] === c.i))) continue
     const d = inferDashFor(c.j, c.i, hull)
     edges.value.push([c.j, c.i, d])
     added++
     if (d) dashed++
   }
-  if (added || skipped) {
+  if (added || odd || notEnd) {
     note.value = '按字母补了 ' + added + ' 条侧棱（X–X₁）' + (dashed ? '，其中 ' + dashed + ' 条虚线' : '') +
-      (skipped ? '；另有 ' + skipped + ' 对**位置关系不一致，没补**（字母可能认错了）' : '')
+      (notEnd ? '；' + notEnd + ' 对因端点没连线（不是端点）跳过' : '') +
+      (odd ? '；其中 ' + odd + ' 对位移不一致，字母可能认错，请核对' : '')
   }
   return added
 }
@@ -447,6 +456,8 @@ function inferFacePolygons(): number {
       if (k + 1 < arr.length && arr[k + 1].base === arr[k].base) { runOK = false; break }
     }
     if (!runOK) continue
+    // 环上每个点都必须是**端点**（一条边都没连的孤立点不算面顶点）
+    if (arr.some((x) => !edges.value.some((e) => e[0] === x.i || e[1] === x.i))) continue
     const P = arr.map((x) => [px(x.i), py(x.i)] as [number, number])
     if (!isConvexRing(P)) continue
     const hull = vertHull()
