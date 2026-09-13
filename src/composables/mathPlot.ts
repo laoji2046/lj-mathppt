@@ -478,6 +478,16 @@ export function functionFigure(kind: string, w: number, h: number, stroke: strin
 // 圆锥曲线
 // ---------------------------------------------------------------------------
 
+/** 椭圆的窗口：**比 4:3 高一些** —— 4:3 时纵轴只有横轴的 75%，看着太短。
+ *  纵横比 1.15 时纵轴≈横轴的 87%，接近教材里的样子。
+ *  ⚠ 静态 view 与 viewOf 必须用**同一个比例**：元素框是按静态 view 给的，
+ *    比例不一致图形会被拉伸。 */
+const ELLIPSE_AR = 1.15
+export function ellipseWindow(a: number, b: number): View {
+  const k = Math.max(0.5, Math.max(a, b) * 1.28)
+  return { xmin: -k * ELLIPSE_AR, xmax: k * ELLIPSE_AR, ymin: -k, ymax: k }
+}
+
 /** 按尺寸算出合适的显示窗口（留 25% 边距，且保持大致 4:3 的比例） */
 function windowFor(halfW: number, halfH: number): View {
   const hx = Math.max(1, halfW * 1.25)
@@ -498,7 +508,7 @@ export const CONICS: Record<string, {
 }> = {
   // —— 焦点在 x 轴 ——
   conicCircle: { label: '圆 x²+y²=r²', view: { xmin: -3.6, xmax: 3.6, ymin: -3.2, ymax: 3.2 } },
-  ellipse: { label: '椭圆（焦点在 x 轴）', view: { xmin: -5.4, xmax: 5.4, ymin: -4, ymax: 4 } },
+  ellipse: { label: '椭圆（焦点在 x 轴）', view: ellipseWindow(4, 3) },
   hyperbola: { label: '双曲线（焦点在 x 轴）', view: { xmin: -6.6, xmax: 6.6, ymin: -4.8, ymax: 4.8 } },
   conicParabola: { label: '抛物线 y²=2px（焦点在 x 轴）', view: { xmin: -4.6, xmax: 8.2, ymin: -6, ymax: 6 } },
   conicFocusDir: { label: '圆锥曲线统一定义（焦点·准线）', view: { xmin: -4.6, xmax: 8.2, ymin: -6, ymax: 6 } },
@@ -516,12 +526,12 @@ export const CONICS: Record<string, {
   // —— 自定义：参数自己给，窗口随参数自适应 ——
   conicCustomEllipse: {
     label: '自定义椭圆 x²/a²+y²/b²=1（可调 a、b）',
-    view: { xmin: -5, xmax: 5, ymin: -3.75, ymax: 3.75 },
+    view: ellipseWindow(4, 3),
     params: [
       { key: 'a', label: 'a（半长轴）', def: 4, step: 0.5, min: 0.5, max: 20 },
       { key: 'b', label: 'b（半短轴）', def: 3, step: 0.5, min: 0.5, max: 20 },
     ],
-    viewOf: (p) => windowFor(Math.max(p.a, p.b), Math.max(p.a, p.b) * 0.72),
+    viewOf: (p) => ellipseWindow(p.a || 1, p.b || 1),
   },
   conicCustomHyperbola: {
     label: '自定义双曲线 x²/a²−y²/b²=1（可调 a、b）',
@@ -534,14 +544,15 @@ export const CONICS: Record<string, {
   },
   conicCustomParabola: {
     label: '自定义抛物线 y²=2px（可调 p、开口方向）',
-    view: { xmin: -4.6, xmax: 8.2, ymin: -6, ymax: 6 },
+    // 静态 view 与 viewOf 都按 4:3 —— 不一致的话元素框会把图形拉伸
+    view: { xmin: -8, xmax: 8, ymin: -6, ymax: 6 },
     params: [
       { key: 'p', label: 'p（焦准距）', def: 4, step: 0.5, min: 0.2, max: 20 },
       { key: 'dir', label: '开口：1右 2上 3左 4下', def: 1, step: 1, min: 1, max: 4 },
     ],
     viewOf: (p) => {
       const h = Math.max(2, p.p * 1.6)
-      return { xmin: -h, xmax: h, ymin: -h * 0.75, ymax: h * 0.75 }
+      return { xmin: -h * 1.3333, xmax: h * 1.3333, ymin: -h, ymax: h }   // 4:3，与静态 view 一致
     },
   },
 }
