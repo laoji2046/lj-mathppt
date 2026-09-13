@@ -265,6 +265,53 @@ function setAuxStyle(i: number, style: 'auto' | 'solid' | 'dashed') {
   raw.value = JSON.stringify(next, null, 1)
   parse()
 }
+// ---------------- 自由点（给坐标） ----------------
+const fpName = ref('')
+const fpX = ref(0)
+const fpY = ref(0)
+const fpZ = ref(0)
+function addFreePoint() {
+  if (!model.value) return
+  const name = fpName.value.trim() || nextMarkName()
+  const next = JSON.parse(raw.value) as Geom3D
+  next.freePoints = [
+    ...(next.freePoints || []).filter((x) => x.name !== name),
+    { name, at: [+fpX.value, +fpY.value, +fpZ.value] as [number, number, number] },
+  ]
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+  fpName.value = ''
+}
+const addedFree = computed(() => (model.value?.freePoints || []).map((x, i) => ({ i, name: x.name, at: x.at })))
+function delFreePoint(i: number) {
+  if (!model.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  next.freePoints?.splice(i, 1)
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+
+// ---------------- 两平面的交线 ----------------
+const ilA = ref(-1)
+const ilB = ref(-1)
+function addIntersect() {
+  const pa = planes.value[ilA.value]
+  const pb = planes.value[ilB.value]
+  if (!model.value || !pa || !pb || ilA.value === ilB.value || ilA.value < 0 || ilB.value < 0) return
+  const next = JSON.parse(raw.value) as Geom3D
+  next.intersectLines = [...(next.intersectLines || []), { a: pa.pts.slice(), b: pb.pts.slice() }]
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+const addedIntersects = computed(() => (model.value?.intersectLines || []).map((x, i) => ({ i, a: x.a.join('-'), b: x.b.join('-') })))
+function delIntersect(i: number) {
+  if (!model.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  next.intersectLines?.splice(i, 1)
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+
 // ---------------- 直线与平面的交点 ----------------
 const meetA = ref('')
 const meetB = ref('')
@@ -437,6 +484,28 @@ function usePreset(json: string) {
   parse()
 }
 
+// ---------------- 我的预设（存本地） ----------------
+const MY_KEY = 'lj-mathslides-geom3d-presets'
+function loadMy(): { name: string; json: string }[] {
+  try { return (JSON.parse(localStorage.getItem(MY_KEY) || '[]') || []) as { name: string; json: string }[] } catch { return [] }
+}
+const myPresets = ref<{ name: string; json: string }[]>(loadMy())
+const myName = ref('')
+/** 把当前模型（连视角）存成一个常用预设 —— 常画的图形不用每次重搭 */
+function saveMy() {
+  const m = model.value
+  if (!m) return
+  const name = myName.value.trim() || '未命名图形'
+  const json = JSON.stringify({ ...m, view: { azim: azim.value, elev: elev.value } }, null, 1)
+  myPresets.value = [...myPresets.value.filter((p) => p.name !== name), { name, json }]
+  try { localStorage.setItem(MY_KEY, JSON.stringify(myPresets.value)) } catch { /* 存不下就算了 */ }
+  myName.value = ''
+}
+function delMy(name: string) {
+  myPresets.value = myPresets.value.filter((p) => p.name !== name)
+  try { localStorage.setItem(MY_KEY, JSON.stringify(myPresets.value)) } catch { /* 忽略 */ }
+}
+
 // ---------------- 搭模型（不依赖 AI） ----------------
 const bType = ref<'cube' | 'box' | 'prism' | 'pyramid' | 'cylinder' | 'cone'>('prism')
 const bN = ref(4)
@@ -586,7 +655,12 @@ function insert() {
             <select class="g3__sel" @change="usePreset(($event.target as HTMLSelectElement).value)">
               <option value="">常用几何体…</option>
               <option v-for="p in GEOM3D_PRESETS" :key="p.name" :value="p.json">{{ p.name }}</option>
+              <optgroup v-if="myPresets.length" label="我的预设">
+                <option v-for="p in myPresets" :key="'my' + p.name" :value="p.json">{{ p.name }}</option>
+              </optgroup>
             </select>
+            <input v-model="myName" class="g3__inp g3__inp--sm" placeholder="预设名" title="给当前模型起个名字，存成常用预设">
+            <button class="g3__btn" title="把当前模型（连视角）存成常用预设" @click="saveMy()">存为常用</button>
             <button class="g3__btn" title="想把题目交给 AI 翻译成 JSON 时用：复制提示词，连同题目一起发出去" @click="copyPrompt()">
               {{ copied ? '已复制 ✓' : '复制提示词（可选）' }}
             </button>
@@ -631,6 +705,21 @@ function insert() {
               </select>
               <button class="g3__btn" @click="addAux()">添加</button>
             </div>
+            <div v-if="myPresets.length" class="g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">我的预设：</span>
+              <span v-for="p in myPresets" :key="'myp' + p.name" class="g3__plane">
+                <b class="g3__link" title="载入这个预设" @click="usePreset(p.json)">{{ p.name }}</b>
+                <button class="g3__btn g3__btn--tiny" title="删掉这个预设" @click="delMy(p.name)">×</button>
+              </span>
+            </div>
+            <div class="g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">自由点（给坐标）：</span>
+              <input v-model="fpName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
+              <label class="g3__num">x <input v-model.number="fpX" type="number" step="0.1"></label>
+              <label class="g3__num">y <input v-model.number="fpY" type="number" step="0.1"></label>
+              <label class="g3__num">z <input v-model.number="fpZ" type="number" step="0.1"></label>
+              <button class="g3__btn" @click="addFreePoint()">加这个点</button>
+            </div>
             <div class="g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">定比分点 P = A + t(B−A)：</span>
               <select v-model="mkFrom" class="g3__sel g3__sel--sm">
@@ -647,7 +736,7 @@ function insert() {
               <input v-model="mkName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
               <button class="g3__btn" @click="addMark()">加这个点</button>
             </div>
-            <div v-if="addedMarks.length || addedAux.length" class="g3__row g3__row--top g3__row--stack">
+            <div v-if="addedMarks.length || addedAux.length || addedFree.length" class="g3__row g3__row--top g3__row--stack">
               <span class="g3__tip g3__tip--inline">已加的（可删）：</span>
               <span
                 v-for="mk in addedMarks" :key="'mk' + mk.i" class="g3__plane"
@@ -656,12 +745,35 @@ function insert() {
                 <b>点 {{ mk.name }}</b>
                 <button class="g3__btn g3__btn--tiny" title="删掉这个点" @click="delMark(mk.i)">×</button>
               </span>
+              <span v-for="fp in addedFree" :key="'fp' + fp.i" class="g3__plane" :title="'自由点 (' + fp.at.join(', ') + ')'">
+                <b>点 {{ fp.name }}</b><span class="g3__meet">{{ fp.at.join(',') }}</span>
+                <button class="g3__btn g3__btn--tiny" @click="delFreePoint(fp.i)">×</button>
+              </span>
               <span v-for="ax in addedAux" :key="'ax' + ax.i" class="g3__plane">
                 <b class="g3__link" title="在图上选中这条线" @click="selectAux(ax.from, ax.to)">线 {{ ax.from }}–{{ ax.to }}</b>
                 <button class="g3__btn g3__btn--tiny" :class="{ 'g3__btn--on': ax.style === 'auto' }" @click="setAuxStyle(ax.i, 'auto')">自动</button>
                 <button class="g3__btn g3__btn--tiny" :class="{ 'g3__btn--on': ax.style === 'solid' }" @click="setAuxStyle(ax.i, 'solid')">实</button>
                 <button class="g3__btn g3__btn--tiny" :class="{ 'g3__btn--on': ax.style === 'dashed' }" @click="setAuxStyle(ax.i, 'dashed')">虚</button>
                 <button class="g3__btn g3__btn--tiny" title="删掉这条辅助线" @click="delAux(ax.i)">×</button>
+              </span>
+            </div>
+            <div v-if="planes.length >= 2" class="g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">两平面的交线：</span>
+              <select v-model.number="ilA" class="g3__sel g3__sel--sm" style="min-width:100px">
+                <option :value="-1">平面 A…</option>
+                <option v-for="(pl, k) in planes" :key="'ila' + k" :value="k">{{ pl.label }}</option>
+              </select>
+              <select v-model.number="ilB" class="g3__sel g3__sel--sm" style="min-width:100px">
+                <option :value="-1">平面 B…</option>
+                <option v-for="(pl, k) in planes" :key="'ilb' + k" :value="k">{{ pl.label }}</option>
+              </select>
+              <button class="g3__btn" @click="addIntersect()">求交线</button>
+            </div>
+            <div v-if="addedIntersects.length" class="g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">交线：</span>
+              <span v-for="il in addedIntersects" :key="'il' + il.i" class="g3__plane">
+                <b>{{ il.a }}</b><span class="g3__meet">∩ {{ il.b }}</span>
+                <button class="g3__btn g3__btn--tiny" @click="delIntersect(il.i)">×</button>
               </span>
             </div>
             <div v-if="planes.length" class="g3__row g3__row--top">

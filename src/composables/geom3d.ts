@@ -42,6 +42,11 @@ export interface Geom3D {
   /** **点样式**（按点名）：改标签文字（`null` = 不显示）、颜色、大小。
    *  编辑器里选中一个点就能改这些。 */
   pointStyles?: Record<string, { label?: string | null; color?: string; size?: number }>
+  /** **两平面的交线**：a / b 各是定一个平面的三点（或更多）。
+   *  算出交线后**截到多面体内部**（两面各自截面的公共部分），画成一条线。 */
+  intersectLines?: { a: string[]; b: string[] }[]
+  /** **自由点**（直接给坐标）：不在任何棱上、纯粹是作图位置，比如外接球球心、投影点。 */
+  freePoints?: { name: string; at: [number, number, number] }[]
   /** **直线与平面的交点**（构造点）：line 是直线上的两点、plane 是定平面的三点。
    *  解析时算出来当普通顶点用 —— 后续连线、定平面都能拿它当端点。 */
   meetPoints?: { name: string; line: [string, string]; plane: string[] }[]
@@ -193,6 +198,12 @@ export function resolveVertices(m: Geom3D): Record<string, [number, number, numb
     pend = next
     if (!moved) break
   }
+  // 自由点（直接给坐标）
+  for (const fp of m.freePoints || []) {
+    if (fp?.name && Array.isArray(fp.at) && fp.at.length === 3 && !out[fp.name]) {
+      out[fp.name] = [+fp.at[0], +fp.at[1], +fp.at[2]]
+    }
+  }
   // 直线与平面的交点（构造点）：跟定比分点一样，解析出来当普通顶点用
   for (const mp of m.meetPoints || []) {
     if (!mp?.name || out[mp.name]) continue
@@ -214,6 +225,32 @@ export function resolveVertices(m: Geom3D): Record<string, [number, number, numb
     ]
   }
   return out
+}
+
+/** 直线（o + t·dir）在共面多边形环内的参数区间（环是这个平面截多面体得到的截面）。
+ *  没有交点或整条线在环外 → null。 */
+function spanInRing(
+  o: [number, number, number],
+  dir: [number, number, number],
+  ring: [number, number, number][],
+): [number, number] | null {
+  const ts: number[] = []
+  for (let k = 0; k < ring.length; k++) {
+    const A = ring[k]
+    const B = ring[(k + 1) % ring.length]
+    const e = sub(B, A)
+    const w0 = sub(o, A)
+    const n = cross(dir, e)
+    const nn = dot(n, n)
+    if (nn < 1e-12) continue
+    const t = dot(cross(w0, e), n) / nn
+    // s 要取负 —— 直接套 t 的写法会把符号带错（踩过：t 对、s 反，结果全被 s∈[0,1] 滤掉，
+    // 交线一条都出不来，但看起来"公式没问题"）
+    const s = -dot(cross(w0, dir), n) / nn
+    if (s >= -1e-6 && s <= 1 + 1e-6) ts.push(t)
+  }
+  if (!ts.length) return null
+  return [Math.min(...ts), Math.max(...ts)]
 }
 
 /** 参数化生成常见几何体 —— 不依赖任何 AI，选类型 + 填参数就出模型。
@@ -648,6 +685,53 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     if (ring.length >= 3) sections.push({ ring, fill: pc.fill })
   }
 
+  // **两平面的交线**：nA × nB 是方向；线上一点解 [nA; nB; dir]·P = [cA; cB; 0]（Cramer，det = |dir|²）。
+  // 再分别截到两个平面各自的截面环里，取公共区间。
+  const meetLines: [number, number, number][][] = []
+  for (const il of m.intersectLines || []) {
+    const pa = (il.a || []).map((n) => idx[n]).filter((k) => k !== undefined)
+    const pb = (il.b || []).map((n) => idx[n]).filter((k) => k !== undefined)
+    if (pa.length < 3 || pb.length < 3) continue
+    const nA = norm(cross(sub(P3[pa[1]], P3[pa[0]]), sub(P3[pa[2]], P3[pa[0]])))
+    const nB = norm(cross(sub(P3[pb[1]], P3[pb[0]]), sub(P3[pb[2]], P3[pb[0]])))
+    const dir = cross(nA, nB)
+    const dd = dot(dir, dir)
+    if (dd < 1e-10) continue                       // 两平面平行（或重合）→ 没有唯一交线
+    const cA = dot(nA, P3[pa[0]])
+    const cB = dot(nB, P3[pb[0]])
+    // Cramer：系数矩阵的行是 [nA; nB; dir]，所以它的**列**是下面三个 ——
+    // 行列式要按"列"给（det(a,b,c) = a·(b×c)）。踩过的坑：按行传会把位置解错，
+    // 交线整个跑到别处，而公式看上去"没毛病"。
+    const detC = (a: [number, number, number], b2: [number, number, number], c2: [number, number, number]) =>
+      a[0] * (b2[1] * c2[2] - b2[2] * c2[1]) + a[1] * (b2[2] * c2[0] - b2[0] * c2[2]) + a[2] * (b2[0] * c2[1] - b2[1] * c2[0])
+    const cx: [number, number, number] = [nA[0], nB[0], dir[0]]
+    const cy: [number, number, number] = [nA[1], nB[1], dir[1]]
+    const cz: [number, number, number] = [nA[2], nB[2], dir[2]]
+    const det = detC(cx, cy, cz)
+    if (Math.abs(det) < 1e-10) continue
+    const rhs: [number, number, number] = [cA, cB, 0]
+    const onLine: [number, number, number] = [
+      detC(rhs, cy, cz) / det,
+      detC(cx, rhs, cz) / det,
+      detC(cx, cy, rhs) / det,
+    ]
+    // 截到多面体内部：两个平面的截面环各自给出一个参数区间，取交集
+    const ringA = sectionPolygon(P3, faces, P3[pa[0]], nA)
+    const ringB = sectionPolygon(P3, faces, P3[pb[0]], nB)
+    const sA = ringA.length >= 3 ? spanInRing(onLine, dir, ringA) : null
+    const sB = ringB.length >= 3 ? spanInRing(onLine, dir, ringB) : null
+    if (!sA || !sB) continue
+    const lo = Math.max(sA[0], sB[0])
+    const hi = Math.min(sA[1], sB[1])
+    if (hi - lo < 1e-6) continue
+    const pt = (t: number): [number, number, number] => [
+      +(onLine[0] + dir[0] * t).toFixed(4),
+      +(onLine[1] + dir[1] * t).toFixed(4),
+      +(onLine[2] + dir[2] * t).toFixed(4),
+    ]
+    meetLines.push([pt(lo), pt(hi)])
+  }
+
   const raw = P3.map((p) => [dot(p, right), dot(p, up), dot(p, d)] as [number, number, number])
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
   for (const r of raw) {
@@ -656,6 +740,13 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   }
   for (const sec of sections) {
     for (const p of sec.ring) {
+      const sx = dot(p, right), sy = -dot(p, up)
+      if (sx < x0) x0 = sx; if (sx > x1) x1 = sx
+      if (sy < y0) y0 = sy; if (sy > y1) y1 = sy
+    }
+  }
+  for (const seg of meetLines) {
+    for (const p of seg) {
       const sx = dot(p, right), sy = -dot(p, up)
       if (sx < x0) x0 = sx; if (sx > x1) x1 = sx
       if (sy < y0) y0 = sy; if (sy > y1) y1 = sy
@@ -678,6 +769,18 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     }
     secStart.push(0)
     secIdx.push(ids)
+  }
+
+  // 交线的两个端点也是**新点**，追加到 points 末尾（无字母）
+  const meetIdx: number[][] = []
+  for (const seg of meetLines) {
+    const ids: number[] = []
+    for (const p of seg) {
+      const sx = dot(p, right), sy = -dot(p, up)
+      ids.push(points.length / 2)
+      points.push(+(ox + (sx - x0) * s).toFixed(4), +(oy + (sy - y0) * s).toFixed(4))
+    }
+    meetIdx.push(ids)
   }
 
   const c: [number, number, number] = [0, 0, 0]
@@ -771,6 +874,10 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   }
   // 点样式：编辑器里改过的标签优先（label 为 null 表示不显示这个字母）
   const ps = m.pointStyles || {}
+  // 交线：画成一条线（实线 —— 它是题目的结论，不该被虚实规则藏起来）
+  for (const ids of meetIdx) {
+    if (ids.length >= 2) edges.push([ids[0], ids[1], 0])
+  }
   const vlabels = names.map((n) => {
     const ov = ps[n]
     if (ov && 'label' in ov) return ov.label == null ? null : toLabelText(ov.label)
@@ -778,6 +885,7 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     return toLabelText(m.labels?.[n] || n)
   })
   if (secIdx.length) vlabels.push(...secIdx.map((ids) => ids.map(() => null)).flat())
+  if (meetIdx.length) vlabels.push(...meetIdx.map((ids) => ids.map(() => null)).flat())
   const faceStyles = faces.map((_, i) => cutStyles[i - (faces.length - cutStyles.length)] || null)
   // 线样式（编辑器改的属性）：按两端点名查，与 mesh.edges 一一对应
   const es = m.edgeStyles || {}
