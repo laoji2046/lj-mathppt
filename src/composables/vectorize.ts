@@ -510,7 +510,12 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   interface Edge { aId: number; bId: number; a: [number, number]; b: [number, number]; dash: 0 | 1; snap?: number; dir?: [number, number] }
   const edges: Edge[] = []
   for (const s of fixedSegs) edges.push({ aId: s.aId, bId: s.bId, a: s.a, b: s.b, dash: 0 })
-  for (const s of leftover) edges.push({ aId: -1, bId: -1, a: s.a, b: s.b, dash: 0 })
+  for (const s of leftover) {
+    // 只认出一截的短划：它**仍然是虚线**，不能当实线短段画。
+    // 之前把它标成 dash:0 又没有吸附半径，结果就是"一小段突兀的实线 + 两端各造一个多余顶点"，
+    // 而它本该连成的那条虚线（例如 D–E、C–F 这种只有一两截的短虚线）看着就像没识别出来。
+    edges.push({ aId: -1, bId: -1, a: s.a, b: s.b, dash: 1 })
+  }
   for (const C of chains) {
     let ux = C[0].b[0] - C[0].a[0], uy = C[0].b[1] - C[0].a[1]
     const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul
