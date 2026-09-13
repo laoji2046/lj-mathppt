@@ -69,12 +69,17 @@ node tools/solidfit/compare.cjs vec.json
 | 虚线 / 实线判定 | 配上 61 条边，**58 条判对** |
 | 边召回 | 30%~77%（冗余顶点会把一条边拆成两段，几何上仍是对的） |
 
-另外两个诊断脚本（都拿 8 套真值打分）：
+另外三个诊断脚本：
 
 ```bash
-node tools/solidfit/vertcheck.cjs v18.json      # 多出来的顶点按拓扑分类：悬空 / 共线 / 拐点 / 三度交点
-node tools/solidfit/dashcheck.cjs 改前 v10.json 改后 v18.json   # 虚实判定的绝对条数（比百分比可靠）
+node tools/solidfit/vertcheck.cjs v18.json                      # 多出来的顶点按拓扑分类（拿 8 套真值）
+node tools/solidfit/dashcheck.cjs 改前 a.json 改后 b.json        # 虚实判定的绝对条数（比百分比可靠）
+node tools/solidfit/corpuscheck.cjs vall.json [标签]            # 整批图（206 张）的顶点/虚线/碎边总数
 ```
+
+**改算法要看 corpuscheck**：8 张真值只覆盖 8 种图，看不出"对别的图有没有变好"。
+实测 v1136 → v1139（虚线成链的三处放宽）在 206 张图上：顶点合计 2862 → **2591**（少 271 个多余点）、
+虚线 1431 → **1670**（多 239 条成链），碎边都是 0。
 
 结论：**几何位置和虚实线基本可以直接用**，剩下的活是删掉几个冗余顶点、填字母 —— 
 比纯手工量快一个数量级，但还不能完全无人值守。
