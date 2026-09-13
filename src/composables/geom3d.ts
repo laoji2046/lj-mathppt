@@ -48,6 +48,11 @@ export interface Geom3D {
   /** **点在平面上的投影（射影）**：from 是那个点，plane 是定平面的三点。
    *  `foot` 给 true 时同时画一条 from→投影点的垂线（教材里那条）。 */
   projectPoints?: { name: string; from: string; plane: string[]; foot?: boolean }[]
+  /** **隐藏**（编辑器里的"眼睛"）：键的写法
+   *  - `p:A` 点名 —— 不显示这个字母（点仍在，别的线还能用它）
+   *  - `e:A|B` 一条棱/线（两点名按字典序拼）
+   *  - `aux:0` / `cut:0` / `plane:0` / `il:0` / `pp:0` —— 第 i 条辅助线 / 截面 / 平面 / 交线 / 射影垂线 */
+  hidden?: string[]
   /** **自由点**（直接给坐标）：不在任何棱上、纯粹是作图位置，比如外接球球心、投影点。 */
   freePoints?: { name: string; at: [number, number, number] }[]
   /** **直线与平面的交点**（构造点）：line 是直线上的两点、plane 是定平面的三点。
@@ -688,8 +693,11 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   const faces = (m.faces || []).map((f) => f.map((n) => idx[n]).filter((k) => k !== undefined))
   // **多点确定平面 → 求截面**：三个点定出平面，再逐面求交得到真正的截面多边形。
   // （必须在归一化之前算，截面的顶点也要进包围盒，否则图会偏。）
+  const hid = new Set(m.hidden || [])
   const sections: { ring: [number, number, number][]; fill?: string | null }[] = []
-  for (const pc of m.planeCuts || []) {
+  for (let pi = 0; pi < (m.planeCuts || []).length; pi++) {
+    const pc = (m.planeCuts || [])[pi]
+    if (hid.has('plane:' + pi)) continue
     const ids = (pc.through || []).map((n) => idx[n]).filter((k) => k !== undefined)
     if (ids.length < 3) continue
     const p0 = P3[ids[0]]
@@ -707,7 +715,9 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   // **两平面的交线**：nA × nB 是方向；线上一点解 [nA; nB; dir]·P = [cA; cB; 0]（Cramer，det = |dir|²）。
   // 再分别截到两个平面各自的截面环里，取公共区间。
   const meetLines: [number, number, number][][] = []
-  for (const il of m.intersectLines || []) {
+  for (let li = 0; li < (m.intersectLines || []).length; li++) {
+    const il = (m.intersectLines || [])[li]
+    if (hid.has('il:' + li)) continue
     const pa = (il.a || []).map((n) => idx[n]).filter((k) => k !== undefined)
     const pb = (il.b || []).map((n) => idx[n]).filter((k) => k !== undefined)
     if (pa.length < 3 || pb.length < 3) continue
@@ -839,7 +849,9 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     return true
   }
   const auxVisible: { i: number; j: number; dash: 0 | 1 }[] = []
-  for (const a of m.auxiliary || []) {
+  for (let ai = 0; ai < (m.auxiliary || []).length; ai++) {
+    const a = (m.auxiliary || [])[ai]
+    if (hid.has('aux:' + ai)) continue
     const i = idx[a.from], j = idx[a.to]
     if (i === undefined || j === undefined) continue
     let dash: 0 | 1 = 0
@@ -860,8 +872,9 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   // **必须在截面/交线往 faces 里塞新点之前做** —— 那些点的下标只存在于 points 里，
   // inside() 遍历 faces 时会拿它们去索引 P3，直接崩（踩过）。
   const footEdges: [number, number, number][] = []
-  for (const pp of m.projectPoints || []) {
-    if (!pp?.foot) continue
+  for (let qi = 0; qi < (m.projectPoints || []).length; qi++) {
+    const pp = (m.projectPoints || [])[qi]
+    if (!pp?.foot || hid.has('pp:' + qi)) continue
     const i = idx[pp.from], j = idx[pp.name]
     if (i === undefined || j === undefined) continue
     const mid: [number, number, number] = [
@@ -883,7 +896,9 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   // 边是实是虚按这个多边形自己朝向定 —— 截面通常是题目的主角，朝向相机就画实线。
   // 注意：要在上面那套可见性算完之后再加，免得它参与"棱属于哪个面"的判断。
   const cutStyles: { fill?: string; opacity?: number }[] = []
-  for (const cp of m.cutPlanes || []) {
+  for (let ci = 0; ci < (m.cutPlanes || []).length; ci++) {
+    const cp = (m.cutPlanes || [])[ci]
+    if (hid.has('cut:' + ci)) continue
     const ids = (cp.points || []).map((n) => idx[n]).filter((k) => k !== undefined)
     if (ids.length < 3) continue
     const A = P3[ids[0]], B = P3[ids[1]], C = P3[ids[2]]
@@ -918,6 +933,7 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     if (ids.length >= 2) edges.push([ids[0], ids[1], 0])
   }
   const vlabels = names.map((n) => {
+    if (hid.has('p:' + n)) return null            // 点了"隐藏"的点不显示字母（点还在，别的线仍可用）
     const ov = ps[n]
     if (ov && 'label' in ov) return ov.label == null ? null : toLabelText(ov.label)
     if (m.labels && !(n in m.labels)) return null
@@ -932,10 +948,15 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     const a = names[i], b = names[j]
     return a === undefined || b === undefined ? '' : [a, b].sort().join('|')
   }
-  const edgeStylesOut = edges.map(([i, j]) => {
+  // 隐藏的线（e:A|B，两端点名按字典序）—— 要在算 edgeStyles 之前过滤，保持一一对应
+  const edgesOut = edges.filter(([i, j]) => {
+    const a = names[i], b = names[j]
+    return !(a !== undefined && b !== undefined && hid.has('e:' + [a, b].sort().join('|')))
+  })
+  const edgeStylesOut = edgesOut.map(([i, j]) => {
     const o = es[ekey(i, j)]
     if (!o) return null
     return { color: o.color, width: o.width, dash: o.dash === 1 ? 'dash' as const : o.dash === 0 ? 'solid' as const : undefined }
   })
-  return { points, mesh: { edges, faces }, vlabels, arcs: [], aspect: bw / bh, faceStyles, edgeStyles: edgeStylesOut }
+  return { points, mesh: { edges: edgesOut, faces }, vlabels, arcs: [], aspect: bw / bh, faceStyles, edgeStyles: edgeStylesOut }
 }

@@ -511,6 +511,20 @@ function usePreset(json: string) {
   parse()
 }
 
+// ---------------- 图元显隐 ----------------
+/** 切换一条图元的隐藏状态（键的写法见 Geom3D.hidden 的注释） */
+function toggleHidden(key: string) {
+  if (!model.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  const hs = new Set(next.hidden || [])
+  if (hs.has(key)) hs.delete(key)
+  else hs.add(key)
+  next.hidden = [...hs]
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+const isHidden = (key: string) => (model.value?.hidden || []).includes(key)
+
 // ---------------- 顶点坐标（可直接改） ----------------
 /** 一张可编辑的顶点表：模型自带顶点 + 自由点可以改坐标；
  *  定比分点 / 交点 / 截面点这些是**算出来的**，只读展示（灰掉）。 */
@@ -817,15 +831,18 @@ function insert() {
                 v-for="mk in addedMarks" :key="'mk' + mk.i" class="g3__plane"
                 :title="'定比分点 ' + mk.name + ' = ' + mk.from + ' + ' + mk.t + '×(' + mk.to + ' − ' + mk.from + ')'"
               >
-                <b>点 {{ mk.name }}</b>
+                <b :class="{ 'g3__off': isHidden('p:' + mk.name) }">点 {{ mk.name }}</b>
+                <button class="g3__btn g3__btn--tiny" :title="isHidden('p:' + mk.name) ? '显示字母' : '隐藏字母'" @click="toggleHidden('p:' + mk.name)">{{ isHidden('p:' + mk.name) ? '○' : '●' }}</button>
                 <button class="g3__btn g3__btn--tiny" title="删掉这个点" @click="delMark(mk.i)">×</button>
               </span>
               <span v-for="fp in addedFree" :key="'fp' + fp.i" class="g3__plane" :title="'自由点 (' + fp.at.join(', ') + ')'">
-                <b>点 {{ fp.name }}</b><span class="g3__meet">{{ fp.at.join(',') }}</span>
+                <b :class="{ 'g3__off': isHidden('p:' + fp.name) }">点 {{ fp.name }}</b><span class="g3__meet">{{ fp.at.join(',') }}</span>
+                <button class="g3__btn g3__btn--tiny" :title="isHidden('p:' + fp.name) ? '显示' : '隐藏'" @click="toggleHidden('p:' + fp.name)">{{ isHidden('p:' + fp.name) ? '○' : '●' }}</button>
                 <button class="g3__btn g3__btn--tiny" @click="delFreePoint(fp.i)">×</button>
               </span>
               <span v-for="ax in addedAux" :key="'ax' + ax.i" class="g3__plane">
                 <b class="g3__link" title="在图上选中这条线" @click="selectAux(ax.from, ax.to)">线 {{ ax.from }}–{{ ax.to }}</b>
+                <button class="g3__btn g3__btn--tiny" :title="isHidden('aux:' + ax.i) ? '显示这条线' : '隐藏这条线'" @click="toggleHidden('aux:' + ax.i)">{{ isHidden('aux:' + ax.i) ? '○' : '●' }}</button>
                 <button class="g3__btn g3__btn--tiny" :class="{ 'g3__btn--on': ax.style === 'auto' }" @click="setAuxStyle(ax.i, 'auto')">自动</button>
                 <button class="g3__btn g3__btn--tiny" :class="{ 'g3__btn--on': ax.style === 'solid' }" @click="setAuxStyle(ax.i, 'solid')">实</button>
                 <button class="g3__btn g3__btn--tiny" :class="{ 'g3__btn--on': ax.style === 'dashed' }" @click="setAuxStyle(ax.i, 'dashed')">虚</button>
@@ -900,7 +917,8 @@ function insert() {
             <div v-if="planes.length" class="g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">平面属性：</span>
               <span v-for="pl in planes" :key="pl.kind + pl.i" class="g3__plane">
-                <b>{{ pl.label }}</b>
+                <b :class="{ 'g3__off': isHidden((pl.kind === 'cut' ? 'cut:' : 'plane:') + pl.i) }">{{ pl.label }}</b>
+                <button class="g3__btn g3__btn--tiny" :title="isHidden((pl.kind === 'cut' ? 'cut:' : 'plane:') + pl.i) ? '显示这个平面' : '隐藏这个平面'" @click="toggleHidden((pl.kind === 'cut' ? 'cut:' : 'plane:') + pl.i)">{{ isHidden((pl.kind === 'cut' ? 'cut:' : 'plane:') + pl.i) ? '○' : '●' }}</button>
                 <input
                   type="color" class="g3__col" :value="pl.fill || '#f0c674'"
                   title="填充色"
@@ -1042,6 +1060,7 @@ function insert() {
 .g3__col { width: 30px; height: 20px; padding: 0; border: 1px solid var(--border, #ddd); border-radius: 4px; background: none; }
 .g3__plane { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #555; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 2px 4px; background: #fff; }
 .g3__plane b { color: #1668e0; font-weight: 600; }
+.g3__off { text-decoration: line-through; opacity: .45; }
 .g3__row--stack { align-items: flex-start; }
 .g3__verts { margin-top: 12px; }
 .g3__vsub { font-weight: 400; color: #8a8aa0; font-size: 11px; }
