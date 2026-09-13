@@ -95,7 +95,7 @@ const svg = computed(() => {
   if (!m) return ''
   const p = projectGeom(m, { azim: azim.value, elev: elev.value })
   const solid = renderSolid('cube', p.points, W.value, H, '#1a1a1a', 2.6, 'transparent', '6 5',
-    p.vlabels, undefined, undefined, undefined, undefined, undefined, undefined, p.mesh)
+    p.vlabels, undefined, undefined, undefined, undefined, p.faceStyles.length ? p.faceStyles : undefined, undefined, p.mesh)
   // 圆柱 / 圆锥的底面是**弧图元**，renderSolid 不画它，单独叠一层（跟画布里的做法一致）
   return solid + arcsSvg(p.arcs, W.value, H, '#1a1a1a', 2.6)
 })
@@ -185,6 +185,24 @@ function addAux() {
   parse()
 }
 
+/** 加截面 / 辅助面：输入一串顶点名（空格或逗号分隔），按这个顺序围成多边形。
+ *  例题里的"截面 A-C-B₁"就是这三个字。填充色浅黄，只描边就留空颜色。 */
+const cutText = ref('')
+const cutFill = ref(true)
+function addCut() {
+  const m = model.value
+  if (!m) return
+  const ids = cutText.value.split(/[\s,，]+/).map((s) => s.trim()).filter(Boolean)
+  if (ids.length < 3) return
+  const bad = ids.filter((n) => !(n in m.vertices))
+  if (bad.length) { parseErr.value = '截面里有不存在的顶点：' + bad.join('、'); return }
+  const next = JSON.parse(raw.value) as Geom3D
+  next.cutPlanes = [...(next.cutPlanes || []), { points: ids, fill: cutFill.value ? '#f0c674' : null }]
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+  cutText.value = ''
+}
+
 /** 棱柱：给每条竖棱加一个中点（A2 / B2 / …）—— 教材里那排"中点"一点就齐。 */
 function addMidpoints() {
   const m = model.value
@@ -211,6 +229,7 @@ function insert() {
   store.addElement('mathfig', {
     kind: 'cube', points: p.points, mesh: p.mesh, vlabels: p.vlabels,
     arcs: p.arcs.length ? p.arcs : undefined,
+    faceStyles: p.faceStyles.length ? p.faceStyles : undefined,
     w: W.value, h: H, fill: 'transparent', stroke: '#1a1a1a', strokeWidth: 2.6,
   } as never)
   closeGeom3D()
@@ -248,6 +267,7 @@ function insert() {
                 <option value="box">长方体</option>
                 <option value="cylinder">圆柱</option>
                 <option value="cone">圆锥</option>
+                <option value="sphere">球</option>
               </select>
               <label v-if="bType === 'prism' || bType === 'pyramid'" class="g3__num">n <input v-model.number="bN" type="number" min="3" max="12"></label>
               <label class="g3__num">{{ bType === 'cube' ? '棱长' : (bType === 'cylinder' || bType === 'cone' ? '底半径' : '长/底边') }} <input v-model.number="bA" type="number" step="0.1"></label>
@@ -272,6 +292,12 @@ function insert() {
                 <option value="dashed">虚线</option>
               </select>
               <button class="g3__btn" @click="addAux()">添加</button>
+            </div>
+            <div class="g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">加截面 / 辅助面（顶点名，空格分隔）：</span>
+              <input v-model="cutText" class="g3__inp" placeholder="如 A C B1">
+              <label class="g3__num"><input v-model="cutFill" type="checkbox"> 填充</label>
+              <button class="g3__btn" @click="addCut()">添加截面</button>
             </div>
           </div>
           <textarea v-model="raw" class="g3__ta" spellcheck="false" @blur="parse" @input="parseErr = ''" />
@@ -350,6 +376,7 @@ function insert() {
 .g3__num input { width: 58px; border: 1px solid var(--border, #ddd); border-radius: 5px; padding: 4px 6px; font-size: 12px; }
 .g3__build { margin-top: 12px; padding: 8px 10px; border: 1px dashed var(--border, #ddd); border-radius: 6px; background: #fafafc; }
 .g3__tip--inline { margin: 0; }
+.g3__inp { flex: 1; min-width: 110px; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 5px 8px; font-size: 12px; }
 .g3__f { font-size: 12px; color: #555; flex: 1; min-width: 170px; }
 .g3__f input { width: 100%; }
 .g3__tip { font-size: 12px; color: #6b6b76; line-height: 1.6; margin: 8px 0 0; }

@@ -27,8 +27,10 @@ export interface Geom3D {
   auxiliary?: { from: string; to: string; style?: 'solid' | 'dashed' | 'auto' }[]
   /** 只标注列出的顶点；省略则全标。写 'A1' 会变成应用里的 A_1 */
   labels?: Record<string, string>
-  /** 圆柱 / 圆锥：顶点表留空也行，形状由这里产生（底面圆 → 投影成椭圆弧） */
+  /** 圆柱 / 圆锥 / 球：顶点表留空也行，形状由这里产生（底面圆 → 投影成椭圆弧） */
   primitive?: GeomPrimitive
+  /** 截面 / 辅助面：按顺序列顶点名；fill 给颜色字符串表示填充，null 只描边 */
+  cutPlanes?: { points: string[]; fill?: string | null }[]
 }
 
 export interface Geom3DView {
@@ -65,7 +67,8 @@ function viewDir(azim: number, elev: number): [number, number, number] {
 /** 圆柱 / 圆锥：圆形底在投影里是椭圆，用**弧图元**表达（不是折线）。
  *  n 是采样数，只影响"看起来圆不圆"，60 够用。 */
 export interface GeomPrimitive {
-  type: 'cylinder' | 'cone'
+  /** sphere 用 r，忽略 h */
+  type: 'cylinder' | 'cone' | 'sphere'
   /** 底面半径 */
   r: number
   /** 高 */
@@ -76,21 +79,30 @@ export interface GeomPrimitive {
  *  （圆在仿射映射下的像一定是椭圆，所以只要知道圆的两个轴向量的投影就够了，
  *   不必去采样点再拟合。） */
 function ellipseFromConjugate(ux: number, uy: number, vx: number, vy: number) {
-  const uu = ux * ux + uy * uy, vv = vx * vx + vy * vy, uv = ux * vx + uy * vy
-  const E = (uu + vv) / 2, F = (uu - vv) / 2, G = uv
-  const s = Math.hypot(F, G)
-  const rx = Math.sqrt(Math.max(1e-12, E + s))
-  const ry = Math.sqrt(Math.max(1e-12, E - s))
-  let rot = 0.5 * Math.atan2(2 * uv, uu - vv)
-  if (ry > rx) { rot += Math.PI / 2; return { rx: ry, ry: rx, rot } }
+  // 椭圆的点 = M·(单位圆)，M = [U V]。半轴和朝向就是 M 的奇异值 / 左奇异向量，
+  // 也就是 **MMᵀ 的特征值 / 特征向量**（对称 2×2 有闭式）。
+  //
+  // **别用"共轭直径夹角"那套公式算朝向**：半轴长度两边都对，朝向会错 ——
+  // 实测球的赤道（共轭直径在 xy 上协方差是对角的，朝向本该是 0°）被算成 55°，
+  // 椭圆整个画歪。这正是踩过的坑。
+  const a11 = ux * ux + vx * vx
+  const a12 = ux * uy + vx * vy
+  const a22 = uy * uy + vy * vy
+  const tr = a11 + a22
+  const det = a11 * a22 - a12 * a12
+  const disc = Math.sqrt(Math.max(0, (tr * tr) / 4 - det))
+  const l1 = tr / 2 + disc, l2 = tr / 2 - disc
+  const rx = Math.sqrt(Math.max(1e-12, l1))
+  const ry = Math.sqrt(Math.max(1e-12, l2))
+  const rot = 0.5 * Math.atan2(2 * a12, a11 - a22)
   return { rx, ry, rot }
 }
 
 /** 参数化生成常见几何体 —— 不依赖任何 AI，选类型 + 填参数就出模型。
  *  顶点命名按教材习惯：底面 A、B、C…，上底 A1、B1、C1…，锥顶 P，底面中心 O。 */
 export interface BuildOpts {
-  /** 'cube' 正方体 | 'box' 长方体 | 'prism' 正 n 棱柱 | 'pyramid' 正 n 棱锥 | 'cylinder' 圆柱 | 'cone' 圆锥 */
-  type: 'cube' | 'box' | 'prism' | 'pyramid' | 'cylinder' | 'cone'
+  /** 'cube' 正方体 | 'box' 长方体 | 'prism' 正 n 棱柱 | 'pyramid' 正 n 棱锥 | 'cylinder' 圆柱 | 'cone' 圆锥 | 'sphere' 球 */
+  type: 'cube' | 'box' | 'prism' | 'pyramid' | 'cylinder' | 'cone' | 'sphere'
   /** 底面边数（棱柱 / 棱锥用） */
   n?: number
   /** 底面边长（正方体忽略，用 size） */
@@ -109,7 +121,7 @@ export function buildSolid(o: BuildOpts): Geom3D {
   const verts: Record<string, [number, number, number]> = {}
   const faces: string[][] = []
   // 圆柱 / 圆锥：交给 primitive —— 底面圆投影成椭圆弧，不是折线
-  if (o.type === 'cylinder' || o.type === 'cone') {
+  if (o.type === 'cylinder' || o.type === 'cone' || o.type === 'sphere') {
     return { vertices: {}, primitive: { type: o.type, r: o.a ?? 1.2, h: o.h ?? 2.4 } }
   }
   if (o.type === 'cube' || o.type === 'box') {
@@ -246,6 +258,8 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   arcs: { cx: number; cy: number; rx: number; ry: number; rot: number; a0: number; a1: number; dash: 0 | 1 }[]
   /** 内容宽高比（宽/高）—— 元素框要按它给，否则投影会被拉变形（椭圆尤其明显） */
   aspect: number
+  /** 与 mesh.faces 一一对应的面样式（截面用得到填充） */
+  faceStyles: ({ fill?: string; opacity?: number } | null)[]
 } {
   const d = viewDir(view.azim, view.elev)
   const aDeg = (view.azim * Math.PI) / 180
@@ -256,7 +270,8 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
 
   // ---------------- primitive：圆柱 / 圆锥 ----------------
   if (m.primitive) {
-    const { type, r, h } = m.primitive
+    const { type, r, h: hh } = m.primitive
+    const h = type === 'sphere' ? 0 : hh
     const names: string[] = []
     const P3: [number, number, number][] = []
     const vlabels: (string | null)[] = []
@@ -277,6 +292,39 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     const nearPlus = (Math.cos(t0 + Math.PI / 2) * d[0] + Math.sin(t0 + Math.PI / 2) * d[1]) > 0
     const edges: [number, number, number][] = []
     let apex = -1, iA = -1, iB = -1
+    if (type === 'sphere') {
+      // 球：侧影是个**正圆**（正交投影下），另加一条赤道椭圆。
+      // 赤道用上面那套共轭直径法；侧影圆直接给 rx = ry = r（视线方向是单位向量，屏幕半径就等于 r）。
+      push('O', [0, 0, 0])
+      const c0 = sc([0, 0, 0])
+      const eq = ellipseFromConjugate(r * (right[0] - 0), -(r * up[0]), r * right[1], -(r * up[1]))
+      // 赤道可见半圈：跟底面圆同一套判据（法向与视线垂直的两点切开）
+      const t0s = Math.atan2(-d[0], d[1])
+      const nearPlusS = (Math.cos(t0s + Math.PI / 2) * d[0] + Math.sin(t0s + Math.PI / 2) * d[1]) > 0
+      const halfS = nearPlusS ? t0s + Math.PI : t0s + 2 * Math.PI
+      const arcsS: { cx: number; cy: number; rx: number; ry: number; rot: number; a0: number; a1: number; dash: 0 | 1 }[] = [
+        { cx: c0[0], cy: c0[1], rx: r, ry: r, rot: 0, a0: 0, a1: Math.PI * 2, dash: 0 },      // 侧影圆
+        { cx: c0[0] + 0, cy: c0[1] + 0, ...eq, a0: t0s, a1: halfS, dash: 0 },                  // 赤道近半
+        { cx: c0[0], cy: c0[1], ...eq, a0: halfS, a1: t0s + Math.PI * 2, dash: 1 },            // 赤道远半
+      ]
+      const xs2 = [c0[0] - r, c0[0] + r]
+      const ys2 = [c0[1] - r, c0[1] + r]
+      const bx0 = Math.min(...xs2), bx1 = Math.max(...xs2), by0 = Math.min(...ys2), by1 = Math.max(...ys2)
+      const bw2 = Math.max(1e-6, bx1 - bx0), bh2 = Math.max(1e-6, by1 - by0)
+      const s2 = 0.84 / Math.max(bw2, bh2)
+      const ox2 = (1 - bw2 * s2) / 2, oy2 = (1 - bh2 * s2) / 2
+      const pts2: number[] = []
+      for (const p of P3) {
+        const q = sc(p)
+        pts2.push(+(ox2 + (q[0] - bx0) * s2).toFixed(4), +(oy2 + (q[1] - by0) * s2).toFixed(4))
+      }
+      const arcs2 = arcsS.map((a) => ({
+        cx: +(ox2 + (a.cx - bx0) * s2).toFixed(4), cy: +(oy2 + (a.cy - by0) * s2).toFixed(4),
+        rx: +(a.rx * s2).toFixed(4), ry: +(a.ry * s2).toFixed(4),
+        rot: +a.rot.toFixed(4), a0: +a.a0.toFixed(4), a1: +a.a1.toFixed(4), dash: a.dash,
+      }))
+      return { points: pts2, mesh: { edges: [], faces: [] }, vlabels, arcs: arcs2, aspect: bw2 / bh2, faceStyles: [] }
+    }
     if (type === 'cone') {
       apex = push('P', [0, 0, h])
       push('O', [0, 0, 0])
@@ -341,7 +389,7 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
       a1: +a.a1.toFixed(4),
       dash: a.dash,
     }))
-    return { points, mesh: { edges, faces: [] }, vlabels, arcs: arcsOut, aspect: bw / bh }
+    return { points, mesh: { edges, faces: [] }, vlabels, arcs: arcsOut, aspect: bw / bh, faceStyles: [] }
   }
 
   // ---------------- 多面体（走面表） ----------------
@@ -349,7 +397,7 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   const idx: Record<string, number> = {}
   names.forEach((n, i) => { idx[n] = i })
   const P3 = names.map((n) => m.vertices[n]) as [number, number, number][]
-  if (!P3.length) return { points: [], mesh: { edges: [], faces: [] }, vlabels: [], arcs: [], aspect: 1 }
+  if (!P3.length) return { points: [], mesh: { edges: [], faces: [] }, vlabels: [], arcs: [], aspect: 1, faceStyles: [] }
 
   const raw = P3.map((p) => [dot(p, right), dot(p, up), dot(p, d)] as [number, number, number])
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
@@ -421,6 +469,25 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     const dup = edges.some((e) => (e[0] === a.i && e[1] === a.j) || (e[0] === a.j && e[1] === a.i))
     if (!dup) edges.push([a.i, a.j, a.dash])
   }
+  // 截面 / 辅助面：作为**面**加进去（可填充），它的边也画出来。
+  // 边是实是虚按这个多边形自己朝向定 —— 截面通常是题目的主角，朝向相机就画实线。
+  // 注意：要在上面那套可见性算完之后再加，免得它参与"棱属于哪个面"的判断。
+  const cutStyles: { fill?: string; opacity?: number }[] = []
+  for (const cp of m.cutPlanes || []) {
+    const ids = (cp.points || []).map((n) => idx[n]).filter((k) => k !== undefined)
+    if (ids.length < 3) continue
+    const A = P3[ids[0]], B = P3[ids[1]], C = P3[ids[2]]
+    const n2 = norm(cross(sub(B, A), sub(C, B)))
+    const front = dot(n2, d) > 0
+    for (let k = 0; k < ids.length; k++) {
+      const a = ids[k], b = ids[(k + 1) % ids.length]
+      if (edges.some((e) => (e[0] === a && e[1] === b) || (e[0] === b && e[1] === a))) continue
+      edges.push([a, b, front ? 0 : 1])
+    }
+    faces.push(ids)
+    cutStyles.push({ fill: cp.fill || '#f0c674', opacity: 0.28 })
+  }
   const vlabels = names.map((n) => (m.labels && !(n in m.labels) ? null : toLabelText(m.labels?.[n] || n)))
-  return { points, mesh: { edges, faces }, vlabels, arcs: [], aspect: bw / bh }
+  const faceStyles = faces.map((_, i) => cutStyles[i - (faces.length - cutStyles.length)] || null)
+  return { points, mesh: { edges, faces }, vlabels, arcs: [], aspect: bw / bh, faceStyles }
 }
