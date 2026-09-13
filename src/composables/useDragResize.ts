@@ -53,8 +53,11 @@ export function useDragResize(opts: Options) {
     const startX = e.clientX
     const startY = e.clientY
     const scale = opts.getScale() || 1
-    // 比例锁定：只有"缩放"模式、且这次按下没按 Alt 才启用
-    const lockAspect = mode === 'resize' && !e.altKey
+    // 比例锁定：**只有拖"角"才锁**（等比例缩放，图片用它自己的原始比例）；
+    // 拖上/下/左/右四条**边**是单向拉伸/压缩，绝不能锁 —— 那正是"竖直/水平拉伸"的用法。
+    // 按住 Alt 拖角也能自由拉伸。
+    const corner = handle === 'nw' || handle === 'ne' || handle === 'sw' || handle === 'se'
+    const lockAspect = mode === 'resize' && corner && !e.altKey
     const bounds0 = opts.getBounds() ? { ...opts.getBounds()! } : null
     const targets = opts.getTargets()
 
@@ -117,7 +120,11 @@ export function useDragResize(opts: Options) {
         // 锁比例（图片用）：按"主导方向"算出另一边，再把锚点摆回去。
         // 这样不管抓的是角还是边，拖出来的矩形都等于图片自身的比例 ——
         // contain 就正好铺满，不留白也不裁剪。按住 Alt 可自由拉伸。
-        const ar = lockAspect && r0.h > 0 ? r0.w / r0.h : null
+        // 优先用调用方给的**原始比例**（图片的自然宽高比），拿不到才退回当前框的比例 ——
+        // 否则图片被拉扁过一次之后，拖角会锁在"拉扁的比例"上 ✗
+        const ar = lockAspect
+          ? (opts.getAspect?.() ?? (r0.h > 0 ? r0.w / r0.h : null))
+          : null
         if (ar && ar > 0) {
           if (handle === 'n' || handle === 's') {
             // 上下边驱动高度，宽度跟着

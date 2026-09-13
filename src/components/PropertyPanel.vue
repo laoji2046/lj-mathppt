@@ -1163,6 +1163,7 @@ function layerTypeLabel(type: string) {
           <select :value="image?.fit" @change="patch({ fit: ($event.target as HTMLSelectElement).value as ImageElement['fit'] } as Partial<SlideElement>)">
             <option value="cover">裁切填满</option>
             <option value="contain">完整显示</option>
+            <option value="fill">拉伸填满（可变形）</option>
           </select>
         </label>
         <button class="quick__btn" style="width:100%;margin-top:4px;background:#ede9fb;border-color:#c9b8f0;color:#5b43ad" @click="openImageEditor(el.id)">✂ 图片编辑器（裁剪 / 旋转 / 翻转 / 滤镜）</button>

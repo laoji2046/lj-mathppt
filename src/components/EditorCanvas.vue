@@ -244,6 +244,17 @@ function onGrab(payload: { ev: PointerEvent; mode: 'move' | 'resize'; handle: Ha
   const ev = payload.ev
   const additive = ev.ctrlKey || ev.metaKey
 
+  // 拖**边**手柄 = 竖直/水平单向拉伸。但图片若是 contain/cover，拉伸的只是框、图片本身没变 ✗，
+  // 所以这里顺手切成 fill（拉伸填满），拖的时候就能立刻看到被拉长/压扁。
+  // 只动图片元素，且只从"留在框内"的两种切过来。
+  if (payload.mode === 'resize' && ['n', 's', 'e', 'w'].includes(payload.handle)) {
+    const el = store.currentSlide?.elements.find((e) => e.id === id)
+    const img = el as { type?: string; fit?: string } | undefined
+    if (img?.type === 'image' && img.fit !== 'fill') {
+      store.updateElement(id, { fit: 'fill' } as Partial<SlideElement>)
+    }
+  }
+
   if (payload.mode === 'move') {
     if (!store.isSelected(id)) {
       store.selectElement(id, additive)

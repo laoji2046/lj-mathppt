@@ -581,7 +581,8 @@ export interface RichTextElement extends ElementBase {
 export interface ImageElement extends ElementBase {
   type: 'image'
   src: string
-  fit: 'cover' | 'contain'
+  /** fill=拉伸填满（可变形，配合拖边单向拉伸）；contain=完整显示（留白）；cover=裁切填满 */
+  fit: 'cover' | 'contain' | 'fill'
   /** 发光（PowerPoint 图片特效）：颜色 + 强度(px，drop-shadow 模糊半径) */
   glowColor?: string
   glowSize?: number
