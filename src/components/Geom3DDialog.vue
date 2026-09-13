@@ -511,6 +511,45 @@ function usePreset(json: string) {
   parse()
 }
 
+// ---------------- 两直线的交点 ----------------
+const lmP = ref(['', '', '', ''] as string[])
+const lmName = ref('')
+const lmMsg = ref('')
+function addLineMeet() {
+  if (!model.value || lmP.value.some((x) => !x) || lmP.value[0] === lmP.value[1] || lmP.value[2] === lmP.value[3]) return
+  const name = lmName.value.trim() || nextMarkName()
+  const next = JSON.parse(raw.value) as Geom3D
+  next.lineMeets = [
+    ...(next.lineMeets || []).filter((x) => x.name !== name),
+    { name, a: [lmP.value[0], lmP.value[1]] as [string, string], b: [lmP.value[2], lmP.value[3]] as [string, string] },
+  ]
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+  // 算得出才算数 —— 异面/平行时给个明确反馈（否则"点了没反应"很迷惑）
+  lmMsg.value = order.value.includes(name) ? '' : '这两条直线不相交（异面或平行），算不出交点'
+  lmName.value = ''
+}
+const addedLineMeets = computed(() => (model.value?.lineMeets || []).map((x, i) => ({ i, name: x.name, a: x.a.join(''), b: x.b.join('') })))
+function delLineMeet(i: number) {
+  if (!model.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  next.lineMeets?.splice(i, 1)
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+
+/** 一键清空"已加的"（保留模型本身）—— 加了一堆想重来时最省事 */
+function clearAdded() {
+  if (!model.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  for (const k of ['marks', 'freePoints', 'meetPoints', 'lineMeets', 'projectPoints', 'auxiliary', 'cutPlanes', 'planeCuts', 'intersectLines', 'hidden'] as const) {
+    delete (next as unknown as Record<string, unknown>)[k]
+  }
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+  lmMsg.value = ''
+}
+
 // ---------------- 图元显隐 ----------------
 /** 切换一条图元的隐藏状态（键的写法见 Geom3D.hidden 的注释） */
 function toggleHidden(key: string) {
@@ -614,12 +653,26 @@ const mkFrom = ref('')
 const mkTo = ref('')
 const mkT = ref(0.5)
 const mkName = ref('')
+/** **所有已占用的点名**（顶点 + 各种"算出来的点"）。
+ *  必须把 marks / freePoints / meetPoints / lineMeets / projectPoints 全算上 ——
+ *  只看 vertices 会导致新点重名，而按名字去重会把**旧点悄悄顶掉**（测试抓到的真 bug）。 */
+const usedNames = computed(() => {
+  const m = model.value
+  const s = new Set<string>()
+  if (!m) return s
+  for (const n of Object.keys(m.vertices || {})) s.add(n)
+  for (const k of m.marks || []) if (k?.name) s.add(k.name)
+  for (const k of m.freePoints || []) if (k?.name) s.add(k.name)
+  for (const k of m.meetPoints || []) if (k?.name) s.add(k.name)
+  for (const k of m.lineMeets || []) if (k?.name) s.add(k.name)
+  for (const k of m.projectPoints || []) if (k?.name) s.add(k.name)
+  return s
+})
 /** 默认给还没用过的字母（M、N、E、F…）—— 教材里中点常叫 M / N / E */
 function nextMarkName(): string {
-  const used = new Set(Object.keys(model.value?.vertices || {}))
-  const used2 = new Set((model.value?.marks || []).map((x) => x.name))
+  const used = usedNames.value
   for (const c of ['M', 'N', 'E', 'F', 'G', 'H', 'K', 'Q', 'R', 'S', 'T']) {
-    if (!used.has(c) && !used2.has(c)) return c
+    if (!used.has(c)) return c
   }
   return 'M'
 }
@@ -777,6 +830,9 @@ function insert() {
               </select>
               <button class="g3__btn" @click="addAux()">添加</button>
             </div>
+            <div v-if="addedMarks.length || addedAux.length || addedFree.length || planes.length" class="g3__row g3__row--top">
+              <button class="g3__btn" title="清空所有后加的图元（点/线/面），保留模型本身" @click="clearAdded()">清空已加的图元</button>
+            </div>
             <div v-if="vertexRows.length" class="g3__verts">
               <div class="g3__lab">顶点坐标 <span class="g3__vsub">（白底可改；灰的是算出来的，只读）</span></div>
               <div class="g3__vlist">
@@ -847,6 +903,22 @@ function insert() {
                 <button class="g3__btn g3__btn--tiny" :class="{ 'g3__btn--on': ax.style === 'solid' }" @click="setAuxStyle(ax.i, 'solid')">实</button>
                 <button class="g3__btn g3__btn--tiny" :class="{ 'g3__btn--on': ax.style === 'dashed' }" @click="setAuxStyle(ax.i, 'dashed')">虚</button>
                 <button class="g3__btn g3__btn--tiny" title="删掉这条辅助线" @click="delAux(ax.i)">×</button>
+              </span>
+            </div>
+            <div class="g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">两直线的交点：</span>
+              <select v-for="(_, k) in 4" :key="'lm' + k" v-model="lmP[k]" class="g3__sel g3__sel--sm">
+                <option value="">{{ k % 2 === 0 ? '线' + (k < 2 ? 1 : 2) + '点1' : '点2' }}</option>
+                <option v-for="n in order" :key="'lmo' + k + n" :value="n">{{ n }}</option>
+              </select>
+              <input v-model="lmName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
+              <button class="g3__btn" @click="addLineMeet()">求交点</button>
+            </div>
+            <div v-if="lmMsg || addedLineMeets.length" class="g3__row g3__row--top">
+              <span v-if="lmMsg" class="g3__warn">{{ lmMsg }}</span>
+              <span v-for="lm in addedLineMeets" :key="'lmj' + lm.i" class="g3__plane">
+                <b>{{ lm.name }}</b><span class="g3__meet">{{ lm.a }} ∩ {{ lm.b }}</span>
+                <button class="g3__btn g3__btn--tiny" @click="delLineMeet(lm.i)">×</button>
               </span>
             </div>
             <div v-if="planes.length" class="g3__row g3__row--top">
@@ -1061,6 +1133,7 @@ function insert() {
 .g3__plane { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #555; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 2px 4px; background: #fff; }
 .g3__plane b { color: #1668e0; font-weight: 600; }
 .g3__off { text-decoration: line-through; opacity: .45; }
+.g3__warn { font-size: 11px; color: #c0392b; }
 .g3__row--stack { align-items: flex-start; }
 .g3__verts { margin-top: 12px; }
 .g3__vsub { font-weight: 400; color: #8a8aa0; font-size: 11px; }

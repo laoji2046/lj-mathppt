@@ -45,6 +45,9 @@ export interface Geom3D {
   /** **两平面的交线**：a / b 各是定一个平面的三点（或更多）。
    *  算出交线后**截到多面体内部**（两面各自截面的公共部分），画成一条线。 */
   intersectLines?: { a: string[]; b: string[] }[]
+  /** **两直线的交点**：a / b 各是直线上的两点。相交（或接近到容差内）才算得出点；
+   *  异面或平行时解析不出（界面会提示"不相交"）。 */
+  lineMeets?: { name: string; a: [string, string]; b: [string, string] }[]
   /** **点在平面上的投影（射影）**：from 是那个点，plane 是定平面的三点。
    *  `foot` 给 true 时同时画一条 from→投影点的垂线（教材里那条）。 */
   projectPoints?: { name: string; from: string; plane: string[]; foot?: boolean }[]
@@ -205,6 +208,31 @@ export function resolveVertices(m: Geom3D): Record<string, [number, number, numb
     }
     pend = next
     if (!moved) break
+  }
+  // 两直线的交点：求两直线的最近点对，距离在容差内就当相交（取中点）
+  for (const lm of m.lineMeets || []) {
+    if (!lm?.name || out[lm.name]) continue
+    const P1 = out[lm.a?.[0]], P2 = out[lm.a?.[1]]
+    const P3v = out[lm.b?.[0]], P4 = out[lm.b?.[1]]
+    if (!P1 || !P2 || !P3v || !P4) continue
+    const d1 = sub(P2, P1)
+    const d2 = sub(P4, P3v)
+    const w = sub(P1, P3v)
+    const aa = dot(d1, d1), bb = dot(d1, d2), cc = dot(d2, d2)
+    const dd = dot(d1, w), ee = dot(d2, w)
+    const den = aa * cc - bb * bb
+    if (Math.abs(den) < 1e-12) continue                  // 平行（或重合）→ 没有唯一交点
+    const s = (bb * ee - cc * dd) / den
+    const tt = (aa * ee - bb * dd) / den
+    const PA: [number, number, number] = [P1[0] + d1[0] * s, P1[1] + d1[1] * s, P1[2] + d1[2] * s]
+    const PB: [number, number, number] = [P3v[0] + d2[0] * tt, P3v[1] + d2[1] * tt, P3v[2] + d2[2] * tt]
+    // 异面直线：最近点对还有距离 → 不算相交
+    if (Math.hypot(PA[0] - PB[0], PA[1] - PB[1], PA[2] - PB[2]) > 1e-3) continue
+    out[lm.name] = [
+      +((PA[0] + PB[0]) / 2).toFixed(4),
+      +((PA[1] + PB[1]) / 2).toFixed(4),
+      +((PA[2] + PB[2]) / 2).toFixed(4),
+    ]
   }
   // 点在平面上的投影：P' = P − ((P−Q₀)·n / |n|²)·n
   for (const pp of m.projectPoints || []) {

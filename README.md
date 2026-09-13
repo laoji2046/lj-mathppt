@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1180**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1181**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,29 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-13（v2026.09.1181）
+
+**1181 · 两直线的交点 + 一键清空 + 修一个"静默覆盖"的取名 bug**
+
+- **两直线的交点** lineMeets：给两条直线各两点 → 求最近点对；距离在容差内就算相交（取中点）。
+  **异面/平行时算不出**，界面明确提示「这两条直线不相交（异面或平行），算不出交点」——
+  不然"点了没反应"很迷惑。
+- **一键清空已加的图元**：把 marks / freePoints / meetPoints / lineMeets / projectPoints /
+  auxiliary / cutPlanes / planeCuts / intersectLines / hidden 全删掉，**保留模型本身**。
+
+**测试抓到一个真 bug（静默覆盖）**：加第二个交点后发现**第一个被顶掉了** ✗。
+根因：nextMarkName() 只查 vertices / marks，不知道 meetPoints / lineMeets / projectPoints 里
+已经用掉了 M —— 于是新点又叫 M，而写入时按名字去重，旧点就被悄悄替换了 ✗。
+修法：把**所有"点来源"**汇总成一个 usedNames，取名时全算上。
+
+**验证**：
+
+    数学  AC ∩ BD = [1,1,0] ✓（底面中心）
+          AB ∩ CC1（异面）= 算不出 ✓
+          AA1 ∩ A1C1（共点）= [0,0,2] ✓
+    界面  两个交点都保留：M AC∩BD ✓ | N AB∩CC1（带提示）✓
+    清空  只剩 vertices/faces/view ✓，8 个顶点 ✓   无报错
 
 ### 2026-09-13（v2026.09.1180）
 
