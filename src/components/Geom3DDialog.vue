@@ -64,7 +64,30 @@ const fitErr = ref<number | null>(null)
 const alignBox = ref<HTMLElement | null>(null)
 
 const model = ref<Geom3D | null>(null)
-const order = computed(() => (model.value ? Object.keys(model.value.vertices) : []))
+/** 可用的点名（按出现顺序）：模型顶点 + **定比分点解析出来的点**。
+ *  定比分点存在 marks 里、到投影时才解析，所以这里必须自己解析一遍 ——
+ *  否则"新加了点却不能拿它连辅助线/定平面"（用户报过这个）。
+ *  可传递：一个定比分点可以拿另一个定比分点当端点。 */
+const order = computed(() => {
+  const m = model.value
+  if (!m) return []
+  const names = Object.keys(m.vertices || {})
+  const known = new Set(names)
+  let pend = (m.marks || []).filter((k) => k && k.name)
+  for (let pass = 0; pass < 8 && pend.length; pass++) {
+    const next: typeof pend = []
+    let moved = false
+    for (const mk of pend) {
+      if (known.has(mk.from) && known.has(mk.to)) {
+        if (!known.has(mk.name)) { names.push(mk.name); known.add(mk.name) }
+        moved = true
+      } else next.push(mk)
+    }
+    pend = next
+    if (!moved) break
+  }
+  return names
+})
 const nextName = computed(() => order.value[clicks.value.length] || '')
 
 function parse() {
