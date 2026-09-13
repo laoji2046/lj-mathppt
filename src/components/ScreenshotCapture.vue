@@ -12,6 +12,9 @@ const err = ref('')
 const fullUrl = ref('')
 const imageRef = ref<HTMLImageElement | null>(null)
 const stage = ref<HTMLElement | null>(null)
+/** 正好包住图片的壳（position: relative）—— 选区坐标**天然相对图片**，
+ *  不再有"stage 坐标系 ↔ 图片坐标系"的换算，从结构上消掉一类偏移 bug。 */
+const wrap = ref<HTMLElement | null>(null)
 let stream: MediaStream | null = null
 
 // 选区矩形（相对 stage 的 CSS 像素）
@@ -67,32 +70,37 @@ function bringToFront() {
 
 // 选区拖拽
 function onDown(e: PointerEvent) {
-  const s = stage.value
-  if (!s) return
-  const r = s.getBoundingClientRect()
-  selStart.value = { x: e.clientX - r.left, y: e.clientY - r.top }
-  ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+  if (!wrap.value) return
+  const p = localPoint(e)
+  const b = imgBox()
+  selStart.value = {
+    x: Math.min(Math.max(p.x, 0), b.w),
+    y: Math.min(Math.max(p.y, 0), b.h),
+  }
+  try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* 合成指针会抛，忽略 */ }
 }
-/** 图片相对 stage 的偏移（stage 是 flex 居中的，图片比 stage 窄时左右有留白）。
- *  选区和裁剪必须用同一套基准，否则会整体偏移 —— 用户报过"左侧被截掉"。 */
-function imgOffset() {
-  const s = stage.value
-  const img = imageRef.value
-  if (!s || !img) return { x: 0, y: 0, w: s?.clientWidth || 0, h: s?.clientHeight || 0 }
-  const sr = s.getBoundingClientRect()
-  const ir = img.getBoundingClientRect()
-  return { x: ir.left - sr.left, y: ir.top - sr.top, w: ir.width, h: ir.height }
+/** 选区坐标以**包住图片的壳**为基准（图片左上角 = 壳的 0,0）——
+ *  这样框选和裁剪天生同源，不需要任何偏移换算。 */
+function imgBox() {
+  const w = wrap.value
+  if (!w) return { x: 0, y: 0, w: 0, h: 0 }
+  const r = w.getBoundingClientRect()
+  return { x: 0, y: 0, w: r.width, h: r.height }
+}
+/** 相对壳的指针坐标 */
+function localPoint(e: PointerEvent) {
+  const w = wrap.value
+  if (!w) return { x: 0, y: 0 }
+  const r = w.getBoundingClientRect()
+  return { x: e.clientX - r.left, y: e.clientY - r.top }
 }
 function onMove(e: PointerEvent) {
   if (!selStart.value) return
-  const s = stage.value
-  if (!s) return
-  const r = s.getBoundingClientRect()
-  const off = imgOffset()
-  // 夹在**图片**范围内（不是 stage —— 否则会框到留白上，裁出来也是错的）
+  const p = localPoint(e)
+  const b = imgBox()
   const cur = {
-    x: Math.min(Math.max(e.clientX - r.left, off.x), off.x + off.w),
-    y: Math.min(Math.max(e.clientY - r.top, off.y), off.y + off.h),
+    x: Math.min(Math.max(p.x, 0), b.w),
+    y: Math.min(Math.max(p.y, 0), b.h),
   }
   const st = selStart.value
   sel.value = {
@@ -121,14 +129,12 @@ function confirmCrop() {
   if (!img || !sel.value || !fullUrl.value) return
   const selBox = sel.value
   if (selBox.w < 8 || selBox.h < 8) return
-  // 选区是按 stage 量的（overlay 也画在 stage 里），裁剪要按**图片** —— 先减掉图片相对 stage 的偏移。
-  // 不减的话，图片比 stage 窄时整块内容会右移，看起来就是"左侧被截掉了"。
-  const off = imgOffset()
+  // 选区坐标本来就以图片为基准（壳就是图片的盒子），直接换算成自然像素即可
   const r = img.getBoundingClientRect() // 显示尺寸
   const scaleX = natural.value.w / r.width
   const scaleY = natural.value.h / r.height
-  const sx = Math.max(0, (selBox.x - off.x) * scaleX)
-  const sy = Math.max(0, (selBox.y - off.y) * scaleY)
+  const sx = Math.max(0, selBox.x * scaleX)
+  const sy = Math.max(0, selBox.y * scaleY)
   const sw = selBox.w * scaleX
   const sh = selBox.h * scaleY
   const canvas = document.createElement('canvas')
@@ -166,8 +172,10 @@ onBeforeUnmount(stopStream)
 
       <template v-else>
         <div class="shot__stage" ref="stage" @pointerdown="onDown" @pointermove="onMove" @pointerup="onUp">
+          <div ref="wrap" class="shot__wrap">
           <img ref="imageRef" :src="fullUrl" class="shot__img" draggable="false" alt="截图预览" />
           <div v-if="sel" class="shot__sel" :style="{ left: sel.x + 'px', top: sel.y + 'px', width: sel.w + 'px', height: sel.h + 'px' }"></div>
+          </div>
         </div>
         <div v-if="needFocus" class="shot__focus" @click="tryFocus">
           浏览器没有自动把本窗口切到前台 —— 点一下本窗口（或点这里）就能框选了。
@@ -206,6 +214,7 @@ onBeforeUnmount(stopStream)
   display: flex;
   justify-content: center;
 }
+.shot__wrap { position: relative; display: inline-block; line-height: 0; }   /* 选区以它为基准 = 图片的盒子 */
 .shot__img { display: block; max-width: 100%; max-height: 64vh; user-select: none; }
 .shot__sel {
   position: absolute;
