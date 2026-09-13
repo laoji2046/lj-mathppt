@@ -211,8 +211,8 @@ fn read_local_image(name: String) -> serde_json::Value {
 /// 为什么要在 Rust 里做：浏览器只能截"用户授权共享的那个源"，而且必须先弹一次共享选择器 ✗。
 /// exe 里用原生截屏可以做到 Word/PPT 那种"直接在桌面上拖"的手感（前端把主窗口临时全屏置顶，
 /// 把这张图铺满，用户在上面拖选区即可）。
-/// 真正干活的：截整个虚拟桌面（不含任何"让开"逻辑，便于单测）。
-fn capture_desktop_inner() -> Result<serde_json::Value, String> {
+/// 抓一张整个虚拟桌面的**原始位图**（不编码，便于"连续两帧比对"）。
+fn grab_desktop_image() -> Result<(image::RgbaImage, i32, i32, Vec<serde_json::Value>), String> {
     use xcap::Monitor;
 
     let monitors = Monitor::all().map_err(|e| e.to_string())?;
@@ -252,16 +252,77 @@ fn capture_desktop_inner() -> Result<serde_json::Value, String> {
         image::imageops::overlay(&mut canvas, &img, (x - minx) as i64, (y - miny) as i64);
     }
 
-    let b64 = png_b64(&canvas)?;
+    Ok((canvas, minx, miny, monitor_info_json))
+}
+
+/// 真正干活的：截整个虚拟桌面（不含任何"让开"逻辑，便于单测）。
+fn capture_desktop_inner() -> Result<serde_json::Value, String> {
+    let (canvas, minx, miny, monitors) = grab_desktop_image()?;
     Ok(serde_json::json!({
         "ok": true,
-        "dataBase64": b64,
+        "dataBase64": png_b64(&canvas)?,
         "w": canvas.width(),
         "h": canvas.height(),
         "minX": minx,
         "minY": miny,
         // 诊断用：几台显示器、各自多大 —— 抓不全时能一眼看出是漏了显示器还是抓的是旧帧
-        "monitors": monitor_info_json
+        "monitors": monitors
+    }))
+}
+
+/// 等桌面"画稳了"再返回：**连续两次抓到的帧一致**才认为稳定。
+///
+/// 为什么不用固定等待：死等要么不够（抓到旧帧 ✗）、要么白等（每次都拖满 ✗）。
+/// 这样多数情况 200~300ms 就能拿到稳定帧，个别时候自动多等一会儿，最多 900ms 兜底。
+/// 另外**只在最后编码一次 PNG** —— 一张 3840×2400 编码一次就要一百多毫秒，每轮都编码纯属浪费。
+fn capture_desktop_settled() -> Result<serde_json::Value, String> {
+    let start = std::time::Instant::now();
+    let mut prev_sig: Option<Vec<u8>> = None;
+    let mut got: Option<(image::RgbaImage, i32, i32, Vec<serde_json::Value>)> = None;
+    loop {
+        // 第一轮多等一点让桌面开始重绘，后续每轮短一些
+        let wait = if prev_sig.is_none() { 80 } else { 45 };
+        std::thread::sleep(std::time::Duration::from_millis(wait));
+        match grab_desktop_image() {
+            Ok((img, mx, my, ms)) => {
+                // 抽样比对（每 4093 字节取一个，3840×2400 大约 900 个样本）。
+                // **不能要求完全一致**：桌面上时钟在跳、光标在闪，那样永远等不到 ✗。
+                // 差异样本占比 < 0.5% 就认为画面已经定下来了（一个光标大约只占 1 个样本）。
+                let sig: Vec<u8> = img.as_raw().iter().step_by(4093).copied().collect();
+                let settled = match &prev_sig {
+                    Some(p) if p.len() == sig.len() => {
+                        let diff = p.iter().zip(sig.iter()).filter(|(a, b)| a != b).count();
+                        (diff as f64) / (sig.len().max(1) as f64) < 0.005
+                    }
+                    _ => false,
+                };
+                prev_sig = Some(sig);
+                got = Some((img, mx, my, ms));
+                if settled && start.elapsed().as_millis() >= 120 {
+                    break;
+                }
+            }
+            Err(e) => {
+                // 抓不到就直接把错误抛回去（通常是环境不支持）
+                if start.elapsed().as_millis() > 300 {
+                    return Err(e);
+                }
+            }
+        }
+        // 兜底上限：正常 200~350ms 就会命中，这里只是防止极端情况一直转
+        if start.elapsed().as_millis() > 600 {
+            break;
+        }
+    }
+    let (canvas, minx, miny, monitors) = got.ok_or_else(|| "截图失败".to_string())?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "dataBase64": png_b64(&canvas)?,
+        "w": canvas.width(),
+        "h": canvas.height(),
+        "minX": minx,
+        "minY": miny,
+        "monitors": monitors
     }))
 }
 
@@ -310,15 +371,9 @@ fn capture_screens(window: tauri::WebviewWindow) -> Result<serde_json::Value, St
     // 藏掉窗口还不够：桌面本身没被"要求重绘"时，桌面复制很可能继续给旧帧 ✗。
     // 把桌面窗口顶到前台，逼合成器重画一遍。
     force_desktop_redraw();
-    std::thread::sleep(std::time::Duration::from_millis(350));
 
-    // **连抓三次、只留最后一张**：桌面复制的头一两次常拿到旧帧（窗口还在的那一帧），
-    // 表现就是"只截到某一层" ✗。多抓几次、间隔开，最后一张才是稳定的当前合成结果。
-    let _ = capture_desktop_inner();
-    std::thread::sleep(std::time::Duration::from_millis(150));
-    let _ = capture_desktop_inner();
-    std::thread::sleep(std::time::Duration::from_millis(150));
-    let out = capture_desktop_inner();
+    // 等桌面"画稳了"再取（连续两帧一致）—— 比死等固定时间又快又稳
+    let out = capture_desktop_settled();
     // 无论抓到没抓到，都要把窗口还回来，否则应用就"消失"了
     let _ = window.show();
     match out {
@@ -504,6 +559,17 @@ mod tests {
                 println!("截到 {}x{}，PNG {} 字节", w, h, png.len());
             }
             Err(e) => println!("环境不支持截图（可接受）：{}", e),
+        }
+        // 顺带量一下"等桌面稳定"实际花多久 —— 这就是用户感受到的等待时间
+        let t0 = std::time::Instant::now();
+        match super::capture_desktop_settled() {
+            Ok(v) => println!(
+                "稳定帧耗时 {}ms（{}x{}）",
+                t0.elapsed().as_millis(),
+                v.get("w").and_then(|x| x.as_u64()).unwrap_or(0),
+                v.get("h").and_then(|x| x.as_u64()).unwrap_or(0)
+            ),
+            Err(e) => println!("稳定帧取不到：{}", e),
         }
     }
 

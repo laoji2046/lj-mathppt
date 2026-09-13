@@ -40,6 +40,14 @@ const native = ref(false)
 const diag = ref('')
 /** 桌面端：可截的窗口列表 + 原始的整桌面截图（"回到整个桌面"要用） */
 const winList = ref<WinInfo[]>([])
+/** 窗口搜索（窗口多的时候用） */
+const winQuery = ref('')
+/** 过滤后的窗口；注意 list_windows 返回的本身就是**层序**（最上面的窗口在前），已经是"最近用过的靠前" */
+const winShown = computed(() => {
+  const q = winQuery.value.trim().toLowerCase()
+  if (!q) return winList.value
+  return winList.value.filter((w) => (w.app + ' ' + w.title).toLowerCase().includes(q))
+})
 const desktopUrl = ref('')
 const desktopNatural = ref<{ w: number; h: number }>({ w: 0, h: 0 })
 
@@ -281,8 +289,12 @@ onBeforeUnmount(() => {
           <button class="shot__win" :class="{ 'shot__win--on': fullUrl === desktopUrl }" @click="backToDesktop()">
             <b>整个桌面</b><span>{{ desktopNatural.w }}×{{ desktopNatural.h }}</span>
           </button>
+          <input
+            v-if="winList.length > 5" v-model="winQuery" class="shot__winq" type="search"
+            placeholder="搜窗口…" title="按应用名或标题过滤"
+          >
           <button
-            v-for="w in winList" :key="w.id" class="shot__win"
+            v-for="w in winShown" :key="w.id" class="shot__win"
             :class="{ 'shot__win--on': fullUrl !== desktopUrl && diag.includes(w.title) }"
             :title="w.title"
             @click="pickWindow(w.id)"
@@ -354,6 +366,8 @@ onBeforeUnmount(() => {
 .shot__win { flex: 0 0 auto; max-width: 240px; text-align: left; border: 1px solid #2c3542; background: #1b222d; color: #cbd3e0; border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer; }
 .shot__win:hover { background: #232c39; }
 .shot__win--on { border-color: #1668e0; background: #17304f; color: #fff; }
+.shot__winq { flex: 0 0 130px; border: 1px solid #2c3542; background: #1b222d; color: #cbd3e0; border-radius: 6px; padding: 4px 8px; font-size: 11px; }
+.shot__winq::placeholder { color: #6b7a90; }
 .shot__win b { display: block; font-size: 10.5px; color: #8fa3c0; font-weight: 600; }
 .shot__win span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .shot__diag { display: block; margin-top: 2px; font-size: 10.5px; color: #9aa3b5; font-style: normal; }
