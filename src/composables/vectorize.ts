@@ -13,6 +13,7 @@
  */
 
 import { recognizeLabels } from './glyphOcr'
+import type { FigureArc } from '@/types'
 
 export interface VectorizeOpt {
   /** 识别范围（原图像素），不传 = 整图。用来切掉图片下方的「图 1」这类题注 */
@@ -71,7 +72,108 @@ export interface VectorizeResult {
   edges: [number, number, number][]
   /** 被抹掉的字母：位置（归一化，相对识别框）+ 自动认出来的文本 */
   anchors: { x: number; y: number; text: string; conf: number }[]
+  /** 拟合出来的椭圆弧（球/圆锥/圆台/圆柱的底、画弧的题）。坐标与 points 同一套 */
+  arcs?: FigureArc[]
   stats: VectorizeStats
+}
+
+/** 把一串点拟合成**轴对齐**椭圆，返回像素单位的中心/半径/参数角与拟合残差。
+ *  立体几何里的底面圆投影下来基本都是轴对齐椭圆，够用；拟合得不像（残差大）就退回折线。
+ *  用代数距离最小二乘：x² + B·y² + C·x + D·y + E = 0，展开成 4 元线性方程组。 */
+export function fitEllipse(pts: [number, number][]): { cx: number; cy: number; rx: number; ry: number; a0: number; a1: number; rms: number } | null {
+  const n = pts.length
+  if (n < 8) return null
+  // **先在单位框里拟合**：直接拿像素坐标算，x² 的量级是 500²=25 万，跟常数项差 5 个数量级，
+  // 法方程条件数极差 —— 实测会解出 rx=452531 这种退化结果、或者干脆失败。
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9
+  for (const [x, y] of pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y }
+  const bw = Math.max(1e-6, x1 - x0), bh = Math.max(1e-6, y1 - y0)
+  const P = pts.map(([x, y]) => [(x - x0) / bw, (y - y0) / bh] as [number, number])
+  let a11 = 0, a12 = 0, a13 = 0, a14 = 0, a22 = 0, a23 = 0, a24 = 0, a33 = 0, a34 = 0, a44 = 0
+  let b1 = 0, b2 = 0, b3 = 0, b4 = 0
+  for (const [x, y] of P) {
+    const r0 = y * y, r1 = x, r2 = y
+    const t = -x * x
+    a11 += r0 * r0; a12 += r0 * r1; a13 += r0 * r2; a14 += r0
+    a22 += r1 * r1; a23 += r1 * r2; a24 += r1
+    a33 += r2 * r2; a34 += r2
+    a44 += 1
+    b1 += r0 * t; b2 += r1 * t; b3 += r2 * t; b4 += t
+  }
+  // 4x4 高斯消元（带部分主元）
+  const M = [[a11, a12, a13, a14, b1], [a12, a22, a23, a24, b2], [a13, a23, a33, a34, b3], [a14, a24, a34, a44, b4]]
+  for (let c = 0; c < 4; c++) {
+    let piv = c
+    for (let r = c + 1; r < 4; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r
+    if (Math.abs(M[piv][c]) < 1e-12) return null
+    if (piv !== c) { const t = M[piv]; M[piv] = M[c]; M[c] = t }
+    for (let r = c + 1; r < 4; r++) {
+      const f = M[r][c] / M[c][c]
+      for (let k = c; k < 5; k++) M[r][k] -= f * M[c][k]
+    }
+  }
+  const sol = [0, 0, 0, 0]
+  for (let r = 3; r >= 0; r--) {
+    let s = M[r][4]
+    for (let k = r + 1; k < 4; k++) s -= M[r][k] * sol[k]
+    sol[r] = s / M[r][r]
+  }
+  const [B, C, D, E] = sol
+  if (!(B > 1e-4)) return null
+  const ncx = -C / 2, ncy = -D / 2
+  const K = ncx * ncx + B * ncy * ncy - E
+  if (!(K > 1e-6)) return null
+  const nrx = Math.sqrt(K)
+  const nry = Math.sqrt(K / B)
+  if (!isFinite(nrx) || !isFinite(nry) || nrx < 1e-3 || nry < 1e-3) return null
+  // 换回像素坐标（轴对齐，角度不变）
+  const cx = x0 + ncx * bw, cy = y0 + ncy * bh
+  const rx = nrx * bw, ry = nry * bh
+  if (rx < 3 || ry < 3) return null
+  // 残差 = 各点到椭圆的径向距离（像素）
+  let sum = 0
+  for (const [x, y] of pts) {
+    const q = Math.hypot((x - cx) / rx, (y - cy) / ry)
+    sum += ((q - 1) * Math.min(rx, ry)) ** 2
+  }
+  const rms = Math.sqrt(sum / n)
+  const ang = (p: [number, number]) => Math.atan2((p[1] - cy) / ry, (p[0] - cx) / rx)
+  return { cx, cy, rx, ry, a0: ang(pts[0]), a1: ang(pts[n - 1]), rms }
+}
+
+/** 在一串骨架点里找出"确实是椭圆弧"的连续段。
+ *  一条路常常是「弧 + 一段直线」连在一起（弧画到角点后又顺着直线追下去了），整条拟合残差几十像素；
+ *  所以按窗口滑着拟合，把残差小、又不退化的窗口连成段，再对每段整体拟合一次。 */
+export function fitArcRuns(pts: [number, number][]): { cx: number; cy: number; rx: number; ry: number; a0: number; a1: number; rms: number; i0: number; i1: number }[] {
+  const N = pts.length
+  const W = 64, STEP = 16
+  if (N < W) return []
+  const good = new Array<boolean>(N).fill(false)
+  for (let s = 0; s + W <= N; s += STEP) {
+    const f = fitEllipse(pts.slice(s, s + W))
+    if (!f) continue
+    if (f.rms > 1.6) continue
+    // 退化保护：长短轴之比太大 = 其实是一条直线，不是弧
+    if (Math.max(f.rx, f.ry) / Math.min(f.rx, f.ry) > 6) continue
+    for (let k = s; k < s + W; k++) good[k] = true
+  }
+  const runs: { i0: number; i1: number }[] = []
+  let i = 0
+  while (i < N) {
+    if (!good[i]) { i++; continue }
+    let j = i
+    while (j < N && good[j]) j++
+    if (j - i >= W) runs.push({ i0: i, i1: j - 1 })
+    i = j
+  }
+  const out: { cx: number; cy: number; rx: number; ry: number; a0: number; a1: number; rms: number; i0: number; i1: number }[] = []
+  for (const r of runs) {
+    const f = fitEllipse(pts.slice(r.i0, r.i1 + 1))
+    if (!f || f.rms > 2.5) continue
+    if (Math.max(f.rx, f.ry) / Math.min(f.rx, f.ry) > 6) continue
+    out.push({ ...f, i0: r.i0, i1: r.i1 })
+  }
+  return out
 }
 
 export function loadImageElement(src: string): Promise<HTMLImageElement> {
@@ -515,6 +617,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   const diag = Math.hypot(box[2] - box[0], box[3] - box[1])
   const comp = components(m.ink, W, H, box)
   const st = stripText(comp, W, diag, m.ink, opt)
+  const inkPre = st.ink                    // 抹掉字母之后的墨迹，用来判断一条弧是实线还是虚线
   const clipped = opt.crop ? clippedEdges(st.ink, W, box) : undefined
   // 被抹掉的那些小块其实是字母 —— 顺手认一下（模板匹配，见 glyphOcr.ts）
   const labels = recognizeLabels(W, st.anchors)
@@ -532,12 +635,40 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   // 塞进下面的"按共线连成虚线链"里每段都会变成孤立的碎片，最后整条弧都画不出来。
   // 判据：这条路径够长、且简化后不止两个点（真直的线简化完就是两点）。
   const curveSegs: Seg[] = []
+  /** 拟合成功的椭圆弧（像素坐标，最后统一归一化） */
+  const fittedArcs: { cx: number; cy: number; rx: number; ry: number; a0: number; a1: number; dash: 0 | 1 }[] = []
   for (const P of paths) {
     if (P.pts.length < 2) continue
     const poly = rdp(P.pts, opt.eps ?? 2.2)
     let plen2 = 0
     for (let k = 1; k < P.pts.length; k++) plen2 += Math.hypot(P.pts[k][0] - P.pts[k - 1][0], P.pts[k][1] - P.pts[k - 1][1])
     const isCurve = poly.length >= 3 && plen2 > maxPiece
+    if (isCurve) {
+      // 在整条路径里找"确实是弧"的连续段（一条路常是「弧 + 顺路追下去的直线」）
+      const runs = fitArcRuns(P.pts)
+      if (runs.length) {
+        for (const run of runs) {
+          // 虚线？沿弧采样看墨迹覆盖率（跟直线那边一个思路）
+          let hit = 0
+          const N = 40
+          for (let k = 0; k <= N; k++) {
+            const t = run.a0 + (run.a1 - run.a0) * (k / N)
+            const px = Math.round(run.cx + run.rx * Math.cos(t)), py = Math.round(run.cy + run.ry * Math.sin(t))
+            let ok = 0
+            for (let dy = -2; dy <= 2 && !ok; dy++) for (let dx = -2; dx <= 2; dx++) {
+              const xx = px + dx, yy = py + dy
+              if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue
+              if (inkPre[yy * W + xx]) { ok = 1; break }
+            }
+            hit += ok
+          }
+          fittedArcs.push({ cx: run.cx, cy: run.cy, rx: run.rx, ry: run.ry, a0: run.a0, a1: run.a1, dash: hit / (N + 1) < 0.85 ? 1 : 0 })
+        }
+        // 弧覆盖了这条路径的大部分：整条都交给弧表示，不再出折线
+        const covered = runs.reduce((s, r) => s + (r.i1 - r.i0 + 1), 0)
+        if (covered >= P.pts.length * 0.6) continue
+      }
+    }
     for (let k = 0; k < poly.length - 1; k++) {
       const a = poly[k], b = poly[k + 1]
       const len = Math.hypot(b[0] - a[0], b[1] - a[1])
@@ -944,10 +1075,20 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   }
   let dashN = 0
   for (const e of outEdges) if (e[2]) dashN++
+  const arcs: FigureArc[] = fittedArcs.map((a) => ({
+    cx: +((a.cx - box[0]) / bw).toFixed(4),
+    cy: +((a.cy - box[1]) / bh).toFixed(4),
+    rx: +(a.rx / bw).toFixed(4),
+    ry: +(a.ry / bh).toFixed(4),
+    a0: +a.a0.toFixed(4),
+    a1: +a.a1.toFixed(4),
+    dash: a.dash,
+  }))
   return {
     W: bw, H: bh, box, imgW: W, imgH: H,
     points,
     edges: outEdges,
+    arcs: arcs.length ? arcs : undefined,
     anchors: labels.map((L) => ({
       x: +((L.cx - box[0]) / bw).toFixed(4),
       y: +((L.cy - box[1]) / bh).toFixed(4),

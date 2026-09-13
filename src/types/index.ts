@@ -401,6 +401,23 @@ export const GRAPHIC_TYPES: { v: string; label: string; cat: 'shape' | 'line' | 
   { v: 'coordinate', label: '坐标系', cat: 'mathfig' },
 ]
 
+/** 一段椭圆弧。rot 是椭圆自身的旋转（弧度，0 = 长短轴与坐标轴平行）。 */
+export interface FigureArc {
+  /** 圆心（归一化 0~1，相对元素宽高） */
+  cx: number
+  cy: number
+  /** 长短半轴（归一化） */
+  rx: number
+  ry: number
+  /** 椭圆旋转，弧度 */
+  rot?: number
+  /** 起止角（弧度，椭圆参数角，不是屏幕角） */
+  a0: number
+  a1: number
+  /** 1 = 虚线（被挡住的那半） */
+  dash?: 0 | 1
+}
+
 export interface MathFigureElement extends ElementBase {
   type: 'mathfig'
   kind: MathFigureKind
@@ -423,6 +440,10 @@ export interface MathFigureElement extends ElementBase {
   faceStyles?: ({ fill?: string; opacity?: number; hidden?: boolean } | null)[]
   /** 自由建模：自定义拓扑（顶点用 points），启用后覆盖该类型默认的边/面 */
   mesh?: { edges: [number, number, number][]; faces: number[][] }
+  /** 圆弧 / 椭圆弧图元（球、圆锥、圆台、圆柱的底面、画弧的题）。
+   *  数学图形原本只有"顶点 + 直边"，一条圆底弧得用七八段折线近似；存成弧之后是一条真曲线，
+   *  拖 rx/ry 就能改大小。坐标与 points 同一套：cx/cy/rx/ry 归一化到 0~1，角度用弧度。 */
+  arcs?: FigureArc[]
   /** 由「图片转图形」生成时的识别上下文 —— 只用来「回到识别弹窗继续编辑」：
    *  顶点 / 边 / 字母本来就在本元素上（points / mesh.edges / vlabels / labelOffsets），这里不重复存。
    *  老存档没有这个字段，属性面板会据此隐藏「继续编辑」入口。 */

@@ -1,6 +1,6 @@
 import type { Deck, Slide, SlideElement, TextElement } from '@/types'
 import { fontStack, imageEffectCss, lineDashCss, normalizeMixed, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
-import { SOLID_VCOUNT, renderSolid, solidVerts, type EdgeStyle, type FaceStyle, type SolidMesh } from '@/composables/solid3d'
+import { SOLID_VCOUNT, renderSolid, solidVerts, arcsSvg, type EdgeStyle, type FaceStyle, type SolidMesh } from '@/composables/solid3d'
 
 /**
  * 场景图 → Reveal.js 演示页。
@@ -487,7 +487,7 @@ function elementToHtml(el: SlideElement): string {
   }
 
   if (el.type === 'mathfig') {
-    return `<div style="${box}${rot}"${cls}${fragIdx}><svg width="100%" height="100%" viewBox="0 0 ${el.w} ${el.h}" preserveAspectRatio="none">${figureInner(el.kind, el.w, el.h, el.stroke, el.strokeWidth, el.fill, el.points, el.strokeDash, el.depth, el.vlabels, el.edgeStyles, el.labelOffsets, el.faceStyles, el.mesh)}</svg></div>`
+    return `<div style="${box}${rot}"${cls}${fragIdx}><svg width="100%" height="100%" viewBox="0 0 ${el.w} ${el.h}" preserveAspectRatio="none">${figureInner(el.kind, el.w, el.h, el.stroke, el.strokeWidth, el.fill, el.points, el.strokeDash, el.depth, el.vlabels, el.edgeStyles, el.labelOffsets, el.faceStyles, el.mesh)}${arcsSvg(el.arcs, el.w, el.h, el.stroke, el.strokeWidth)}</svg></div>`
   }
 
   if (el.type === 'chart') {

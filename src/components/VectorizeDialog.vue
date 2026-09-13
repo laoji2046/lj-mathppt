@@ -12,7 +12,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
-import type { MathFigureElement, SlideElement } from '@/types'
+import type { MathFigureElement, SlideElement, FigureArc } from '@/types'
 import { loadImageElement, type VectorizeOpt, type VectorizeResult } from '@/composables/vectorize'
 import { labelFontSize, labelGap } from '@/composables/solid3d'
 
@@ -81,6 +81,8 @@ const res = ref<VectorizeResult | null>(null)
 /** 识别结果的可编辑副本：pts 归一化顶点（相对识别框）、edges [起,止,虚线] */
 const pts = ref<number[]>([])
 const edges = ref<[number, number, number][]>([])
+/** 拟合出来的椭圆弧：比七八段折线好拖好改（拖 rx/ry 就能调大小） */
+const arcs = ref<FigureArc[]>([])
 const labels = ref<string[]>([])
 /** 每个顶点字母的识别置信度（0 = 没配上字母、是空着的） */
 const lconf = ref<number[]>([])
@@ -212,6 +214,7 @@ function ex(i: number) { const e = edges.value[i]; return e ? [px(e[0]), py(e[0]
 function adopt(r: VectorizeResult) {
   pts.value = r.points.slice()
   edges.value = r.edges.map((e) => [e[0], e[1], e[2]] as [number, number, number])
+  arcs.value = (r.arcs || []).map((a) => ({ ...a }))     // 拟合出来的椭圆弧（球/圆台底、画弧的题）
   const n = pts.value.length / 2
   labels.value = new Array(n).fill('')
   lconf.value = new Array(n).fill(0)
@@ -678,6 +681,8 @@ function buildPatch(): Partial<SlideElement> | null {
     kind: iw / ih > 1.05 ? 'pyramid' : 'cube',
     points: full,
     mesh: { edges: edges.value.map((e) => [e[0], e[1], e[2]] as [number, number, number]), faces: [] },
+    // 弧图元：坐标本来就是"相对识别框归一化"，跟 points 同一套，直接搬过去
+    arcs: arcs.value.length ? arcs.value.map((a) => ({ ...a })) : undefined,
     vlabels: labels.value.map((s) => (s.trim() ? s.trim() : null)),
     labelOffsets,
     fill: 'transparent',

@@ -1,7 +1,41 @@
 // 三维多面体：以“归一化顶点 + 边拓扑 + 面”统一建模。
 // 顶点为 [0,1]×[0,1] 归一化平面坐标（斜投影）；边支持按拓扑默认虚实，也可逐边覆盖（线型/粗细/颜色）；
 // 顶点可标注字母（_ 下标、^ 上标、' 撇），用于数学立体几何作图。
-import type { MathFigureElement } from '@/types'
+import type { MathFigureElement, FigureArc } from '@/types'
+
+/** 椭圆弧 → SVG path。归一化坐标，跟顶点同一套；画布与导出都调这里，别再各写一份。 */
+export function arcsSvg(arcs: FigureArc[] | undefined, w: number, h: number, stroke: string, strokeWidth: number, dash = '6 5'): string {
+  if (!arcs || !arcs.length) return ''
+  const sw = strokeWidth || 2
+  let out = ''
+  for (const a of arcs) {
+    const cx = a.cx * w, cy = a.cy * h
+    const rx = Math.max(0.5, a.rx * w), ry = Math.max(0.5, a.ry * h)
+    const phi = a.rot || 0
+    const cp = Math.cos(phi), sp = Math.sin(phi)
+    const pt = (t: number): [number, number] => [
+      cx + rx * Math.cos(t) * cp - ry * Math.sin(t) * sp,
+      cy + rx * Math.cos(t) * sp + ry * Math.sin(t) * cp,
+    ]
+    let d = a.a1 - a.a0
+    while (d < 0) d += Math.PI * 2
+    while (d > Math.PI * 2) d -= Math.PI * 2
+    // 整圈：起止点重合，SVG 的单条弧画不出来（会退化成一个小点），得用 <ellipse>
+    if (d > Math.PI * 2 - 0.01) {
+      const rot = phi ? ' transform="rotate(' + ((phi * 180) / Math.PI).toFixed(1) + ' ' + cx.toFixed(1) + ' ' + cy.toFixed(1) + ')"' : ''
+      out += '<ellipse cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" rx="' + rx.toFixed(1) + '" ry="' + ry.toFixed(1) +
+        '" fill="none" stroke="' + stroke + '" stroke-width="' + sw + '"' + (a.dash ? ' stroke-dasharray="' + dash + '"' : '') + rot + '/>'
+      continue
+    }
+    const [x0, y0] = pt(a.a0)
+    const [x1, y1] = pt(a.a1)
+    out += '<path d="M ' + x0.toFixed(1) + ' ' + y0.toFixed(1) + ' A ' + rx.toFixed(1) + ' ' + ry.toFixed(1) + ' ' +
+      ((phi * 180) / Math.PI).toFixed(1) + ' ' + (d > Math.PI ? 1 : 0) + ' ' + (a.a1 >= a.a0 ? 1 : 0) +
+      ' ' + x1.toFixed(1) + ' ' + y1.toFixed(1) + '" fill="none" stroke="' + stroke + '" stroke-width="' + sw +
+      '" stroke-linecap="round"' + (a.dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>'
+  }
+  return out
+}
 
 export const SOLID_KINDS = ['cube', 'cuboid', 'pyramid', 'prism', 'tetrahedron', 'pyraFrustum', 'octahedron', 'hexPrism', 'obliquePrism', 'triFrustum'] as const
 export const SOLID_VCOUNT: Record<string, number> = {

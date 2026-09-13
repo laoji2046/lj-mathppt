@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { MathFigureElement, SlideElement } from '@/types'
 import { lineDashCss } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
-import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel } from '@/composables/solid3d'
+import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg } from '@/composables/solid3d'
 import { CONIC_KINDS, FUNCTION_KINDS, conicFigure, functionFigure } from '@/composables/mathPlot'
 import { solidSel, selectSolidVertex, selectSolidEdge, selectSolidFace, clearSolidSel } from '@/composables/solidSel'
 
@@ -32,6 +32,8 @@ const pts = computed(() => {
   return p ?? []
 })
 
+/** 椭圆弧图元（球/圆锥/圆台/圆柱的底、画弧的题）—— 单独一层画在图形之上，与导出共用 arcsSvg */
+const arcSvg = computed(() => arcsSvg(props.el.arcs, props.el.w, props.el.h, props.el.stroke, props.el.strokeWidth))
 const innerHtml = computed(() => {
   const { w, h, stroke, strokeWidth, fill, kind, depth: dep } = props.el
   const s = strokeWidth || 2
@@ -450,7 +452,7 @@ function onSvgDbl(e: MouseEvent) {
 
 <template>
   <div ref="box" class="mathfig-el">
-    <svg :viewBox="`0 0 ${props.el.w} ${props.el.h}`" width="100%" height="100%" :preserveAspectRatio="fit === 'contain' ? 'xMidYMid meet' : 'none'" v-html="innerHtml" @click="onSvgClick" @dblclick="onSvgDbl"></svg>
+    <svg :viewBox="`0 0 ${props.el.w} ${props.el.h}`" width="100%" height="100%" :preserveAspectRatio="fit === 'contain' ? 'xMidYMid meet' : 'none'" v-html="innerHtml + arcSvg" @click="onSvgClick" @dblclick="onSvgDbl"></svg>
     <template v-if="showHandles">
       <!-- 注意：v-for 循环数字时给的是 (值, 下标)，值是 1..n —— 顶点下标必须用 vi（0..n-1）。
            之前用的是 v，于是**第 0 个顶点没有手柄**、末尾还多出一个下标越界的幽灵手柄（拖它会往 points 里写 NaN）。 -->
