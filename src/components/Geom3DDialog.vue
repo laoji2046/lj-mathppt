@@ -219,13 +219,82 @@ function setEdgeStyle(patch: { color?: string; width?: number; dash?: 0 | 1 }) {
   parse()
 }
 
+// ---------------- 已加项（可选中 / 可删 / 可改） ----------------
+/** 定比分点列表 */
+const addedMarks = computed(() => (model.value?.marks || []).map((k, i) => ({ i, name: k.name, from: k.from, to: k.to, t: k.t })))
+/** 辅助线列表 */
+const addedAux = computed(() => (model.value?.auxiliary || []).map((a, i) => ({ i, from: a.from, to: a.to, style: a.style || 'auto' })))
+/** 删掉一个定比分点 */
+function delMark(i: number) {
+  if (!model.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  next.marks?.splice(i, 1)
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+/** 删掉一条辅助线 */
+function delAux(i: number) {
+  if (!model.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  next.auxiliary?.splice(i, 1)
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+/** 改辅助线的虚实（auto = 按是否穿在体内自动判） */
+function setAuxStyle(i: number, style: 'auto' | 'solid' | 'dashed') {
+  if (!model.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  if (!next.auxiliary?.[i]) return
+  next.auxiliary[i] = { ...next.auxiliary[i], style }
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+// ---------------- 直线与平面的交点 ----------------
+const meetA = ref('')
+const meetB = ref('')
+const meetPlane = ref(-1)
+const meetName = ref('')
+function addMeet() {
+  const pl = planes.value[meetPlane.value]
+  if (!model.value || !pl || !meetA.value || !meetB.value || meetA.value === meetB.value) return
+  const name = meetName.value.trim() || nextMarkName()
+  const next = JSON.parse(raw.value) as Geom3D
+  next.meetPoints = [
+    ...(next.meetPoints || []).filter((x) => x.name !== name),
+    { name, line: [meetA.value, meetB.value] as [string, string], plane: pl.pts.slice() },
+  ]
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+  meetName.value = ''
+}
+/** 交点列表（可删） */
+const addedMeets = computed(() => (model.value?.meetPoints || []).map((x, i) => ({ i, name: x.name, line: x.line, plane: x.plane.join('-') })))
+function delMeet(i: number) {
+  if (!model.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  next.meetPoints?.splice(i, 1)
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+
+/** 点列表里的某一行 → 在图上选中对应的线（编辑反馈） */
+function selectAux(from: string, to: string) {
+  const p = proj.value
+  if (!p) return
+  const ia = order.value.indexOf(from)
+  const ib = order.value.indexOf(to)
+  const k = p.mesh.edges.findIndex((e) => (e[0] === ia && e[1] === ib) || (e[0] === ib && e[1] === ia))
+  if (k >= 0) { selKind.value = 'line'; selEdge.value = k; selPoints.value = [] }
+}
+
 /** 平面列表（手画的截面 + 三点定的平面），用于调填充 / 删除 */
 const planes = computed(() => {
   const m = model.value
-  if (!m) return [] as { kind: 'cut' | 'plane'; i: number; label: string; fill: string | null | undefined }[]
-  const out: { kind: 'cut' | 'plane'; i: number; label: string; fill: string | null | undefined }[] = []
-  ;(m.cutPlanes || []).forEach((cp, i) => out.push({ kind: 'cut', i, label: (cp.points || []).join('-'), fill: cp.fill }))
-  ;(m.planeCuts || []).forEach((cp, i) => out.push({ kind: 'plane', i, label: (cp.through || []).join('-'), fill: cp.fill }))
+  type P = { kind: 'cut' | 'plane'; i: number; label: string; fill: string | null | undefined; pts: string[] }
+  if (!m) return [] as P[]
+  const out: P[] = []
+  ;(m.cutPlanes || []).forEach((cp, i) => out.push({ kind: 'cut', i, label: (cp.points || []).join('-'), fill: cp.fill, pts: cp.points || [] }))
+  ;(m.planeCuts || []).forEach((cp, i) => out.push({ kind: 'plane', i, label: (cp.through || []).join('-'), fill: cp.fill, pts: cp.through || [] }))
   return out
 })
 /** 改平面填充色（null = 只描边不填充） */
@@ -554,6 +623,48 @@ function insert() {
               <input v-model="mkName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
               <button class="g3__btn" @click="addMark()">加这个点</button>
             </div>
+            <div v-if="addedMarks.length || addedAux.length" class="g3__row g3__row--top g3__row--stack">
+              <span class="g3__tip g3__tip--inline">已加的（可删）：</span>
+              <span
+                v-for="mk in addedMarks" :key="'mk' + mk.i" class="g3__plane"
+                :title="'定比分点 ' + mk.name + ' = ' + mk.from + ' + ' + mk.t + '×(' + mk.to + ' − ' + mk.from + ')'"
+              >
+                <b>点 {{ mk.name }}</b>
+                <button class="g3__btn g3__btn--tiny" title="删掉这个点" @click="delMark(mk.i)">×</button>
+              </span>
+              <span v-for="ax in addedAux" :key="'ax' + ax.i" class="g3__plane">
+                <b class="g3__link" title="在图上选中这条线" @click="selectAux(ax.from, ax.to)">线 {{ ax.from }}–{{ ax.to }}</b>
+                <button class="g3__btn g3__btn--tiny" :class="{ 'g3__btn--on': ax.style === 'auto' }" @click="setAuxStyle(ax.i, 'auto')">自动</button>
+                <button class="g3__btn g3__btn--tiny" :class="{ 'g3__btn--on': ax.style === 'solid' }" @click="setAuxStyle(ax.i, 'solid')">实</button>
+                <button class="g3__btn g3__btn--tiny" :class="{ 'g3__btn--on': ax.style === 'dashed' }" @click="setAuxStyle(ax.i, 'dashed')">虚</button>
+                <button class="g3__btn g3__btn--tiny" title="删掉这条辅助线" @click="delAux(ax.i)">×</button>
+              </span>
+            </div>
+            <div v-if="planes.length" class="g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">直线与平面的交点（如 A₁C 与平面 AB₁D₁）：</span>
+              <select v-model="meetA" class="g3__sel g3__sel--sm">
+                <option value="">点1</option>
+                <option v-for="n in order" :key="'ma' + n" :value="n">{{ n }}</option>
+              </select>
+              <select v-model="meetB" class="g3__sel g3__sel--sm">
+                <option value="">点2</option>
+                <option v-for="n in order" :key="'mb' + n" :value="n">{{ n }}</option>
+              </select>
+              <span class="g3__tip g3__tip--inline">与平面</span>
+              <select v-model.number="meetPlane" class="g3__sel g3__sel--sm" style="min-width:100px">
+                <option :value="-1">选平面…</option>
+                <option v-for="(pl, k) in planes" :key="'mp' + k" :value="k">{{ pl.label }}</option>
+              </select>
+              <input v-model="meetName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
+              <button class="g3__btn" @click="addMeet()">求交点</button>
+            </div>
+            <div v-if="addedMeets.length" class="g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">交点：</span>
+              <span v-for="mp in addedMeets" :key="'mp' + mp.i" class="g3__plane">
+                <b>{{ mp.name }}</b><span class="g3__meet">{{ mp.line.join('') }} ∩ {{ mp.plane }}</span>
+                <button class="g3__btn g3__btn--tiny" @click="delMeet(mp.i)">×</button>
+              </span>
+            </div>
             <div v-if="planes.length" class="g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">平面属性：</span>
               <span v-for="pl in planes" :key="pl.kind + pl.i" class="g3__plane">
@@ -697,6 +808,10 @@ function insert() {
 .g3__col { width: 30px; height: 20px; padding: 0; border: 1px solid var(--border, #ddd); border-radius: 4px; background: none; }
 .g3__plane { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #555; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 2px 4px; background: #fff; }
 .g3__plane b { color: #1668e0; font-weight: 600; }
+.g3__row--stack { align-items: flex-start; }
+.g3__meet { color: #777; font-size: 10px; }
+.g3__link { cursor: pointer; text-decoration: underline dotted; }
+.g3__link:hover { color: #0b4ea8; }
 .g3__lab { font-size: 12px; font-weight: 700; color: #444; margin-bottom: 6px; }
 .g3__lab--mt { margin-top: 14px; }
 .g3__ta { width: 100%; height: 220px; font: 12px/1.5 Consolas, Menlo, monospace; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 8px; resize: vertical; box-sizing: border-box; }

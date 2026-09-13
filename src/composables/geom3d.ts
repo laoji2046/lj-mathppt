@@ -42,6 +42,9 @@ export interface Geom3D {
   /** **点样式**（按点名）：改标签文字（`null` = 不显示）、颜色、大小。
    *  编辑器里选中一个点就能改这些。 */
   pointStyles?: Record<string, { label?: string | null; color?: string; size?: number }>
+  /** **直线与平面的交点**（构造点）：line 是直线上的两点、plane 是定平面的三点。
+   *  解析时算出来当普通顶点用 —— 后续连线、定平面都能拿它当端点。 */
+  meetPoints?: { name: string; line: [string, string]; plane: string[] }[]
   /** **线样式**：键是两端点名按字典序拼的 `A|B`（无序，A-B 和 B-A 同一条）。
    *  颜色 / 线宽 / 虚实 —— 编辑器里选中一条线就能改。 */
   edgeStyles?: Record<string, { color?: string; width?: number; dash?: 0 | 1 }>
@@ -189,6 +192,26 @@ export function resolveVertices(m: Geom3D): Record<string, [number, number, numb
     }
     pend = next
     if (!moved) break
+  }
+  // 直线与平面的交点（构造点）：跟定比分点一样，解析出来当普通顶点用
+  for (const mp of m.meetPoints || []) {
+    if (!mp?.name || out[mp.name]) continue
+    const A = out[mp.line?.[0]], B = out[mp.line?.[1]]
+    const Q = (mp.plane || []).map((n) => out[n]).filter(Boolean) as [number, number, number][]
+    if (!A || !B || Q.length < 3) continue
+    const d: [number, number, number] = [B[0] - A[0], B[1] - A[1], B[2] - A[2]]
+    const e1v = sub(Q[1], Q[0])
+    const e2v = sub(Q[2], Q[0])
+    const nrm = cross(e1v, e2v)
+    const den = d[0] * nrm[0] + d[1] * nrm[1] + d[2] * nrm[2]
+    // 直线与平面平行（或在平面内）→ 没有唯一交点，跳过
+    if (Math.abs(den) < 1e-9) continue
+    const t = dot(sub(Q[0], A), nrm) / den
+    out[mp.name] = [
+      +(A[0] + d[0] * t).toFixed(4),
+      +(A[1] + d[1] * t).toFixed(4),
+      +(A[2] + d[2] * t).toFixed(4),
+    ]
   }
   return out
 }
