@@ -14,6 +14,7 @@ import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import { projectGeom, solveView, type Geom3D } from '@/composables/geom3d'
+import { GEOM3D_PRESETS, GEOM3D_PROMPT } from '@/composables/geom3dPrompt'
 import { renderSolid } from '@/composables/solid3d'
 import { closeGeom3D } from '@/ui/geom3d'
 
@@ -120,6 +121,31 @@ function solve() {
   elev.value = Math.round(s.elev * 10) / 10
   fitErr.value = s.err
 }
+/** 复制提示词：这份 JSON app 自己不会生成 —— 它由大模型按提示词把题目翻译出来。
+ *  所以把提示词一键复制，跟题目（文字或题图）一起发给任意 AI 即可。 */
+const copied = ref(false)
+async function copyPrompt() {
+  try {
+    await navigator.clipboard.writeText(GEOM3D_PROMPT)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 1600)
+  } catch {
+    // 剪贴板不可用（无权限等）就退回"选中让用户自己复制"
+    const ta = document.createElement('textarea')
+    ta.value = GEOM3D_PROMPT
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 1600)
+  }
+}
+function usePreset(json: string) {
+  raw.value = json
+  parse()
+}
+
 function insert() {
   const m = model.value
   if (!m) return
@@ -143,6 +169,15 @@ function insert() {
       <div class="g3__body">
         <div class="g3__left">
           <div class="g3__lab">几何描述（JSON：vertices 必填，faces 决定虚实）</div>
+          <div class="g3__row g3__row--top">
+            <select class="g3__sel" @change="usePreset(($event.target as HTMLSelectElement).value)">
+              <option value="">常用几何体…</option>
+              <option v-for="p in GEOM3D_PRESETS" :key="p.name" :value="p.json">{{ p.name }}</option>
+            </select>
+            <button class="g3__btn" title="这份 JSON 由大模型按提示词翻译题目得来：复制它，连同题目发给任意 AI" @click="copyPrompt()">
+              {{ copied ? '已复制 ✓' : '复制提示词（让 AI 出 JSON）' }}
+            </button>
+          </div>
           <textarea v-model="raw" class="g3__ta" spellcheck="false" @blur="parse" @input="parseErr = ''" />
           <p v-if="parseErr" class="g3__err">{{ parseErr }}</p>
           <div class="g3__row">
@@ -212,6 +247,8 @@ function insert() {
 .g3__ta { width: 100%; height: 220px; font: 12px/1.5 Consolas, Menlo, monospace; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 8px; resize: vertical; box-sizing: border-box; }
 .g3__err { color: #c0392b; font-size: 12px; margin: 6px 0 0; }
 .g3__row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.g3__row--top { margin-top: 0; margin-bottom: 8px; }
+.g3__sel { flex: 1; min-width: 150px; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 5px 8px; font-size: 12px; background: #fff; }
 .g3__f { font-size: 12px; color: #555; flex: 1; min-width: 170px; }
 .g3__f input { width: 100%; }
 .g3__tip { font-size: 12px; color: #6b6b76; line-height: 1.6; margin: 8px 0 0; }
