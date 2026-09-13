@@ -17,8 +17,12 @@ import { buildSolid, projectGeom, resolveVertices, solveView, type Geom3D } from
 import { GEOM3D_PRESETS, GEOM3D_PROMPT } from '@/composables/geom3dPrompt'
 import { renderSolid, arcsSvg } from '@/composables/solid3d'
 import { closeGeom3D } from '@/ui/geom3d'
+import type { MathFigureElement } from '@/types'
 
+const props = defineProps<{ editId?: string | null }>()
 const store = useDeckStore()
+/** 在**当前页**里按 id 找元素（跟「图片转图形」同一套做法） */
+const findEl = (id: string) => store.currentSlide?.elements.find((e) => e.id === id) as MathFigureElement | undefined
 const H = 620
 /** 当前投影（只算一次，预览 / 属性 / 命中测试共用） */
 const proj = computed(() => (model.value ? projectGeom(model.value, { azim: azim.value, elev: elev.value }) : null))
@@ -128,6 +132,18 @@ function parse() {
   }
 }
 parse()
+
+// 从画布上的三维图形回来 → 还原模型和视角（继续改）
+if (props.editId) {
+  const el = findEl(props.editId)
+  const g = el?.geom3d
+  if (g?.model && Object.keys(g.model).length) {
+    raw.value = JSON.stringify(g.model, null, 1)
+    if (typeof g.azim === 'number') azim.value = g.azim
+    if (typeof g.elev === 'number') elev.value = g.elev
+    parse()
+  }
+}
 
 /** 预览 / 插入用的 SVG（参数顺序：kind, pts, w, h, stroke, sw, fill, dsh, vlabels,
  *  edgeStyles, selVertex, selEdge, labelOffsets, faceStyles, selFace, mesh —— mesh 在最后一位） */
@@ -536,13 +552,21 @@ function insert() {
   const m = model.value
   if (!m) return
   const p = projectGeom(m, { azim: azim.value, elev: elev.value })
-  store.addElement('mathfig', {
+  const patch = {
     kind: 'cube', points: p.points, mesh: p.mesh, vlabels: p.vlabels,
     arcs: p.arcs.length ? p.arcs : undefined,
     faceStyles: p.faceStyles.length ? p.faceStyles : undefined,
     edgeStyles: p.edgeStyles.some(Boolean) ? p.edgeStyles : undefined,
-    w: W.value, h: H, fill: 'transparent', stroke: '#1a1a1a', strokeWidth: 2.6,
-  } as never)
+    // **把源模型存进元素** —— 否则插进画布就"死"了，改不了视角也改不了模型
+    geom3d: { model: m as unknown as Record<string, unknown>, azim: azim.value, elev: elev.value },
+  }
+  const el = props.editId ? findEl(props.editId) : undefined
+  if (el) {
+    // 继续编辑：保留原来的位置和尺寸（用户可能已经拖过、缩过）
+    store.updateElement(el.id, { ...patch, x: el.x, y: el.y, w: el.w, h: el.h } as never)
+  } else {
+    store.addElement('mathfig', { ...patch, w: W.value, h: H, fill: 'transparent', stroke: '#1a1a1a', strokeWidth: 2.6 } as never)
+  }
   closeGeom3D()
 }
 </script>
@@ -551,7 +575,7 @@ function insert() {
   <div class="g3" @mousedown.self="closeGeom3D()">
     <div class="g3__box">
       <header class="g3__head">
-        <span class="g3__title">三维立体图 —— 由模型算出虚实</span>
+        <span class="g3__title">{{ props.editId ? '编辑三维模型' : '三维立体图' }} —— 由模型算出虚实</span>
         <button class="g3__close" @click="closeGeom3D()"><AppIcon name="close" :size="13" /></button>
       </header>
 
@@ -783,7 +807,9 @@ function insert() {
       <footer class="g3__foot">
         <span class="g3__stat">{{ edgeStat }}</span>
         <button class="g3__btn" @click="closeGeom3D()">取消</button>
-        <button class="g3__btn g3__btn--primary" :disabled="!model" @click="insert()">插入到当前页</button>
+        <button class="g3__btn g3__btn--primary" :disabled="!model" @click="insert()">
+          {{ props.editId ? '保存修改' : '插入到当前页' }}
+        </button>
       </footer>
     </div>
   </div>

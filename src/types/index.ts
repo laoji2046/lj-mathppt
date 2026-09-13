@@ -470,6 +470,14 @@ export interface MathFigureElement extends ElementBase {
     /** 识别框在原图里的位置（像素） */
     box: [number, number, number, number]
   }
+  /** 由「三维立体图」生成时的模型上下文 —— 用来「回到弹窗继续改视角 / 改模型」。
+   *  投影结果（points / mesh / vlabels）本来就在本元素上，这里存的是**源模型**。 */
+  geom3d?: {
+    /** 三维模型（Geom3D 的 JSON），弹窗里原样还原 */
+    model: Record<string, unknown>
+    azim: number
+    elev: number
+  }
 }
 
 /** 图表类型 */
