@@ -88,6 +88,24 @@ export function arcPolyline(a: FigureArc, points: number[] | undefined, w: numbe
   }
   if (P.length < 2) return []
   if (P.length === 2) {
+    // 半椭圆：长半轴 = 弦长的一半，短半轴 = |拱高|，只画拱向那一侧的半圈。
+    // 圆台/圆锥/圆柱的底面在斜二测里就是这种半椭圆。
+    if (a.ellipse) {
+      const c = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1])
+      const bulge = Math.max(-0.5, Math.min(0.5, a.bulge ?? 0))
+      if (c < 1 || Math.abs(bulge) < 0.02) return P
+      const A2 = c / 2, B2 = Math.abs(bulge) * c, sign = bulge >= 0 ? 1 : -1
+      const cx = (P[0][0] + P[1][0]) / 2, cy = (P[0][1] + P[1][1]) / 2
+      const ux = (P[1][0] - P[0][0]) / c, uy = (P[1][1] - P[0][1]) / c
+      const vx = uy, vy = -ux
+      const N = 44
+      const out: [number, number][] = []
+      for (let k = 0; k <= N; k++) {
+        const t = Math.PI * (k / N)
+        out.push([cx + ux * A2 * Math.cos(t) + vx * B2 * sign * Math.sin(t), cy + uy * A2 * Math.cos(t) + vy * B2 * sign * Math.sin(t)])
+      }
+      return out
+    }
     const c = circleFromChord(P[0], P[1], a.bulge ?? 0)
     return c ? sampleCircle(c, P[0], P[1]) : P
   }

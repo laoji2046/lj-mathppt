@@ -509,6 +509,7 @@ function onVertexDown(e: PointerEvent, i: number) {
   if (panMode.value) return
   if (linkMode.value) { pickForLink(i); return }
   if (arcMode.value) { pickForArc(i); return }
+  if (ellipseMode.value) { pickForEllipseArc(i); return }
   if (e.shiftKey && selV.value !== null && selV.value !== i) {
     const s = snap()
     if (connect(selV.value, i)) pushSnap(s)
@@ -571,11 +572,46 @@ function toggleLink() {
  *  几何由 arcPolyline 现算（画布、导出、弹窗共用这一份）。
  *  关键：**双击加控制点只是往 pts 里插一个下标，曲线始终是一条**，不会被拆成几段。 */
 const arcMode = ref(false)
+/** 画椭圆弧（圆台 / 圆锥 / 圆柱的底面就是这种"半椭圆"） */
+const ellipseMode = ref(false)
 const selArc = ref<number | null>(null)
 function toggleArc() {
   arcMode.value = !arcMode.value
+  ellipseMode.value = false
   pendingV.value = null
   if (arcMode.value) { linkMode.value = false; panMode.value = false; cropping.value = false }
+}
+function toggleEllipseArc() {
+  ellipseMode.value = !ellipseMode.value
+  arcMode.value = false
+  pendingV.value = null
+  if (ellipseMode.value) { linkMode.value = false; panMode.value = false; cropping.value = false }
+}
+/** 画椭圆弧：点两个顶点（= 椭圆长轴的两端），出来就是一条半椭圆 */
+function pickForEllipseArc(i: number) {
+  if (pendingV.value === null) { pendingV.value = i; selVs.value = [i]; selE.value = null; selArc.value = null; return }
+  if (pendingV.value === i) { pendingV.value = null; return }
+  const s = snap()
+  const a = pendingV.value, b = i
+  // 默认扁平度 0.2（短半轴 = 0.4 × 长半轴）—— 立体几何插图的底面差不多就这么扁
+  arcs.value.push({ pts: [a, b], bulge: defaultBulge(a, b, 0.2), ellipse: 1, dash: 0 })
+  selArc.value = arcs.value.length - 1
+  pushSnap(s)
+  pendingV.value = null
+  selVs.value = [b]
+  selE.value = null
+}
+/** 把选中的弧翻面（开口方向反过来） */
+function flipArc(i: number) {
+  const a = arcs.value[i]
+  if (!a) return
+  const s = snap()
+  a.bulge = +(-(a.bulge ?? 0)).toFixed(4)
+  pushSnap(s)
+}
+/** 这条弧是不是半椭圆 */
+function isEllipseArc(i: number): boolean {
+  return !!arcs.value[i]?.ellipse
 }
 /** 这条弧的控制点下标表（兼容旧的 i0/i1 写法） */
 function arcIdxOf(a: FigureArc): number[] | null {
@@ -624,7 +660,7 @@ function pickForArc(i: number) {
   selE.value = null
 }
 /** 默认拱向：让拱顶落在"图形重心"的反面，弧就不会切进图形内部 */
-function defaultBulge(i0: number, i1: number): number {
+function defaultBulge(i0: number, i1: number, mag = 0.25): number {
   const n = pts.value.length / 2
   if (!n) return 0.25
   let cx = 0, cy = 0
@@ -636,7 +672,7 @@ function defaultBulge(i0: number, i1: number): number {
   const c2 = Math.hypot(dx, dy) || 1
   const ux = dy / c2, uy = -dx / c2                 // 正拱高朝这一侧
   const mx = (ax + bx) / 2 - cx, my = (ay + by) / 2 - cy
-  return mx * ux + my * uy > 0 ? -0.25 : 0.25       // 重心在正侧就反过来鼓
+  return mx * ux + my * uy > 0 ? -mag : mag         // 重心在正侧就反过来鼓
 }
 /** 拖拱高手柄（只有 2 个控制点时有）：把指针位置投影到弦的垂线上 */
 let arcDrag = -1
@@ -1165,6 +1201,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <button class="vd__btn" :class="{ 'vd__btn--on': arcMode }" @click="toggleArc">
                 {{ arcMode ? '结束画弧' : '＋ 画一段弧' }}
               </button>
+              <button class="vd__btn" :class="{ 'vd__btn--on': ellipseMode }" @click="toggleEllipseArc">
+                {{ ellipseMode ? '结束画椭圆弧' : '＋ 画椭圆弧' }}
+              </button>
               <button v-if="selE !== null" class="vd__btn" @click="toggleDash">实线 / 虚线 切换</button>
             </div>
             <p v-if="linkMode" class="vd__tip vd__tip--on">
@@ -1177,8 +1216,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 ? '画弧中：点一个顶点作为弧的起点'
                 : '起点 #' + pendingV + ' —— 再点一个顶点就画出这段弧（点同一个点取消）' }}
             </p>
+            <p v-if="ellipseMode" class="vd__tip vd__tip--on">
+              {{ pendingV === null
+                ? '画椭圆弧中：点一个顶点作为长轴的一端（圆台底面就点左右两端）'
+                : '起点 #' + pendingV + ' —— 再点另一个顶点，画出半椭圆（点同一个点取消）' }}
+            </p>
             <div v-if="selArc !== null" class="vd__row">
-              <span class="vd__selnum">曲线 #{{ selArc }}：拖绿点（弧上任意位置双击可加）</span>
+              <span class="vd__selnum">{{ isEllipseArc(selArc) ? '椭圆弧' : '曲线' }} #{{ selArc }}：拖绿点{{ isEllipseArc(selArc) ? '（绿点=半椭圆高低，翻面按钮改开口方向）' : '（弧上任意位置双击可加控制点）' }}</span>
+              <button v-if="isEllipseArc(selArc)" class="vd__btn" @click="flipArc(selArc)">翻面（开口反向）</button>
               <button class="vd__btn" @click="toggleArcDash(selArc)">{{ arcs[selArc]?.dash ? '改成实线' : '改成虚线' }}</button>
               <button class="vd__btn vd__btn--danger" @click="delArc(selArc)">删掉这段弧</button>
             </div>
