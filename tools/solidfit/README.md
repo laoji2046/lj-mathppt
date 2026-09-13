@@ -77,6 +77,22 @@ node tools/solidfit/dashcheck.cjs 改前 a.json 改后 b.json        # 虚实判
 node tools/solidfit/corpuscheck.cjs vall.json [标签]            # 整批图（206 张）的顶点/虚线/碎边总数
 ```
 
+### 不需要真值的打分器：coverage
+
+```bash
+node tools/solidfit/coverage.cjs spec.json out.html        # spec 同 vectorize.cjs
+chrome --headless=new --virtual-time-budget=600000 --dump-dom file:///.../out.html > ocov.html
+```
+
+把识别结果画到与原图**同尺寸**的画布上做双向像素比对（字母先用 `anchors[].pix` 从原图里剔掉）：
+
+- **覆盖率**（正向）= 原图线条墨迹有多少落在渲染笔迹附近 —— 低 = **漏线**
+- **反向覆盖率** = 渲染笔迹有多少落在原图墨迹附近 —— 低 = **凭空多画**
+
+实测 13 张用户真图：反向 **81~100%**（几乎不多画），正向 **46~85%** —— 短板明确在"漏线"。
+最低的三张病因各不相同：一张是**图里有大椭圆**（现在只输出直线段，曲线整条没接住），
+一张是**一个点放射大量虚线**（成链时被吃掉几条）。
+
 **改算法要看 corpuscheck**：8 张真值只覆盖 8 种图，看不出"对别的图有没有变好"。
 实测 v1136 → v1139（虚线成链的三处放宽）在 206 张图上：顶点合计 2862 → **2591**（少 271 个多余点）、
 虚线 1431 → **1670**（多 239 条成链），碎边都是 0。

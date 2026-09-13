@@ -1,0 +1,73 @@
+<!doctype html><html><head><meta charset="utf-8"><title>coverage</title></head><body>
+<pre id="out">running</pre>
+<script src="imgs.js"></script>
+<script src="_vec.js"></script>
+<script>
+// 不需要真值的打分器：把识别结果画到与原图同尺寸的画布上，做**双向**像素覆盖比对
+//   正向 = 原图线条墨迹有多少落在渲染笔迹附近（漏没漏线）
+//   反向 = 渲染笔迹有多少落在原图墨迹附近（有没有凭空多画）
+// 字母要从原图里剔掉（识别结果本来就不画字母），用 anchors[].pix 排掉
+function maskFromCanvas(cv, thresh) {
+  const g = cv.getContext('2d');
+  const d = g.getImageData(0, 0, cv.width, cv.height).data;
+  const m = new Uint8Array(cv.width * cv.height);
+  for (let i = 0, p = 0; i < m.length; i++, p += 4) {
+    const lum = 0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2];
+    if (d[p + 3] > 100 && lum < thresh) m[i] = 1;
+  }
+  return m;
+}
+function near(mask, W, H, x, y, R) {
+  for (let dy = -R; dy <= R; dy++) {
+    const yy = y + dy; if (yy < 0 || yy >= H) continue;
+    for (let dx = -R; dx <= R; dx++) {
+      const xx = x + dx; if (xx < 0 || xx >= W) continue;
+      if (mask[yy * W + xx]) return true;
+    }
+  }
+  return false;
+}
+(async function () {
+  const R = 3;
+  const rows = [];
+  for (let i = 0; i < window.__FIGS__.length; i++) {
+    const f = window.__FIGS__[i];
+    try {
+      const img = await window.solidfit.loadImage(f.src);
+      const W = img.naturalWidth, H = img.naturalHeight;
+      const out = window.solidfit.vectorizeImage(img, f.opts || {});
+      // 原图线条墨迹（扣掉字母）
+      const ink = window.solidfit.toInk(img).ink;
+      const line = ink.slice();
+      let letterPx = 0;
+      for (const a of (out.anchors || [])) for (const p of (a.pix || [])) if (line[p]) { line[p] = 0; letterPx++; }
+      // 把识别结果画出来
+      const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      const g = cv.getContext('2d');
+      g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+      g.strokeStyle = '#000'; g.lineWidth = 2.5; g.lineCap = 'round';
+      const P = out.points; const bx = out.box || [0, 0, W, H];
+      const cw = bx[2] - bx[0], ch = bx[3] - bx[1];
+      const px = (i) => bx[0] + P[i * 2] * cw;
+      const py = (i) => bx[1] + P[i * 2 + 1] * ch;
+      for (const e of out.edges) {
+        g.setLineDash(e[2] ? [6, 5] : []);
+        g.beginPath(); g.moveTo(px(e[0]), py(e[0])); g.lineTo(px(e[1]), py(e[1])); g.stroke();
+      }
+      g.setLineDash([]);
+      const draw = maskFromCanvas(cv, 128);
+      // 双向覆盖
+      let lineN = 0, hitF = 0, drawN = 0, hitR = 0;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const idx = y * W + x;
+        if (line[idx]) { lineN++; if (near(draw, W, H, x, y, R)) hitF++; }
+        if (draw[idx]) { drawN++; if (near(line, W, H, x, y, R)) hitR++; }
+      }
+      rows.push({ name: f.name, W, H, verts: out.stats.verts, edges: out.stats.edges, dash: out.stats.dash,
+        linePx: lineN, drawPx: drawN, letterPx,
+        cover: lineN ? hitF / lineN : 0, precision: drawN ? hitR / drawN : 0 });
+    } catch (e) { rows.push({ name: f.name, error: String((e && e.stack) || (e && e.message) || e) }); }
+  }
+  document.getElementById("out").textContent = "@@BEGIN@@\n" + JSON.stringify(rows) + "\n@@END@@";
+})();
+</script></body></html>
