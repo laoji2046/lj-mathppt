@@ -12,6 +12,7 @@ import PresentationOverlay from '@/components/PresentationOverlay.vue'
 import PaperModal from '@/components/PaperModal.vue'
 import GgbSuite from '@/components/GgbSuite.vue'
 import TemplatePicker from '@/components/TemplatePicker.vue'
+import LayoutGallery from '@/components/LayoutGallery.vue'
 import { ggbEdit, openGgbSuite, closeGgbSuite } from '@/ui/ggbEditor'
 import ImageEditorModal from '@/components/ImageEditorModal.vue'
 import VectorizeDialog from '@/components/VectorizeDialog.vue'
@@ -132,6 +133,7 @@ function onPresent() {
       @close="presenting = false"
     />
     <TemplatePicker v-if="tplOpen" :mode="tplMode" @close="closeTemplateLibrary()" />
+    <LayoutGallery />
     <PaperModal v-if="paperOpen" @close="paperOpen = false" />
     <GgbSuite v-if="ggbEdit.open" :edit-id="ggbEdit.editId" @close="closeGgbSuite()" />
     <ImageEditorModal v-if="imageEditOpen && imageEditId" :id="imageEditId" @close="closeImageEditor()" />

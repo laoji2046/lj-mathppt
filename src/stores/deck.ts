@@ -5,6 +5,7 @@ import type {
 } from '@/types'
 import { createElement, findTheme, GRAPHIC_TYPES } from '@/types'
 import { findTemplate } from '@/templates/mathTemplates'
+import { findSlideLayout } from '@/templates/slideLayouts'
 import { findBundle } from '@/templates/mathBundles'
 import { findProTemplate, findProBundle } from '@/templates/proTemplates'
 import { findMathAppletTemplate } from '@/templates/mathAppletTemplates'
@@ -516,6 +517,43 @@ export const useDeckStore = defineStore('deck', () => {
     currentIndex.value = index + 1
     clearSelection()
   }
+  /** 套用版式库里的某一套版式（会替换该页内容） */
+  function applyLayoutToSlide(index: number, layoutId: string) {
+    const s = deck.value.slides[index]
+    const layout = findSlideLayout(layoutId)
+    if (!s || !layout) return
+    pushHistory()
+    gotoSlide(index)
+    const cur = deck.value.slides[index]
+    cur.elements = []
+    cur.bg = '#ffffff'
+    delete cur.bgGradient
+    delete cur.bgImage
+    const W = deck.value.width || 1920
+    const H = deck.value.height || 1080
+    for (const slot of layout.slots) {
+      const rect = {
+        x: Math.round(slot.x * W),
+        y: Math.round(slot.y * H),
+        w: Math.round(slot.w * W),
+        h: Math.round(slot.h * H),
+      }
+      if (slot.kind === 'image') {
+        addElement('image', { ...rect, src: '', fit: 'contain' } as Partial<SlideElement>)
+      } else {
+        addElement('text', {
+          ...rect,
+          text: slot.text || '',
+          fontSize: slot.fontSize || 24,
+          fontWeight: slot.fontWeight ?? 400,
+          align: slot.align || 'left',
+          color: '#1b1f27', fontFamily: 'sans', bgColor: 'transparent', shadow: 'none', valign: 'top',
+        } as Partial<SlideElement>)
+      }
+    }
+    clearSelection()
+  }
+
   /** 隐藏 / 取消隐藏某页（演示与导出会跳过隐藏页） */
   function toggleSlideHidden(index: number) {
     const s = deck.value.slides[index]
@@ -895,7 +933,7 @@ export const useDeckStore = defineStore('deck', () => {
     canUndo, canRedo,
     isSelected, selectElement, setSelection, clearSelection, pruneSelection,
     editingGroupId, enterGroup, exitGroup,
-    slideClip, copySlideToClip, cutSlideToClip, pasteSlideAt, toggleSlideHidden, resetSlide,
+    slideClip, copySlideToClip, cutSlideToClip, pasteSlideAt, toggleSlideHidden, resetSlide, applyLayoutToSlide,
     addSlide, addSubpageAfterCurrent, addPageWithTemplate, addBundlePages, applyBlank, addBlankPage, removeSlide, setSlideSubpage, gotoSlide, insertSlides, replaceDeck, importDeck, copySlide, moveSlide, reorderSlide,
     versions, saveVersion, restoreVersion, deleteVersion,
     addElement, updateElement, switchGraphic, commitElements, setAllFragments, removeSelected, removeElement, copyElements, cutElements, pasteElements, canPaste, setSlideBg, setSlideBgGradient, setSlideBgImage, setSlideTransition, setSlideNotes, applyTemplate, applyBundle,
