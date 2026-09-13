@@ -263,6 +263,100 @@ function adopt(r: VectorizeResult) {
   if (n1 && n2) note.value = '按字母补了 ' + (n1 + n2) + ' 条线（侧棱 ' + n1 + ' + 面的边 ' + n2 + '）'
 }
 
+// ---------------- 补出来的线判虚实 ----------------
+/** 原图像素（判"这条补出来的线在原图上是什么线型"用）。onMounted 里准备好，失败就退回几何判据 */
+const srcPix = ref<{ data: Uint8ClampedArray; w: number; h: number } | null>(null)
+function prepareSrcPix(im: HTMLImageElement) {
+  try {
+    const c = document.createElement('canvas')
+    c.width = im.naturalWidth
+    c.height = im.naturalHeight
+    const g = c.getContext('2d', { willReadFrequently: true })
+    if (!g) { srcPix.value = null; return }
+    g.drawImage(im, 0, 0)
+    const d = g.getImageData(0, 0, c.width, c.height)
+    srcPix.value = { data: d.data, w: c.width, h: c.height }
+  } catch { srcPix.value = null }
+}
+/** 整图像素坐标处是不是墨迹（跟矢量化用同一个阈值 150） */
+function inkAtFull(x: number, y: number): boolean {
+  const s = srcPix.value
+  if (!s) return false
+  const xi = Math.round(x), yi = Math.round(y)
+  if (xi < 0 || yi < 0 || xi >= s.w || yi >= s.h) return false
+  const k = (yi * s.w + xi) * 4
+  return (s.data[k] * 0.299 + s.data[k + 1] * 0.587 + s.data[k + 2] * 0.114) < 150
+}
+/** 顶点 i 在**整图**里的像素坐标（pts 是"相对识别框"归一化的，要经 toFull 换算） */
+function fullPx(i: number): [number, number] {
+  const im = img.value
+  const f = toFull(i)
+  return im ? [f[0] * im.naturalWidth, f[1] * im.naturalHeight] : [0, 0]
+}
+/** 顶点集的凸包（Andrew 单调链）—— 用来判"这条线是不是藏在图形内部" */
+function convexHull(P: [number, number][]): [number, number][] {
+  const a = P.slice().sort((p, q) => (p[0] - q[0]) || (p[1] - q[1]))
+  if (a.length < 3) return a
+  const cr = (o: [number, number], p: [number, number], q: [number, number]) =>
+    (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
+  const lo: [number, number][] = []
+  for (const p of a) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p) }
+  const up: [number, number][] = []
+  for (let i = a.length - 1; i >= 0; i--) { const p = a[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p) }
+  lo.pop(); up.pop()
+  return lo.concat(up)
+}
+/** 点是不是**明显在凸包内部**（离边界 margin 像素以上才算）—— 边界上的点算"在轮廓上" */
+function insideHull(hull: [number, number][], x: number, y: number, margin = 4): boolean {
+  const n = hull.length
+  if (n < 3) return false
+  let minD = 1e9
+  let inside = false
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const a = hull[j], b = hull[i]
+    // 射线法
+    if ((b[1] > y) !== (a[1] > y) && x < ((a[0] - b[0]) * (y - b[1])) / (a[1] - b[1] || 1e-9) + b[0]) inside = !inside
+    // 到边界的距离
+    const dx = b[0] - a[0], dy = b[1] - a[1]
+    const L2 = dx * dx + dy * dy || 1e-9
+    let t = ((x - a[0]) * dx + (y - a[1]) * dy) / L2
+    t = Math.max(0, Math.min(1, t))
+    minD = Math.min(minD, Math.hypot(x - (a[0] + t * dx), y - (a[1] + t * dy)))
+  }
+  return inside && minD > margin
+}
+/** 补出来的线该画实线还是虚线：
+ *  ① 先看**原图**这条线上有没有墨 —— 几乎连续 → 实线；断续 → 虚线（隐藏线本来就是虚线画法）；
+ *  ② 一个墨点都没有（整条漏了，多半是细虚线没认出来）→ 按几何判：
+ *     中点藏在顶点凸包**内部** = 被挡住的棱 → 虚线；在轮廓上 → 实线。 */
+function inferDashFor(a: number, b: number, hull: [number, number][]): 0 | 1 {
+  const [ax, ay] = fullPx(a), [bx, by] = fullPx(b)
+  const L = Math.hypot(bx - ax, by - ay)
+  if (srcPix.value && L > 4) {
+    const N = Math.max(8, Math.min(240, Math.round(L / 2)))
+    let hit = 0
+    for (let k = 0; k <= N; k++) {
+      const t = k / N
+      const x = ax + (bx - ax) * t, y = ay + (by - ay) * t
+      let ok = false
+      for (let dy = -2; dy <= 2 && !ok; dy++) {
+        for (let dx = -2; dx <= 2; dx++) if (inkAtFull(x + dx, y + dy)) { ok = true; break }
+      }
+      if (ok) hit++
+    }
+    const cov = hit / (N + 1)
+    if (cov >= 0.85) return 0
+    if (cov >= 0.25) return 1
+  }
+  return insideHull(hull, (ax + bx) / 2, (ay + by) / 2) ? 1 : 0
+}
+/** 当前所有顶点的凸包（整图像素） */
+function vertHull(): [number, number][] {
+  const P: [number, number][] = []
+  for (let i = 0; i < nVerts.value; i++) P.push(fullPx(i))
+  return convexHull(P)
+}
+
 /** 按字母补线：图上只要有 **X 和 X_1**（同底字母 + 下标 1，下标用 _1 或 ^1 都认）这种一对，
  *  它们之间就一定有一条线（立体图里的侧棱，C–C₁、B–B₁…），识别漏了要补上 —— 用户明确说"这条线必画"。
  *  重名只取第一个；已经连了的跳过；补出来的默认实线，不对的话在图上点一下就能改虚实。
@@ -273,17 +367,20 @@ function inferCorrespondingEdges(): number {
     const s = (t || '').trim()
     if (s && !byLabel.has(s)) byLabel.set(s, i)
   })
-  let added = 0
+  let added = 0, dashed = 0
+  const hull = vertHull()
   for (const [txt, i] of byLabel) {
     const m = /^([A-Za-z])[_^]1$/.exec(txt)
     if (!m) continue
     const j = byLabel.get(m[1])
     if (j === undefined || j === i) continue
     if (edges.value.some((e) => (e[0] === i && e[1] === j) || (e[0] === j && e[1] === i))) continue
-    edges.value.push([j, i, 0])
+    const d = inferDashFor(j, i, hull)
+    edges.value.push([j, i, d])
     added++
+    if (d) dashed++
   }
-  if (added) note.value = '按字母补了 ' + added + ' 条必画的线（X–X₁ 这类侧棱）'
+  if (added) note.value = '按字母补了 ' + added + ' 条线（X–X₁ 这类侧棱）' + (dashed ? '，其中 ' + dashed + ' 条虚线' : '')
   return added
 }
 
@@ -321,20 +418,23 @@ function inferFacePolygons(): number {
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push({ i, base: m[1].toUpperCase() })
   })
-  let added = 0
+  let added = 0, dashed = 0
   for (const arr of groups.values()) {
     if (arr.length < 3) continue
     arr.sort((a, b) => (a.base < b.base ? -1 : a.base > b.base ? 1 : 0))
     const P = arr.map((x) => [px(x.i), py(x.i)] as [number, number])
     if (!isConvexRing(P)) continue
+    const hull = vertHull()
     for (let k = 0; k < arr.length; k++) {
       const a = arr[k].i, b = arr[(k + 1) % arr.length].i
       if (edges.value.some((e) => (e[0] === a && e[1] === b) || (e[0] === b && e[1] === a))) continue
-      edges.value.push([a, b, 0])
+      const d = inferDashFor(a, b, hull)
+      edges.value.push([a, b, d])
       added++
+      if (d) dashed++
     }
   }
-  if (added) note.value = '按字母补了 ' + added + ' 条面的边（A-B-C-D-A 这种闭合）'
+  if (added) note.value = '按字母补了 ' + added + ' 条面的边（A-B-C-D-A 这种闭合）' + (dashed ? '，其中 ' + dashed + ' 条虚线' : '')
   return added
 }
 
@@ -1243,6 +1343,7 @@ onMounted(async () => {
   try {
     const im = await loadImageElement(props.src)
     img.value = im
+    prepareSrcPix(im)
     const shrunk = shrinkSrc(im)
     storeSrc.value = shrunk.url
     storeK.value = shrunk.k
