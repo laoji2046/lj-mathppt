@@ -487,7 +487,7 @@ function elementToHtml(el: SlideElement): string {
   }
 
   if (el.type === 'mathfig') {
-    return `<div style="${box}${rot}"${cls}${fragIdx}><svg width="100%" height="100%" viewBox="0 0 ${el.w} ${el.h}" preserveAspectRatio="none">${figureInner(el.kind, el.w, el.h, el.stroke, el.strokeWidth, el.fill, el.points, el.strokeDash, el.depth, el.vlabels, el.edgeStyles, el.labelOffsets, el.faceStyles, el.mesh)}${arcsSvg(el.arcs, el.w, el.h, el.stroke, el.strokeWidth)}</svg></div>`
+    return `<div style="${box}${rot}"${cls}${fragIdx}><svg width="100%" height="100%" viewBox="0 0 ${el.w} ${el.h}" preserveAspectRatio="none">${figureInner(el.kind, el.w, el.h, el.stroke, el.strokeWidth, el.fill, el.points, el.strokeDash, el.depth, el.vlabels, el.edgeStyles, el.labelOffsets, el.faceStyles, el.mesh)}${arcsSvg(el.arcs, el.w, el.h, el.stroke, el.strokeWidth, '6 5', el.points)}</svg></div>`
   }
 
   if (el.type === 'chart') {

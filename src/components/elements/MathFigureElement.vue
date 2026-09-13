@@ -32,8 +32,10 @@ const pts = computed(() => {
   return p ?? []
 })
 
-/** 椭圆弧图元（球/圆锥/圆台/圆柱的底、画弧的题）—— 单独一层画在图形之上，与导出共用 arcsSvg */
-const arcSvg = computed(() => arcsSvg(props.el.arcs, props.el.w, props.el.h, props.el.stroke, props.el.strokeWidth))
+/** 弧 / 曲线图元 —— 单独一层画在图形之上，与导出共用 arcsSvg。
+ *  **必须把元素的 points 传进去**：弦式曲线是"顶点下标 + 拱高"，没有顶点表就解不出几何，
+ *  漏传的表现就是"弹窗里画得好好的，插入页面后弧不显示"（踩过）。 */
+const arcSvg = computed(() => arcsSvg(props.el.arcs, props.el.w, props.el.h, props.el.stroke, props.el.strokeWidth, '6 5', props.el.points))
 const innerHtml = computed(() => {
   const { w, h, stroke, strokeWidth, fill, kind, depth: dep } = props.el
   const s = strokeWidth || 2
