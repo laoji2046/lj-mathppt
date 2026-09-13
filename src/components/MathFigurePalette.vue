@@ -47,7 +47,11 @@ function previewFit(kind: MathFigureKind): 'stretch' | 'contain' {
 /** 插入尺寸：函数 / 圆锥曲线按视图宽高比给（圆才会是圆），其余用元素默认值 */
 function insert(kind: MathFigureKind) {
   const box = figureBox(kind)
-  store.addElement('mathfig', box ? { kind, ...box } : { kind } as any)
+  // 自定义函数（空白）：给一份能直接改的默认配置，别让元素缺字段
+  const extra = kind === 'custom'
+    ? { custom: { expr: 'x^2-2x+1', x0: -2, x1: 4, y0: -2, y1: 6, grid: true, axes: true }, w: 420, h: 300 }
+    : {}
+  store.addElement('mathfig', { kind, ...(box || {}), ...extra } as any)
   emit('close')
 }
 

@@ -4,7 +4,7 @@ import type { MathFigureElement, SlideElement } from '@/types'
 import { lineDashCss } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
 import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg } from '@/composables/solid3d'
-import { CONIC_KINDS, FUNCTION_KINDS, conicFigure, functionFigure } from '@/composables/mathPlot'
+import { CONIC_KINDS, FUNCTION_KINDS, conicFigure, customFigure, functionFigure } from '@/composables/mathPlot'
 import { solidSel, selectSolidVertex, selectSolidEdge, selectSolidFace, clearSolidSel } from '@/composables/solidSel'
 
 const props = defineProps<{ el: MathFigureElement; selected?: boolean; /** 预览用：等比缩放（contain）而不是拉伸（stretch） */ fit?: 'stretch' | 'contain' }>()
@@ -60,6 +60,16 @@ const innerHtml = computed(() => {
   }
 
   // 函数图像 / 圆锥曲线：走纯几何模块 mathPlot（真采样，非手工贝塞尔）
+  // 自定义函数（空白）：表达式由用户给；解析不了就画一行红字提示（不静默空白）
+  if (kind === 'custom') {
+    const cfg = props.el.custom || { expr: 'x^2', x0: -4, x1: 4, y0: -2, y1: 6 }
+    const svg = customFigure(cfg, w, h, stroke, s)
+    if (svg === null) {
+      const fs = Math.max(12, Math.min(w, h) * 0.05)
+      return '<text x="' + w / 2 + '" y="' + h / 2 + '" text-anchor="middle" fill="#c0392b" font-size="' + fs.toFixed(1) + '">表达式无法解析</text>'
+    }
+    return svg
+  }
   if (FUNCTION_KINDS.includes(kind)) return functionFigure(kind, w, h, stroke, s, props.el.params)
   if (CONIC_KINDS.includes(kind)) return conicFigure(kind, w, h, stroke, s, fillColor)
 

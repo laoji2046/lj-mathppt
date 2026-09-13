@@ -269,6 +269,7 @@ export interface PenElement extends ElementBase {
 /** 数学图形种类 */
 export type MathFigureKind =
   // ---- 函数图像（含新增：一次 / 三次 / 绝对值 / 根式 / 反比例 / 双钩 / 正切 / 正弦型 / 指数递减） ----
+  | 'custom'
   | 'linear' | 'parabola' | 'cubic' | 'absolute' | 'sqrt' | 'reciprocal' | 'hook'
   | 'tangent' | 'sine' | 'cosine' | 'sinusoid' | 'exponential' | 'expDecay' | 'logarithm'
   | 'piecewise' | 'paramQuadratic' | 'paramAbs'
@@ -306,6 +307,7 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   { v: 'piecewise', label: '分段函数（实心/空心点）', cat: '函数图像' },
   { v: 'paramQuadratic', label: '含参二次 y=x²−2ax+1（可调 a）', cat: '函数图像' },
   { v: 'paramAbs', label: '含参绝对值 y=|x−a|（可调 a）', cat: '函数图像' },
+  { v: 'custom', label: '自定义函数（空白）', cat: '函数图像' },
   { v: 'tangent', label: '正切 y=tan x', cat: '函数图像' },
   { v: 'exponential', label: '指数 y=2ˣ', cat: '函数图像' },
   { v: 'expDecay', label: '指数 y=(1/2)ˣ', cat: '函数图像' },
@@ -469,6 +471,19 @@ export interface MathFigureElement extends ElementBase {
     imgH: number
     /** 识别框在原图里的位置（像素） */
     box: [number, number, number, number]
+  }
+  /** 自定义函数（空白）：表达式 + 定义域/值域 + 网格/坐标轴开关。
+   *  表达式语法见 mathPlot.compileExpr（+ − * / ^、括号、pi/e、sin/cos/ln/sqrt…，支持 2x 这种隐式乘法） */
+  custom?: {
+    expr: string
+    /** 定义域 */
+    x0: number
+    x1: number
+    /** 值域（也就是显示窗口的 y 范围） */
+    y0: number
+    y1: number
+    grid?: boolean
+    axes?: boolean
   }
   /** 由「三维立体图」生成时的模型上下文 —— 用来「回到弹窗继续改视角 / 改模型」。
    *  投影结果（points / mesh / vlabels）本来就在本元素上，这里存的是**源模型**。 */

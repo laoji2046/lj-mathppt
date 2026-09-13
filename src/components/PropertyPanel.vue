@@ -12,7 +12,7 @@ import { captureDesmosState } from '@/composables/useDesmos'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
 import { openShapeEdit } from '@/ui/shapeEditor'
-import { figureParams } from '@/composables/mathPlot'
+import { compileExpr, figureParams } from '@/composables/mathPlot'
 import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type EdgeStyle, type FaceStyle } from '@/composables/solid3d'
 import { solidSel } from '@/composables/solidSel'
 import { openImageEditor } from '@/ui/imageEditor'
@@ -88,6 +88,17 @@ function reopenVectorize() {
   const m = mathfig.value
   if (!m?.vectorizeCtx) return
   openVectorize(m.vectorizeCtx.src, null, m.id)
+}
+
+/** 自定义函数：表达式能不能解析（不能就提示，别静默画不出来） */
+const customBad = computed(() => {
+  if (mathfig.value?.kind !== 'custom') return false
+  return compileExpr(mathfig.value.custom?.expr || '') === null
+})
+/** 改自定义函数的某一项 */
+function setCustom(p: Partial<NonNullable<MathFigureElement['custom']>>) {
+  const cur = mathfig.value?.custom || { expr: 'x^2', x0: -4, x1: 4, y0: -2, y1: 6 }
+  patch({ custom: { ...cur, ...p } } as Partial<SlideElement>)
 }
 
 /** 「三维立体图」生成的元素：带着源模型回到那个弹窗，继续改视角 / 改模型 */
@@ -823,6 +834,33 @@ function layerTypeLabel(type: string) {
             </optgroup>
           </select>
         </label>
+        <!-- 自定义函数（空白）：表达式 / 定义域 / 值域 / 网格 / 坐标轴 -->
+        <template v-if="mathfig?.kind === 'custom'">
+          <label class="field"><span>y =</span>
+            <input
+              class="cfn__expr"
+              :value="mathfig.custom?.expr ?? ''"
+              placeholder="如 x^2-2x+1、2sin(x)、1/x"
+              @change="setCustom({ expr: ($event.target as HTMLInputElement).value })"
+            />
+          </label>
+          <p v-if="customBad" class="cfn__err">表达式看不懂 —— 支持 + − * / ^、括号、pi/e、sin/cos/tan/ln/sqrt/abs/exp…（2x 这种写法也认）</p>
+          <label class="field"><span>定义域</span>
+            <span class="cfn__pair">
+              x ∈ [<input type="number" step="0.5" :value="mathfig.custom?.x0 ?? -4" @change="setCustom({ x0: num(($event.target as HTMLInputElement).value, -4) })" />,
+              <input type="number" step="0.5" :value="mathfig.custom?.x1 ?? 4" @change="setCustom({ x1: num(($event.target as HTMLInputElement).value, 4) })" />]
+            </span>
+          </label>
+          <label class="field"><span>值域</span>
+            <span class="cfn__pair">
+              y ∈ [<input type="number" step="0.5" :value="mathfig.custom?.y0 ?? -2" @change="setCustom({ y0: num(($event.target as HTMLInputElement).value, -2) })" />,
+              <input type="number" step="0.5" :value="mathfig.custom?.y1 ?? 6" @change="setCustom({ y1: num(($event.target as HTMLInputElement).value, 6) })" />]
+            </span>
+          </label>
+          <label class="field field--row"><input type="checkbox" :checked="mathfig.custom?.grid !== false" @change="setCustom({ grid: ($event.target as HTMLInputElement).checked })"> <span>网格</span></label>
+          <label class="field field--row"><input type="checkbox" :checked="mathfig.custom?.axes !== false" @change="setCustom({ axes: ($event.target as HTMLInputElement).checked })"> <span>坐标轴</span></label>
+          <p class="cfn__hint">值域就是显示窗口的 y 范围；改完在画布上直接拖缩放即可调整大小。</p>
+        </template>
         <!-- 可调参数（正弦型 A/ω/φ、含参二次的 a…） -->
         <label v-for="pr in figParams" :key="pr.key" class="field">
           <span>{{ pr.label }}</span>
@@ -1351,6 +1389,13 @@ function layerTypeLabel(type: string) {
 
 /* ---------- 表单字段 ---------- */
 .field { display: block; margin-bottom: 8px; font-size: 11.5px; color: var(--muted); }
+/* 自定义函数（空白）的小表单 */
+.field--row { display: flex; align-items: center; gap: 6px; }
+.field--row > span { display: inline; margin: 0; }
+.cfn__pair { display: flex; align-items: center; gap: 4px; }
+.cfn__pair input { width: 62px !important; }
+.cfn__err { margin: 4px 0 8px; font-size: 11px; color: #c0392b; line-height: 1.5; }
+.cfn__hint { margin: 2px 0 0; font-size: 11px; color: #8a8aa0; line-height: 1.55; }
 .field > span { display: block; margin-bottom: 4px; }
 .field input[type="number"],
 .field input[type="text"],

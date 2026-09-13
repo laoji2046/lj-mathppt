@@ -318,6 +318,140 @@ export const FUNCTIONS: Record<string, FunctionDef> = {
   },
 }
 
+
+// ---------------------------------------------------------------------------
+// 自定义函数（空白）：自己解析表达式，不 eval —— 安全、离线、无 CSP 问题
+// ---------------------------------------------------------------------------
+
+type Node = (x: number) => number
+
+const FN1: Record<string, (v: number) => number> = {
+  sin: Math.sin, cos: Math.cos, tan: Math.tan,
+  asin: Math.asin, acos: Math.acos, atan: Math.atan,
+  sinh: Math.sinh, cosh: Math.cosh, tanh: Math.tanh,
+  sqrt: Math.sqrt, abs: Math.abs, exp: Math.exp,
+  ln: Math.log, log: Math.log10, log2: Math.log2,
+  floor: Math.floor, ceil: Math.ceil, round: Math.round, sign: Math.sign,
+}
+
+/** 解析表达式成 x → y 的函数；语法不认识就返回 null（调用方提示用户）。
+ *  支持：+ − * / ^ 、括号、常数 pi / e、单参函数（sin/cos/ln/sqrt/abs/…）。
+ *  优先级按数学惯例：^ 高于 * / 高于 + −，且 -x^2 = -(x^2)、a^b^c 右结合。 */
+export function compileExpr(src: string): ((x: number) => number) | null {
+  const s = String(src || "").replace(/\s+/g, "").replace(/×/g, "*").replace(/÷/g, "/")
+  if (!s) return null
+  let i = 0
+  const fail = (): never => { throw new Error("expr") }
+  const expr = (): Node => {
+    let a = term()
+    for (;;) {
+      if (s[i] === "+") { i++; const b = term(); const p = a; a = (x) => p(x) + b(x) }
+      else if (s[i] === "-") { i++; const b = term(); const p = a; a = (x) => p(x) - b(x) }
+      else return a
+    }
+  }
+  const term = (): Node => {
+    let a = unary()
+    for (;;) {
+      if (s[i] === "*") { i++; const b = unary(); const p = a; a = (x) => p(x) * b(x) }
+      else if (s[i] === "/") { i++; const b = unary(); const p = a; a = (x) => p(x) / b(x) }
+      // **隐式乘法**：2x、3(x+1)、2sin(x) 都当乘法 —— 数学写法里太常见，
+      // 不支持的话用户一写 2x 就"语法错误"，很挫败。
+      else if (s[i] && /[0-9A-Za-z(]/.test(s[i])) { const b = unary(); const p = a; a = (x) => p(x) * b(x) }
+      else return a
+    }
+  }
+  const unary = (): Node => {
+    if (s[i] === "-") { i++; const b = unary(); return (x) => -b(x) }
+    if (s[i] === "+") { i++; return unary() }
+    return power()
+  }
+  const power = (): Node => {
+    const a = atom()
+    if (s[i] === "^") { i++; const b = unary(); return (x) => Math.pow(a(x), b(x)) }
+    return a
+  }
+  const atom = (): Node => {
+    if (s[i] === "(") {
+      i++
+      const e = expr()
+      if (s[i] !== ")") fail()
+      i++
+      return e
+    }
+    const num = /^[0-9]+(\.[0-9]+)?/.exec(s.slice(i))
+    if (num && /[0-9.]/.test(s[i])) { i += num[0].length; const v = parseFloat(num[0]); return () => v }
+    const idm = /^[A-Za-z][A-Za-z0-9]*/.exec(s.slice(i))
+    const name = idm ? idm[0] : ''
+    if (!name) fail()
+    i += name.length
+    if (name === "x") return (x) => x
+    if (name === "pi") return () => Math.PI
+    if (name === "e") return () => Math.E
+    const fn = FN1[name]
+    if (!fn) fail()
+    if (s[i] !== "(") fail()
+    i++
+    const arg = expr()
+    if (s[i] !== ")") fail()
+    i++
+    return (x) => fn(arg(x))
+  }
+  try {
+    const root = expr()
+    if (i !== s.length) return null      // 有没吃完的字符 = 语法不完整
+    return root
+  } catch { return null }
+}
+
+/** 自定义函数图的配置 */
+export interface CustomFn {
+  expr: string
+  x0: number; x1: number
+  y0: number; y1: number
+  grid?: boolean
+  axes?: boolean
+}
+
+/** 网格（浅色细线，画在曲线下面） */
+function gridSvg(view: View, w: number, h: number, m: Mapper): string {
+  const stepOf = (lo: number, hi: number) => {
+    const span = Math.abs(hi - lo) || 1
+    const raw = span / 10
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)))
+    const n = raw / mag
+    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * mag
+  }
+  const sx = stepOf(view.xmin, view.xmax)
+  const sy = stepOf(view.ymin, view.ymax)
+  let out = '<g stroke="#c9d6e8" stroke-width="1">'
+  for (let x = Math.ceil(view.xmin / sx) * sx; x <= view.xmax + 1e-9; x += sx) {
+    const px = m.X(x)
+    out += '<line x1="' + px.toFixed(1) + '" y1="0" x2="' + px.toFixed(1) + '" y2="' + h + '"/>'
+  }
+  for (let y = Math.ceil(view.ymin / sy) * sy; y <= view.ymax + 1e-9; y += sy) {
+    const py = m.Y(y)
+    out += '<line x1="0" y1="' + py.toFixed(1) + '" x2="' + w + '" y2="' + py.toFixed(1) + '"/>'
+  }
+  return out + "</g>"
+}
+
+/** 自定义函数图：网格 / 坐标轴 / 曲线，三样都可开关。
+ *  表达式解析不了就返回 null，调用方给提示。 */
+export function customFigure(cfg: CustomFn, w: number, h: number, stroke: string, sw: number): string | null {
+  const f = compileExpr(cfg.expr)
+  if (!f) return null
+  const view: View = { xmin: cfg.x0, xmax: cfg.x1, ymin: cfg.y0, ymax: cfg.y1 }
+  const m = mapper(view, w, h)
+  let s = cfg.grid ? gridSvg(view, w, h, m) : ""
+  if (cfg.axes !== false) s += axesSvg(view, w, h, stroke, sw, true)
+  const d = plotFunction(f, view, w, h, 600)
+  if (d) {
+    s += '<path d="' + d + '" fill="none" stroke="' + stroke + '" stroke-width="' + n1(sw) +
+      '" stroke-linecap="round" stroke-linejoin="round"/>'
+  }
+  return s
+}
 export function functionFigure(kind: string, w: number, h: number, stroke: string, sw: number, params?: Record<string, number>): string {
   const def = FUNCTIONS[kind]
   if (!def) return ''
