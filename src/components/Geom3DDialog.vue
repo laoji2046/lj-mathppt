@@ -188,8 +188,11 @@ const bA = ref(2)
 const bB = ref(1.4)
 const bH = ref(2)
 /** 参数化生成 → 写回 JSON 文本框（文本框始终是唯一数据源，手改也行） */
+const bAxial = ref(false)
 function build() {
   const m = buildSolid({ type: bType.value, n: bN.value, a: bA.value, b: bB.value, h: bH.value })
+  // 圆柱 / 圆锥可以勾"轴截面"（教材里那个着色的三角形 / 矩形）
+  if (m.primitive && bAxial.value) m.primitive.axial = 1
   const view = { azim: azim.value, elev: elev.value }
   raw.value = JSON.stringify({ ...m, view }, null, 1)
   parse()
@@ -340,6 +343,9 @@ function insert() {
               <label class="g3__num">{{ bType === 'cube' ? '棱长' : (bType === 'cylinder' || bType === 'cone' ? '底半径' : '长/底边') }} <input v-model.number="bA" type="number" step="0.1"></label>
               <label v-if="bType === 'box'" class="g3__num">宽 <input v-model.number="bB" type="number" step="0.1"></label>
               <label class="g3__num">高 <input v-model.number="bH" type="number" step="0.1"></label>
+              <label v-if="bType === 'cylinder' || bType === 'cone'" class="g3__num" title="教材里那种着色的轴截面（圆锥=三角形 AOB）">
+                <input v-model="bAxial" type="checkbox"> 轴截面
+              </label>
               <button class="g3__btn" @click="build()">生成</button>
               <button class="g3__btn" title="给每条竖棱加中点（A2 / B2 / …）" @click="addMidpoints()">＋竖棱中点</button>
             </div>

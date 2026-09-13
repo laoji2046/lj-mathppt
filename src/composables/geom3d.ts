@@ -81,6 +81,8 @@ export interface GeomPrimitive {
   r: number
   /** 高 */
   h: number
+  /** 画**轴截面**并着色（教材里圆锥那个"三角形 AOB"）：底面两个侧影点标成 A、B */
+  axial?: 0 | 1 | boolean
 }
 
 /** 由两个**共轭半直径**向量还原椭圆：半轴 rx/ry + 旋转角 rot。
@@ -430,20 +432,29 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
       }))
       return { points: pts2, mesh: { edges: [], faces: [] }, vlabels, arcs: arcs2, aspect: bw2 / bh2, faceStyles: [] }
     }
+    const axial = !!m.primitive.axial
+    const iO = (): number => names.findIndex((n) => n === 'O')
     if (type === 'cone') {
       apex = push('P', [0, 0, h])
       push('O', [0, 0, 0])
-      iA = push(null, tang[0])
-      iB = push(null, tang[1])
+      iA = push(axial ? 'A' : null, tang[0])
+      iB = push(axial ? 'B' : null, tang[1])
       edges.push([apex, iA, 0], [apex, iB, 0])
+      if (axial) {
+        // 轴截面：A–O、O–B 在锥体内部 → 虚线；三角形整体着色（教材的画法）
+        edges.push([iA, iO(), 1], [iO(), iB, 1])
+      }
     } else {
       push('O', [0, 0, 0])
       push('O1', [0, 0, h])
-      iA = push(null, tang[0])
-      iB = push(null, tang[1])
-      const iA1 = push(null, [tang[0][0], tang[0][1], h])
-      const iB1 = push(null, [tang[1][0], tang[1][1], h])
+      iA = push(axial ? 'A' : null, tang[0])
+      iB = push(axial ? 'B' : null, tang[1])
+      const iA1 = push(axial ? 'A1' : null, [tang[0][0], tang[0][1], h])
+      const iB1 = push(axial ? 'B1' : null, [tang[1][0], tang[1][1], h])
       edges.push([iA, iA1, 0], [iB, iB1, 0])
+      if (axial) {
+        edges.push([iA, iB, 1], [iA1, iB1, 0])     // 底面的直径在体内（虚线）、顶面的直径看得见（实线）
+      }
     }
     const arcs: { cx: number; cy: number; rx: number; ry: number; rot: number; a0: number; a1: number; dash: 0 | 1 }[] = []
     // 底面：近半可见（实线）、远半被挡（虚线）—— 这就是教材里圆柱/圆锥底的那条画法
@@ -486,7 +497,17 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
       a1: +a.a1.toFixed(4),
       dash: a.dash,
     }))
-    return { points, mesh: { edges, faces: [] }, vlabels, arcs: arcsOut, aspect: bw / bh, faceStyles: [] }
+    // 轴截面着色（一个面）：圆锥是三角形 P-A-B，圆柱是矩形 A-B-B1-A1
+    const axFace: number[][] = []
+    if (axial) {
+      if (type === 'cone') axFace.push([apex, iA, iB])
+      else axFace.push([iA, iB, names.findIndex((n) => n === 'B1'), names.findIndex((n) => n === 'A1')])
+    }
+    const axStyles = axFace.map(() => ({ fill: '#c9c9c9', opacity: 0.4 }))
+    return {
+      points, mesh: { edges, faces: axFace }, vlabels, arcs: arcsOut, aspect: bw / bh,
+      faceStyles: axStyles as ({ fill?: string; opacity?: number } | null)[],
+    }
   }
 
   // ---------------- 多面体（走面表） ----------------
