@@ -381,6 +381,74 @@ export function buildGraph(sk: Uint8Array, W: number, H: number): SkGraph {
       paths.push({ pts, aId: nodeId[start], bId: isNode[lastPix] ? nodeId[lastPix] : -1 })
     }
   }
+  // ---- 补追：第一遍只从节点出发，追到局部变宽/变细的地方会提前断头，剩下的骨架就没人管了。
+  // 实测用户那张带半椭圆的图：骨架 2140 像素里 **803 个（38%）不属于任何路径**，范围正好是半椭圆，
+  // 于是整条弧凭空消失。这里从没被走过的骨架像素继续往两头追。
+  for (const s of pix) {
+    if (usedPix[s] || isNode[s]) continue
+    const sxy: [number, number] = [s % W, (s / W) | 0]
+    const back: [number, number][] = []
+    const fwd: [number, number][] = []
+    for (const dir of [0, 1]) {
+      let prev = s, cur = s, guard = 0
+      while (guard++ < 500000) {
+        const nx = nextPixel(cur, prev)
+        if (nx < 0) break
+        usedPix[nx] = 1
+        ;(dir ? fwd : back).push([nx % W, (nx / W) | 0])
+        prev = cur; cur = nx
+        if (isNode[cur]) break
+      }
+    }
+    back.reverse()
+    const pts = back.concat([sxy], fwd)
+    if (pts.length < 2) continue
+    const head = pts[0], tail = pts[pts.length - 1]
+    paths.push({
+      pts,
+      aId: isNode[head[1] * W + head[0]] ? nodeId[head[1] * W + head[0]] : -1,
+      bId: isNode[tail[1] * W + tail[0]] ? nodeId[tail[1] * W + tail[0]] : -1,
+    })
+  }
+
+  // ---- 把"顺路"的两条路径在度 2 节点处接起来 ----
+  // 细曲线（椭圆、弧）在对角方向会形成 2x2 阶梯像素块，那些像素的交叉数不是 2 → 被判成节点，
+  // 于是**整条曲线被切成几十段几十像素的小路径**（实测椭圆变成 45 段 <40px）。
+  // 小段之间又天然不共线，进不了后面的"虚线成链"，最后整条弧都画不出来。
+  // 这里把方向连续的两条接回一条：接点在中间、两边各只有一个通路时才接，真拐点（角度 > ~25°）不接。
+  const dirOut = (p: SkGraph['paths'][number], end: 'a' | 'b', k = 4): [number, number] => {
+    const n = p.pts.length
+    const i0 = end === 'a' ? 0 : n - 1
+    const i1 = end === 'a' ? Math.min(k, n - 1) : Math.max(0, n - 1 - k)
+    const dx = p.pts[i0][0] - p.pts[i1][0], dy = p.pts[i0][1] - p.pts[i1][1]
+    const L = Math.hypot(dx, dy) || 1
+    return [dx / L, dy / L]
+  }
+  for (let guard = 0; guard < 4000; guard++) {
+    const at = new Map<number, { pi: number; end: 'a' | 'b'; dir: [number, number] }[]>()
+    paths.forEach((p, pi) => {
+      if (p.aId >= 0) { const g = at.get(p.aId) || []; g.push({ pi, end: 'a', dir: dirOut(p, 'a') }); at.set(p.aId, g) }
+      if (p.bId >= 0) { const g = at.get(p.bId) || []; g.push({ pi, end: 'b', dir: dirOut(p, 'b') }); at.set(p.bId, g) }
+    })
+    let done = false
+    for (const [, list] of at) {
+      if (list.length !== 2) continue
+      const [x, y] = list
+      if (x.pi === y.pi) continue
+      if (x.dir[0] * y.dir[0] + x.dir[1] * y.dir[1] > -0.9) continue   // 夹角 > ~25°：是真拐点，不接
+      const A = paths[x.pi], B = paths[y.pi]
+      const first = x.end === 'b' ? A.pts : A.pts.slice().reverse()
+      const second = y.end === 'a' ? B.pts : B.pts.slice().reverse()
+      const aId = x.end === 'b' ? A.aId : A.bId
+      const bId = y.end === 'a' ? B.bId : B.aId
+      paths[x.pi] = { pts: first.concat(second.slice(1)), aId, bId }
+      paths.splice(y.pi, 1)
+      done = true
+      break
+    }
+    if (!done) break
+  }
+
   // 只有"引出 >= 2 条路径"的节点才算顶点；度 1 的节点是自由端（短划的端头、线的断头）
   const stubs = new Int32Array(nodes.length)
   for (const p of paths) { stubs[p.aId]++; if (p.bId >= 0) stubs[p.bId]++ }
@@ -459,19 +527,28 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
 
   interface Seg { a: [number, number]; b: [number, number]; len: number; aId: number; bId: number }
   const segs: Seg[] = []
+  const maxPiece = (opt.pieceMax ?? 0.115) * diag
+  // 曲线（弧、椭圆、圆）单独走一条路：折线一简化就成多段，而**相邻段之间天然不共线**，
+  // 塞进下面的"按共线连成虚线链"里每段都会变成孤立的碎片，最后整条弧都画不出来。
+  // 判据：这条路径够长、且简化后不止两个点（真直的线简化完就是两点）。
+  const curveSegs: Seg[] = []
   for (const P of paths) {
     if (P.pts.length < 2) continue
     const poly = rdp(P.pts, opt.eps ?? 2.2)
+    let plen2 = 0
+    for (let k = 1; k < P.pts.length; k++) plen2 += Math.hypot(P.pts[k][0] - P.pts[k - 1][0], P.pts[k][1] - P.pts[k - 1][1])
+    const isCurve = poly.length >= 3 && plen2 > maxPiece
     for (let k = 0; k < poly.length - 1; k++) {
       const a = poly[k], b = poly[k + 1]
       const len = Math.hypot(b[0] - a[0], b[1] - a[1])
       if (len < 2) continue
-      segs.push({ a, b, len, aId: k === 0 ? P.aId : -1, bId: k === poly.length - 2 ? P.bId : -1 })
+      const s = { a, b, len, aId: k === 0 ? P.aId : -1, bId: k === poly.length - 2 ? P.bId : -1 }
+      if (isCurve) curveSegs.push(s)
+      else segs.push(s)
     }
   }
 
   // 虚线：两端悬空的短段按共线连成链
-  const maxPiece = (opt.pieceMax ?? 0.115) * diag
   const linkOK = (A: Seg, B: Seg) => {
     let ux = A.b[0] - A.a[0], uy = A.b[1] - A.a[1]
     const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul
@@ -515,6 +592,8 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   // 只给 14px 的话会"吸附不上就新建顶点"，于是一条虚线变成一条悬空长线 + 两个多余顶点。
   interface Edge { aId: number; bId: number; a: [number, number]; b: [number, number]; dash: 0 | 1; snap?: number; dir?: [number, number] }
   const edges: Edge[] = []
+  // 曲线的每一段都是真边（画出来就是那条弧），不参与"虚线成链"
+  for (const s of curveSegs) edges.push({ aId: s.aId, bId: s.bId, a: s.a, b: s.b, dash: 0 })
   for (const s of fixedSegs) edges.push({ aId: s.aId, bId: s.bId, a: s.a, b: s.b, dash: 0 })
   for (const s of leftover) {
     // 只认出一截的短划：它**仍然是虚线**，不能当实线短段画。
