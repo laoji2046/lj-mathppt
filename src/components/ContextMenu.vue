@@ -54,6 +54,7 @@ onBeforeUnmount(() => {
         class="ctx-item"
         :class="{ 'ctx-item--danger': it.danger }"
         :disabled="it.disabled"
+        @mouseenter="it.hover && !it.disabled && it.hover($event.currentTarget as HTMLElement)"
         @click="it.onClick(); closeMenu()"
       ><span>{{ it.label }}</span><span v-if="it.hint" class="ctx-hint">{{ it.hint }}</span></button>
     </template>

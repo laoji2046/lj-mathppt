@@ -6,7 +6,7 @@
  * 所以套用版式会**替换该页内容**（弹窗里也写明了）。
  */
 import { useDeckStore } from '@/stores/deck'
-import { closeLayoutGallery, layoutGalleryIndex, layoutGalleryOpen } from '@/ui/layoutGallery'
+import { closeLayoutGallery, layoutGalleryAnchor, layoutGalleryIndex, layoutGalleryOpen } from '@/ui/layoutGallery'
 import { SLIDE_LAYOUTS, type LayoutSlot } from '@/templates/slideLayouts'
 import AppIcon from './AppIcon.vue'
 
@@ -28,8 +28,11 @@ function slotStyle(s: LayoutSlot) {
 </script>
 
 <template>
-  <div v-if="layoutGalleryOpen" class="lg" @click.self="closeLayoutGallery()">
-    <div class="lg__box">
+  <div v-if="layoutGalleryOpen" class="lg" :class="{ 'lg--float': !!layoutGalleryAnchor }" @click.self="closeLayoutGallery()">
+    <div
+      class="lg__box"
+      :style="layoutGalleryAnchor ? { position: 'fixed', left: layoutGalleryAnchor.x + 'px', top: layoutGalleryAnchor.y + 'px', width: 'min(680px, 92vw)', maxHeight: 'calc(100vh - ' + (layoutGalleryAnchor.y + 14) + 'px)' } : undefined"
+    >
       <header class="lg__head">
         <span>版式（套用会替换本页内容）</span>
         <button class="lg__x" @click="closeLayoutGallery()"><AppIcon name="close" :size="13" /></button>
@@ -58,8 +61,11 @@ function slotStyle(s: LayoutSlot) {
 </template>
 
 <style scoped>
-.lg { position: fixed; inset: 0; z-index: 460; background: rgba(20, 24, 34, 0.55); display: flex; align-items: center; justify-content: center; }
+.lg { position: fixed; inset: 0; z-index: 470; background: rgba(20, 24, 34, 0.55); display: flex; align-items: center; justify-content: center; }
+/* 悬停菜单项弹出时：不压暗背景、贴着菜单项出现（PowerPoint 的版式浮层就是这个感觉） */
+.lg--float { background: transparent; display: block; }
 .lg__box { background: var(--panel); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: min(920px, 94vw); max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; }
+.lg--float .lg__box { border-radius: var(--radius); width: min(680px, 92vw); }
 .lg__head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; font-weight: 600; }
 .lg__x { border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--muted); }
 .lg__grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 16px; overflow-y: auto; }

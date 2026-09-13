@@ -11,6 +11,9 @@ export interface MenuItem {
   hint?: string
   /** 子菜单（鼠标悬停展开，用于「版式」这类二级项） */
   children?: MenuItem[]
+  /** 鼠标悬停到该项时触发（参数是该项的 DOM，便于把浮层贴在它旁边）——
+   *  用来做"鼠标一落在「版式…」上就把版式库弹出来" */
+  hover?: (el: HTMLElement) => void
 }
 interface MenuState { open: boolean; x: number; y: number; items: MenuItem[] }
 

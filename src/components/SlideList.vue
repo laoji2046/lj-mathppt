@@ -51,7 +51,13 @@ function onSlideCtx(i: number, e: MouseEvent) {
     { label: '创建副本', onClick: () => store.copySlide(i) },
     { label: '删除幻灯片', danger: true, disabled: store.slideCount <= 1, onClick: () => store.removeSlide(i) },
     { sep: true, label: '', onClick: () => {} },
-    { label: '版式…', hint: '版式库', onClick: () => openLayoutGallery(i) },
+    {
+      label: '版式…',
+      hint: '版式库',
+      // 鼠标一落上来就把版式库弹出来（贴在菜单右边），不用再点一下
+      hover: (el) => openLayoutGallery(i, el),
+      onClick: () => openLayoutGallery(i),
+    },
     { label: '重设幻灯片（清空内容、恢复白底）', onClick: () => store.resetSlide(i) },
     { sep: true, label: '', onClick: () => {} },
     { label: s?.hidden ? '取消隐藏幻灯片' : '隐藏幻灯片', onClick: () => store.toggleSlideHidden(i) },
