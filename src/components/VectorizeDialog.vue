@@ -14,7 +14,7 @@ import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type { MathFigureElement, SlideElement, FigureArc } from '@/types'
 import { loadImageElement, type VectorizeOpt, type VectorizeResult } from '@/composables/vectorize'
-import { labelFontSize, labelGap, resolveArc } from '@/composables/solid3d'
+import { labelFontSize, labelGap, arcPolyline } from '@/composables/solid3d'
 
 type VectorizeWorker = Worker & { __nextId?: number }
 let vectorWorker: VectorizeWorker | null = null
@@ -427,12 +427,14 @@ function onDown(e: PointerEvent) {
 
 function onMove(e: PointerEvent) {
   if (arcDrag >= 0) {
-    // 拖弧的控制点：用跟顶点拖动同一套坐标换算（toCropNorm），别再自己减 rect（舞台有缩放，会差一个比例）
+    // 拖拱高手柄（只有 2 个控制点的曲线才有）：
+    // 用跟顶点拖动同一套坐标换算（toCropNorm），别再自己减 rect（舞台有缩放，会差一个比例）
     const p = toCropNorm(e)
     const a = arcs.value[arcDrag]
-    if (!p || !a || a.i0 === undefined || a.i1 === undefined) return
-    const ax = pts.value[a.i0 * 2], ay = pts.value[a.i0 * 2 + 1]
-    const bx = pts.value[a.i1 * 2], by = pts.value[a.i1 * 2 + 1]
+    const idx = a ? arcIdxOf(a) : null
+    if (!p || !a || !idx || idx.length !== 2) return
+    const ax = pts.value[idx[0] * 2], ay = pts.value[idx[0] * 2 + 1]
+    const bx = pts.value[idx[1] * 2], by = pts.value[idx[1] * 2 + 1]
     const dx = bx - ax, dy = by - ay
     const c = Math.hypot(dx, dy) || 1
     const ux = dy / c, uy = -dx / c
@@ -564,9 +566,10 @@ function toggleLink() {
   if (linkMode.value) { panMode.value = false; cropping.value = false; arcMode.value = false }
 }
 
-// ---------------- 画弧 ----------------
-/** 弧是"弦式"的：只记两个顶点下标 + 拱高，**拖顶点时弧自动跟着走**，不用重算圆心。
- *  圆心/半径由 resolveArc 现算（跟画布、导出共用同一份几何）。 */
+// ---------------- 画弧 / 曲线 ----------------
+/** 弧（曲线）是"弦式"的：只记**一串控制点的顶点下标**（2 个点时另加拱高）。
+ *  几何由 arcPolyline 现算（画布、导出、弹窗共用这一份）。
+ *  关键：**双击加控制点只是往 pts 里插一个下标，曲线始终是一条**，不会被拆成几段。 */
 const arcMode = ref(false)
 const selArc = ref<number | null>(null)
 function toggleArc() {
@@ -574,33 +577,38 @@ function toggleArc() {
   pendingV.value = null
   if (arcMode.value) { linkMode.value = false; panMode.value = false; cropping.value = false }
 }
-/** 在 overlay 的像素坐标里解出这条弧的圆心/半径/角度 */
-function arcGeo(i: number) {
-  const a = arcs.value[i]
-  if (!a) return null
-  const r = resolveArc(a, pts.value, viewW.value, viewH.value)
-  if (!r) return null
-  return { cx: r.cx * viewW.value, cy: r.cy * viewH.value, rx: r.rx * viewW.value, ry: r.ry * viewH.value, a0: r.a0, a1: r.a1 }
+/** 这条弧的控制点下标表（兼容旧的 i0/i1 写法） */
+function arcIdxOf(a: FigureArc): number[] | null {
+  if (a.pts && a.pts.length >= 2) return a.pts
+  if (a.i0 !== undefined && a.i1 !== undefined) return [a.i0, a.i1]
+  return null
 }
-/** 弧的采样折线（画出来 + 做命中测试）。用 resolveArc 解出来的角度，几何只有那一份 */
+/** 曲线在 overlay 里的采样点：几何算在"元素像素"空间（viewW/imgW = 显示比例），再整体平移 */
+function arcSamples(i: number): [number, number][] {
+  const a = arcs.value[i], r = res.value
+  if (!a || !r) return []
+  const sc = viewW.value / r.imgW
+  const list = arcPolyline(a, pts.value, sc * r.W, sc * r.H)
+  const ox = sc * r.box[0], oy = sc * r.box[1]
+  return list.map(([x, y]) => [x + ox, y + oy] as [number, number])
+}
 function arcPath(i: number): string {
-  const g = arcGeo(i)
-  if (!g) return ''
-  const d = g.a1 - g.a0
-  const N = 30
+  const list = arcSamples(i)
+  if (list.length < 2) return ''
   let out = ''
-  for (let k = 0; k <= N; k++) {
-    const t = g.a0 + d * (k / N)
-    out += (k ? ' L ' : 'M ') + (g.cx + g.rx * Math.cos(t)).toFixed(1) + ' ' + (g.cy + g.ry * Math.sin(t)).toFixed(1)
-  }
+  for (let k = 0; k < list.length; k++) out += (k ? ' L ' : 'M ') + list[k][0].toFixed(1) + ' ' + list[k][1].toFixed(1)
   return out
 }
-/** 拱顶（控制点）在 overlay 里的位置 */
+/** 拱顶（只有 2 个控制点时才有的曲率手柄）：取采样折线的中点 */
 function arcApex(i: number): [number, number] {
-  const g = arcGeo(i)
-  if (!g) return [0, 0]
-  const t = (g.a0 + g.a1) / 2
-  return [g.cx + g.rx * Math.cos(t), g.cy + g.ry * Math.sin(t)]
+  const list = arcSamples(i)
+  return list.length ? list[list.length >> 1] : [0, 0]
+}
+/** 3 个控制点以上时，控制点本身就是可拖的顶点，不需要额外的拱高手柄 */
+function needsBulgeHandle(i: number): boolean {
+  const a = arcs.value[i]
+  const idx = a ? arcIdxOf(a) : null
+  return !!idx && idx.length === 2
 }
 /** 画弧：第一次点记起点，第二次点成弧。默认拱高 0.25，且**朝图形外侧鼓**（免得弧切进图形里） */
 function pickForArc(i: number) {
@@ -608,7 +616,7 @@ function pickForArc(i: number) {
   if (pendingV.value === i) { pendingV.value = null; return }
   const s = snap()
   const a = pendingV.value, b = i
-  arcs.value.push({ i0: a, i1: b, bulge: defaultBulge(a, b), dash: 0 })
+  arcs.value.push({ pts: [a, b], bulge: defaultBulge(a, b), dash: 0 })
   selArc.value = arcs.value.length - 1
   pushSnap(s)
   pendingV.value = null
@@ -630,11 +638,11 @@ function defaultBulge(i0: number, i1: number): number {
   const mx = (ax + bx) / 2 - cx, my = (ay + by) / 2 - cy
   return mx * ux + my * uy > 0 ? -0.25 : 0.25       // 重心在正侧就反过来鼓
 }
-/** 拖控制点改拱高：把指针位置投影到弦的垂线上 */
+/** 拖拱高手柄（只有 2 个控制点时有）：把指针位置投影到弦的垂线上 */
 let arcDrag = -1
 function onArcCtrlDown(e: PointerEvent, i: number) {
   e.stopPropagation()
-  if (edges.value.length >= 0) pushUndo()
+  pushUndo()
   arcDrag = i
   selArc.value = i
   selVs.value = []
@@ -642,61 +650,63 @@ function onArcCtrlDown(e: PointerEvent, i: number) {
   try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
 }
 
-/** 被弧用到的顶点（= 弧的控制点）—— 在图上画成绿色，跟图形本身的顶点区分开，
+/** 被曲线用到的顶点（= 曲线的控制点）—— 在图上画成绿色，跟图形本身的顶点区分开，
  *  免得用户看着像个"莫名多出来的点"，也一眼能看出哪几个点可以拖来改曲线 */
 const arcEnds = computed(() => {
   const s = new Set<number>()
   for (const a of arcs.value) {
-    if (a.i0 !== undefined) s.add(a.i0)
-    if (a.i1 !== undefined) s.add(a.i1)
+    const idx = arcIdxOf(a)
+    if (idx) for (const k of idx) s.add(k)
   }
   return s
 })
 
-/** 双击弧上：在那一点把弧切成两段，各带一个控制点 —— 想要几个控制点就双击几次。
- *  切点落成一个真顶点（在弧上），两段的拱高按"同一条圆"精确算出来，形状不变。 */
-function splitArcAt(i: number, e: MouseEvent) {
+/** 双击曲线上：在那一点**加一个控制点**。曲线始终是一条，只是多一个可拖的点 ——
+ *  3 个控制点时正好是"过三点的圆"，所以点在弧上时不加控制点形状也完全不变。 */
+function addArcPoint(i: number, e: MouseEvent) {
   const a = arcs.value[i]
-  const g = arcGeo(i)
-  if (!a || !g || a.i0 === undefined || a.i1 === undefined) return
+  const idx = a ? arcIdxOf(a) : null
+  const r = res.value
+  if (!a || !idx || !r) return
   const p = toCropNorm(e)
   if (!p) return
+  const list = arcSamples(i)
+  if (list.length < 2) return
   const mx = p[0] * viewW.value, my = p[1] * viewH.value
-  // 在弧上找离点击最近的那个参数
-  const span = g.a1 - g.a0
-  let bt = g.a0 + span / 2, bd = 1e9
-  for (let k = 0; k <= 60; k++) {
-    const t = g.a0 + span * (k / 60)
-    const dd = Math.hypot(g.cx + g.rx * Math.cos(t) - mx, g.cy + g.ry * Math.sin(t) - my)
-    if (dd < bd) { bd = dd; bt = t }
+  let bk = 0, bd = 1e9
+  for (let k = 0; k < list.length; k++) {
+    const dd = Math.hypot(list[k][0] - mx, list[k][1] - my)
+    if (dd < bd) { bd = dd; bk = k }
   }
-  if (bd > 26) return                                    // 离弧太远，当误点
-  // 父弧的半径（弦式弧一定是圆）
-  const ax0 = px(a.i0), ay0 = py(a.i0), bx0 = px(a.i1), by0 = py(a.i1)
-  const c0 = Math.hypot(bx0 - ax0, by0 - ay0)
-  const s0 = Math.abs(a.bulge || 0) * c0
-  if (c0 < 1 || s0 < 0.5) return
-  const R = (c0 * c0 / 4 + s0 * s0) / (2 * s0)
-  const sign = (a.bulge || 0) >= 0 ? 1 : -1
-  const subBulge = (t0: number, t1: number) => {
-    const x0 = g.cx + g.rx * Math.cos(t0), y0 = g.cy + g.ry * Math.sin(t0)
-    const x1 = g.cx + g.rx * Math.cos(t1), y1 = g.cy + g.ry * Math.sin(t1)
-    const c = Math.hypot(x1 - x0, y1 - y0) || 1
-    const sag = R - Math.sqrt(Math.max(0, R * R - (c * c) / 4))
-    return +((sign * sag) / c).toFixed(4)
-  }
-  const b1 = subBulge(g.a0, bt)
-  const b2 = subBulge(bt, g.a1)
+  if (bd > 26) return                                   // 离曲线太远，当误点
+  // 每个控制点在采样序列里的位置，用来判断新点插在哪一段
+  const anchors = idx.map((k) => {
+    const vx = px(k), vy = py(k)
+    let best = 0, bdd = 1e9
+    for (let j = 0; j < list.length; j++) {
+      const dd = Math.hypot(list[j][0] - vx, list[j][1] - vy)
+      if (dd < bdd) { bdd = dd; best = j }
+    }
+    return best
+  })
+  let seg = 0
+  for (let j = 0; j + 1 < anchors.length; j++) if (bk >= anchors[j]) seg = j
   const s = snap()
-  const idx = nVerts.value
-  pts.value.push(+((g.cx + g.rx * Math.cos(bt)) / viewW.value).toFixed(4), +((g.cy + g.ry * Math.sin(bt)) / viewH.value).toFixed(4))
+  const newIdx = nVerts.value
+  const sc = viewW.value / r.imgW
+  pts.value.push(+((list[bk][0] - sc * r.box[0]) / (sc * r.W)).toFixed(4), +((list[bk][1] - sc * r.box[1]) / (sc * r.H)).toFixed(4))
   labels.value.push('')
   lconf.value.push(0)
   offs.value.push({ dx: 0, dy: 0 })
-  arcs.value.splice(i, 1, { i0: a.i0, i1: idx, bulge: b1, dash: a.dash }, { i0: idx, i1: a.i1, bulge: b2, dash: a.dash })
+  const next = idx.slice()
+  next.splice(seg + 1, 0, newIdx)
+  a.pts = next
+  if (next.length > 2) delete a.bulge                    // 拱高只对 2 个控制点有意义
+  delete a.i0
+  delete a.i1
   pushSnap(s)
-  selArc.value = i                                        // 选中前一段，它的控制点接着可拖
-  selVs.value = []
+  selArc.value = i
+  selVs.value = [newIdx]
   selE.value = null
 }
 
@@ -707,13 +717,14 @@ function toggleArcDash(i: number) {
   a.dash = a.dash ? 0 : 1
   pushSnap(s)
 }
-/** 删掉选中的弧 */
+/** 删掉选中的整条曲线 */
 function delArc(i: number) {
   const s = snap()
   arcs.value.splice(i, 1)
   if (selArc.value === i) selArc.value = null
   pushSnap(s)
 }
+
 function togglePan() {
   panMode.value = !panMode.value
   if (panMode.value) { linkMode.value = false; cropping.value = false }
@@ -759,12 +770,16 @@ function finishRemove(i: number, mergedInto: number | null = null) {
   labels.value.splice(i, 1)
   lconf.value.splice(i, 1)
   offs.value.splice(i, 1)
-  const fix = (k: number) => (k === i ? mergedInto : (k > i ? k - 1 : k))
+  const fix = (k: number): number | null => (k === i ? mergedInto : (k > i ? k - 1 : k))
   arcs.value = arcs.value.flatMap((a) => {
-    if (a.i0 === undefined || a.i1 === undefined) return [a]
-    const n0 = fix(a.i0), n1 = fix(a.i1)
-    if (n0 === null || n1 === null || n0 === n1) return []      // 端点没了 / 两端并成一点 → 弧作废
-    return [{ ...a, i0: n0, i1: n1 }]
+    const idx = arcIdxOf(a)
+    if (!idx) return [a]
+    const fixed = idx.map(fix)
+    if (fixed.some((k) => k === null)) return []                // 控制点没了 → 这条曲线作废
+    const uniq: number[] = []
+    for (const k of fixed as number[]) if (uniq[uniq.length - 1] !== k) uniq.push(k)
+    if (uniq.length < 2) return []
+    return [{ ...a, pts: uniq, i0: undefined, i1: undefined }]
   })
   selArc.value = null
   selVs.value = []
@@ -1022,7 +1037,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                     :d="arcPath(i)" fill="none" stroke="transparent" stroke-width="14"
                     style="cursor:pointer"
                     @click="selArc = i; selVs = []; selE = null"
-                    @dblclick.stop="splitArcAt(i, $event)"
+                    @dblclick.stop="addArcPoint(i, $event)"
                   />
                   <path
                     :d="arcPath(i)" fill="none"
@@ -1032,12 +1047,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                     style="pointer-events:none"
                   />
                   <circle
-                    v-if="selArc === i"
+                    v-if="selArc === i && needsBulgeHandle(i)"
                     :cx="arcApex(i)[0]" :cy="arcApex(i)[1]" r="9" fill="transparent" style="cursor:grab"
                     @pointerdown="onArcCtrlDown($event, i)"
                   />
                   <circle
-                    v-if="selArc === i"
+                    v-if="selArc === i && needsBulgeHandle(i)"
                     :cx="arcApex(i)[0]" :cy="arcApex(i)[1]" r="5.5" fill="#12b76a" stroke="#fff" stroke-width="1.5"
                     style="pointer-events:none"
                   />
@@ -1163,7 +1178,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 : '起点 #' + pendingV + ' —— 再点一个顶点就画出这段弧（点同一个点取消）' }}
             </p>
             <div v-if="selArc !== null" class="vd__row">
-              <span class="vd__selnum">弧 #{{ selArc }}：拖绿点改曲率 · 双击弧上可再加控制点</span>
+              <span class="vd__selnum">曲线 #{{ selArc }}：拖绿点（弧上任意位置双击可加）</span>
               <button class="vd__btn" @click="toggleArcDash(selArc)">{{ arcs[selArc]?.dash ? '改成实线' : '改成虚线' }}</button>
               <button class="vd__btn vd__btn--danger" @click="delArc(selArc)">删掉这段弧</button>
             </div>

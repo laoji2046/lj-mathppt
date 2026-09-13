@@ -406,10 +406,14 @@ export const GRAPHIC_TYPES: { v: string; label: string; cat: 'shape' | 'line' | 
  *  - **自由式**（识别拟合出来的弧）：记绝对几何，带椭圆长短轴和旋转。
  *  用 i0/i1 是否存在区分。 */
 export interface FigureArc {
-  /** 【弦式】两端在 points 里的下标 */
+  /** 【弦式曲线的控制点】顶点下标表（首尾是端点，中间是控制点）。
+   *  2 个点：用 bulge 决定的圆；**3 个点：过三点的圆**（往弧上加点时形状完全不变）；
+   *  4 个点以上：Catmull-Rom 平滑通过所有点。整条曲线始终是**一个图元**，不会被拆成几条。 */
+  pts?: number[]
+  /** 【旧写法，兼容】两端在 points 里的下标 */
   i0?: number
   i1?: number
-  /** 【弦式】拱高 ÷ 弦长（正负决定鼓向哪一侧） */
+  /** 【弦式】拱高 ÷ 弦长（正负决定鼓向哪一侧；只在 2 个控制点时有意义） */
   bulge?: number
   /** 【自由式】圆心（归一化 0~1，相对元素宽高） */
   cx?: number

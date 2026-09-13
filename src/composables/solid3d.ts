@@ -3,6 +3,101 @@
 // 顶点可标注字母（_ 下标、^ 上标、' 撇），用于数学立体几何作图。
 import type { MathFigureElement, FigureArc } from '@/types'
 
+/** 弦式曲线的控制点下标（兼容老的 i0/i1 写法） */
+function arcIdx(a: FigureArc): number[] | null {
+  if (a.pts && a.pts.length >= 2) return a.pts
+  if (a.i0 !== undefined && a.i1 !== undefined) return [a.i0, a.i1]
+  return null
+}
+
+function circleFromChord(A: [number, number], B: [number, number], bulge0: number) {
+  const c = Math.hypot(B[0] - A[0], B[1] - A[1])
+  if (c < 1) return null
+  const bulge = Math.max(-0.5, Math.min(0.5, bulge0))
+  const s = bulge * c
+  if (Math.abs(s) < 0.5) return null
+  const R = (c * c / 4 + s * s) / (2 * Math.abs(s))
+  const mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2
+  const ux = (B[1] - A[1]) / c, uy = -(B[0] - A[0]) / c
+  const sign = s > 0 ? 1 : -1
+  const cx = mx - ux * (R - Math.abs(s)) * sign
+  const cy = my - uy * (R - Math.abs(s)) * sign
+  const want: [number, number] = [mx + ux * Math.abs(s) * sign, my + uy * Math.abs(s) * sign]
+  return { cx, cy, r: R, want }
+}
+
+function circleFrom3(A: [number, number], B: [number, number], C: [number, number]) {
+  const d = 2 * (A[0] * (B[1] - C[1]) + B[0] * (C[1] - A[1]) + C[0] * (A[1] - B[1]))
+  if (Math.abs(d) < 1e-6) return null
+  const a2 = A[0] * A[0] + A[1] * A[1], b2 = B[0] * B[0] + B[1] * B[1], c2 = C[0] * C[0] + C[1] * C[1]
+  const cx = (a2 * (B[1] - C[1]) + b2 * (C[1] - A[1]) + c2 * (A[1] - B[1])) / d
+  const cy = (a2 * (C[0] - B[0]) + b2 * (A[0] - C[0]) + c2 * (B[0] - A[0])) / d
+  return { cx, cy, r: Math.hypot(A[0] - cx, A[1] - cy), want: B }
+}
+
+/** 沿圆从 A 走到 B，取**靠近 want 那一侧**的弧，采样成点列 */
+function sampleCircle(c: { cx: number; cy: number; r: number; want: [number, number] }, A: [number, number], B: [number, number]): [number, number][] {
+  const norm = (t: number) => { let v = t % (Math.PI * 2); if (v < 0) v += Math.PI * 2; return v }
+  const a0 = Math.atan2(A[1] - c.cy, A[0] - c.cx)
+  const a1 = Math.atan2(B[1] - c.cy, B[0] - c.cx)
+  const span = norm(a1 - a0)
+  const mk = (from: number, sweep: number) => {
+    const N = Math.max(10, Math.min(72, Math.ceil(Math.abs(sweep) * c.r / 6)))
+    const res: [number, number][] = []
+    for (let k = 0; k <= N; k++) {
+      const t = from + sweep * (k / N)
+      res.push([c.cx + c.r * Math.cos(t), c.cy + c.r * Math.sin(t)])
+    }
+    return res
+  }
+  const A2 = mk(a0, span), B2 = mk(a0, span - Math.PI * 2)
+  const dist = (list: [number, number][]) => {
+    const mid = list[list.length >> 1]
+    return Math.hypot(mid[0] - c.want[0], mid[1] - c.want[1])
+  }
+  return dist(A2) <= dist(B2) ? A2 : B2
+}
+
+/** Catmull-Rom：平滑通过所有控制点（4 个点以上时用） */
+function catmullRom(P: [number, number][], per = 12): [number, number][] {
+  const out: [number, number][] = [P[0]]
+  for (let i = 0; i < P.length - 1; i++) {
+    const p0 = P[i - 1] ?? P[i]
+    const p1 = P[i], p2 = P[i + 1]
+    const p3 = P[i + 2] ?? P[i + 1]
+    for (let s = 1; s <= per; s++) {
+      const t = s / per, t2 = t * t, t3 = t2 * t
+      out.push([
+        0.5 * (2 * p1[0] + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
+        0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3),
+      ])
+    }
+  }
+  return out
+}
+
+/** 弦式曲线 → 采样点列（单位 = “点坐标 × 传进来的 w/h”）。
+ *  2 个控制点用 bulge 的圆；**3 个控制点用过三点的圆**（往弧上加控制点时形状完全不变）；4 个以上用 Catmull-Rom。 */
+export function arcPolyline(a: FigureArc, points: number[] | undefined, w: number, h: number): [number, number][] {
+  const idx = arcIdx(a)
+  if (!idx || !points) return []
+  const P: [number, number][] = []
+  for (const k of idx) {
+    if (k < 0 || k * 2 + 1 >= points.length) return []
+    P.push([points[k * 2] * w, points[k * 2 + 1] * h])
+  }
+  if (P.length < 2) return []
+  if (P.length === 2) {
+    const c = circleFromChord(P[0], P[1], a.bulge ?? 0)
+    return c ? sampleCircle(c, P[0], P[1]) : P
+  }
+  if (P.length === 3) {
+    const c = circleFrom3(P[0], P[1], P[2])
+    if (c) return sampleCircle(c, P[0], P[2])
+  }
+  return catmullRom(P)
+}
+
 /** 弦式弧（两个顶点 + 拱高）→ 自由式的圆心/半径/角度。
  *  拱高 s = bulge × 弦长 c，半径 R = (c²/4 + s²) / (2s)，圆心在中点沿垂线偏 (R − s) 处。
  *  bulge 的正负决定鼓向哪一边；bulge ≈ 0 时退化成直线，这时候不画（返回 null）。 */
@@ -45,38 +140,19 @@ export function resolveArc(a: FigureArc, points: number[] | undefined, w: number
   return { cx: cx / w, cy: cy / h, rx: R / w, ry: R / h, rot: 0, a0: from, a1: to, dash: a.dash }
 }
 
-/** 椭圆弧 → SVG path。归一化坐标，跟顶点同一套；画布与导出都调这里，别再各写一份。 */
+/** 弧 / 曲线 → SVG path（采样成折线，够密就看不出折角）。
+ *  归一化坐标，跟顶点同一套；**画布与导出都调这里**，别再各写一份。
+ *  2/3 个控制点会还原成精确的圆，4 个以上按 Catmull-Rom 平滑通过所有点。 */
 export function arcsSvg(arcs: FigureArc[] | undefined, w: number, h: number, stroke: string, strokeWidth: number, dash = '6 5', points?: number[]): string {
   if (!arcs || !arcs.length) return ''
   const sw = strokeWidth || 2
   let out = ''
-  for (const raw of arcs) {
-    const a = resolveArc(raw, points, w, h)
-    if (!a) continue
-    const cx = a.cx * w, cy = a.cy * h
-    const rx = Math.max(0.5, a.rx * w), ry = Math.max(0.5, a.ry * h)
-    const phi = a.rot || 0
-    const cp = Math.cos(phi), sp = Math.sin(phi)
-    const pt = (t: number): [number, number] => [
-      cx + rx * Math.cos(t) * cp - ry * Math.sin(t) * sp,
-      cy + rx * Math.cos(t) * sp + ry * Math.sin(t) * cp,
-    ]
-    let d = a.a1 - a.a0
-    while (d < 0) d += Math.PI * 2
-    while (d > Math.PI * 2) d -= Math.PI * 2
-    // 整圈：起止点重合，SVG 的单条弧画不出来（会退化成一个小点），得用 <ellipse>
-    if (d > Math.PI * 2 - 0.01) {
-      const rot = phi ? ' transform="rotate(' + ((phi * 180) / Math.PI).toFixed(1) + ' ' + cx.toFixed(1) + ' ' + cy.toFixed(1) + ')"' : ''
-      out += '<ellipse cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" rx="' + rx.toFixed(1) + '" ry="' + ry.toFixed(1) +
-        '" fill="none" stroke="' + stroke + '" stroke-width="' + sw + '"' + (a.dash ? ' stroke-dasharray="' + dash + '"' : '') + rot + '/>'
-      continue
-    }
-    const [x0, y0] = pt(a.a0)
-    const [x1, y1] = pt(a.a1)
-    out += '<path d="M ' + x0.toFixed(1) + ' ' + y0.toFixed(1) + ' A ' + rx.toFixed(1) + ' ' + ry.toFixed(1) + ' ' +
-      ((phi * 180) / Math.PI).toFixed(1) + ' ' + (d > Math.PI ? 1 : 0) + ' ' + (a.a1 >= a.a0 ? 1 : 0) +
-      ' ' + x1.toFixed(1) + ' ' + y1.toFixed(1) + '" fill="none" stroke="' + stroke + '" stroke-width="' + sw +
-      '" stroke-linecap="round"' + (a.dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>'
+  for (const a of arcs) {
+    const list = arcPolyline(a, points, w, h)
+    if (list.length < 2) continue
+    let d = ''
+    for (let k = 0; k < list.length; k++) d += (k ? ' L ' : 'M ') + list[k][0].toFixed(1) + ' ' + list[k][1].toFixed(1)
+    out += '<path d="' + d + '" fill="none" stroke="' + stroke + '" stroke-width="' + sw + '" stroke-linecap="round"' + (a.dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>'
   }
   return out
 }
