@@ -367,20 +367,36 @@ function inferCorrespondingEdges(): number {
     const s = (t || '').trim()
     if (s && !byLabel.has(s)) byLabel.set(s, i)
   })
-  let added = 0, dashed = 0
-  const hull = vertHull()
+  // 先收集候选配对，再**用"相对位置一致"校验一遍**：
+  // 棱柱/棱台就是把下底面 A-B-C-D 平移上去成 A₁-B₁-C₁-D₁ ——
+  // 所以每个对应点的**位移向量应该几乎相同**。偏离共识的那一对，说明字母认错了，不补。
+  const cand: { i: number; j: number; dx: number; dy: number }[] = []
   for (const [txt, i] of byLabel) {
     const m = /^([A-Za-z])[_^]1$/.exec(txt)
     if (!m) continue
     const j = byLabel.get(m[1])
     if (j === undefined || j === i) continue
-    if (edges.value.some((e) => (e[0] === i && e[1] === j) || (e[0] === j && e[1] === i))) continue
-    const d = inferDashFor(j, i, hull)
-    edges.value.push([j, i, d])
+    const [ax, ay] = fullPx(i), [bx, by] = fullPx(j)
+    cand.push({ i, j, dx: ax - bx, dy: ay - by })
+  }
+  if (!cand.length) return 0
+  const mx = cand.reduce((s, c) => s + c.dx, 0) / cand.length
+  const my = cand.reduce((s, c) => s + c.dy, 0) / cand.length
+  const tol = Math.max(8, 0.2 * Math.hypot(mx, my))
+  let added = 0, dashed = 0, skipped = 0
+  const hull = vertHull()
+  for (const c of cand) {
+    if (Math.hypot(c.dx - mx, c.dy - my) > tol) { skipped++; continue }
+    if (edges.value.some((e) => (e[0] === c.i && e[1] === c.j) || (e[0] === c.j && e[1] === c.i))) continue
+    const d = inferDashFor(c.j, c.i, hull)
+    edges.value.push([c.j, c.i, d])
     added++
     if (d) dashed++
   }
-  if (added) note.value = '按字母补了 ' + added + ' 条线（X–X₁ 这类侧棱）' + (dashed ? '，其中 ' + dashed + ' 条虚线' : '')
+  if (added || skipped) {
+    note.value = '按字母补了 ' + added + ' 条侧棱（X–X₁）' + (dashed ? '，其中 ' + dashed + ' 条虚线' : '') +
+      (skipped ? '；另有 ' + skipped + ' 对**位置关系不一致，没补**（字母可能认错了）' : '')
+  }
   return added
 }
 
