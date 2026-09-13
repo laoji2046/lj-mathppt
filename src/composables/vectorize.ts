@@ -141,20 +141,66 @@ export function fitEllipse(pts: [number, number][]): { cx: number; cy: number; r
   return { cx, cy, rx, ry, a0: ang(pts[0]), a1: ang(pts[n - 1]), rms }
 }
 
-/** 在一串骨架点里找出"确实是椭圆弧"的连续段。
- *  一条路常常是「弧 + 一段直线」连在一起（弧画到角点后又顺着直线追下去了），整条拟合残差几十像素；
- *  所以按窗口滑着拟合，把残差小、又不退化的窗口连成段，再对每段整体拟合一次。 */
+/** 最小二乘拟合**圆**（Kasa 法）。只有 3 个参数，短弧上也稳 ——
+ *  用它先找出"哪一段确实是弧"，再对整段拟合椭圆（椭圆 5 个参数，短弧上是病态的：实测残差几十像素、甚至解出 rx=452531）。 */
+export function fitCircle(pts: [number, number][]): { cx: number; cy: number; r: number; rms: number } | null {
+  const n = pts.length
+  if (n < 5) return null
+  let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sxz = 0, syz = 0, sz = 0
+  for (const [x, y] of pts) {
+    const z = x * x + y * y
+    sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y
+    sxz += x * z; syz += y * z; sz += z
+  }
+  const A = [[sxx, sxy, sx, -sxz], [sxy, syy, sy, -syz], [sx, sy, n, -sz]]
+  for (let c = 0; c < 3; c++) {
+    let piv = c
+    for (let r2 = c + 1; r2 < 3; r2++) if (Math.abs(A[r2][c]) > Math.abs(A[piv][c])) piv = r2
+    if (Math.abs(A[piv][c]) < 1e-9) return null
+    if (piv !== c) { const t = A[piv]; A[piv] = A[c]; A[c] = t }
+    for (let r2 = c + 1; r2 < 3; r2++) {
+      const f = A[r2][c] / A[c][c]
+      for (let k = c; k < 4; k++) A[r2][k] -= f * A[c][k]
+    }
+  }
+  const s = [0, 0, 0]
+  for (let r2 = 2; r2 >= 0; r2--) {
+    let v = A[r2][3]
+    for (let k = r2 + 1; k < 3; k++) v -= A[r2][k] * s[k]
+    s[r2] = v / A[r2][r2]
+  }
+  const cx = -s[0] / 2, cy = -s[1] / 2
+  const rr = cx * cx + cy * cy - s[2]
+  if (!(rr > 1)) return null
+  const r = Math.sqrt(rr)
+  let sum = 0
+  for (const [x, y] of pts) sum += (Math.hypot(x - cx, y - cy) - r) ** 2
+  return { cx, cy, r, rms: Math.sqrt(sum / n) }
+}
+
+function diagOf(pts: [number, number][]) {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9
+  for (const [x, y] of pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y }
+  return Math.max(1, Math.hypot(x1 - x0, y1 - y0))
+}
+
+/** 在一串骨架点里找出"确实是弧"的连续段。
+ *  一条路常常是「弧 + 紧接着追下去的直线」，整条拟合残差几十像素；
+ *  所以先按窗口判（用**圆**判，短弧上圆稳），把连续的窗口并成段，再对每段整体拟合椭圆。 */
 export function fitArcRuns(pts: [number, number][]): { cx: number; cy: number; rx: number; ry: number; a0: number; a1: number; rms: number; i0: number; i1: number }[] {
   const N = pts.length
   const W = 64, STEP = 16
   if (N < W) return []
   const good = new Array<boolean>(N).fill(false)
   for (let s = 0; s + W <= N; s += STEP) {
-    const f = fitEllipse(pts.slice(s, s + W))
-    if (!f) continue
-    if (f.rms > 1.6) continue
-    // 退化保护：长短轴之比太大 = 其实是一条直线，不是弧
-    if (Math.max(f.rx, f.ry) / Math.min(f.rx, f.ry) > 6) continue
+    const win = pts.slice(s, s + W)
+    const c = fitCircle(win)
+    if (!c) continue
+    if (c.rms > 1.2) continue
+    // 半径要跟**这个窗口自己的尺寸**比：一段直线也能"拟合"出一个半径几千像素的圆，
+    // 用整条路径的对角线当上限的话这种假圆会混进来，把后面的直线尾巴并进弧里。
+    const wd = diagOf(win)
+    if (c.r < 12 || c.r > wd * 12) continue             // 太小是噪声、太大基本是直线
     for (let k = s; k < s + W; k++) good[k] = true
   }
   const runs: { i0: number; i1: number }[] = []
@@ -166,12 +212,56 @@ export function fitArcRuns(pts: [number, number][]): { cx: number; cy: number; r
     if (j - i >= W) runs.push({ i0: i, i1: j - 1 })
     i = j
   }
+
   const out: { cx: number; cy: number; rx: number; ry: number; a0: number; a1: number; rms: number; i0: number; i1: number }[] = []
   for (const r of runs) {
-    const f = fitEllipse(pts.slice(r.i0, r.i1 + 1))
-    if (!f || f.rms > 2.5) continue
-    if (Math.max(f.rx, f.ry) / Math.min(f.rx, f.ry) > 6) continue
-    out.push({ ...f, i0: r.i0, i1: r.i1 })
+    // 段里往往还拖着一截紧接的直线（弧画到角点后顺着直线追下去了），
+    // 直接整段拟合会被那截直线带偏 → **剔除离群点再拟合**，两轮就够
+    let idx: number[] = []
+    for (let k = r.i0; k <= r.i1; k++) idx.push(k)
+    let f: ReturnType<typeof fitEllipse> = null
+    for (let round = 0; round < 3 && idx.length >= 24; round++) {
+      f = fitEllipse(idx.map((k) => pts[k]))
+      if (!f) break
+      const keep = idx.filter((k) => {
+        const q = Math.hypot((pts[k][0] - f!.cx) / f!.rx, (pts[k][1] - f!.cy) / f!.ry)
+        return Math.abs(q - 1) * Math.min(f!.rx, f!.ry) < 3
+      })
+      if (keep.length === idx.length) break
+      idx = keep
+    }
+    if (idx.length < 24) continue
+    const inl = idx.map((k) => pts[k])
+    // **椭圆和圆都拟一次，谁准用谁**：立体几何里的底多半是圆（投影后才是椭圆），
+    // 而椭圆拟合在真实（带噪声的）点上有时候反而不稳 —— 实测同一条弧圆拟合 0.6px、椭圆 47px。
+    const fe = fitEllipse(inl)
+    const fc = fitCircle(inl)
+    let use: { cx: number; cy: number; rx: number; ry: number; a0: number; a1: number; rms: number } | null = null
+    if (fe && fc) {
+      if (fe.rms <= fc.rms * 1.5) use = fe
+      else {
+        const ang = (p2: [number, number]) => Math.atan2((p2[1] - fc.cy) / fc.r, (p2[0] - fc.cx) / fc.r)
+        use = { cx: fc.cx, cy: fc.cy, rx: fc.r, ry: fc.r, a0: ang(inl[0]), a1: ang(inl[inl.length - 1]), rms: fc.rms }
+      }
+    } else if (fe) use = fe
+    else if (fc) {
+      const ang = (p2: [number, number]) => Math.atan2((p2[1] - fc.cy) / fc.r, (p2[0] - fc.cx) / fc.r)
+      use = { cx: fc.cx, cy: fc.cy, rx: fc.r, ry: fc.r, a0: ang(inl[0]), a1: ang(inl[inl.length - 1]), rms: fc.rms }
+    }
+    if (!use || use.rms > 3.0) continue
+    if (Math.max(use.rx, use.ry) / Math.min(use.rx, use.ry) > 5) continue
+    // 真实扫过角：**沿点序累加相邻角差**（每步取 (-π,π] 那一支）。
+    // 直接用 a1-a0 再补 2π 是错的 —— 会把"反向扫过 11°"算成"正向 349°"，于是留下退化成小段的弧。
+    const angOf = (p2: [number, number]) => Math.atan2((p2[1] - use!.cy) / use!.ry, (p2[0] - use!.cx) / use!.rx)
+    let span = 0
+    for (let i2 = 1; i2 < inl.length; i2++) {
+      let d2 = angOf(inl[i2]) - angOf(inl[i2 - 1])
+      while (d2 > Math.PI) d2 -= Math.PI * 2
+      while (d2 < -Math.PI) d2 += Math.PI * 2
+      span += d2
+    }
+    if (Math.abs(span) < 0.7) continue
+    out.push({ cx: use.cx, cy: use.cy, rx: use.rx, ry: use.ry, a0: use.a0, a1: use.a0 + span, rms: use.rms, i0: idx[0], i1: idx[idx.length - 1] })
   }
   return out
 }
