@@ -293,6 +293,9 @@ function restoreFromElement(el: MathFigureElement): boolean {
       dy: +(((lo.dy - labelGap(labelFontSize(hh)) / hh) * ctx.imgH) / ch).toFixed(4),
     }
   })
+  // 弧也要恢复 —— 弦式弧（手工画的）本来就是相对识别框归一化的，直接搬；
+  // 自由式弧（绝对几何）也同一套坐标，一并带回来
+  arcs.value = (el.arcs || []).map((a) => ({ ...a }))
   return true
 }
 
@@ -639,6 +642,17 @@ function onArcCtrlDown(e: PointerEvent, i: number) {
   try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
 }
 
+/** 被弧用到的顶点（= 弧的控制点）—— 在图上画成绿色，跟图形本身的顶点区分开，
+ *  免得用户看着像个"莫名多出来的点"，也一眼能看出哪几个点可以拖来改曲线 */
+const arcEnds = computed(() => {
+  const s = new Set<number>()
+  for (const a of arcs.value) {
+    if (a.i0 !== undefined) s.add(a.i0)
+    if (a.i1 !== undefined) s.add(a.i1)
+  }
+  return s
+})
+
 /** 双击弧上：在那一点把弧切成两段，各带一个控制点 —— 想要几个控制点就双击几次。
  *  切点落成一个真顶点（在弧上），两段的拱高按"同一条圆"精确算出来，形状不变。 */
 function splitArcAt(i: number, e: MouseEvent) {
@@ -736,11 +750,23 @@ function onUp() {
   rerun([Math.round(d.x * iw), Math.round(d.y * ih), Math.round((d.x + d.w) * iw), Math.round((d.y + d.h) * ih)])
 }
 
-function finishRemove(i: number) {
+/** 删掉第 i 个顶点后的收尾（顶点/字母/偏移/弧的下标一起挪）。
+ *  **弧是按下标引用顶点的**：漏掉这一步，删一个顶点之后所有弧的 i0/i1 就全错位 ——
+ *  弧会接到别的顶点上、看着像"断成两截、再也编辑不了"（实测踩过）。
+ *  mergedInto：这个顶点是被"并到"某个点上（只连一条边的情况），传进来弧就改指过去，而不是作废。 */
+function finishRemove(i: number, mergedInto: number | null = null) {
   pts.value.splice(i * 2, 2)
   labels.value.splice(i, 1)
   lconf.value.splice(i, 1)
   offs.value.splice(i, 1)
+  const fix = (k: number) => (k === i ? mergedInto : (k > i ? k - 1 : k))
+  arcs.value = arcs.value.flatMap((a) => {
+    if (a.i0 === undefined || a.i1 === undefined) return [a]
+    const n0 = fix(a.i0), n1 = fix(a.i1)
+    if (n0 === null || n1 === null || n0 === n1) return []      // 端点没了 / 两端并成一点 → 弧作废
+    return [{ ...a, i0: n0, i1: n1 }]
+  })
+  selArc.value = null
   selVs.value = []
   selE.value = null
 }
@@ -767,7 +793,7 @@ function delVertexRaw(i: number) {
       const other = e[0] === i ? e[1] : e[0]
       const rest = edges.value.filter((x) => x !== e)
       edges.value = keep([...rest, [other, best, e[2]] as [number, number, number]])
-      finishRemove(i)
+      finishRemove(i, best)
       return
     }
   }
@@ -1023,7 +1049,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                   />
                   <circle
                     :cx="px(i - 1)" :cy="py(i - 1)" :r="pendingV === i - 1 ? 6.5 : 4.5"
-                    :fill="pendingV === i - 1 ? '#12b76a' : (selVs.includes(i - 1) ? '#ff8f1f' : '#e02020')"
+                    :fill="pendingV === i - 1 ? '#12b76a' : (selVs.includes(i - 1) ? '#ff8f1f' : (arcEnds.has(i - 1) ? '#12b76a' : '#e02020'))"
                     stroke="#fff" stroke-width="1.2"
                     style="pointer-events:none"
                   />
