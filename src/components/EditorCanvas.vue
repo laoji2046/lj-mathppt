@@ -213,6 +213,21 @@ const { start: startDrag } = useDragResize({
   getScale: () => scale.value,
   getSnapThreshold: () => 6,
   onCommit: (changes) => store.commitElements(changes),
+  /**
+   * 缩放时锁比例：**图片锁它自己的原始宽高比**。
+   * 这样拖出来的矩形永远等于图片的比例 —— contain 正好铺满，既不留白也不裁剪，
+   * 也就是"图片尺寸和拖拽矩形尺寸同步"。按住 Alt 可自由拉伸。
+   * 比例直接从渲染出来的 <img> 读（naturalWidth/naturalHeight），不用另存字段，老存档也管用。
+   */
+  getAspect: () => {
+    if (dragMode !== 'resize' || !resizeId) return null
+    const el = store.currentSlide?.elements.find((e) => e.id === resizeId)
+    if (!el || (el as { type?: string }).type !== 'image') return null
+    const img = document.querySelector<HTMLImageElement>('[data-el-id="' + resizeId + '"] img')
+    const nw = img?.naturalWidth || 0
+    const nh = img?.naturalHeight || 0
+    return nw > 0 && nh > 0 ? nw / nh : null
+  },
   onGuides: (g) => { guides.value = g },
 })
 

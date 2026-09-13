@@ -30,6 +30,13 @@ interface Options {
   onCommit: (changes: { id: string; rect: Rect }[]) => void
   /** 吸附参考线变化（拖拽结束会收到空数组） */
   onGuides?: (guides: Guide[]) => void
+  /**
+   * 缩放时要锁定的宽高比（宽/高）；返回 null 表示自由缩放。
+   * 图片给它自己的**原始比例**：这样拖出来的矩形始终等于图片的比例，
+   * 既不留白也不裁剪 —— 也就是"图片尺寸和拖拽矩形尺寸同步"。
+   * 传入的事件按住 Alt 时忽略锁定，允许自由拉伸。
+   */
+  getAspect?: () => number | null
 }
 
 export function useDragResize(opts: Options) {
@@ -46,6 +53,8 @@ export function useDragResize(opts: Options) {
     const startX = e.clientX
     const startY = e.clientY
     const scale = opts.getScale() || 1
+    // 比例锁定：只有"缩放"模式、且这次按下没按 Alt 才启用
+    const lockAspect = mode === 'resize' && !e.altKey
     const bounds0 = opts.getBounds() ? { ...opts.getBounds()! } : null
     const targets = opts.getTargets()
 
@@ -104,6 +113,29 @@ export function useDragResize(opts: Options) {
         if (handle.includes('s')) h = r0.h + dy
         if (handle.includes('w')) { w = r0.w - dx; x = r0.x + dx }
         if (handle.includes('n')) { h = r0.h - dy; y = r0.y + dy }
+
+        // 锁比例（图片用）：按"主导方向"算出另一边，再把锚点摆回去。
+        // 这样不管抓的是角还是边，拖出来的矩形都等于图片自身的比例 ——
+        // contain 就正好铺满，不留白也不裁剪。按住 Alt 可自由拉伸。
+        const ar = lockAspect && r0.h > 0 ? r0.w / r0.h : null
+        if (ar && ar > 0) {
+          if (handle === 'n' || handle === 's') {
+            // 上下边驱动高度，宽度跟着
+            const nh = Math.max(MIN_SIZE, h)
+            const nw = Math.round(nh * ar)
+            if (handle === 'n') y = r0.y + r0.h - nh
+            w = nw
+            h = nh
+          } else {
+            // 其余（角 / 左右边）用宽度驱动
+            const nw = Math.max(MIN_SIZE, w)
+            const nh = Math.round(nw / ar)
+            if (handle.includes('w')) x = r0.x + r0.w - nw
+            if (handle.includes('n')) y = r0.y + r0.h - nh
+            w = nw
+            h = nh
+          }
+        }
         if (w < MIN_SIZE) {
           if (handle.includes('w')) x = r0.x + r0.w - MIN_SIZE
           w = MIN_SIZE
