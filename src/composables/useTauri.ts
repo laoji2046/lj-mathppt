@@ -99,6 +99,43 @@ export async function captureScreens(): Promise<ScreenShot | null> {
   }
 }
 
+export interface WinInfo {
+  id: number
+  title: string
+  app: string
+  w: number
+  h: number
+}
+
+/** 列出可截图的窗口（有标题、未最小化）。用来"截某个被别的窗口挡住的窗口"。 */
+export async function listWindows(): Promise<WinInfo[]> {
+  if (!isTauri()) return []
+  try {
+    const r = await invoke<{ ok?: boolean; windows?: WinInfo[] }>('list_windows')
+    return r?.ok ? (r.windows || []) : []
+  } catch {
+    return []
+  }
+}
+
+/** 截取指定窗口 —— 按窗口内容截，**被别的窗口挡住也能截到**。 */
+export async function captureWindow(id: number): Promise<ScreenShot | null> {
+  if (!isTauri()) return null
+  try {
+    const r = await invoke<{ ok?: boolean; dataBase64?: string; w?: number; h?: number }>('capture_window', { id })
+    if (!r?.ok || !r.dataBase64) return null
+    return {
+      dataUrl: 'data:image/png;base64,' + r.dataBase64,
+      w: r.w || 0,
+      h: r.h || 0,
+      monitors: [],
+      osMonitors: [],
+    }
+  } catch {
+    return null
+  }
+}
+
 /** 进/出"截屏覆盖"模式：主窗口临时全屏置顶（桌面端才有效） */
 export async function setCaptureMode(on: boolean): Promise<void> {
   if (!isTauri()) return

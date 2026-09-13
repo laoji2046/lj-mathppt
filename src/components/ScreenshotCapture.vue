@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
-import { captureScreens, isTauri, setCaptureMode } from '@/composables/useTauri'
+import { captureScreens, captureWindow, isTauri, listWindows, setCaptureMode, type WinInfo } from '@/composables/useTauri'
 import type { SlideElement } from '@/types'
 
 const store = useDeckStore()
@@ -38,6 +38,32 @@ const liveSize = computed(() => {
 const native = ref(false)
 /** 桌面端抓图的诊断信息（几台显示器、桌面多大）—— 抓不全时一眼看出问题 */
 const diag = ref('')
+/** 桌面端：可截的窗口列表 + 原始的整桌面截图（"回到整个桌面"要用） */
+const winList = ref<WinInfo[]>([])
+const desktopUrl = ref('')
+const desktopNatural = ref<{ w: number; h: number }>({ w: 0, h: 0 })
+
+/** 选一个窗口截：按窗口内容截，**被别的窗口挡住也能截到它自己** —— 这是"想截别的窗口却被遮挡"的唯一解法 */
+async function pickWindow(id: number) {
+  const shot = await captureWindow(id)
+  if (!shot) {
+    diag.value = '这个窗口截不了（可能已关闭或最小化）'
+    return
+  }
+  fullUrl.value = shot.dataUrl
+  natural.value = { w: shot.w, h: shot.h }
+  sel.value = null
+  const w = winList.value.find((x) => x.id === id)
+  diag.value = '窗口截图：' + (w ? (w.app || '') + ' ' + w.title : '') + ' · ' + shot.w + '×' + shot.h
+}
+/** 回到整张桌面 */
+function backToDesktop() {
+  if (!desktopUrl.value) return
+  fullUrl.value = desktopUrl.value
+  natural.value = { ...desktopNatural.value }
+  sel.value = null
+  diag.value = '整个桌面 · ' + desktopNatural.value.w + '×' + desktopNatural.value.h
+}
 async function finish() {
   if (native.value) {
     native.value = false
@@ -60,8 +86,12 @@ async function capture() {
         ' ｜ 系统报告 ' + (shot.osMonitors.length || 1) + ' 个' +
         (shot.monitors.length ? ' ｜ 抓到：' + shot.monitors.map(fmt).join('；') : '') +
         (shot.osMonitors.length ? ' ｜ 系统：' + shot.osMonitors.map(fmt).join('；') : '')
+      desktopUrl.value = shot.dataUrl
+      desktopNatural.value = { w: shot.w, h: shot.h }
       state.value = 'ready'
       await setCaptureMode(true)
+      // 列可截的窗口（被遮挡的窗口只能按窗口截，所以这里列出来给用户挑）
+      winList.value = await listWindows()
       bringToFront()
       return
     }
@@ -247,6 +277,19 @@ onBeforeUnmount(() => {
           </div>
           </div>
         </div>
+        <div v-if="native && (winList.length || desktopUrl)" class="shot__wins">
+          <button class="shot__win" :class="{ 'shot__win--on': fullUrl === desktopUrl }" @click="backToDesktop()">
+            <b>整个桌面</b><span>{{ desktopNatural.w }}×{{ desktopNatural.h }}</span>
+          </button>
+          <button
+            v-for="w in winList" :key="w.id" class="shot__win"
+            :class="{ 'shot__win--on': fullUrl !== desktopUrl && diag.includes(w.title) }"
+            :title="w.title"
+            @click="pickWindow(w.id)"
+          >
+            <b>{{ w.app || '窗口' }}</b><span>{{ w.title }} · {{ w.w }}×{{ w.h }}</span>
+          </button>
+        </div>
         <div v-if="needFocus" class="shot__focus" @click="tryFocus">
           浏览器没有自动把本窗口切到前台 —— 点一下本窗口（或点这里）就能框选了。
         </div>
@@ -306,6 +349,13 @@ onBeforeUnmount(() => {
 .shot--full .shot__hint { color: #d7dbe6; }
 .shot--full .shot__state { color: #cbd2e0; }
 .shot--full .shot__focus { display: none; }
+/* 可截窗口列表：被别的窗口挡住的窗口只能按窗口截，所以列出来让用户挑 */
+.shot__wins { display: flex; gap: 6px; overflow-x: auto; padding: 6px 10px; background: #141a24; border-bottom: 1px solid #232a36; flex: 0 0 auto; }
+.shot__win { flex: 0 0 auto; max-width: 240px; text-align: left; border: 1px solid #2c3542; background: #1b222d; color: #cbd3e0; border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer; }
+.shot__win:hover { background: #232c39; }
+.shot__win--on { border-color: #1668e0; background: #17304f; color: #fff; }
+.shot__win b { display: block; font-size: 10.5px; color: #8fa3c0; font-weight: 600; }
+.shot__win span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .shot__diag { display: block; margin-top: 2px; font-size: 10.5px; color: #9aa3b5; font-style: normal; }
 .shot__size { position: absolute; right: 0; bottom: -20px; padding: 1px 6px; border-radius: 4px; background: rgba(20,24,34,.82); color: #fff; font-size: 11px; line-height: 1.5; white-space: nowrap; pointer-events: none; }
 .shot__bar { display: flex; align-items: center; gap: 10px; padding: 12px 16px 14px; }

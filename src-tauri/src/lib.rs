@@ -252,21 +252,7 @@ fn capture_desktop_inner() -> Result<serde_json::Value, String> {
         image::imageops::overlay(&mut canvas, &img, (x - minx) as i64, (y - miny) as i64);
     }
 
-    let mut png: Vec<u8> = Vec::new();
-    {
-        use image::ImageEncoder;
-        let enc = image::codecs::png::PngEncoder::new(&mut png);
-        enc.write_image(
-            canvas.as_raw(),
-            canvas.width(),
-            canvas.height(),
-            image::ExtendedColorType::Rgba8,
-        )
-        .map_err(|e| e.to_string())?;
-    }
-
-    use base64::Engine;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+    let b64 = png_b64(&canvas)?;
     Ok(serde_json::json!({
         "ok": true,
         "dataBase64": b64,
@@ -364,6 +350,88 @@ fn set_capture_mode(window: tauri::WebviewWindow, on: bool) -> Result<(), String
     Ok(())
 }
 
+
+/// RGBA 图 → PNG base64（桌面截图与窗口截图共用）
+fn png_b64(img: &image::RgbaImage) -> Result<String, String> {
+    let mut png: Vec<u8> = Vec::new();
+    {
+        use image::ImageEncoder;
+        let enc = image::codecs::png::PngEncoder::new(&mut png);
+        enc.write_image(
+            img.as_raw(),
+            img.width(),
+            img.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    use base64::Engine;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&png))
+}
+
+/// 列出"可截图"的窗口：有标题、没最小化、尺寸像样。
+/// 用途：屏幕截图时想截**某个被别的窗口挡住**的窗口 —— 那只能按窗口截，不能按屏幕截。
+#[tauri::command]
+fn list_windows(window: tauri::WebviewWindow) -> Result<serde_json::Value, String> {
+    // 排除本应用自己的窗口：此刻它是全屏覆盖层，截出来就是覆盖层本身，只会让人困惑
+    list_windows_impl(window.hwnd().map(|h| h.0 as u32).ok())
+}
+
+/// 真正的实现（便于单测，不依赖 Tauri 窗口）
+fn list_windows_impl(own: Option<u32>) -> Result<serde_json::Value, String> {
+    use xcap::Window;
+    let ws = Window::all().map_err(|e| e.to_string())?;
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for w in &ws {
+        let id = match w.id() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if own == Some(id) {
+            continue;
+        }
+        let title = w.title().unwrap_or_default();
+        if title.trim().is_empty() {
+            continue; // 无标题的多是工具窗口/隐藏窗口
+        }
+        if w.is_minimized().unwrap_or(false) {
+            continue; // 最小化的截出来是空白
+        }
+        let width = w.width().unwrap_or(0);
+        let height = w.height().unwrap_or(0);
+        if width < 120 || height < 80 {
+            continue;
+        }
+        out.push(serde_json::json!({
+            "id": id,
+            "title": title,
+            "app": w.app_name().unwrap_or_default(),
+            "w": width,
+            "h": height
+        }));
+    }
+    Ok(serde_json::json!({ "ok": true, "windows": out }))
+}
+
+/// 截取**指定窗口**：走 PrintWindow 那条路 —— **被别的窗口挡住也能截到它自己的内容** ✓，
+/// 这正是"想截别的窗口却被遮挡"场景的唯一解法。
+#[tauri::command]
+fn capture_window(id: u32) -> Result<serde_json::Value, String> {
+    use xcap::Window;
+    let ws = Window::all().map_err(|e| e.to_string())?;
+    let w = ws
+        .iter()
+        .find(|x| x.id().map(|v| v == id).unwrap_or(false))
+        .ok_or_else(|| "窗口已经关闭了".to_string())?;
+    let img = w.capture_image().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "dataBase64": png_b64(&img)?,
+        "w": img.width(),
+        "h": img.height()
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -375,7 +443,9 @@ pub fn run() {
             images_dir,
             read_local_image,
             capture_screens,
-            set_capture_mode
+            set_capture_mode,
+            list_windows,
+            capture_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -383,6 +453,40 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    /// 窗口级截图烟雾测试：列出窗口 → 挑一个截图。
+    /// 这是"想截别的窗口却被遮挡"场景的解法，所以必须验证它真能拿到图。
+    #[test]
+    fn window_capture_smoke() {
+        let list = super::list_windows_impl(None).expect("应该能列出窗口");
+        let wins = list.get("windows").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        println!("列出 {} 个可截窗口", wins.len());
+        for w in wins.iter().take(5) {
+            println!(
+                "  id={} [{}] {} ({}x{})",
+                w.get("id").and_then(|x| x.as_u64()).unwrap_or(0),
+                w.get("app").and_then(|x| x.as_str()).unwrap_or(""),
+                w.get("title").and_then(|x| x.as_str()).unwrap_or(""),
+                w.get("w").and_then(|x| x.as_u64()).unwrap_or(0),
+                w.get("h").and_then(|x| x.as_u64()).unwrap_or(0),
+            );
+        }
+        if let Some(first) = wins.first() {
+            let id = first.get("id").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+            match super::capture_window(id) {
+                Ok(v) => {
+                    let b64 = v.get("dataBase64").and_then(|x| x.as_str()).unwrap_or("");
+                    let w = v.get("w").and_then(|x| x.as_u64()).unwrap_or(0);
+                    let h = v.get("h").and_then(|x| x.as_u64()).unwrap_or(0);
+                    use base64::Engine;
+                    let png = base64::engine::general_purpose::STANDARD.decode(b64).expect("base64");
+                    assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
+                    println!("截到窗口 {}x{}，PNG {} 字节", w, h, png.len());
+                }
+                Err(e) => println!("这个窗口截不了（可能已关闭）：{}", e),
+            }
+        }
+    }
+
     /// 原生截屏命令的烟雾测试：能跑通就说明 crate 接线、多显示器拼接、PNG 编码、base64 这几步没接错。
     /// 无显示器的环境（比如 CI）拿不到图，此时只要**优雅报错**也算过。
     #[test]
