@@ -401,19 +401,27 @@ export const GRAPHIC_TYPES: { v: string; label: string; cat: 'shape' | 'line' | 
   { v: 'coordinate', label: '坐标系', cat: 'mathfig' },
 ]
 
-/** 一段椭圆弧。rot 是椭圆自身的旋转（弧度，0 = 长短轴与坐标轴平行）。 */
+/** 一段弧。两种写法：
+ *  - **弦式**（手工画的弧）：只记「两个顶点 + 拱高」，**拖顶点时弧会自动跟着走**；
+ *  - **自由式**（识别拟合出来的弧）：记绝对几何，带椭圆长短轴和旋转。
+ *  用 i0/i1 是否存在区分。 */
 export interface FigureArc {
-  /** 圆心（归一化 0~1，相对元素宽高） */
-  cx: number
-  cy: number
-  /** 长短半轴（归一化） */
-  rx: number
-  ry: number
-  /** 椭圆旋转，弧度 */
+  /** 【弦式】两端在 points 里的下标 */
+  i0?: number
+  i1?: number
+  /** 【弦式】拱高 ÷ 弦长（正负决定鼓向哪一侧） */
+  bulge?: number
+  /** 【自由式】圆心（归一化 0~1，相对元素宽高） */
+  cx?: number
+  cy?: number
+  /** 【自由式】长短半轴（归一化） */
+  rx?: number
+  ry?: number
+  /** 【自由式】椭圆旋转，弧度 */
   rot?: number
-  /** 起止角（弧度，椭圆参数角，不是屏幕角） */
-  a0: number
-  a1: number
+  /** 【自由式】起止角（弧度，椭圆参数角） */
+  a0?: number
+  a1?: number
   /** 1 = 虚线（被挡住的那半） */
   dash?: 0 | 1
 }

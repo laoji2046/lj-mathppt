@@ -14,7 +14,7 @@ import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type { MathFigureElement, SlideElement, FigureArc } from '@/types'
 import { loadImageElement, type VectorizeOpt, type VectorizeResult } from '@/composables/vectorize'
-import { labelFontSize, labelGap } from '@/composables/solid3d'
+import { labelFontSize, labelGap, resolveArc } from '@/composables/solid3d'
 
 type VectorizeWorker = Worker & { __nextId?: number }
 let vectorWorker: VectorizeWorker | null = null
@@ -139,6 +139,7 @@ interface Snap {
   labels: string[]
   lconf: number[]
   offs: { dx: number; dy: number }[]
+  arcs: FigureArc[]
 }
 const past = ref<Snap[]>([])
 const future = ref<Snap[]>([])
@@ -154,6 +155,7 @@ function snap(): Snap {
     labels: labels.value.slice(),
     lconf: lconf.value.slice(),
     offs: offs.value.map((o) => ({ ...o })),
+    arcs: arcs.value.map((a) => ({ ...a })),
   }
 }
 function applySnap(s: Snap) {
@@ -162,8 +164,10 @@ function applySnap(s: Snap) {
   labels.value = s.labels.slice()
   lconf.value = s.lconf.slice()
   offs.value = s.offs.map((o) => ({ ...o }))
+  arcs.value = (s.arcs || []).map((a) => ({ ...a }))
   selVs.value = []
   selE.value = null
+  selArc.value = null
 }
 /** 在**改动之前**调用，记下"改之前"的样子 */
 function pushSnap(s: Snap) {
@@ -419,6 +423,20 @@ function onDown(e: PointerEvent) {
 }
 
 function onMove(e: PointerEvent) {
+  if (arcDrag >= 0) {
+    // 拖弧的控制点：用跟顶点拖动同一套坐标换算（toCropNorm），别再自己减 rect（舞台有缩放，会差一个比例）
+    const p = toCropNorm(e)
+    const a = arcs.value[arcDrag]
+    if (!p || !a || a.i0 === undefined || a.i1 === undefined) return
+    const ax = pts.value[a.i0 * 2], ay = pts.value[a.i0 * 2 + 1]
+    const bx = pts.value[a.i1 * 2], by = pts.value[a.i1 * 2 + 1]
+    const dx = bx - ax, dy = by - ay
+    const c = Math.hypot(dx, dy) || 1
+    const ux = dy / c, uy = -dx / c
+    const along = ((p[0] - (ax + bx) / 2) * ux + (p[1] - (ay + by) / 2) * uy) / c
+    a.bulge = +Math.max(-0.5, Math.min(0.5, along)).toFixed(4)
+    return
+  }
   if (dragging.value !== null) {
     const p = toCropNorm(e)
     if (!p || !dragOrigin.value) return
@@ -446,6 +464,7 @@ function onMove(e: PointerEvent) {
   }
 }
 function onUpStage() {
+  if (arcDrag >= 0) { arcDrag = -1; onUp(); return }
   if (dragging.value !== null) {
     dragging.value = null
     dragSet.value = []
@@ -484,6 +503,7 @@ function onVertexDown(e: PointerEvent, i: number) {
   e.stopPropagation()
   if (panMode.value) return
   if (linkMode.value) { pickForLink(i); return }
+  if (arcMode.value) { pickForArc(i); return }
   if (e.shiftKey && selV.value !== null && selV.value !== i) {
     const s = snap()
     if (connect(selV.value, i)) pushSnap(s)
@@ -538,7 +558,100 @@ function connect(a: number, b: number, dash: 0 | 1 = 0): boolean {
 function toggleLink() {
   linkMode.value = !linkMode.value
   pendingV.value = null
-  if (linkMode.value) { panMode.value = false; cropping.value = false }
+  if (linkMode.value) { panMode.value = false; cropping.value = false; arcMode.value = false }
+}
+
+// ---------------- 画弧 ----------------
+/** 弧是"弦式"的：只记两个顶点下标 + 拱高，**拖顶点时弧自动跟着走**，不用重算圆心。
+ *  圆心/半径由 resolveArc 现算（跟画布、导出共用同一份几何）。 */
+const arcMode = ref(false)
+const selArc = ref<number | null>(null)
+function toggleArc() {
+  arcMode.value = !arcMode.value
+  pendingV.value = null
+  if (arcMode.value) { linkMode.value = false; panMode.value = false; cropping.value = false }
+}
+/** 在 overlay 的像素坐标里解出这条弧的圆心/半径/角度 */
+function arcGeo(i: number) {
+  const a = arcs.value[i]
+  if (!a) return null
+  const r = resolveArc(a, pts.value, viewW.value, viewH.value)
+  if (!r) return null
+  return { cx: r.cx * viewW.value, cy: r.cy * viewH.value, rx: r.rx * viewW.value, ry: r.ry * viewH.value, a0: r.a0, a1: r.a1 }
+}
+/** 弧的采样折线（画出来 + 做命中测试）。用 resolveArc 解出来的角度，几何只有那一份 */
+function arcPath(i: number): string {
+  const g = arcGeo(i)
+  if (!g) return ''
+  const d = g.a1 - g.a0
+  const N = 30
+  let out = ''
+  for (let k = 0; k <= N; k++) {
+    const t = g.a0 + d * (k / N)
+    out += (k ? ' L ' : 'M ') + (g.cx + g.rx * Math.cos(t)).toFixed(1) + ' ' + (g.cy + g.ry * Math.sin(t)).toFixed(1)
+  }
+  return out
+}
+/** 拱顶（控制点）在 overlay 里的位置 */
+function arcApex(i: number): [number, number] {
+  const g = arcGeo(i)
+  if (!g) return [0, 0]
+  const t = (g.a0 + g.a1) / 2
+  return [g.cx + g.rx * Math.cos(t), g.cy + g.ry * Math.sin(t)]
+}
+/** 画弧：第一次点记起点，第二次点成弧。默认拱高 0.25，且**朝图形外侧鼓**（免得弧切进图形里） */
+function pickForArc(i: number) {
+  if (pendingV.value === null) { pendingV.value = i; selVs.value = [i]; selE.value = null; selArc.value = null; return }
+  if (pendingV.value === i) { pendingV.value = null; return }
+  const s = snap()
+  const a = pendingV.value, b = i
+  arcs.value.push({ i0: a, i1: b, bulge: defaultBulge(a, b), dash: 0 })
+  selArc.value = arcs.value.length - 1
+  pushSnap(s)
+  pendingV.value = null
+  selVs.value = [b]
+  selE.value = null
+}
+/** 默认拱向：让拱顶落在"图形重心"的反面，弧就不会切进图形内部 */
+function defaultBulge(i0: number, i1: number): number {
+  const n = pts.value.length / 2
+  if (!n) return 0.25
+  let cx = 0, cy = 0
+  for (let k = 0; k < n; k++) { cx += pts.value[k * 2]; cy += pts.value[k * 2 + 1] }
+  cx /= n; cy /= n
+  const ax = pts.value[i0 * 2], ay = pts.value[i0 * 2 + 1]
+  const bx = pts.value[i1 * 2], by = pts.value[i1 * 2 + 1]
+  const dx = bx - ax, dy = by - ay
+  const c2 = Math.hypot(dx, dy) || 1
+  const ux = dy / c2, uy = -dx / c2                 // 正拱高朝这一侧
+  const mx = (ax + bx) / 2 - cx, my = (ay + by) / 2 - cy
+  return mx * ux + my * uy > 0 ? -0.25 : 0.25       // 重心在正侧就反过来鼓
+}
+/** 拖控制点改拱高：把指针位置投影到弦的垂线上 */
+let arcDrag = -1
+function onArcCtrlDown(e: PointerEvent, i: number) {
+  e.stopPropagation()
+  if (edges.value.length >= 0) pushUndo()
+  arcDrag = i
+  selArc.value = i
+  selVs.value = []
+  selE.value = null
+  try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
+}
+
+function toggleArcDash(i: number) {
+  const a = arcs.value[i]
+  if (!a) return
+  const s = snap()
+  a.dash = a.dash ? 0 : 1
+  pushSnap(s)
+}
+/** 删掉选中的弧 */
+function delArc(i: number) {
+  const s = snap()
+  arcs.value.splice(i, 1)
+  if (selArc.value === i) selArc.value = null
+  pushSnap(s)
 }
 function togglePan() {
   panMode.value = !panMode.value
@@ -652,6 +765,7 @@ function onKey(e: KeyboardEvent) {
   if (typing) return
   if (e.key === 'Delete' || e.key === 'Backspace') {
     if (selVs.value.length) { e.preventDefault(); delSelectedVertices() }
+    else if (selArc.value !== null) { e.preventDefault(); delArc(selArc.value) }
     else if (selE.value !== null) { e.preventDefault(); delEdge(selE.value) }
   }
 }
@@ -830,6 +944,31 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                     style="pointer-events:none"
                   />
                 </g>
+                <g v-for="(a, i) in arcs" :key="'arc' + i">
+                  <path
+                    :d="arcPath(i)" fill="none" stroke="transparent" stroke-width="14"
+                    style="cursor:pointer"
+                    @click="selArc = i; selVs = []; selE = null"
+                    @dblclick.stop="selArc = i; selVs = []; selE = null"
+                  />
+                  <path
+                    :d="arcPath(i)" fill="none"
+                    :stroke="selArc === i ? '#ff8f1f' : '#1668e0'"
+                    :stroke-width="selArc === i ? 3.6 : 2.2"
+                    :stroke-dasharray="a.dash ? '6 5' : ''" stroke-linecap="round"
+                    style="pointer-events:none"
+                  />
+                  <circle
+                    v-if="selArc === i"
+                    :cx="arcApex(i)[0]" :cy="arcApex(i)[1]" r="9" fill="transparent" style="cursor:grab"
+                    @pointerdown="onArcCtrlDown($event, i)"
+                  />
+                  <circle
+                    v-if="selArc === i"
+                    :cx="arcApex(i)[0]" :cy="arcApex(i)[1]" r="5.5" fill="#12b76a" stroke="#fff" stroke-width="1.5"
+                    style="pointer-events:none"
+                  />
+                </g>
                 <g v-for="i in nVerts" :key="'v' + (i - 1)">
                   <circle
                     :cx="px(i - 1)" :cy="py(i - 1)" r="10" fill="transparent" style="cursor:pointer"
@@ -935,6 +1074,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <button class="vd__btn" :class="{ 'vd__btn--on': linkMode }" @click="toggleLink">
                 {{ linkMode ? '结束补线' : '＋ 补一条线' }}
               </button>
+              <button class="vd__btn" :class="{ 'vd__btn--on': arcMode }" @click="toggleArc">
+                {{ arcMode ? '结束画弧' : '＋ 画一段弧' }}
+              </button>
               <button v-if="selE !== null" class="vd__btn" @click="toggleDash">实线 / 虚线 切换</button>
             </div>
             <p v-if="linkMode" class="vd__tip vd__tip--on">
@@ -942,6 +1084,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 ? '补线中：点一个顶点作为起点；点空白处会新建一个顶点'
                 : '已选起点 #' + pendingV + ' —— 再点另一个顶点就连上了（点同一个点取消）' }}
             </p>
+            <p v-if="arcMode" class="vd__tip vd__tip--on">
+              {{ pendingV === null
+                ? '画弧中：点一个顶点作为弧的起点'
+                : '起点 #' + pendingV + ' —— 再点一个顶点就画出这段弧（点同一个点取消）' }}
+            </p>
+            <div v-if="selArc !== null" class="vd__row">
+              <span class="vd__selnum">弧 #{{ selArc }}：拖弧上的绿点改曲率</span>
+              <button class="vd__btn" @click="toggleArcDash(selArc)">{{ arcs[selArc]?.dash ? '改成实线' : '改成虚线' }}</button>
+              <button class="vd__btn vd__btn--danger" @click="delArc(selArc)">删掉这段弧</button>
+            </div>
             <div v-if="selE !== null" class="vd__row">
               <button class="vd__btn vd__btn--danger" @click="delEdge(selE)">删掉选中的这条线（#{{ selE }}）</button>
             </div>

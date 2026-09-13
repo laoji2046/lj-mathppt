@@ -3,12 +3,56 @@
 // 顶点可标注字母（_ 下标、^ 上标、' 撇），用于数学立体几何作图。
 import type { MathFigureElement, FigureArc } from '@/types'
 
+/** 弦式弧（两个顶点 + 拱高）→ 自由式的圆心/半径/角度。
+ *  拱高 s = bulge × 弦长 c，半径 R = (c²/4 + s²) / (2s)，圆心在中点沿垂线偏 (R − s) 处。
+ *  bulge 的正负决定鼓向哪一边；bulge ≈ 0 时退化成直线，这时候不画（返回 null）。 */
+export function resolveArc(a: FigureArc, points: number[] | undefined, w: number, h: number): Required<Pick<FigureArc, 'cx' | 'cy' | 'rx' | 'ry'>> & { rot: number; a0: number; a1: number; dash?: 0 | 1 } | null {
+  if (a.i0 === undefined || a.i1 === undefined) {
+    if (a.cx === undefined || a.cy === undefined || a.rx === undefined || a.ry === undefined) return null
+    return { cx: a.cx, cy: a.cy, rx: a.rx, ry: a.ry, rot: a.rot || 0, a0: a.a0 || 0, a1: a.a1 === undefined ? Math.PI * 2 : a.a1, dash: a.dash }
+  }
+  if (!points || a.i0 * 2 + 1 >= points.length || a.i1 * 2 + 1 >= points.length) return null
+  // 用元素尺寸还原成像素坐标来算（几何要在真实比例下做，不然归一化后不是圆）
+  const ax = points[a.i0 * 2] * w, ay = points[a.i0 * 2 + 1] * h
+  const bx = points[a.i1 * 2] * w, by = points[a.i1 * 2 + 1] * h
+  const c = Math.hypot(bx - ax, by - ay)
+  if (c < 1) return null
+  // 拱高夹在 ±0.5（= 半圆）以内：再大弧就变优弧，几何会翻到另一侧，
+  // 而且界面上的"拱高"控制本来也不会需要超过半圆
+  const bulge = Math.max(-0.5, Math.min(0.5, a.bulge ?? 0))
+  const s = bulge * c
+  if (Math.abs(s) < 0.5) return null                       // 拱高太小 = 直线，不画
+  const R = (c * c / 4 + s * s) / (2 * Math.abs(s))
+  const mx = (ax + bx) / 2, my = (ay + by) / 2
+  // 垂线单位向量：约定**正拱高朝"上"**（弦从左到右时往上鼓），跟界面里拖控制点的手感一致
+  const ux = (by - ay) / c, uy = -(bx - ax) / c
+  const sign = s > 0 ? 1 : -1
+  // 拱顶在 mid + u·s 处，圆心在**拱顶再往外退一个半径**的地方 → mid − u·(R−|s|)·sign
+  const cx = mx - ux * (R - Math.abs(s)) * sign
+  const cy = my - uy * (R - Math.abs(s)) * sign
+  const a0 = Math.atan2(ay - cy, ax - cx)
+  const a1 = Math.atan2(by - cy, bx - cx)
+  // 画"拱起那一侧"的短弧：把两个方向的中点都比一下，哪个离拱顶近就用哪个
+  const want: [number, number] = [mx + ux * Math.abs(s) * sign, my + uy * Math.abs(s) * sign]
+  const norm = (t: number) => { let v = t % (Math.PI * 2); if (v < 0) v += Math.PI * 2; return v }
+  const span = norm(a1 - a0)
+  const pA: [number, number] = [cx + R * Math.cos(a0 + span / 2), cy + R * Math.sin(a0 + span / 2)]
+  const pB: [number, number] = [cx + R * Math.cos(a0 + (span - Math.PI * 2) / 2), cy + R * Math.sin(a0 + (span - Math.PI * 2) / 2)]
+  const dA = Math.hypot(pA[0] - want[0], pA[1] - want[1])
+  const dB = Math.hypot(pB[0] - want[0], pB[1] - want[1])
+  const from = dA <= dB ? a0 : a1
+  const to = dA <= dB ? a1 : a0
+  return { cx: cx / w, cy: cy / h, rx: R / w, ry: R / h, rot: 0, a0: from, a1: to, dash: a.dash }
+}
+
 /** 椭圆弧 → SVG path。归一化坐标，跟顶点同一套；画布与导出都调这里，别再各写一份。 */
-export function arcsSvg(arcs: FigureArc[] | undefined, w: number, h: number, stroke: string, strokeWidth: number, dash = '6 5'): string {
+export function arcsSvg(arcs: FigureArc[] | undefined, w: number, h: number, stroke: string, strokeWidth: number, dash = '6 5', points?: number[]): string {
   if (!arcs || !arcs.length) return ''
   const sw = strokeWidth || 2
   let out = ''
-  for (const a of arcs) {
+  for (const raw of arcs) {
+    const a = resolveArc(raw, points, w, h)
+    if (!a) continue
     const cx = a.cx * w, cy = a.cy * h
     const rx = Math.max(0.5, a.rx * w), ry = Math.max(0.5, a.ry * h)
     const phi = a.rot || 0
