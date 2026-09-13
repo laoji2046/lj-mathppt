@@ -300,7 +300,9 @@ onBeforeUnmount(() => {
 .shot--full .shot__head { display: none; }
 .shot--full .shot__stage { flex: 1; margin: 0; border: 0; border-radius: 0; min-height: 0; }
 .shot--full .shot__img { max-width: 100%; max-height: 100%; }
-.shot--full .shot__bar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); background: rgba(20,24,34,.86); border-radius: 10px; padding: 8px 14px; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+/* 全屏模式下这排按钮**不能浮在画面上** —— 否则画面最下面一条既被挡住、又点不到（框选不到）✗。
+   改成占位：stage 用 flex:1 占满剩余高度，bar 自己占一行。 */
+.shot--full .shot__bar { background: #141a24; border-top: 1px solid #232a36; box-shadow: none; padding: 10px 16px; }
 .shot--full .shot__hint { color: #d7dbe6; }
 .shot--full .shot__state { color: #cbd2e0; }
 .shot--full .shot__focus { display: none; }
