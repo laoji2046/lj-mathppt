@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1203**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1204**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,44 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-14（v2026.09.1204）
+
+**1204 · 图片处理补齐 PowerPoint 那一套（校正 / 颜色 / 翻转）**
+
+图片原来只有「图片特效」三件（发光 / 映像 / 柔化边缘）。这次补齐 PPT「图片格式」里的常用项：
+
+| 新增 | 做法 |
+|---|---|
+| 亮度 / 对比度 / 饱和度（0~200%）| `brightness() contrast() saturate()` |
+| 色调（-180~180°）| `hue-rotate()` |
+| 重新着色：灰度 / 冲蚀 / 棕褐 / 反色 | `grayscale() sepia() invert()` 组合 |
+| 虚化（0~30px）| `blur()` |
+| 水平 / 垂直翻转 | `transform: scale(±1,±1)` |
+| 圆角（px）| `border-radius` |
+| 重设图片调整 | 一次性把上面全部还原 |
+
+**全部走 CSS 滤镜，不重编码图片**：原图不动、存档不变大、导出/放映与画布同一套渲染。
+
+⚠ **踩到的坑（差点埋雷）**：CSS 的 `filter` 只能写一条，写两条会互相覆盖 ——
+原来发光那条是单独写的 `filter: drop-shadow(...)`，新加的亮度如果也单独写一条，
+就会**把发光覆盖掉** ✗。所以把所有滤镜（发光 + 亮度 + 对比度 + 饱和度 + 色调 + 虚化 + 重新着色）
+**合成一条 filter** 输出。
+
+**验证**：
+
+    纯函数单测（imageEffectCss）
+      原图                    → 无滤镜 ✓（默认值不产生任何 CSS）
+      亮度150+对比度120+灰度   → filter: brightness(150%) contrast(120%) grayscale(1) ✓
+      发光12px红 + 亮度150     → filter: drop-shadow(0 0 12px #ff0000) brightness(150%) ✓ 同一条
+      色调90+虚化4+反色        → filter: hue-rotate(90deg) blur(4px) invert(1) ✓
+      翻转+圆角                → transform: scale(-1,1); border-radius: 40px ✓
+      filter 声明条数 = 1 ✓
+
+    界面实测（Chrome CDP）
+      三个分区都在：图片 / 图片特效 / 图片调整 ✓
+      拖亮度、对比度、重新着色 → 渲染出的 filter 随之变化 ✓
+      水平翻转 → transform: matrix(-1,0,0,1,0,0) ✓
 
 ### 2026-09-14（v2026.09.1203）
 

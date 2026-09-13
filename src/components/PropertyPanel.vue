@@ -7,7 +7,7 @@ import type {
   GgbApp, IconElement, ImageElement, LineElement, MathElement, MathFigureElement,
   MathFigureKind, PenElement, RichTextElement, ShapeElement, SlideElement, TableElement, TextElement, WordArtPreset,
 } from '@/types'
-import { ARROW_HEADS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_REFLECTIONS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
+import { ARROW_HEADS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
 import { captureDesmosState } from '@/composables/useDesmos'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
@@ -1174,6 +1174,51 @@ function layerTypeLabel(type: string) {
             @input="patch({ softEdge: num(($event.target as HTMLInputElement).value, 0) } as Partial<SlideElement>)" />
         </label>
         <p class="panel__hint">阴影请用下方「阴影」区设置；发光为贴合透明形状的 drop-shadow；映像在 Chromium / WebView2 生效。</p>
+
+        <h3 class="panel__title">图片调整（校正 / 颜色）</h3>
+        <label class="field"><span>亮度 {{ image?.brightness ?? 100 }}%</span>
+          <input type="range" :value="image?.brightness ?? 100" min="0" max="200" step="1"
+            @input="patch({ brightness: num(($event.target as HTMLInputElement).value, 100) } as Partial<SlideElement>)" />
+        </label>
+        <label class="field"><span>对比度 {{ image?.contrast ?? 100 }}%</span>
+          <input type="range" :value="image?.contrast ?? 100" min="0" max="200" step="1"
+            @input="patch({ contrast: num(($event.target as HTMLInputElement).value, 100) } as Partial<SlideElement>)" />
+        </label>
+        <label class="field"><span>饱和度 {{ image?.saturate ?? 100 }}%</span>
+          <input type="range" :value="image?.saturate ?? 100" min="0" max="200" step="1"
+            @input="patch({ saturate: num(($event.target as HTMLInputElement).value, 100) } as Partial<SlideElement>)" />
+        </label>
+        <label class="field"><span>色调 {{ image?.hue ?? 0 }}°</span>
+          <input type="range" :value="image?.hue ?? 0" min="-180" max="180" step="1"
+            @input="patch({ hue: num(($event.target as HTMLInputElement).value, 0) } as Partial<SlideElement>)" />
+        </label>
+        <label class="field"><span>重新着色</span>
+          <select :value="image?.recolor || 'none'"
+            @change="patch({ recolor: ($event.target as HTMLSelectElement).value as NonNullable<ImageElement['recolor']> } as Partial<SlideElement>)">
+            <option v-for="r in IMAGE_RECOLORS" :key="r.v" :value="r.v">{{ r.label }}</option>
+          </select>
+        </label>
+        <label class="field"><span>虚化 (px)</span>
+          <input type="number" :value="image?.blur || 0" min="0" max="30"
+            @input="patch({ blur: num(($event.target as HTMLInputElement).value, 0) } as Partial<SlideElement>)" />
+        </label>
+        <label class="field"><span>圆角 (px)</span>
+          <input type="number" :value="image?.radius ?? 4" min="0" max="200"
+            @input="patch({ radius: num(($event.target as HTMLInputElement).value, 4) } as Partial<SlideElement>)" />
+        </label>
+        <div class="field--row" style="display:flex;gap:6px;margin-top:6px">
+          <button class="quick__btn" style="flex:1"
+            :style="image?.flipH ? 'background:#e6f0fb;border-color:#b9d3f0;color:#1668e0' : ''"
+            @click="patch({ flipH: !image?.flipH } as Partial<SlideElement>)">水平翻转</button>
+          <button class="quick__btn" style="flex:1"
+            :style="image?.flipV ? 'background:#e6f0fb;border-color:#b9d3f0;color:#1668e0' : ''"
+            @click="patch({ flipV: !image?.flipV } as Partial<SlideElement>)">垂直翻转</button>
+        </div>
+        <button class="quick__btn" style="width:100%;margin-top:6px"
+          @click="patch({ brightness: 100, contrast: 100, saturate: 100, hue: 0, recolor: 'none', blur: 0, flipH: false, flipV: false, radius: 4 } as Partial<SlideElement>)">
+          重设图片调整
+        </button>
+        <p class="panel__hint">这些调整走 CSS 滤镜，**不重编码图片**（原图不动，导出/放映都按同一套渲染）。</p>
       </div>
 
       <div v-if="isMath" class="panel__section">

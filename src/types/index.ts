@@ -589,7 +589,37 @@ export interface ImageElement extends ElementBase {
   reflection?: 'none' | 'tight' | 'medium' | 'loose'
   /** 柔化边缘（px，值越大边缘越淡出） */
   softEdge?: number
+
+  // ---- 图片调整（PowerPoint「图片格式 → 校正 / 颜色」那一套，全部走 CSS filter，非破坏性）----
+  // 默认值：亮度/对比度/饱和度 100，色调 0，其余 0/无 —— 不设或等于默认值时不产生任何滤镜
+  /** 亮度 %（100 = 原图） */
+  brightness?: number
+  /** 对比度 %（100 = 原图） */
+  contrast?: number
+  /** 饱和度 %（100 = 原图，0 = 灰度） */
+  saturate?: number
+  /** 色调旋转（度，-180~180） */
+  hue?: number
+  /** 重新着色 */
+  recolor?: 'none' | 'gray' | 'sepia' | 'invert' | 'wash'
+  /** 虚化（px） */
+  blur?: number
+  /** 水平翻转 */
+  flipH?: boolean
+  /** 垂直翻转 */
+  flipV?: boolean
+  /** 圆角（px，默认 4） */
+  radius?: number
 }
+
+/** 重新着色预设（PowerPoint「颜色 → 重新着色」） */
+export const IMAGE_RECOLORS: { v: NonNullable<ImageElement['recolor']>; label: string }[] = [
+  { v: 'none', label: '不重新着色' },
+  { v: 'gray', label: '灰度' },
+  { v: 'wash', label: '冲蚀（淡彩）' },
+  { v: 'sepia', label: '棕褐（怀旧）' },
+  { v: 'invert', label: '反色' },
+]
 
 /** 图片特效预设下拉（PowerPoint 风格）*/
 export const IMAGE_REFLECTIONS: { v: NonNullable<ImageElement['reflection']>; label: string }[] = [
@@ -609,9 +639,33 @@ const REFLECT_PRESETS: Record<Exclude<ImageElement['reflection'], undefined | 'n
 /** 生成图片特效 CSS（编辑器画布与 Reveal 导出共用，保证两端一致）。
  *  发光=drop-shadow 贴合透明形状；映像=-webkit-box-reflect（Firefox 优雅降级为无反射）；
  *  柔化边缘=双侧 mask 渐隐，保留矩形轮廓。 */
-export function imageEffectCss(el: Pick<ImageElement, 'glowColor' | 'glowSize' | 'reflection' | 'softEdge'>): string {
+export function imageEffectCss(
+  el: Pick<
+    ImageElement,
+    | 'glowColor' | 'glowSize' | 'reflection' | 'softEdge'
+    | 'brightness' | 'contrast' | 'saturate' | 'hue' | 'recolor' | 'blur'
+    | 'flipH' | 'flipV' | 'radius'
+  >,
+): string {
   const css: string[] = []
-  if (el.glowSize && el.glowColor) css.push('filter: drop-shadow(0 0 ' + el.glowSize + 'px ' + el.glowColor + ')')
+  // ⚠ 所有 filter 必须**合成一条** —— 写成两条会互相覆盖（原来发光那条是单独写的）
+  const filters: string[] = []
+  if (el.glowSize && el.glowColor) filters.push('drop-shadow(0 0 ' + el.glowSize + 'px ' + el.glowColor + ')')
+  if (el.brightness != null && el.brightness !== 100) filters.push('brightness(' + el.brightness + '%)')
+  if (el.contrast != null && el.contrast !== 100) filters.push('contrast(' + el.contrast + '%)')
+  if (el.saturate != null && el.saturate !== 100) filters.push('saturate(' + el.saturate + '%)')
+  if (el.hue) filters.push('hue-rotate(' + el.hue + 'deg)')
+  if (el.blur) filters.push('blur(' + el.blur + 'px)')
+  if (el.recolor === 'gray') filters.push('grayscale(1)')
+  else if (el.recolor === 'sepia') filters.push('sepia(1)')
+  else if (el.recolor === 'invert') filters.push('invert(1)')
+  else if (el.recolor === 'wash') filters.push('saturate(0.4) brightness(1.1)')
+  if (filters.length) css.push('filter: ' + filters.join(' '))
+  if (el.flipH || el.flipV) {
+    // 翻转靠 transform —— 注意元素本身的旋转在外层，这里是图片内部翻转，不冲突
+    css.push('transform: scale(' + (el.flipH ? -1 : 1) + ',' + (el.flipV ? -1 : 1) + ')')
+  }
+  if (el.radius != null && el.radius !== 4) css.push('border-radius: ' + el.radius + 'px')
   if (el.reflection && el.reflection !== 'none') {
     const g = REFLECT_PRESETS[el.reflection] ?? [0, 'rgba(0,0,0,0.4)']
     css.push('-webkit-box-reflect: below ' + g[0] + 'px linear-gradient(to bottom, ' + g[1] + ', transparent)')
