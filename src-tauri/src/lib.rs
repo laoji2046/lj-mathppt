@@ -283,6 +283,23 @@ fn capture_desktop_inner() -> Result<serde_json::Value, String> {
 ///
 /// 关键教训：如果窗口还在屏幕上（尤其是最大化时它盖满整个桌面），抓到的就**只有应用自己** ✗。
 /// 所以这里先 hide → 等合成器把下面的桌面画出来 → 抓 → 无论成败都把窗口恢复。
+#[cfg(windows)]
+extern "system" {
+    fn GetDesktopWindow() -> isize;
+    fn SetForegroundWindow(hwnd: isize) -> i32;
+}
+
+/// 把"桌面"本身顶到前台，逼合成器重画一遍。
+/// 光把本窗口 hide 掉，桌面不一定会立刻重绘 —— 于是桌面复制拿到的还是上一帧 ✗。
+#[cfg(windows)]
+fn force_desktop_redraw() {
+    unsafe {
+        SetForegroundWindow(GetDesktopWindow());
+    }
+}
+#[cfg(not(windows))]
+fn force_desktop_redraw() {}
+
 #[tauri::command]
 fn capture_screens(window: tauri::WebviewWindow) -> Result<serde_json::Value, String> {
     // 诊断用：系统（winit/Tauri）自己看到几台显示器 —— 跟 xcap 看到的一对比，
@@ -304,12 +321,17 @@ fn capture_screens(window: tauri::WebviewWindow) -> Result<serde_json::Value, St
         .unwrap_or_default();
 
     let _ = window.hide();
-    // 等窗口藏掉、桌面重绘出来
-    std::thread::sleep(std::time::Duration::from_millis(400));
-    // **抓两次、丢掉第一张**：Windows 的桌面复制第一次调用经常拿到"上一帧"（窗口还在的那一帧），
-    // 表现就是"只截到应用下面那一层" ✗。第二张才是当前真正的合成结果。
+    // 藏掉窗口还不够：桌面本身没被"要求重绘"时，桌面复制很可能继续给旧帧 ✗。
+    // 把桌面窗口顶到前台，逼合成器重画一遍。
+    force_desktop_redraw();
+    std::thread::sleep(std::time::Duration::from_millis(350));
+
+    // **连抓三次、只留最后一张**：桌面复制的头一两次常拿到旧帧（窗口还在的那一帧），
+    // 表现就是"只截到某一层" ✗。多抓几次、间隔开，最后一张才是稳定的当前合成结果。
     let _ = capture_desktop_inner();
-    std::thread::sleep(std::time::Duration::from_millis(120));
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    let _ = capture_desktop_inner();
+    std::thread::sleep(std::time::Duration::from_millis(150));
     let out = capture_desktop_inner();
     // 无论抓到没抓到，都要把窗口还回来，否则应用就"消失"了
     let _ = window.show();
