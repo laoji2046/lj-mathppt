@@ -21,6 +21,12 @@ export interface VectorizeOpt {
   textMax?: number
   /** 自由端点吸附到顶点的半径（px） */
   snapR?: number
+  /** 虚线链端点吸附到顶点的半径（px，默认 60）。虚线链的两端本来就不精确（开头是个缝、或被字母截断），
+   *  跟实线段用同一个 14px 半径的话吸不上就新建顶点 —— 一条虚线就变成"悬空长线 + 两个多余顶点"，
+   *  这是「识别出来容易多出点」最主要的来源 */
+  snapDash?: number
+  /** 虚线链端点吸附时允许偏离链所在直线的距离（px，默认 18） */
+  snapPerp?: number
   /** 顶点合并半径（px） */
   mergeR?: number
   /** 去毛刺：短于这么长的单端路径丢掉（px） */
@@ -498,7 +504,10 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     else leftover.push(chain[0])
   }
 
-  interface Edge { aId: number; bId: number; a: [number, number]; b: [number, number]; dash: 0 | 1 }
+  // snap：这条边的端点允许吸附到多远的已有顶点上（不给就用全局 snapR）。
+  // 虚线链需要更大 —— 链的两端本来就不精确（开头是个缝、或被抹掉的字母截断），
+  // 只给 14px 的话会"吸附不上就新建顶点"，于是一条虚线变成一条悬空长线 + 两个多余顶点。
+  interface Edge { aId: number; bId: number; a: [number, number]; b: [number, number]; dash: 0 | 1; snap?: number; dir?: [number, number] }
   const edges: Edge[] = []
   for (const s of fixedSegs) edges.push({ aId: s.aId, bId: s.bId, a: s.a, b: s.b, dash: 0 })
   for (const s of leftover) edges.push({ aId: -1, bId: -1, a: s.a, b: s.b, dash: 0 })
@@ -514,7 +523,9 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
         if (t > maxT) { maxT = t; best1 = q }
       }
     }
-    edges.push({ aId: -1, bId: -1, a: best0, b: best1, dash: 1 })
+    // 虚线链的另一头可能离角点很远（原图里那一段虚线被字母/其它线吃掉了），
+    // 所以吸附半径给得比实线大得多；靠 dir 上的垂距约束保证不会吸到隔壁那条线上去。
+    edges.push({ aId: -1, bId: -1, a: best0, b: best1, dash: 1, snap: opt.snapDash ?? 60, dir: [ux, uy] })
   }
 
   // 顶点
@@ -526,6 +537,8 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     verts.push({ x: G.nodes[i].cx, y: G.nodes[i].cy })
   }
   const snapR = opt.snapR ?? 14
+  /** 虚线链端点吸附时允许偏离链所在直线的距离（px） */
+  const snapPerp = opt.snapPerp ?? 18
   const nearest = (x: number, y: number, r: number) => {
     let bi = -1, bd = r
     for (let i = 0; i < verts.length; i++) {
@@ -534,12 +547,29 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     }
     return bi
   }
+  /** 沿某条直线方向找顶点：除了距离，还要求它基本落在这条线上（垂距小）。
+   *  不加这个约束的话，虚线链的端点会吸到"旁边那条线的角点"上 —— 实测会吃掉真顶点、还会把虚实判错。 */
+  const nearestOn = (x: number, y: number, r: number, ux: number, uy: number, perp: number) => {
+    let bi = -1, bd = r
+    for (let i = 0; i < verts.length; i++) {
+      const dx = verts[i].x - x, dy = verts[i].y - y
+      const d = Math.hypot(dx, dy)
+      if (d >= bd) continue
+      if (Math.abs(dx * -uy + dy * ux) > perp) continue
+      bd = d; bi = i
+    }
+    return bi
+  }
   const addV = (x: number, y: number) => { verts.push({ x, y }); return verts.length - 1 }
   let outEdges: [number, number, number][] = []
   for (const E of edges) {
-    let ai = E.aId >= 0 ? nodeVert[E.aId] : nearest(E.a[0], E.a[1], snapR)
+    const sr = E.snap ?? snapR
+    // E.a 是链沿 dir 的最小端，E.b 是最大端 —— 各自只能往自己那侧外面延伸
+    const pick = (x: number, y: number, sgn: number) =>
+      E.dir ? nearestOn(x, y, sr, E.dir[0] * sgn, E.dir[1] * sgn, snapPerp) : nearest(x, y, sr)
+    let ai = E.aId >= 0 ? nodeVert[E.aId] : pick(E.a[0], E.a[1], -1)
     if (ai < 0) ai = addV(E.a[0], E.a[1])
-    let bi = E.bId >= 0 ? nodeVert[E.bId] : nearest(E.b[0], E.b[1], snapR)
+    let bi = E.bId >= 0 ? nodeVert[E.bId] : pick(E.b[0], E.b[1], 1)
     if (bi < 0) bi = addV(E.b[0], E.b[1])
     if (ai === bi) continue
     if (Math.hypot(verts[ai].x - verts[bi].x, verts[ai].y - verts[bi].y) < 4) continue
