@@ -851,6 +851,8 @@ export interface Slide {
   bgImage?: string
   /** Reveal 本页过渡动画（none/fade/slide/zoom/...；留空用文稿默认） */
   transition?: string
+  /** 隐藏幻灯片：列表里变暗，演示 / 导出时跳过（PowerPoint 同名功能） */
+  hidden?: boolean
 }
 
 

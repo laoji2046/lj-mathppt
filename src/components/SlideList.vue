@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useDeckStore } from '@/stores/deck'
 import { useContextMenu, type MenuItem } from '@/composables/useContextMenu'
+import type { SlideElement } from '@/types'
 import SlideThumb from './SlideThumb.vue'
 import AppIcon from './AppIcon.vue'
 
@@ -34,18 +35,70 @@ function onDrop(i: number, e: DragEvent) {
 }
 function onDragEnd() { resetDrag() }
 function resetDrag() { dragFrom.value = null; dragOver.value = null }
+/**
+ * 套用一套「版式」：先清空该页，再放好标题/正文这类框架元素。
+ * 说明：PowerPoint 的版式能"保留内容重新排版"，这个编辑器的元素是绝对定位的 ✗，
+ * 做不到那种重排，所以这里给的是**成套版式**（会替换该页内容），并在菜单里写清楚。
+ */
+function applyLayout(i: number, kind: 'blank' | 'title' | 'titleText' | 'twoCol') {
+  store.gotoSlide(i)
+  store.resetSlide(i)
+  if (kind === 'blank') return
+  const W = store.deck.width || 1920
+  const H = store.deck.height || 1080
+  const t = (x: number, y: number, w: number, h: number, text: string, size: number, weight: number, align: 'left' | 'center') =>
+    store.addElement('text', {
+      x, y, w, h, text, fontSize: size, fontWeight: weight, align,
+      color: '#1b1f27', fontFamily: 'sans', bgColor: 'transparent', shadow: 'none', valign: 'top',
+    } as Partial<SlideElement>)
+  if (kind === 'title') {
+    t(W * 0.08, H * 0.36, W * 0.84, H * 0.20, '标题', 72, 700, 'center')
+    return
+  }
+  t(W * 0.08, H * 0.09, W * 0.84, H * 0.14, '标题', 44, 700, 'left')
+  if (kind === 'twoCol') {
+    t(W * 0.08, H * 0.30, W * 0.40, H * 0.56, '左栏内容', 24, 400, 'left')
+    t(W * 0.52, H * 0.30, W * 0.40, H * 0.56, '右栏内容', 24, 400, 'left')
+  } else {
+    t(W * 0.08, H * 0.30, W * 0.84, H * 0.56, '正文内容', 24, 400, 'left')
+  }
+}
+
 function onSlideCtx(i: number, e: MouseEvent) {
   e.preventDefault()
+  // 右键要同时把这一页选中（PPT 就是这个行为），后面的操作都作用在它身上
+  store.gotoSlide(i)
   const s = store.deck.slides[i]
   const isSub = !!s?.parentId
+  const hasClip = !!store.slideClip?.length
   const items: MenuItem[] = [
-    { label: '复制此页', onClick: () => store.copySlide(i) },
+    { label: '剪切', hint: 'Ctrl+X', disabled: store.slideCount <= 1, onClick: () => store.cutSlideToClip(i) },
+    { label: '复制', hint: 'Ctrl+C', onClick: () => store.copySlideToClip(i) },
+    { label: '粘贴', hint: 'Ctrl+V', disabled: !hasClip, onClick: () => store.pasteSlideAt(i) },
+    { sep: true, label: '', onClick: () => {} },
+    { label: '新建幻灯片', onClick: () => { store.addSlide(); } },
+    { label: '创建副本', onClick: () => store.copySlide(i) },
+    { label: '删除幻灯片', danger: true, disabled: store.slideCount <= 1, onClick: () => store.removeSlide(i) },
+    { sep: true, label: '', onClick: () => {} },
+    {
+      label: '版式（会替换本页内容）',
+      onClick: () => {},
+      children: [
+        { label: '空白', onClick: () => applyLayout(i, 'blank') },
+        { label: '标题页', onClick: () => applyLayout(i, 'title') },
+        { label: '标题和内容', onClick: () => applyLayout(i, 'titleText') },
+        { label: '两栏内容', onClick: () => applyLayout(i, 'twoCol') },
+      ],
+    },
+    { label: '重设幻灯片（清空内容、恢复白底）', onClick: () => store.resetSlide(i) },
+    { sep: true, label: '', onClick: () => {} },
+    { label: s?.hidden ? '取消隐藏幻灯片' : '隐藏幻灯片', onClick: () => store.toggleSlideHidden(i) },
     { label: '上移', onClick: () => store.moveSlide(i, -1), disabled: i === 0 },
     { label: '下移', onClick: () => store.moveSlide(i, 1), disabled: i === store.slideCount - 1 },
   ]
   if (isSub) items.push({ label: '取消子页', onClick: () => store.setSlideSubpage(i, false) })
   else if (i > 0) items.push({ label: '设为子页', onClick: () => store.setSlideSubpage(i, true) })
-  items.push({ label: '删除此页', onClick: () => store.removeSlide(i), danger: true, disabled: store.slideCount <= 1 })
+  // （"删除此页"已并入上面的 PPT 分组，这里不再重复一项）
   openMenu(e.clientX, e.clientY, items)
 }
 </script>
@@ -60,6 +113,7 @@ function onSlideCtx(i: number, e: MouseEvent) {
         'slide-item--active': i === store.currentIndex,
         'slide-item--dragover': dragOver === i && dragFrom !== null && dragFrom !== i,
         'slide-item--sub': !!s.parentId,
+        'slide-item--hidden': !!s.hidden,
       }"
       draggable="true"
       @click="store.gotoSlide(i)"
@@ -71,6 +125,7 @@ function onSlideCtx(i: number, e: MouseEvent) {
     >
       <span class="slide-num">{{ i + 1 }}</span>
       <span v-if="s.parentId" class="slide-sub">↳ 子页</span>
+      <span v-if="s.hidden" class="slide-sub">隐藏</span>
       <div class="slide-thumb" style="width:100%;height:100%">
         <SlideThumb :slide="s" :width="THUMB_W" />
       </div>
@@ -106,6 +161,9 @@ function onSlideCtx(i: number, e: MouseEvent) {
 }
 .slide-item--drag { opacity: 0.55; }
 .slide-item--sub { margin-left: 12px; }
+/* 隐藏幻灯片：编辑器里仍在（能右键取消隐藏），只是变暗提示不参与放映 */
+.slide-item--hidden { opacity: 0.45; }
+.slide-item--hidden .slide-thumb { filter: grayscale(0.7); }
 
 .slide-thumb {
   position: relative;

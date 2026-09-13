@@ -5,6 +5,12 @@ export interface MenuItem {
   onClick: () => void
   danger?: boolean
   disabled?: boolean
+  /** 分隔线（此时 label / onClick 忽略） */
+  sep?: boolean
+  /** 右侧灰色提示（PPT 那种快捷键/说明文字） */
+  hint?: string
+  /** 子菜单（鼠标悬停展开，用于「版式」这类二级项） */
+  children?: MenuItem[]
 }
 interface MenuState { open: boolean; x: number; y: number; items: MenuItem[] }
 

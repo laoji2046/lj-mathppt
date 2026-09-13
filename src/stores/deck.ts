@@ -483,6 +483,59 @@ export const useDeckStore = defineStore('deck', () => {
     currentIndex.value = index + 1
     clearSelection()
   }
+  // ---- 幻灯片剪贴板（右键菜单的 剪切 / 复制 / 粘贴）----
+  // 存的是深拷贝：粘贴出来的页面元素会换新 id，跟来源页互不影响
+  function cloneSlide(src: Slide): Slide {
+    return {
+      ...(JSON.parse(JSON.stringify(src)) as Slide),
+      id: uid('slide'),
+      elements: src.elements.map((e) => ({ ...(JSON.parse(JSON.stringify(e)) as SlideElement), id: uid('el') })),
+    }
+  }
+  const slideClip = ref<Slide[] | null>(null)
+  function copySlideToClip(index: number) {
+    const s = deck.value.slides[index]
+    if (!s) return
+    slideClip.value = [JSON.parse(JSON.stringify(s)) as Slide]
+  }
+  function cutSlideToClip(index: number) {
+    const s = deck.value.slides[index]
+    if (!s) return
+    const n = deck.value.slides.length
+    if (n <= 1) return // 只剩一页时不允许剪掉
+    copySlideToClip(index)
+    removeSlide(index)
+  }
+  /** 粘到第 index 页之后（PPT 的"粘贴"是插到当前页后面） */
+  function pasteSlideAt(index: number) {
+    const clip = slideClip.value
+    if (!clip?.length) return
+    pushHistory()
+    const made = clip.map((s) => cloneSlide(s))
+    deck.value.slides.splice(index + 1, 0, ...made)
+    currentIndex.value = index + 1
+    clearSelection()
+  }
+  /** 隐藏 / 取消隐藏某页（演示与导出会跳过隐藏页） */
+  function toggleSlideHidden(index: number) {
+    const s = deck.value.slides[index]
+    if (!s) return
+    pushHistory()
+    if (s.hidden) delete s.hidden
+    else s.hidden = true
+  }
+  /** 重设幻灯片：清空本页元素，背景恢复为纯白 */
+  function resetSlide(index: number) {
+    const s = deck.value.slides[index]
+    if (!s) return
+    pushHistory()
+    s.elements = []
+    s.bg = '#ffffff'
+    delete s.bgGradient
+    delete s.bgImage
+    clearSelection()
+  }
+
   /** 上下移动页面 */
   function moveSlide(index: number, dir: -1 | 1) {
     const to = index + dir
@@ -842,6 +895,7 @@ export const useDeckStore = defineStore('deck', () => {
     canUndo, canRedo,
     isSelected, selectElement, setSelection, clearSelection, pruneSelection,
     editingGroupId, enterGroup, exitGroup,
+    slideClip, copySlideToClip, cutSlideToClip, pasteSlideAt, toggleSlideHidden, resetSlide,
     addSlide, addSubpageAfterCurrent, addPageWithTemplate, addBundlePages, applyBlank, addBlankPage, removeSlide, setSlideSubpage, gotoSlide, insertSlides, replaceDeck, importDeck, copySlide, moveSlide, reorderSlide,
     versions, saveVersion, restoreVersion, deleteVersion,
     addElement, updateElement, switchGraphic, commitElements, setAllFragments, removeSelected, removeElement, copyElements, cutElements, pasteElements, canPaste, setSlideBg, setSlideBgGradient, setSlideBgImage, setSlideTransition, setSlideNotes, applyTemplate, applyBundle,

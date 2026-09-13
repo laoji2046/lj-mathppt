@@ -565,6 +565,11 @@ function elementToHtml(el: SlideElement): string {
 
 /** 渲染幻灯片，支持 Reveal 垂直堆叠：带子页（parentId）的父页包成上下滚动的嵌套 section */
 function renderSlidesStack(slides: Slide[]): string {
+  // 隐藏幻灯片：演示 / 导出时整页跳过（连同它的子页一起）——
+  // 编辑器里还看得到（列表变暗），只是不参与放映。
+  const hidden = new Set(slides.filter((s) => s.hidden).map((s) => s.id))
+  const shown = slides.filter((s) => !s.hidden && !(s.parentId && hidden.has(s.parentId)))
+  slides = shown
   const valid = new Set(slides.map((s) => s.id))
   const byParent = new Map<string, Slide[]>()
   for (const s of slides) {

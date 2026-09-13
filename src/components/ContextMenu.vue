@@ -27,14 +27,36 @@ onBeforeUnmount(() => {
     :style="{ left: state.x + 'px', top: state.y + 'px' }"
     @contextmenu.prevent
   >
-    <button
-      v-for="(it, i) in state.items"
-      :key="i"
-      class="ctx-item"
-      :class="{ 'ctx-item--danger': it.danger }"
-      :disabled="it.disabled"
-      @click="it.onClick(); closeMenu()"
-    >{{ it.label }}</button>
+    <template v-for="(it, i) in state.items" :key="i">
+      <div v-if="it.sep" class="ctx-sep"></div>
+
+      <div v-else-if="it.children && it.children.length" class="ctx-sub">
+        <button class="ctx-item ctx-item--parent" :disabled="it.disabled">
+          <span>{{ it.label }}</span>
+          <span class="ctx-arrow">▸</span>
+        </button>
+        <div class="ctx-menu ctx-submenu">
+          <template v-for="(c, j) in it.children" :key="j">
+            <div v-if="c.sep" class="ctx-sep"></div>
+            <button
+              v-else
+              class="ctx-item"
+              :class="{ 'ctx-item--danger': c.danger }"
+              :disabled="c.disabled"
+              @click="c.onClick(); closeMenu()"
+            ><span>{{ c.label }}</span><span v-if="c.hint" class="ctx-hint">{{ c.hint }}</span></button>
+          </template>
+        </div>
+      </div>
+
+      <button
+        v-else
+        class="ctx-item"
+        :class="{ 'ctx-item--danger': it.danger }"
+        :disabled="it.disabled"
+        @click="it.onClick(); closeMenu()"
+      ><span>{{ it.label }}</span><span v-if="it.hint" class="ctx-hint">{{ it.hint }}</span></button>
+    </template>
   </div>
 </template>
 
@@ -50,8 +72,29 @@ onBeforeUnmount(() => {
   padding: 5px;
   animation: fx-pop var(--dur-1) var(--ease);
 }
+/* 分隔线（PPT 菜单里那些分组横线） */
+.ctx-sep { height: 1px; margin: 5px 6px; background: var(--border); }
+
+/* 子菜单：悬停展开（「版式」这类二级项） */
+.ctx-sub { position: relative; }
+.ctx-item--parent { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ctx-arrow { color: var(--muted); font-size: 11px; }
+.ctx-submenu {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: -6px;
+  margin-left: 2px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.ctx-sub:hover > .ctx-submenu { display: block; }
+
 .ctx-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   width: 100%;
   text-align: left;
   min-height: 32px;
@@ -69,4 +112,5 @@ onBeforeUnmount(() => {
 .ctx-item:disabled { opacity: 0.4; cursor: not-allowed; }
 .ctx-item--danger { color: var(--danger); }
 .ctx-item--danger:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); }
+.ctx-hint { color: var(--muted); font-size: 11px; font-weight: 400; flex: 0 0 auto; }
 </style>
