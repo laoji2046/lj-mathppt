@@ -24,6 +24,8 @@ const store = useDeckStore()
 /** 在**当前页**里按 id 找元素（跟「图片转图形」同一套做法） */
 const findEl = (id: string) => store.currentSlide?.elements.find((e) => e.id === id) as MathFigureElement | undefined
 const H = 620
+/** 左侧面板页签：一次只显示一类控件（控件太多，不分页就是一面墙） */
+const tab = ref<'model' | 'draw' | 'list'>('model')
 /** 当前投影（只算一次，预览 / 属性 / 命中测试共用） */
 const proj = computed(() => (model.value ? projectGeom(model.value, { azim: azim.value, elev: elev.value }) : null))
 
@@ -774,9 +776,14 @@ function insert() {
       </header>
 
       <div class="g3__body">
-        <div class="g3__left">
-          <div class="g3__lab">几何描述（JSON：vertices 必填，faces 决定虚实）</div>
-          <div class="g3__row g3__row--top">
+        <div class="g3__left" :data-tab="tab">
+          <div class="g3__tabs">
+            <button :class="{ 'g3__tab--on': tab === 'model' }" @click="tab = 'model'">① 模型</button>
+            <button :class="{ 'g3__tab--on': tab === 'draw' }" @click="tab = 'draw'">② 作图</button>
+            <button :class="{ 'g3__tab--on': tab === 'list' }" @click="tab = 'list'">③ 图元</button>
+          </div>
+          <div class="g3__sec g3__sec--model g3__lab">几何描述（JSON：vertices 必填，faces 决定虚实）</div>
+          <div class="g3__sec g3__sec--model g3__row g3__row--top">
             <select class="g3__sel" @change="usePreset(($event.target as HTMLSelectElement).value)">
               <option value="">常用几何体…</option>
               <option v-for="p in GEOM3D_PRESETS" :key="p.name" :value="p.json">{{ p.name }}</option>
@@ -791,7 +798,7 @@ function insert() {
             </button>
           </div>
 
-          <div class="g3__build">
+          <div class="g3__sec g3__sec--model g3__build">
             <div class="g3__lab">搭一个（不用 AI）</div>
             <div class="g3__row g3__row--top">
               <select v-model="bType" class="g3__sel">
@@ -830,10 +837,11 @@ function insert() {
               </select>
               <button class="g3__btn" @click="addAux()">添加</button>
             </div>
-            <div v-if="addedMarks.length || addedAux.length || addedFree.length || planes.length" class="g3__row g3__row--top">
+          </div>
+            <div v-if="addedMarks.length || addedAux.length || addedFree.length || planes.length" class="g3__sec g3__sec--list g3__row g3__row--top">
               <button class="g3__btn" title="清空所有后加的图元（点/线/面），保留模型本身" @click="clearAdded()">清空已加的图元</button>
             </div>
-            <div v-if="vertexRows.length" class="g3__verts">
+            <div v-if="vertexRows.length" class="g3__sec g3__sec--model g3__verts">
               <div class="g3__lab">顶点坐标 <span class="g3__vsub">（白底可改；灰的是算出来的，只读）</span></div>
               <div class="g3__vlist">
                 <div v-for="r in vertexRows" :key="'v' + r.name" class="g3__vrow">
@@ -850,14 +858,14 @@ function insert() {
                 </div>
               </div>
             </div>
-            <div v-if="myPresets.length" class="g3__row g3__row--top">
+            <div v-if="myPresets.length" class="g3__sec g3__sec--model g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">我的预设：</span>
               <span v-for="p in myPresets" :key="'myp' + p.name" class="g3__plane">
                 <b class="g3__link" title="载入这个预设" @click="usePreset(p.json)">{{ p.name }}</b>
                 <button class="g3__btn g3__btn--tiny" title="删掉这个预设" @click="delMy(p.name)">×</button>
               </span>
             </div>
-            <div class="g3__row g3__row--top">
+            <div class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">自由点（给坐标）：</span>
               <input v-model="fpName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
               <label class="g3__num">x <input v-model.number="fpX" type="number" step="0.1"></label>
@@ -865,7 +873,7 @@ function insert() {
               <label class="g3__num">z <input v-model.number="fpZ" type="number" step="0.1"></label>
               <button class="g3__btn" @click="addFreePoint()">加自由点</button>
             </div>
-            <div class="g3__row g3__row--top">
+            <div class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">定比分点 P = A + t(B−A)：</span>
               <select v-model="mkFrom" class="g3__sel g3__sel--sm">
                 <option value="">从…</option>
@@ -881,7 +889,7 @@ function insert() {
               <input v-model="mkName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
               <button class="g3__btn" @click="addMark()">加定比分点</button>
             </div>
-            <div v-if="addedMarks.length || addedAux.length || addedFree.length" class="g3__row g3__row--top g3__row--stack">
+            <div v-if="addedMarks.length || addedAux.length || addedFree.length" class="g3__sec g3__sec--list g3__row g3__row--top g3__row--stack">
               <span class="g3__tip g3__tip--inline">已加的（可删）：</span>
               <span
                 v-for="mk in addedMarks" :key="'mk' + mk.i" class="g3__plane"
@@ -905,7 +913,7 @@ function insert() {
                 <button class="g3__btn g3__btn--tiny" title="删掉这条辅助线" @click="delAux(ax.i)">×</button>
               </span>
             </div>
-            <div class="g3__row g3__row--top">
+            <div class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">两直线的交点：</span>
               <select v-for="(_, k) in 4" :key="'lm' + k" v-model="lmP[k]" class="g3__sel g3__sel--sm">
                 <option value="">{{ k % 2 === 0 ? '线' + (k < 2 ? 1 : 2) + '点1' : '点2' }}</option>
@@ -914,14 +922,14 @@ function insert() {
               <input v-model="lmName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
               <button class="g3__btn" @click="addLineMeet()">求交点</button>
             </div>
-            <div v-if="lmMsg || addedLineMeets.length" class="g3__row g3__row--top">
+            <div v-if="lmMsg || addedLineMeets.length" class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span v-if="lmMsg" class="g3__warn">{{ lmMsg }}</span>
               <span v-for="lm in addedLineMeets" :key="'lmj' + lm.i" class="g3__plane">
                 <b>{{ lm.name }}</b><span class="g3__meet">{{ lm.a }} ∩ {{ lm.b }}</span>
                 <button class="g3__btn g3__btn--tiny" @click="delLineMeet(lm.i)">×</button>
               </span>
             </div>
-            <div v-if="planes.length" class="g3__row g3__row--top">
+            <div v-if="planes.length" class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">点在平面上的投影（射影）：</span>
               <select v-model="ppFrom" class="g3__sel g3__sel--sm">
                 <option value="">点…</option>
@@ -935,14 +943,14 @@ function insert() {
               <input v-model="ppName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
               <button class="g3__btn" @click="addProject()">求投影</button>
             </div>
-            <div v-if="addedProjects.length" class="g3__row g3__row--top">
+            <div v-if="addedProjects.length" class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">射影：</span>
               <span v-for="pp in addedProjects" :key="'ppj' + pp.i" class="g3__plane">
                 <b>{{ pp.name }}</b><span class="g3__meet">{{ pp.from }} → {{ pp.plane }}{{ pp.foot ? ' ·垂线' : '' }}</span>
                 <button class="g3__btn g3__btn--tiny" @click="delProject(pp.i)">×</button>
               </span>
             </div>
-            <div v-if="planes.length >= 2" class="g3__row g3__row--top">
+            <div v-if="planes.length >= 2" class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">两平面的交线：</span>
               <select v-model.number="ilA" class="g3__sel g3__sel--sm" style="min-width:100px">
                 <option :value="-1">平面 A…</option>
@@ -954,14 +962,14 @@ function insert() {
               </select>
               <button class="g3__btn" @click="addIntersect()">求交线</button>
             </div>
-            <div v-if="addedIntersects.length" class="g3__row g3__row--top">
+            <div v-if="addedIntersects.length" class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">交线：</span>
               <span v-for="il in addedIntersects" :key="'il' + il.i" class="g3__plane">
                 <b>{{ il.a }}</b><span class="g3__meet">∩ {{ il.b }}</span>
                 <button class="g3__btn g3__btn--tiny" @click="delIntersect(il.i)">×</button>
               </span>
             </div>
-            <div v-if="planes.length" class="g3__row g3__row--top">
+            <div v-if="planes.length" class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">直线与平面的交点（如 A₁C 与平面 AB₁D₁）：</span>
               <select v-model="meetA" class="g3__sel g3__sel--sm">
                 <option value="">点1</option>
@@ -979,14 +987,14 @@ function insert() {
               <input v-model="meetName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
               <button class="g3__btn" @click="addMeet()">求交点</button>
             </div>
-            <div v-if="addedMeets.length" class="g3__row g3__row--top">
+            <div v-if="addedMeets.length" class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">交点：</span>
               <span v-for="mp in addedMeets" :key="'mp' + mp.i" class="g3__plane">
                 <b>{{ mp.name }}</b><span class="g3__meet">{{ mp.line.join('') }} ∩ {{ mp.plane }}</span>
                 <button class="g3__btn g3__btn--tiny" @click="delMeet(mp.i)">×</button>
               </span>
             </div>
-            <div v-if="planes.length" class="g3__row g3__row--top">
+            <div v-if="planes.length" class="g3__sec g3__sec--list g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">平面属性：</span>
               <span v-for="pl in planes" :key="pl.kind + pl.i" class="g3__plane">
                 <b :class="{ 'g3__off': isHidden((pl.kind === 'cut' ? 'cut:' : 'plane:') + pl.i) }">{{ pl.label }}</b>
@@ -1000,21 +1008,20 @@ function insert() {
                 <button class="g3__btn g3__btn--tiny" title="删掉这个平面" @click="delPlane(pl.kind, pl.i)">×</button>
               </span>
             </div>
-            <div class="g3__row g3__row--top">
+            <div class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">多点定平面 → 求截面：</span>
               <input v-model="planeText" class="g3__inp" placeholder="如 A C B1">
               <button class="g3__btn" @click="addPlaneCut()">求截面</button>
             </div>
-            <div class="g3__row g3__row--top">
+            <div class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">加截面 / 辅助面（顶点名，空格分隔）：</span>
               <input v-model="cutText" class="g3__inp" placeholder="如 A C B1">
               <label class="g3__num"><input v-model="cutFill" type="checkbox"> 填充</label>
               <button class="g3__btn" @click="addCut()">添加截面</button>
             </div>
-          </div>
-          <textarea v-model="raw" class="g3__ta" spellcheck="false" @blur="parse" @input="parseErr = ''" />
-          <p v-if="parseErr" class="g3__err">{{ parseErr }}</p>
-          <div class="g3__row">
+          <textarea v-model="raw" class="g3__sec g3__sec--model g3__ta" spellcheck="false" @blur="parse" @input="parseErr = ''" />
+          <p v-if="parseErr" class="g3__sec g3__sec--model g3__err">{{ parseErr }}</p>
+          <div class="g3__sec g3__sec--model g3__row">
             <label class="g3__f">方位角 azim <b>{{ azim }}°</b>
               <input v-model.number="azim" type="range" min="-180" max="180" step="1">
             </label>
@@ -1022,12 +1029,12 @@ function insert() {
               <input v-model.number="elev" type="range" min="-80" max="80" step="1">
             </label>
           </div>
-          <p class="g3__tip">教材常用：方位角 −60~−10°，仰角 10~30°（正值是俯视，看得见上底面）。</p>
+          <p class="g3__sec g3__sec--model g3__tip">教材常用：方位角 −60~−10°，仰角 10~30°（正值是俯视，看得见上底面）。</p>
 
-          <div class="g3__lab g3__lab--mt">截图描点对齐（可选，但最准）</div>
-          <button class="g3__btn" @click="pickImage()">{{ alignImg ? '换一张截图' : '导入同一张截图…' }}</button>
-          <input id="g3-img" type="file" accept="image/*" style="display:none" @change="onPicked">
-          <template v-if="alignImg">
+          <div class="g3__sec g3__sec--model g3__lab g3__lab--mt">截图描点对齐（可选，但最准）</div>
+          <button class="g3__sec g3__sec--model g3__btn" @click="pickImage()">{{ alignImg ? '换一张截图' : '导入同一张截图…' }}</button>
+          <input class="g3__sec g3__sec--model" id="g3-img" type="file" accept="image/*" style="display:none" @change="onPicked">
+          <template class="g3__sec g3__sec--model" v-if="alignImg">
             <p class="g3__tip">
               按提示**依次点出**每个顶点：
               <b>{{ clicks.length }}/{{ order.length }}</b>
@@ -1035,14 +1042,14 @@ function insert() {
               <template v-else> —— 点完了，点「反解视角」</template>
               （至少 4 个，且要跨上下两层，否则解不准）
             </p>
-            <div ref="alignBox" class="g3__imgbox" @click="onClickImage">
+            <div ref="alignBox" class="g3__sec g3__sec--model g3__imgbox" @click="onClickImage">
               <img :src="alignImg" alt="" draggable="false">
               <span
                 v-for="(c, i) in clicks" :key="'c' + i" class="g3__dot"
                 :style="{ left: c[0] + 'px', top: c[1] + 'px' }"
               >{{ order[i] }}</span>
             </div>
-            <div class="g3__row">
+            <div class="g3__sec g3__sec--model g3__row">
               <button class="g3__btn" :disabled="clicks.length < 3" @click="solve()">反解视角</button>
               <button class="g3__btn" @click="clicks = []; fitErr = null">重点</button>
               <span v-if="fitErr !== null" class="g3__fit">
@@ -1148,6 +1155,13 @@ function insert() {
 .g3__meet { color: #777; font-size: 10px; }
 .g3__link { cursor: pointer; text-decoration: underline dotted; }
 .g3__link:hover { color: #0b4ea8; }
+.g3__tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.g3__tabs button { flex: 1; border: 1px solid var(--border, #e2e2e8); background: #f5f5f9; border-radius: 8px; padding: 7px 0; font-size: 12.5px; cursor: pointer; color: #5a5a68; transition: background .12s, color .12s; }
+.g3__tabs button:hover { background: #ececf3; }
+.g3__tabs button.g3__tab--on { background: #1668e0; border-color: #1668e0; color: #fff; font-weight: 700; }
+.g3__left[data-tab="model"] .g3__sec:not(.g3__sec--model),
+.g3__left[data-tab="draw"] .g3__sec:not(.g3__sec--draw),
+.g3__left[data-tab="list"] .g3__sec:not(.g3__sec--list) { display: none; }
 .g3__lab { font-size: 12px; font-weight: 700; color: #444; margin-bottom: 6px; }
 .g3__lab--mt { margin-top: 14px; }
 .g3__ta { width: 100%; height: 220px; font: 12px/1.5 Consolas, Menlo, monospace; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 8px; resize: vertical; box-sizing: border-box; }
