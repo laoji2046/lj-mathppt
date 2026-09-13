@@ -398,7 +398,29 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
       // th2 可能算出来是 −π（反向），那样画出来的是另一半，虚实正好反（用户报过）。
       const from = vis ? th1 : th2
       const to = vis ? th1 + fwd : th2 + (Math.PI * 2 - fwd)
-      return { c2, e, from, to }
+      return { c2, e, from, to, paramOf, at, depthAt }
+    }
+    /** 从椭圆外一点 P2 向椭圆作切线，返回两个切点（屏幕坐标）。
+     *  **圆锥的母线落点用的是这个**，不是椭圆的左右端点 —— 那只对圆柱成立。
+     *  （用户拿教材图对比指出：母线该是切线，不能穿过底面椭圆。） */
+    const tangentFromPoint = (
+      e: { rx: number; ry: number; rot: number },
+      c2: [number, number],
+      P2: [number, number],
+    ): [number, number][] | null => {
+      const cp = Math.cos(-e.rot), sp = Math.sin(-e.rot)
+      const dx = P2[0] - c2[0], dy = P2[1] - c2[1]
+      const ux = (dx * cp - dy * sp) / e.rx
+      const uy = (dx * sp + dy * cp) / e.ry
+      const d2 = ux * ux + uy * uy
+      if (d2 <= 1.0001) return null
+      const k = 1 / d2, m = Math.sqrt(d2 - 1) / d2
+      const back = (tx: number, ty: number): [number, number] => {
+        const x = tx * e.rx, y = ty * e.ry
+        const c2r = Math.cos(e.rot), s2r = Math.sin(e.rot)
+        return [c2[0] + x * c2r - y * s2r, c2[1] + x * s2r + y * c2r]
+      }
+      return [back(k * ux - m * uy, k * uy + m * ux), back(k * ux + m * uy, k * uy - m * ux)]
     }
     const edges: [number, number, number][] = []
     let apex = -1, iA = -1, iB = -1
@@ -434,11 +456,31 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     }
     const axial = !!m.primitive.axial
     const iO = (): number => names.findIndex((n) => n === 'O')
+    /** 圆锥：母线落点 = **从顶点投影向底面椭圆作的切线的切点**（不是椭圆的左右端点）。
+     *  左右端点那条只对圆柱成立 —— 用户拿教材图对比指出过：母线必须是切线，不能穿进底面。 */
+    let coneSplit: { from: number; to: number } | null = null
     if (type === 'cone') {
+      const cs = circleSplit(0)
+      let pA: [number, number, number] = tang[0]
+      let pB: [number, number, number] = tang[1]
+      const tps = tangentFromPoint(cs.e, cs.c2, scr3(0, 0, h))
+      if (tps) {
+        const back = (s: [number, number]): [number, number, number] => {
+          const q = planeXY(s[0], s[1])
+          return [+q[0].toFixed(4), +q[1].toFixed(4), 0]
+        }
+        pA = back(tps[0]); pB = back(tps[1])
+        const thA = cs.paramOf(tps[0][0], tps[0][1])
+        const thB = cs.paramOf(tps[1][0], tps[1][1])
+        const nrm2 = (v: number) => { let x = v % (Math.PI * 2); if (x < 0) x += Math.PI * 2; return x }
+        const fw = nrm2(thB - thA)
+        const visHalf = cs.depthAt(nrm2(thA + fw / 2)) > 0
+        coneSplit = visHalf ? { from: thA, to: thA + fw } : { from: thB, to: thB + (Math.PI * 2 - fw) }
+      }
       apex = push('P', [0, 0, h])
       push('O', [0, 0, 0])
-      iA = push(axial ? 'A' : null, tang[0])
-      iB = push(axial ? 'B' : null, tang[1])
+      iA = push(axial ? 'A' : null, pA)
+      iB = push(axial ? 'B' : null, pB)
       edges.push([apex, iA, 0], [apex, iB, 0])
       if (axial) {
         // 轴截面：A–O、O–B 在锥体内部 → 虚线；三角形整体着色（教材的画法）
@@ -459,8 +501,11 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     const arcs: { cx: number; cy: number; rx: number; ry: number; rot: number; a0: number; a1: number; dash: 0 | 1 }[] = []
     // 底面：近半可见（实线）、远半被挡（虚线）—— 这就是教材里圆柱/圆锥底的那条画法
     const eb = circleSplit(0)
-    arcs.push({ cx: eb.c2[0], cy: eb.c2[1], ...eb.e, a0: eb.from, a1: eb.to, dash: 0 })
-    arcs.push({ cx: eb.c2[0], cy: eb.c2[1], ...eb.e, a0: eb.to, a1: eb.from + Math.PI * 2, dash: 1 })
+    // 圆锥的切分点用切线切点（跟母线落点一致），圆柱用椭圆的左右端点
+    const bf = coneSplit ? coneSplit.from : eb.from
+    const bt = coneSplit ? coneSplit.to : eb.to
+    arcs.push({ cx: eb.c2[0], cy: eb.c2[1], ...eb.e, a0: bf, a1: bt, dash: 0 })
+    arcs.push({ cx: eb.c2[0], cy: eb.c2[1], ...eb.e, a0: bt, a1: bf + Math.PI * 2, dash: 1 })
     if (type === 'cylinder') {
       // 顶面：从上方看整圈都可见（实线）
       const et = circleSplit(h)
