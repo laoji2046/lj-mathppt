@@ -73,12 +73,27 @@ function onDown(e: PointerEvent) {
   selStart.value = { x: e.clientX - r.left, y: e.clientY - r.top }
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
 }
+/** 图片相对 stage 的偏移（stage 是 flex 居中的，图片比 stage 窄时左右有留白）。
+ *  选区和裁剪必须用同一套基准，否则会整体偏移 —— 用户报过"左侧被截掉"。 */
+function imgOffset() {
+  const s = stage.value
+  const img = imageRef.value
+  if (!s || !img) return { x: 0, y: 0, w: s?.clientWidth || 0, h: s?.clientHeight || 0 }
+  const sr = s.getBoundingClientRect()
+  const ir = img.getBoundingClientRect()
+  return { x: ir.left - sr.left, y: ir.top - sr.top, w: ir.width, h: ir.height }
+}
 function onMove(e: PointerEvent) {
   if (!selStart.value) return
   const s = stage.value
   if (!s) return
   const r = s.getBoundingClientRect()
-  const cur = { x: Math.min(Math.max(e.clientX - r.left, 0), r.width), y: Math.min(Math.max(e.clientY - r.top, 0), r.height) }
+  const off = imgOffset()
+  // 夹在**图片**范围内（不是 stage —— 否则会框到留白上，裁出来也是错的）
+  const cur = {
+    x: Math.min(Math.max(e.clientX - r.left, off.x), off.x + off.w),
+    y: Math.min(Math.max(e.clientY - r.top, off.y), off.y + off.h),
+  }
   const st = selStart.value
   sel.value = {
     x: Math.max(0, Math.min(st.x, cur.x)),
@@ -106,11 +121,14 @@ function confirmCrop() {
   if (!img || !sel.value || !fullUrl.value) return
   const selBox = sel.value
   if (selBox.w < 8 || selBox.h < 8) return
+  // 选区是按 stage 量的（overlay 也画在 stage 里），裁剪要按**图片** —— 先减掉图片相对 stage 的偏移。
+  // 不减的话，图片比 stage 窄时整块内容会右移，看起来就是"左侧被截掉了"。
+  const off = imgOffset()
   const r = img.getBoundingClientRect() // 显示尺寸
   const scaleX = natural.value.w / r.width
   const scaleY = natural.value.h / r.height
-  const sx = selBox.x * scaleX
-  const sy = selBox.y * scaleY
+  const sx = Math.max(0, (selBox.x - off.x) * scaleX)
+  const sy = Math.max(0, (selBox.y - off.y) * scaleY)
   const sw = selBox.w * scaleX
   const sh = selBox.h * scaleY
   const canvas = document.createElement('canvas')
