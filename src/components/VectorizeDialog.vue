@@ -258,7 +258,9 @@ function adopt(r: VectorizeResult) {
     out[i] = { dx: (ux / L) * 0.06 * (r.W / r.H > 1 ? 1 : 0.8), dy: (uy / L) * 0.06 }
   }
   offs.value = out
-  inferCorrespondingEdges()
+  const n1 = inferCorrespondingEdges()
+  const n2 = inferFacePolygons()
+  if (n1 && n2) note.value = '按字母补了 ' + (n1 + n2) + ' 条线（侧棱 ' + n1 + ' + 面的边 ' + n2 + '）'
 }
 
 /** 按字母补线：图上只要有 **X 和 X_1**（同底字母 + 下标 1，下标用 _1 或 ^1 都认）这种一对，
@@ -282,6 +284,57 @@ function inferCorrespondingEdges(): number {
     added++
   }
   if (added) note.value = '按字母补了 ' + added + ' 条必画的线（X–X₁ 这类侧棱）'
+  return added
+}
+
+/** 按顺序连出来的多边形是不是"凸"（叉积同号）—— 投影不变凸，所以底面画出来一定是凸的。
+ *  不是凸的就说明**字母顺序不是多边形顺序**（典型：底面标签里混进了 M、N、h 这种），宁可不补。 */
+function isConvexRing(P: [number, number][]): boolean {
+  const n = P.length
+  if (n < 3) return false
+  let sign = 0
+  for (let i = 0; i < n; i++) {
+    const a = P[i], b = P[(i + 1) % n], c = P[(i + 2) % n]
+    const ux = b[0] - a[0], uy = b[1] - a[1]
+    const vx = c[0] - b[0], vy = c[1] - b[1]
+    const cr = ux * vy - uy * vx
+    const scale = Math.hypot(ux, uy) * Math.hypot(vx, vy)
+    if (scale < 1e-6) return false
+    if (Math.abs(cr) < 0.02 * scale) continue          // 近似共线：放过（真实图会有这种）
+    const s2 = cr > 0 ? 1 : -1
+    if (sign === 0) sign = s2
+    else if (s2 !== sign) return false
+  }
+  return sign !== 0
+}
+
+/** 按字母补**面的闭合多边形**：同一个下标的一组顶点应该首尾相连 ——
+ *  A-B-C-D-A、A₁-B₁-C₁-D₁-A₁（用户明确说"都应该有直线连接"）。
+ *  组内按字母顺序连；**只在至少 3 个点、且这个顺序连出来是凸多边形时**才补。 */
+function inferFacePolygons(): number {
+  const groups = new Map<string, { i: number; base: string }[]>()
+  labels.value.forEach((t, i) => {
+    const s = (t || '').trim()
+    const m = /^([A-Za-z])([_^]?[0-9]*)$/.exec(s)       // 基字母 + 下标（_1 / ^1 / 空）
+    if (!m) return
+    const key = m[2] || ''
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push({ i, base: m[1].toUpperCase() })
+  })
+  let added = 0
+  for (const arr of groups.values()) {
+    if (arr.length < 3) continue
+    arr.sort((a, b) => (a.base < b.base ? -1 : a.base > b.base ? 1 : 0))
+    const P = arr.map((x) => [px(x.i), py(x.i)] as [number, number])
+    if (!isConvexRing(P)) continue
+    for (let k = 0; k < arr.length; k++) {
+      const a = arr[k].i, b = arr[(k + 1) % arr.length].i
+      if (edges.value.some((e) => (e[0] === a && e[1] === b) || (e[0] === b && e[1] === a))) continue
+      edges.value.push([a, b, 0])
+      added++
+    }
+  }
+  if (added) note.value = '按字母补了 ' + added + ' 条面的边（A-B-C-D-A 这种闭合）'
   return added
 }
 
@@ -1392,7 +1445,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 {{ ellipseMode ? '结束画椭圆弧' : '＋ 画椭圆弧' }}
               </button>
               <button class="vd__btn" title="同底字母配下标 1 的一对（C 和 C₁）之间一定有线，识别漏了就补上"
-                @click="inferCorrespondingEdges()">按字母补侧棱</button>
+                @click="inferCorrespondingEdges() + inferFacePolygons()">按字母补线（侧棱 + 面的边）</button>
               <button v-if="selE !== null" class="vd__btn" @click="toggleDash">实线 / 虚线 切换</button>
             </div>
             <p v-if="linkMode" class="vd__tip vd__tip--on">
