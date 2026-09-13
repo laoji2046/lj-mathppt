@@ -54,8 +54,12 @@ async function capture() {
       native.value = true
       fullUrl.value = shot.dataUrl
       natural.value = { w: shot.w, h: shot.h }
-      diag.value = '已捕获 ' + (shot.monitors.length || 1) + ' 个显示器 · 桌面 ' + shot.w + '×' + shot.h +
-        (shot.monitors.length ? '（' + shot.monitors.map((m) => (m.name || '?') + ' ' + m.w + '×' + m.h + '@' + m.x + ',' + m.y).join('；') + '）' : '')
+      const fmt = (m: { name?: string; x: number; y: number; w: number; h: number; scale?: number }) =>
+        (m.name || '?') + ' ' + m.w + '×' + m.h + '@' + m.x + ',' + m.y + (m.scale ? ' ×' + m.scale : '')
+      diag.value = '捕获 ' + (shot.monitors.length || 1) + ' 个显示器 · 桌面 ' + shot.w + '×' + shot.h +
+        ' ｜ 系统报告 ' + (shot.osMonitors.length || 1) + ' 个' +
+        (shot.monitors.length ? ' ｜ 抓到：' + shot.monitors.map(fmt).join('；') : '') +
+        (shot.osMonitors.length ? ' ｜ 系统：' + shot.osMonitors.map(fmt).join('；') : '')
       state.value = 'ready'
       await setCaptureMode(true)
       bringToFront()

@@ -68,8 +68,10 @@ export interface ScreenShot {
   dataUrl: string
   w: number
   h: number
-  /** 诊断：抓到几台显示器、各自的位置尺寸（抓不全时能一眼看出问题） */
+  /** 诊断：xcap 抓到几台显示器、各自的位置尺寸 */
   monitors: { name?: string; x: number; y: number; w: number; h: number }[]
+  /** 诊断：系统（Tauri/winit）自己报告的显示器 —— 两者不一致就说明是枚举/DPI 问题 */
+  osMonitors: { name?: string; x: number; y: number; w: number; h: number; scale?: number }[]
 }
 
 /** 原生截**整个桌面**（多显示器拼接）。只有桌面端能做，浏览器返回 null。 */
@@ -82,6 +84,7 @@ export async function captureScreens(): Promise<ScreenShot | null> {
       w?: number
       h?: number
       monitors?: { name?: string; x: number; y: number; w: number; h: number }[]
+      osMonitors?: { name?: string; x: number; y: number; w: number; h: number; scale?: number }[]
     }>('capture_screens')
     if (!r?.ok || !r.dataBase64) return null
     return {
@@ -89,6 +92,7 @@ export async function captureScreens(): Promise<ScreenShot | null> {
       w: r.w || 0,
       h: r.h || 0,
       monitors: r.monitors || [],
+      osMonitors: r.osMonitors || [],
     }
   } catch {
     return null

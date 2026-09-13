@@ -285,6 +285,24 @@ fn capture_desktop_inner() -> Result<serde_json::Value, String> {
 /// 所以这里先 hide → 等合成器把下面的桌面画出来 → 抓 → 无论成败都把窗口恢复。
 #[tauri::command]
 fn capture_screens(window: tauri::WebviewWindow) -> Result<serde_json::Value, String> {
+    // 诊断用：系统（winit/Tauri）自己看到几台显示器 —— 跟 xcap 看到的一对比，
+    // 就能区分"是枚举漏了"还是"抓取本身不对"。
+    let os_monitors = window
+        .available_monitors()
+        .map(|ms| {
+            ms.iter()
+                .map(|m| {
+                    let p = m.position();
+                    let s = m.size();
+                    serde_json::json!({
+                        "name": m.name(), "x": p.x, "y": p.y, "w": s.width, "h": s.height,
+                        "scale": m.scale_factor()
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
     let _ = window.hide();
     // 等窗口藏掉、桌面重绘出来
     std::thread::sleep(std::time::Duration::from_millis(400));
@@ -295,7 +313,16 @@ fn capture_screens(window: tauri::WebviewWindow) -> Result<serde_json::Value, St
     let out = capture_desktop_inner();
     // 无论抓到没抓到，都要把窗口还回来，否则应用就"消失"了
     let _ = window.show();
-    out
+    match out {
+        Ok(mut v) => {
+            // 把系统看到的显示器数一并带出去（前端会显示出来）
+            if let Some(o) = v.as_object_mut() {
+                o.insert("osMonitors".into(), serde_json::json!(os_monitors));
+            }
+            Ok(v)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// 进入/退出"截屏覆盖"模式：主窗口临时全屏 + 置顶（退出时还原并重新聚焦）。
