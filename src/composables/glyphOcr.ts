@@ -26,7 +26,11 @@ const CW = 40          // 归一化画布宽
 const CH = 36          // 归一化画布高
 const GH = 26          // 字形归一化后的高度
 const BASE = 30        // 基线所在行
-const FONT_STACK = '"Cambria Math","Times New Roman","Nimbus Roman","Liberation Serif",Georgia,serif'
+/** 模板要渲染的字体：**每种都单独来一套**，比对时取最高分。
+ *  原来是排成一个 font-stack 让 canvas 自己挑第一个装了的 —— 结果 Windows 上永远挑中 Cambria Math，
+ *  可试卷插图用的是 Times 斜体，两者字形差得远：实测干净的 "D₁" 会被认成 "Z_1"。
+ *  多字体模板的代价只是建一次表、每次比对多几倍计算，换来的是不再被"装了哪个字体"决定成败。 */
+const FONT_FAMILIES = ['"Times New Roman"', '"Cambria Math"', 'Georgia', '"Nimbus Roman"', '"Liberation Serif"']
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 const LOWER = 'abcdefghijklmnopqrstuvwxyz'
@@ -86,31 +90,39 @@ function templates(): Template[] {
   c.width = 220; c.height = 160
   const g = c.getContext('2d', { willReadFrequently: true })
   if (!g) return (TEMPLATES = [])
-  for (const style of ['italic ', '']) {
-    for (const ch of CHARS) {
-      g.clearRect(0, 0, c.width, c.height)
-      g.fillStyle = '#000'
-      g.font = style + '110px ' + FONT_STACK
-      g.textBaseline = 'alphabetic'
-      g.fillText(ch, 60, 120)
-      const d = g.getImageData(0, 0, c.width, c.height).data
-      const pix: number[] = []
-      let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1
-      for (let y = 0; y < c.height; y++) {
-        for (let x = 0; x < c.width; x++) {
-          if (d[(y * c.width + x) * 4 + 3] < 128) continue
-          pix.push(y * c.width + x)
-          if (x < x0) x0 = x
-          if (y < y0) y0 = y
-          if (x > x1) x1 = x
-          if (y > y1) y1 = y
+  // 同一套模板只留一份：某个字体没装时 canvas 会退回默认字体，渲染出来的东西和别的一样，
+  // 直接按掩码去重，省掉重复的比对开销。
+  const seen = new Set<string>()
+  for (const fam of FONT_FAMILIES) {
+    for (const style of ['italic ', '']) {
+      for (const ch of CHARS) {
+        g.clearRect(0, 0, c.width, c.height)
+        g.fillStyle = '#000'
+        g.font = style + '110px ' + fam
+        g.textBaseline = 'alphabetic'
+        g.fillText(ch, 60, 120)
+        const d = g.getImageData(0, 0, c.width, c.height).data
+        const pix: number[] = []
+        let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1
+        for (let y = 0; y < c.height; y++) {
+          for (let x = 0; x < c.width; x++) {
+            if (d[(y * c.width + x) * 4 + 3] < 128) continue
+            pix.push(y * c.width + x)
+            if (x < x0) x0 = x
+            if (y < y0) y0 = y
+            if (x > x1) x1 = x
+            if (y > y1) y1 = y
+          }
         }
+        if (!pix.length) continue
+        const m = normalizeMask(c.width, pix, { x0, y0, x1, y1 })
+        const key = m.join('')
+        if (seen.has(key)) continue
+        seen.add(key)
+        let n = 0
+        for (let i = 0; i < m.length; i++) n += m[i]
+        out.push({ ch, m, d: dilate(m), n })
       }
-      if (!pix.length) continue
-      const m = normalizeMask(c.width, pix, { x0, y0, x1, y1 })
-      let n = 0
-      for (let i = 0; i < m.length; i++) n += m[i]
-      out.push({ ch, m, d: dilate(m), n })
     }
   }
   TEMPLATES = out
