@@ -258,9 +258,10 @@ function adopt(r: VectorizeResult) {
     out[i] = { dx: (ux / L) * 0.06 * (r.W / r.H > 1 ? 1 : 0.8), dy: (uy / L) * 0.06 }
   }
   offs.value = out
-  // **不自动补线**：识别结果就是你扫描件里的东西。
-  // 之前这里自动跑了一遍"按字母补线"，字母一认错就会连出一堆乱线（用户反馈"补了太多无用的线"），
-  // 改成：确认字母没错之后，自己点「按字母补线」。
+  // **X–X₁ 这类侧棱默认就连**（用户明确要求：C-C₁、B-B₁、A-A₁、D-D₁ 默认需要连线）。
+  // 面的边那条规则更激进（要猜字母顺序 + 凸性），仍然只在点「按字母补线」时才跑。
+  // 两端点之间已经有线的不重复连；字母认错导致位移对不上的，只提示不否决。
+  inferCorrespondingEdges()
 }
 
 // ---------------- 补出来的线判虚实 ----------------
@@ -339,8 +340,11 @@ function inferDashFor(a: number, b: number, hull: [number, number][]): 0 | 1 {
       const t = k / N
       const x = ax + (bx - ax) * t, y = ay + (by - ay) * t
       let ok = false
-      for (let dy = -2; dy <= 2 && !ok; dy++) {
-        for (let dx = -2; dx <= 2; dx++) if (inkAtFull(x + dx, y + dy)) { ok = true; break }
+      // 取样窗口只开 3×3：原来是 5×5，**太宽** —— 虚线的小空隙被旁边的墨盖住，
+      // 于是虚线被判成实线（实测 C–C₁ 那条虚线补出来是实线）。线宽本身只有 2px 左右，
+      // 3×3 足够容忍识别出来的端点偏差，又能看见虚线断口。
+      for (let dy = -1; dy <= 1 && !ok; dy++) {
+        for (let dx = -1; dx <= 1; dx++) if (inkAtFull(x + dx, y + dy)) { ok = true; break }
       }
       if (ok) hit++
     }
@@ -350,6 +354,33 @@ function inferDashFor(a: number, b: number, hull: [number, number][]): 0 | 1 {
   }
   return insideHull(hull, (ax + bx) / 2, (ay + by) / 2) ? 1 : 0
 }
+/** a–b 这条直线是不是**已经被现有的线覆盖**了（覆盖它的可能是几段共线的边 ——
+ *  比如 D₁–D₂–D，中间那个点 D₂ 就在 D₁D 上）。用户说"两端点之间有线就不再连线"，
+ *  这是那句话的几何版判据：只查"有没有这条边"会漏掉上面那种情况，连出来就是叠着的多余线。 */
+function segmentCovered(a: number, b: number): boolean {
+  const ax = px(a), ay = py(a), bx = px(b), by = py(b)
+  const L = Math.hypot(bx - ax, by - ay)
+  if (L < 2) return true
+  const N = Math.max(4, Math.min(60, Math.round(L / 3)))
+  for (let k = 0; k <= N; k++) {
+    const t = k / N
+    const x = ax + (bx - ax) * t, y = ay + (by - ay) * t
+    let ok = false
+    for (const e of edges.value) {
+      const x0 = px(e[0]), y0 = py(e[0]), x1 = px(e[1]), y1 = py(e[1])
+      const dx = x1 - x0, dy = y1 - y0
+      const L2 = dx * dx + dy * dy || 1e-9
+      let tt = ((x - x0) * dx + (y - y0) * dy) / L2
+      tt = Math.max(0, Math.min(1, tt))
+      // 容差 6px：识别出来的中间点常偏离直线几个像素（实测 A₁–A₂–A 里的 A₂ 偏 4px 左右），
+      // 卡太紧会把"其实已经有线"判成没有，于是叠着画出一条多余的。
+      if (Math.hypot(x - (x0 + tt * dx), y - (y0 + tt * dy)) < 6) { ok = true; break }
+    }
+    if (!ok) return false
+  }
+  return true
+}
+
 /** 当前所有顶点的凸包（整图像素） */
 function vertHull(): [number, number][] {
   const P: [number, number][] = []
@@ -383,14 +414,14 @@ function inferCorrespondingEdges(): number {
   // 先收集候选配对，再**用"相对位置一致"校验一遍**：
   // 棱柱/棱台就是把下底面 A-B-C-D 平移上去成 A₁-B₁-C₁-D₁ ——
   // 所以每个对应点的**位移向量应该几乎相同**。偏离共识的那一对，说明字母认错了，不补。
-  const cand: { i: number; j: number; dx: number; dy: number }[] = []
+  const cand: { i: number; j: number; dx: number; dy: number; name: string }[] = []
   for (const [txt, i] of byLabel) {
     const m = /^([A-Za-z])[_^]1$/.exec(txt)
     if (!m) continue
     const j = byLabel.get(m[1])
     if (j === undefined || j === i) continue
     const [ax, ay] = fullPx(i), [bx, by] = fullPx(j)
-    cand.push({ i, j, dx: ax - bx, dy: ay - by })
+    cand.push({ i, j, dx: ax - bx, dy: ay - by, name: m[1] + '–' + txt })
   }
   if (!cand.length) return 0
   // 位移向量只用来**提示可疑**，不再拿来否决 —— 用户明确说"C–C₁、B–B₁ 等必有线"，
@@ -399,17 +430,23 @@ function inferCorrespondingEdges(): number {
   const my = cand.reduce((s, c) => s + c.dy, 0) / cand.length
   const tol = Math.max(8, 0.2 * Math.hypot(mx, my))
   let added = 0, dashed = 0, odd = 0
+  const names: string[] = []
   const hull = vertHull()
   for (const c of cand) {
     if (Math.hypot(c.dx - mx, c.dy - my) > tol) odd++
     if (edges.value.some((e) => (e[0] === c.i && e[1] === c.j) || (e[0] === c.j && e[1] === c.i))) continue
+    // 两点之间已经有线了就不再连 —— 这里用**几何版**判据：
+    // 直线上可能中间还有个点（图里的 D₁–D₂–D，D₂ 就在 D₁D 上），
+    // 只查"有没有这条边"会漏掉那种情况，连出来的线就叠在已有的两段上，成了多余的一条。
+    if (segmentCovered(c.i, c.j)) continue
     const d = inferDashFor(c.j, c.i, hull)
     edges.value.push([c.j, c.i, d])
     added++
+    names.push(c.name)
     if (d) dashed++
   }
   if (added || odd) {
-    note.value = '按字母补了 ' + added + ' 条侧棱（X–X₁）' + (dashed ? '，其中 ' + dashed + ' 条虚线' : '') +
+    note.value = '按字母补了 ' + added + ' 条侧棱' + (names.length ? '（' + names.slice(0, 6).join('、') + '）' : '') + (dashed ? '，其中 ' + dashed + ' 条虚线' : '') +
       (odd ? '；其中 ' + odd + ' 对位移不一致，字母可能认错，请核对' : '')
   }
   return added
