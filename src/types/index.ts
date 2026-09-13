@@ -277,6 +277,7 @@ export type MathFigureKind =
   | 'conicCircle' | 'ellipse' | 'hyperbola' | 'conicParabola' | 'conicFocusDir'
   | 'ellipseV' | 'hyperbolaV' | 'conicParabolaV' | 'conicCircleY'
   | 'ellipseDirectrix' | 'hyperbolaDirectrix' | 'ellipseFamily' | 'hyperbolaFamily' | 'eccAnim'
+  | 'conicCustomEllipse' | 'conicCustomHyperbola' | 'conicCustomParabola'
   // ---- 平面图形 ----
   | 'coordinate' | 'numberline' | 'venn' | 'righttriangle' | 'angle' | 'semicircle'
   | 'triangle' | 'rectangle' | 'circle' | 'pentagon' | 'hexagon' | 'rhombus'
@@ -327,6 +328,9 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   { v: 'ellipseFamily', label: '椭圆族（离心率 e 变化）', cat: '圆锥曲线' },
   { v: 'hyperbolaFamily', label: '双曲线族（离心率 e 变化）', cat: '圆锥曲线' },
   { v: 'eccAnim', label: '椭圆离心率变化（动画）', cat: '圆锥曲线' },
+  { v: 'conicCustomEllipse', label: '自定义椭圆（可调 a、b）', cat: '圆锥曲线' },
+  { v: 'conicCustomHyperbola', label: '自定义双曲线（可调 a、b）', cat: '圆锥曲线' },
+  { v: 'conicCustomParabola', label: '自定义抛物线（可调 p、开口方向）', cat: '圆锥曲线' },
   // ---- 平面图形 ----
   { v: 'coordinate', label: '坐标系', cat: '平面图形' },
   { v: 'numberline', label: '数轴', cat: '平面图形' },

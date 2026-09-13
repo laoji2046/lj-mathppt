@@ -71,7 +71,7 @@ const innerHtml = computed(() => {
     return svg
   }
   if (FUNCTION_KINDS.includes(kind)) return functionFigure(kind, w, h, stroke, s, props.el.params)
-  if (CONIC_KINDS.includes(kind)) return conicFigure(kind, w, h, stroke, s, fillColor)
+  if (CONIC_KINDS.includes(kind)) return conicFigure(kind, w, h, stroke, s, fillColor, props.el.params)
 
   // 三维多面体统一走顶点模型渲染（支持拖拽顶点编辑）
   if (SOLID_VCOUNT[kind]) return renderSolid(kind, pts.value, w, h, stroke, s, fillColor, dashed, props.el.vlabels, props.el.edgeStyles, solidSel.elementId === props.el.id ? (solidSel.vertex ?? undefined) : undefined, solidSel.elementId === props.el.id ? (solidSel.edge ?? undefined) : undefined, props.el.labelOffsets, props.el.faceStyles, solidSel.elementId === props.el.id ? (solidSel.face ?? undefined) : undefined, props.el.mesh)

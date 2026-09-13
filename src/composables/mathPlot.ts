@@ -206,7 +206,7 @@ export interface FunctionDef {
 
 /** 取某个图形的可调参数说明（无参数返回空数组） */
 export function figureParams(kind: string): ParamSpec[] {
-  return FUNCTIONS[kind]?.params ?? []
+  return FUNCTIONS[kind]?.params ?? CONICS[kind]?.params ?? []
 }
 
 /** 把外部参数与默认值合并 */
@@ -478,7 +478,24 @@ export function functionFigure(kind: string, w: number, h: number, stroke: strin
 // 圆锥曲线
 // ---------------------------------------------------------------------------
 
-export const CONICS: Record<string, { label: string; view: View }> = {
+/** 按尺寸算出合适的显示窗口（留 25% 边距，且保持大致 4:3 的比例） */
+function windowFor(halfW: number, halfH: number): View {
+  const hx = Math.max(1, halfW * 1.25)
+  const hy = Math.max(1, halfH * 1.25)
+  const ar = 4 / 3
+  let x0 = hx, y0 = hy
+  if (hx / hy > ar) y0 = hx / ar
+  else x0 = hy * ar
+  return { xmin: -x0, xmax: x0, ymin: -y0, ymax: y0 }
+}
+
+export const CONICS: Record<string, {
+  label: string
+  view: View
+  /** 窗口随参数变（自定义曲线用） */
+  viewOf?: (p: Record<string, number>) => View
+  params?: ParamSpec[]
+}> = {
   // —— 焦点在 x 轴 ——
   conicCircle: { label: '圆 x²+y²=r²', view: { xmin: -3.6, xmax: 3.6, ymin: -3.2, ymax: 3.2 } },
   ellipse: { label: '椭圆（焦点在 x 轴）', view: { xmin: -5.4, xmax: 5.4, ymin: -4, ymax: 4 } },
@@ -496,12 +513,44 @@ export const CONICS: Record<string, { label: string; view: View }> = {
   hyperbolaV: { label: '双曲线（焦点在 y 轴）', view: { xmin: -5.6, xmax: 5.6, ymin: -6.4, ymax: 6.4 } },
   conicParabolaV: { label: '抛物线 x²=2py（焦点在 y 轴）', view: { xmin: -5.4, xmax: 5.4, ymin: -3.6, ymax: 7.6 } },
   conicCircleY: { label: '圆（圆心在 y 轴·与 x 轴相切）', view: { xmin: -4.4, xmax: 4.4, ymin: -1.8, ymax: 7 } },
+  // —— 自定义：参数自己给，窗口随参数自适应 ——
+  conicCustomEllipse: {
+    label: '自定义椭圆 x²/a²+y²/b²=1（可调 a、b）',
+    view: { xmin: -5, xmax: 5, ymin: -3.75, ymax: 3.75 },
+    params: [
+      { key: 'a', label: 'a（半长轴）', def: 4, step: 0.5, min: 0.5, max: 20 },
+      { key: 'b', label: 'b（半短轴）', def: 3, step: 0.5, min: 0.5, max: 20 },
+    ],
+    viewOf: (p) => windowFor(Math.max(p.a, p.b), Math.max(p.a, p.b) * 0.72),
+  },
+  conicCustomHyperbola: {
+    label: '自定义双曲线 x²/a²−y²/b²=1（可调 a、b）',
+    view: { xmin: -6.5, xmax: 6.5, ymin: -4.9, ymax: 4.9 },
+    params: [
+      { key: 'a', label: 'a（实半轴）', def: 3, step: 0.5, min: 0.3, max: 20 },
+      { key: 'b', label: 'b（虚半轴）', def: 2, step: 0.5, min: 0.3, max: 20 },
+    ],
+    viewOf: (p) => windowFor(Math.max(p.a, p.b) * 1.7, Math.max(p.a, p.b) * 1.25),
+  },
+  conicCustomParabola: {
+    label: '自定义抛物线 y²=2px（可调 p、开口方向）',
+    view: { xmin: -4.6, xmax: 8.2, ymin: -6, ymax: 6 },
+    params: [
+      { key: 'p', label: 'p（焦准距）', def: 4, step: 0.5, min: 0.2, max: 20 },
+      { key: 'dir', label: '开口：1右 2上 3左 4下', def: 1, step: 1, min: 1, max: 4 },
+    ],
+    viewOf: (p) => {
+      const h = Math.max(2, p.p * 1.6)
+      return { xmin: -h, xmax: h, ymin: -h * 0.75, ymax: h * 0.75 }
+    },
+  },
 }
 
-export function conicFigure(kind: string, w: number, h: number, stroke: string, sw: number, fill = 'none'): string {
+export function conicFigure(kind: string, w: number, h: number, stroke: string, sw: number, fill = 'none', params?: Record<string, number>): string {
   const def = CONICS[kind]
   if (!def) return ''
-  const view = def.view
+  const pv = withParams(kind, params)
+  const view = def.viewOf ? def.viewOf(pv) : def.view
   const m = mapper(view, w, h)
   const { X, Y } = m
   const m0 = Math.min(w, h)
@@ -517,6 +566,59 @@ export function conicFigure(kind: string, w: number, h: number, stroke: string, 
   const label = (x: number, y: number, t: string, dx = 0, dy = 0) => textSvg(X(x) + dx, Y(y) + dy, t, fs, stroke)
   const dot = (x: number, y: number, k = 1) => dotSvg(X(x), Y(y), r * k, stroke)
 
+  // —— 自定义圆锥曲线：a / b / p 由用户给，窗口跟着自适应 ——
+  if (kind === 'conicCustomEllipse') {
+    const a = Math.max(0.2, pv.a), b = Math.max(0.2, pv.b)
+    const a2 = Math.max(a, b), b2 = Math.min(a, b)      // a 是半长轴（名不副实时自动纠正）
+    const c = Math.sqrt(Math.max(0, a2 * a2 - b2 * b2))
+    s += curve(plotParametric((t) => a * Math.cos(t), (t) => b * Math.sin(t), 0, TAU, view, w, h))
+    s += lineSvg(X(-a), Y(0), X(a), Y(0), stroke, thin, dash)
+    s += dot(-c, 0) + dot(c, 0)
+    s += label(-c, 0, 'F₁', 0, fs * 1.15) + label(c, 0, 'F₂', 0, fs * 1.15)
+    s += label(a, 0, 'a=' + a, fs * 0.5, -fs * 0.6)
+    s += label(0, b, 'b=' + b, fs * 0.5, -fs * 0.6)
+    return s
+  }
+  if (kind === 'conicCustomHyperbola') {
+    const a = Math.max(0.1, pv.a), b = Math.max(0.1, pv.b)
+    const U = 3
+    s += curve(plotParametric((t) => a * Math.cosh(t), (t) => b * Math.sinh(t), -U, U, view, w, h))
+    s += curve(plotParametric((t) => -a * Math.cosh(t), (t) => b * Math.sinh(t), -U, U, view, w, h))
+    const c = Math.sqrt(a * a + b * b)
+    s += dot(-c, 0) + dot(c, 0)
+    s += label(-c, 0, 'F₁', 0, fs * 1.15) + label(c, 0, 'F₂', 0, fs * 1.15)
+    s += label(a, 0, 'a=' + a, fs * 0.5, -fs * 0.6)
+    return s
+  }
+  if (kind === 'conicCustomParabola') {
+    const pp = Math.max(0.05, pv.p)
+    const dir = Math.round(pv.dir || 1)
+    // 先按"开口向右"算，再按方向映射：(x,y) → 右/上/左/下
+    const mapPt = (x: number, y: number): [number, number] => {
+      if (dir === 2) return [y, x]
+      if (dir === 3) return [-x, y]
+      if (dir === 4) return [y, -x]
+      return [x, y]
+    }
+    const yLo = (dir === 2 || dir === 4) ? view.xmin : view.ymin
+    const yHi = (dir === 2 || dir === 4) ? view.xmax : view.ymax
+    const step = (yHi - yLo) / 400
+    let d = ''
+    for (let y = yLo; y <= yHi + 1e-9; y += step) {
+      const x = (y * y) / (2 * pp)
+      if (x < -1e-9 || x > Math.max(view.xmax, view.ymax) * 1.2) { d = ''; continue }
+      const [qx, qy] = mapPt(x, y)
+      d += (d ? ' L ' : 'M ') + X(qx).toFixed(1) + ' ' + Y(qy).toFixed(1)
+    }
+    s += curve(d)
+    const [fx, fy] = mapPt(pp / 2, 0)
+    const [dx2, dy2] = mapPt(-pp / 2, 0)
+    s += dot(fx, fy) + label(fx, fy, 'F', fs * 0.6, -fs * 0.7)
+    if (dir === 1 || dir === 3) s += lineSvg(X(dx2), Y(-view.ymax), X(dx2), Y(view.ymax), stroke, thin, dash)
+    else s += lineSvg(X(view.xmin), Y(dy2), X(view.xmax), Y(dy2), stroke, thin, dash)
+    s += label(dx2, (dir === 1 || dir === 3) ? view.ymax * 0.92 : view.xmax * 0.92, '准线', 0, 0)
+    return s
+  }
   if (kind === 'conicCircle') {
     const R = 2
     s += curve(plotParametric((t) => R * Math.cos(t), (t) => R * Math.sin(t), 0, TAU, view, w, h))
