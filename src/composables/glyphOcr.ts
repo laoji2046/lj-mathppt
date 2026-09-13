@@ -233,6 +233,28 @@ export function fixLabelCase(s: string): string {
   return (CASE_FIX[m[1].toLowerCase()] ?? m[1]) + m[2]
 }
 
+/** 下标按"整张图的词汇表"归一：识别出来的下标常被笔画碎片污染（C_2_6、B_m_8_2）。
+ *  用户给的思路 —— **看图里干净的那几个**（有 A_1、D_2、A_2，说明合法下标就是 1、2），
+ *  脏标签的下标只保留下标词汇表里有的那个数字。
+ *  没有词汇表（整张图都脏）就退化成"取第一个数字"；一个数字都没有就原样留着让你手改。 */
+export function normalizeSubscripts(labels: LabelBox[]) {
+  const vocab = new Set<string>()
+  for (const L of labels) {
+    const m = /^[A-Za-z][_^]([0-9])$/.exec(L.text)
+    if (m) vocab.add(m[1])
+  }
+  for (const L of labels) {
+    const m = /^([A-Za-z])([_^])(.+)$/.exec(L.text)
+    if (!m) continue
+    const parts = m[3].split(/[_^]/)
+    if (parts.length < 2) continue                    // 干净的单段下标不动（保住 A_12 这种两位数写法）
+    const digits = m[3].match(/[0-9]/g) || []
+    if (!digits.length) continue                      // 连数字都没有：原样留着，别乱改
+    const pick = digits.find((d) => vocab.has(d)) ?? digits[0]
+    L.text = m[1] + m[2] + pick
+  }
+}
+
 /** 入口：把"被挑出来的字母块"认成文本 */
 export function recognizeLabels(W: number, boxes: GlyphBox[]): LabelBox[] {
   if (!boxes.length) return []
@@ -283,5 +305,6 @@ export function recognizeLabels(W: number, boxes: GlyphBox[]): LabelBox[] {
     const y0 = Math.min(...g.map((b) => b.y0)), y1 = Math.max(...g.map((b) => b.y1))
     out.push({ text: fixLabelCase(text), conf: confN ? confSum / confN : 0, x0, y0, x1, y1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 })
   }
+  normalizeSubscripts(out)
   return out
 }
