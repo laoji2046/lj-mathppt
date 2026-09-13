@@ -13,7 +13,7 @@
 import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
-import { projectGeom, solveView, type Geom3D } from '@/composables/geom3d'
+import { buildSolid, projectGeom, solveView, type Geom3D } from '@/composables/geom3d'
 import { GEOM3D_PRESETS, GEOM3D_PROMPT } from '@/composables/geom3dPrompt'
 import { renderSolid } from '@/composables/solid3d'
 import { closeGeom3D } from '@/ui/geom3d'
@@ -146,6 +146,52 @@ function usePreset(json: string) {
   parse()
 }
 
+// ---------------- 搭模型（不依赖 AI） ----------------
+const bType = ref<'cube' | 'box' | 'prism' | 'pyramid'>('prism')
+const bN = ref(4)
+const bA = ref(2)
+const bB = ref(1.4)
+const bH = ref(2)
+/** 参数化生成 → 写回 JSON 文本框（文本框始终是唯一数据源，手改也行） */
+function build() {
+  const m = buildSolid({ type: bType.value, n: bN.value, a: bA.value, b: bB.value, h: bH.value })
+  const view = { azim: azim.value, elev: elev.value }
+  raw.value = JSON.stringify({ ...m, view }, null, 1)
+  parse()
+}
+
+/** 在当前模型上加一条辅助线（选 from/to + 线型）。高 PO、体对角线 AC₁ 都这么加。 */
+const auxFrom = ref('')
+const auxTo = ref('')
+const auxStyle = ref<'auto' | 'solid' | 'dashed'>('auto')
+function addAux() {
+  const m = model.value
+  if (!m || !auxFrom.value || !auxTo.value || auxFrom.value === auxTo.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  next.auxiliary = [...(next.auxiliary || []), { from: auxFrom.value, to: auxTo.value, style: auxStyle.value }]
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+
+/** 棱柱：给每条竖棱加一个中点（A2 / B2 / …）—— 教材里那排"中点"一点就齐。 */
+function addMidpoints() {
+  const m = model.value
+  if (!m) return
+  const next = JSON.parse(raw.value) as Geom3D
+  const add: Record<string, [number, number, number]> = {}
+  for (const n of Object.keys(next.vertices)) {
+    const base = n.replace(/\d+$/, '')
+    const top = base + '1'
+    if (!n.endsWith('1') || !next.vertices[top] || !next.vertices[base]) continue
+    const lo = next.vertices[base], hi = next.vertices[top]
+    add[base + '2'] = [lo[0], lo[1], +((lo[2] + hi[2]) / 2).toFixed(4)]
+  }
+  if (!Object.keys(add).length) return
+  next.vertices = { ...next.vertices, ...add }
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+
 function insert() {
   const m = model.value
   if (!m) return
@@ -174,9 +220,44 @@ function insert() {
               <option value="">常用几何体…</option>
               <option v-for="p in GEOM3D_PRESETS" :key="p.name" :value="p.json">{{ p.name }}</option>
             </select>
-            <button class="g3__btn" title="这份 JSON 由大模型按提示词翻译题目得来：复制它，连同题目发给任意 AI" @click="copyPrompt()">
-              {{ copied ? '已复制 ✓' : '复制提示词（让 AI 出 JSON）' }}
+            <button class="g3__btn" title="想把题目交给 AI 翻译成 JSON 时用：复制提示词，连同题目一起发出去" @click="copyPrompt()">
+              {{ copied ? '已复制 ✓' : '复制提示词（可选）' }}
             </button>
+          </div>
+
+          <div class="g3__build">
+            <div class="g3__lab">搭一个（不用 AI）</div>
+            <div class="g3__row g3__row--top">
+              <select v-model="bType" class="g3__sel">
+                <option value="prism">正 n 棱柱</option>
+                <option value="pyramid">正 n 棱锥</option>
+                <option value="cube">正方体</option>
+                <option value="box">长方体</option>
+              </select>
+              <label v-if="bType === 'prism' || bType === 'pyramid'" class="g3__num">n <input v-model.number="bN" type="number" min="3" max="12"></label>
+              <label class="g3__num">{{ bType === 'cube' ? '棱长' : '长/底边' }} <input v-model.number="bA" type="number" step="0.1"></label>
+              <label v-if="bType === 'box'" class="g3__num">宽 <input v-model.number="bB" type="number" step="0.1"></label>
+              <label class="g3__num">高 <input v-model.number="bH" type="number" step="0.1"></label>
+              <button class="g3__btn" @click="build()">生成</button>
+              <button class="g3__btn" title="给每条竖棱加中点（A2 / B2 / …）" @click="addMidpoints()">＋竖棱中点</button>
+            </div>
+            <div class="g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">加辅助线（高 PO、体对角线 AC₁ 这类）：</span>
+              <select v-model="auxFrom" class="g3__sel g3__sel--sm">
+                <option value="">从…</option>
+                <option v-for="n in order" :key="'af' + n" :value="n">{{ n }}</option>
+              </select>
+              <select v-model="auxTo" class="g3__sel g3__sel--sm">
+                <option value="">到…</option>
+                <option v-for="n in order" :key="'at' + n" :value="n">{{ n }}</option>
+              </select>
+              <select v-model="auxStyle" class="g3__sel g3__sel--sm">
+                <option value="auto">自动判</option>
+                <option value="solid">实线</option>
+                <option value="dashed">虚线</option>
+              </select>
+              <button class="g3__btn" @click="addAux()">添加</button>
+            </div>
           </div>
           <textarea v-model="raw" class="g3__ta" spellcheck="false" @blur="parse" @input="parseErr = ''" />
           <p v-if="parseErr" class="g3__err">{{ parseErr }}</p>
@@ -249,6 +330,11 @@ function insert() {
 .g3__row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
 .g3__row--top { margin-top: 0; margin-bottom: 8px; }
 .g3__sel { flex: 1; min-width: 150px; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 5px 8px; font-size: 12px; background: #fff; }
+.g3__sel--sm { flex: 0 0 auto; min-width: 68px; }
+.g3__num { font-size: 12px; color: #555; display: flex; align-items: center; gap: 4px; }
+.g3__num input { width: 58px; border: 1px solid var(--border, #ddd); border-radius: 5px; padding: 4px 6px; font-size: 12px; }
+.g3__build { margin-top: 12px; padding: 8px 10px; border: 1px dashed var(--border, #ddd); border-radius: 6px; background: #fafafc; }
+.g3__tip--inline { margin: 0; }
 .g3__f { font-size: 12px; color: #555; flex: 1; min-width: 170px; }
 .g3__f input { width: 100%; }
 .g3__tip { font-size: 12px; color: #6b6b76; line-height: 1.6; margin: 8px 0 0; }

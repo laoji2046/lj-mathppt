@@ -58,6 +58,70 @@ function viewDir(azim: number, elev: number): [number, number, number] {
 }
 
 
+
+/** 参数化生成常见几何体 —— 不依赖任何 AI，选类型 + 填参数就出模型。
+ *  顶点命名按教材习惯：底面 A、B、C…，上底 A1、B1、C1…，锥顶 P，底面中心 O。 */
+export interface BuildOpts {
+  /** 'cube' 正方体 | 'box' 长方体 | 'prism' 正 n 棱柱 | 'pyramid' 正 n 棱锥 */
+  type: 'cube' | 'box' | 'prism' | 'pyramid'
+  /** 底面边数（棱柱 / 棱锥用） */
+  n?: number
+  /** 底面边长（正方体忽略，用 size） */
+  a?: number
+  /** 长方体的长 / 宽 */
+  b?: number
+  /** 高 */
+  h?: number
+  /** 正方体边长 */
+  size?: number
+}
+
+const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
+export function buildSolid(o: BuildOpts): Geom3D {
+  const verts: Record<string, [number, number, number]> = {}
+  const faces: string[][] = []
+  if (o.type === 'cube' || o.type === 'box') {
+    const w = o.type === 'cube' ? (o.size ?? 2) : (o.a ?? 2)
+    const d = o.type === 'cube' ? (o.size ?? 2) : (o.b ?? 1.4)
+    const h = o.type === 'cube' ? (o.size ?? 2) : (o.h ?? 1.6)
+    Object.assign(verts, {
+      A: [0, 0, 0], B: [w, 0, 0], C: [w, d, 0], D: [0, d, 0],
+      A1: [0, 0, h], B1: [w, 0, h], C1: [w, d, h], D1: [0, d, h],
+    })
+    faces.push(['A', 'B', 'C', 'D'], ['A1', 'B1', 'C1', 'D1'],
+      ['A', 'B', 'B1', 'A1'], ['B', 'C', 'C1', 'B1'], ['C', 'D', 'D1', 'C1'], ['D', 'A', 'A1', 'D1'])
+    return { vertices: verts, faces }
+  }
+  const n = Math.max(3, Math.min(26, Math.round(o.n ?? 4)))
+  const a = o.a ?? 2
+  const h = o.h ?? 2
+  const R = a / (2 * Math.sin(Math.PI / n))              // 正 n 边形的外接圆半径
+  const base: string[] = []
+  for (let i = 0; i < n; i++) {
+    const t = (i * 2 * Math.PI) / n
+    // 底面按"从 -y 侧起、逆时针"摆，跟教材一致（正视图里 A 在左下）
+    base.push(LETTERS[i])
+    verts[LETTERS[i]] = [+(R * Math.sin(t)).toFixed(4), +(R * Math.cos(t)).toFixed(4), 0]
+  }
+  if (o.type === 'prism') {
+    for (let i = 0; i < n; i++) {
+      verts[LETTERS[i] + '1'] = [verts[LETTERS[i]][0], verts[LETTERS[i]][1], h]
+    }
+    faces.push(base.slice())
+    faces.push(base.map((s) => s + '1'))
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n
+      faces.push([LETTERS[i], LETTERS[j], LETTERS[j] + '1', LETTERS[i] + '1'])
+    }
+    return { vertices: verts, faces }
+  }
+  verts.P = [0, 0, h]
+  faces.push(base.slice())
+  for (let i = 0; i < n; i++) faces.push(['P', LETTERS[i], LETTERS[(i + 1) % n]])
+  return { vertices: verts, faces }
+}
+
 /** 只做投影、不归一化也不判虚实 —— 给「截图描点对齐」解视角用。
  *  约定跟 projectGeom 一致：x 向右、y 向里、z 向上；返回屏幕坐标（y 向上，画面里再翻）。 */
 export function projectRaw(m: Geom3D, azimDeg: number, elevDeg: number): Record<string, [number, number]> {
