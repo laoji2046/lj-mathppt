@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type { SlideElement } from '@/types'
@@ -21,6 +21,16 @@ let stream: MediaStream | null = null
 const sel = ref<{ x: number; y: number; w: number; h: number } | null>(null)
 const selStart = ref<{ x: number; y: number } | null>(null)
 const natural = ref<{ w: number; h: number }>({ w: 0, h: 0 })
+/** 拖拽时跟着走的尺寸提示（按**自然像素**显示，跟 Word 一样） */
+const liveSize = computed(() => {
+  const b = sel.value
+  if (!b || !imageRef.value) return ''
+  const r = imageRef.value.getBoundingClientRect()
+  if (!r.width || !r.height) return ''
+  const w = Math.round((b.w * natural.value.w) / r.width)
+  const h = Math.round((b.h * natural.value.h) / r.height)
+  return w + ' × ' + h
+})
 
 async function capture() {
   try {
@@ -110,8 +120,13 @@ function onMove(e: PointerEvent) {
     h: Math.abs(cur.y - st.y),
   }
 }
+/** 松手即裁 —— Word/PPT 就是"拖完就完事"，不该再多点一次确认 ✗。
+ *  选区太小（相当于单击）就什么都不做，让用户接着拖或点「整屏插入」。 */
 function onUp() {
+  if (!selStart.value) return
   selStart.value = null
+  const b = sel.value
+  if (b && b.w >= 8 && b.h >= 8) confirmCrop()
 }
 
 function insertImage(url: string, nw: number, nh: number) {
@@ -149,8 +164,27 @@ function insertFull() {
   insertImage(fullUrl.value, natural.value.w, natural.value.h)
 }
 
-onMounted(capture)
-onBeforeUnmount(stopStream)
+/** 键盘：Esc 取消，Enter 确认选区（不框选时 = 整屏插入） */
+function onKey(e: KeyboardEvent) {
+  if (state.value !== 'ready') {
+    if (e.key === 'Escape') emit('close')
+    return
+  }
+  if (e.key === 'Escape') { emit('close'); return }
+  if (e.key === 'Enter') {
+    if (sel.value && sel.value.w >= 8 && sel.value.h >= 8) confirmCrop()
+    else insertFull()
+  }
+}
+
+onMounted(() => {
+  capture()
+  window.addEventListener('keydown', onKey)
+})
+onBeforeUnmount(() => {
+  stopStream()
+  window.removeEventListener('keydown', onKey)
+})
 </script>
 
 <template>
@@ -174,14 +208,16 @@ onBeforeUnmount(stopStream)
         <div class="shot__stage" ref="stage" @pointerdown="onDown" @pointermove="onMove" @pointerup="onUp">
           <div ref="wrap" class="shot__wrap">
           <img ref="imageRef" :src="fullUrl" class="shot__img" draggable="false" alt="截图预览" />
-          <div v-if="sel" class="shot__sel" :style="{ left: sel.x + 'px', top: sel.y + 'px', width: sel.w + 'px', height: sel.h + 'px' }"></div>
+          <div v-if="sel" class="shot__sel" :style="{ left: sel.x + 'px', top: sel.y + 'px', width: sel.w + 'px', height: sel.h + 'px' }">
+            <span v-if="liveSize" class="shot__size">{{ liveSize }}</span>
+          </div>
           </div>
         </div>
         <div v-if="needFocus" class="shot__focus" @click="tryFocus">
           浏览器没有自动把本窗口切到前台 —— 点一下本窗口（或点这里）就能框选了。
         </div>
         <div class="shot__bar">
-          <span class="shot__hint">在画面上拖拽框选要截取的区域；不框选则整屏插入。</span>
+          <span class="shot__hint">在画面上拖一下即完成截取；Enter 整屏插入，Esc 取消。</span>
           <div class="shot__actions">
             <button class="shot__btn" @click="emit('close')">取消</button>
             <button class="shot__btn" @click="insertFull">整屏插入</button>
@@ -224,6 +260,7 @@ onBeforeUnmount(stopStream)
   pointer-events: none;
 }
 .shot__focus { margin: 8px 16px 0; padding: 8px 12px; border-radius: 7px; background: #fff6e5; border: 1px solid #f0d9a8; color: #8a6116; font-size: 12px; cursor: pointer; }
+.shot__size { position: absolute; right: 0; bottom: -20px; padding: 1px 6px; border-radius: 4px; background: rgba(20,24,34,.82); color: #fff; font-size: 11px; line-height: 1.5; white-space: nowrap; pointer-events: none; }
 .shot__bar { display: flex; align-items: center; gap: 10px; padding: 12px 16px 14px; }
 .shot__hint { font-size: 12px; color: var(--muted); flex: 1; }
 .shot__actions { display: flex; gap: 8px; }
