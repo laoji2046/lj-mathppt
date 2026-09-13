@@ -258,9 +258,9 @@ function adopt(r: VectorizeResult) {
     out[i] = { dx: (ux / L) * 0.06 * (r.W / r.H > 1 ? 1 : 0.8), dy: (uy / L) * 0.06 }
   }
   offs.value = out
-  const n1 = inferCorrespondingEdges()
-  const n2 = inferFacePolygons()
-  if (n1 && n2) note.value = '按字母补了 ' + (n1 + n2) + ' 条线（侧棱 ' + n1 + ' + 面的边 ' + n2 + '）'
+  // **不自动补线**：识别结果就是你扫描件里的东西。
+  // 之前这里自动跑了一遍"按字母补线"，字母一认错就会连出一堆乱线（用户反馈"补了太多无用的线"），
+  // 改成：确认字母没错之后，自己点「按字母补线」。
 }
 
 // ---------------- 补出来的线判虚实 ----------------
@@ -422,6 +422,15 @@ function inferFacePolygons(): number {
   for (const arr of groups.values()) {
     if (arr.length < 3) continue
     arr.sort((a, b) => (a.base < b.base ? -1 : a.base > b.base ? 1 : 0))
+    // **只认"一串连续的字母"**（A、B、C、D… 不跳号、不重复）——
+    // 字母认错（比如 C_2_6 / B_m_8_7）或底面混进了 M、N、h 这种，一律不补。
+    // 这一条是"补了太多无用的线"的直接修法：宁可漏，不可乱加。
+    let runOK = true
+    for (let k = 0; k < arr.length; k++) {
+      if (arr[k].base !== String.fromCharCode(65 + k)) { runOK = false; break }
+      if (k + 1 < arr.length && arr[k + 1].base === arr[k].base) { runOK = false; break }
+    }
+    if (!runOK) continue
     const P = arr.map((x) => [px(x.i), py(x.i)] as [number, number])
     if (!isConvexRing(P)) continue
     const hull = vertHull()
