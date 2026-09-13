@@ -45,6 +45,9 @@ export interface Geom3D {
   /** **两平面的交线**：a / b 各是定一个平面的三点（或更多）。
    *  算出交线后**截到多面体内部**（两面各自截面的公共部分），画成一条线。 */
   intersectLines?: { a: string[]; b: string[] }[]
+  /** **点在平面上的投影（射影）**：from 是那个点，plane 是定平面的三点。
+   *  `foot` 给 true 时同时画一条 from→投影点的垂线（教材里那条）。 */
+  projectPoints?: { name: string; from: string; plane: string[]; foot?: boolean }[]
   /** **自由点**（直接给坐标）：不在任何棱上、纯粹是作图位置，比如外接球球心、投影点。 */
   freePoints?: { name: string; at: [number, number, number] }[]
   /** **直线与平面的交点**（构造点）：line 是直线上的两点、plane 是定平面的三点。
@@ -197,6 +200,22 @@ export function resolveVertices(m: Geom3D): Record<string, [number, number, numb
     }
     pend = next
     if (!moved) break
+  }
+  // 点在平面上的投影：P' = P − ((P−Q₀)·n / |n|²)·n
+  for (const pp of m.projectPoints || []) {
+    if (!pp?.name || out[pp.name]) continue
+    const P0 = out[pp.from]
+    const Q = (pp.plane || []).map((n) => out[n]).filter(Boolean) as [number, number, number][]
+    if (!P0 || Q.length < 3) continue
+    const nrm = cross(sub(Q[1], Q[0]), sub(Q[2], Q[0]))
+    const nn = dot(nrm, nrm)
+    if (nn < 1e-12) continue
+    const d = dot(sub(P0, Q[0]), nrm) / nn
+    out[pp.name] = [
+      +(P0[0] - nrm[0] * d).toFixed(4),
+      +(P0[1] - nrm[1] * d).toFixed(4),
+      +(P0[2] - nrm[2] * d).toFixed(4),
+    ]
   }
   // 自由点（直接给坐标）
   for (const fp of m.freePoints || []) {
@@ -813,6 +832,8 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     if (!faces.length) return false
     for (let fi = 0; fi < faces.length; fi++) {
       const A = P3[faces[fi][0]]
+      // 防护：截面/交线会往 faces 里加"只存在于 points 里的点"，它们的下标索引不到 P3
+      if (!A || !faceNormal[fi]) continue
       if (dot(faceNormal[fi], sub(p, A)) > 1e-6) return false
     }
     return true
@@ -835,7 +856,25 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     auxVisible.push({ i, j, dash })
   }
 
+  // 投影点：勾了"连垂线"就画 from→投影点（穿在体内画虚线，跟辅助线同一套规矩）。
+  // **必须在截面/交线往 faces 里塞新点之前做** —— 那些点的下标只存在于 points 里，
+  // inside() 遍历 faces 时会拿它们去索引 P3，直接崩（踩过）。
+  const footEdges: [number, number, number][] = []
+  for (const pp of m.projectPoints || []) {
+    if (!pp?.foot) continue
+    const i = idx[pp.from], j = idx[pp.name]
+    if (i === undefined || j === undefined) continue
+    const mid: [number, number, number] = [
+      (P3[i][0] + P3[j][0]) / 2,
+      (P3[i][1] + P3[j][1]) / 2,
+      (P3[i][2] + P3[j][2]) / 2,
+    ]
+    footEdges.push([i, j, inside(mid) ? 1 : 0])
+  }
   const edges: [number, number, number][] = [...edgeMap.values()].map((e) => [e.i, e.j, e.front ? 0 : 1])
+  for (const fe of footEdges) {
+    if (!edges.some((e) => (e[0] === fe[0] && e[1] === fe[1]) || (e[0] === fe[1] && e[1] === fe[0]))) edges.push(fe)
+  }
   for (const a of auxVisible) {
     const dup = edges.some((e) => (e[0] === a.i && e[1] === a.j) || (e[0] === a.j && e[1] === a.i))
     if (!dup) edges.push([a.i, a.j, a.dash])

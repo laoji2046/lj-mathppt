@@ -291,6 +291,33 @@ function delFreePoint(i: number) {
   parse()
 }
 
+// ---------------- 点在平面上的投影 ----------------
+const ppFrom = ref('')
+const ppPlane = ref(-1)
+const ppName = ref('')
+const ppFoot = ref(true)
+function addProject() {
+  const pl = planes.value[ppPlane.value]
+  if (!model.value || !pl || !ppFrom.value) return
+  const name = ppName.value.trim() || nextMarkName()
+  const next = JSON.parse(raw.value) as Geom3D
+  next.projectPoints = [
+    ...(next.projectPoints || []).filter((x) => x.name !== name),
+    { name, from: ppFrom.value, plane: pl.pts.slice(), foot: ppFoot.value },
+  ]
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+  ppName.value = ''
+}
+const addedProjects = computed(() => (model.value?.projectPoints || []).map((x, i) => ({ i, name: x.name, from: x.from, plane: x.plane.join('-'), foot: !!x.foot })))
+function delProject(i: number) {
+  if (!model.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  next.projectPoints?.splice(i, 1)
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+
 // ---------------- 两平面的交线 ----------------
 const ilA = ref(-1)
 const ilB = ref(-1)
@@ -803,6 +830,27 @@ function insert() {
                 <button class="g3__btn g3__btn--tiny" :class="{ 'g3__btn--on': ax.style === 'solid' }" @click="setAuxStyle(ax.i, 'solid')">实</button>
                 <button class="g3__btn g3__btn--tiny" :class="{ 'g3__btn--on': ax.style === 'dashed' }" @click="setAuxStyle(ax.i, 'dashed')">虚</button>
                 <button class="g3__btn g3__btn--tiny" title="删掉这条辅助线" @click="delAux(ax.i)">×</button>
+              </span>
+            </div>
+            <div v-if="planes.length" class="g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">点在平面上的投影（射影）：</span>
+              <select v-model="ppFrom" class="g3__sel g3__sel--sm">
+                <option value="">点…</option>
+                <option v-for="n in order" :key="'ppf' + n" :value="n">{{ n }}</option>
+              </select>
+              <select v-model.number="ppPlane" class="g3__sel g3__sel--sm" style="min-width:100px">
+                <option :value="-1">投到平面…</option>
+                <option v-for="(pl, k) in planes" :key="'ppp' + k" :value="k">{{ pl.label }}</option>
+              </select>
+              <label class="g3__num" title="同时画一条从该点到射影的垂线"><input v-model="ppFoot" type="checkbox"> 连垂线</label>
+              <input v-model="ppName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
+              <button class="g3__btn" @click="addProject()">求投影</button>
+            </div>
+            <div v-if="addedProjects.length" class="g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">射影：</span>
+              <span v-for="pp in addedProjects" :key="'ppj' + pp.i" class="g3__plane">
+                <b>{{ pp.name }}</b><span class="g3__meet">{{ pp.from }} → {{ pp.plane }}{{ pp.foot ? ' ·垂线' : '' }}</span>
+                <button class="g3__btn g3__btn--tiny" @click="delProject(pp.i)">×</button>
               </span>
             </div>
             <div v-if="planes.length >= 2" class="g3__row g3__row--top">
