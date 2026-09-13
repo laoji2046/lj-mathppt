@@ -959,6 +959,53 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   mergeVerts(opt.mergeR ?? 8)
   dedupe()
 
+  // 【字母切断线的补接】被抹掉的字母会把压在它下面的线切断，于是同一条线上留下两个近邻顶点 ——
+  // 多出来的那个就是用户说的"不必要的点"（实测 (157,163)/(176,198)=C₂、(292,466)/(286,486)=A₂）。
+  // 判据三条一起用：①两点够近；②**正中间确实有一个被抹掉的字母**；③两点各自都有一条边大致指着对方
+  // （同一条线的两截，而不是拐角）。三条都不满足就不接 —— 宁可少接不可错接。
+  for (let guard = 0; guard < 80; guard++) {
+    let acted = false
+    outer2:
+    for (let i = 0; i < verts.length; i++) {
+      for (let j = i + 1; j < verts.length; j++) {
+        const dx = verts[j].x - verts[i].x, dy = verts[j].y - verts[i].y
+        const d = Math.hypot(dx, dy)
+        if (d < 2 || d > 48) continue
+        const ux = dx / d, uy = dy / d
+        // ② 中间要有被抹掉的字母：扫描两点连线上的采样点，任一点靠近某个字母中心即可
+        //   （不能只看中点 —— 标签是挂在有字母那一端的，实测中点离字母 35px 以上）
+        let hasLabel = false
+        for (let k = 2; k <= 8 && !hasLabel; k++) {
+          const t = k / 10
+          const px2 = verts[i].x + dx * t, py2 = verts[i].y + dy * t
+          // 用"字母中心的距离"判，阈值 34px —— 实测这一版在真值集上三项各 +1（76% / 68 / 63），
+          // 放到 50px 或用外框判都反而退步（真值 配上边掉到 65、虚实掉到 60）。
+          // 代价：棱柱图那对（字母中心离连线 41px）接不上，还得另想办法。
+          if (labels.some((L) => Math.hypot(L.cx - px2, L.cy - py2) < 34)) hasLabel = true
+        }
+        if (!hasLabel) continue
+        // ③ 两点各自都有一条边指着对方
+        const facing = (v: number) => outEdges.some((E) => {
+          if (E[0] !== v && E[1] !== v) return false
+          const o = E[0] === v ? E[1] : E[0]
+          const ex = verts[o].x - verts[v].x, ey = verts[o].y - verts[v].y
+          const el = Math.hypot(ex, ey) || 1
+          return (ex / el) * ux + (ey / el) * uy > 0.8
+        })
+        if (!facing(i) || !facing(j)) continue
+        verts[i].x = (verts[i].x + verts[j].x) / 2
+        verts[i].y = (verts[i].y + verts[j].y) / 2
+        for (const e of outEdges) { if (e[0] === j) e[0] = i; if (e[1] === j) e[1] = i }
+        verts.splice(j, 1)
+        for (const e of outEdges) { if (e[0] > j) e[0]--; if (e[1] > j) e[1]-- }
+        acted = true
+        break outer2
+      }
+    }
+    if (!acted) break
+  }
+  dedupe()
+
   // 虚线的短划天然够不到交点（差着一两个划的间距），沿自身方向往外延长，吸附到近旁的顶点上
   const findAlong = (p: { x: number; y: number }, dx: number, dy: number) => {
     const r = opt.extendR ?? 72
