@@ -51,6 +51,10 @@ export interface Geom3D {
   /** **点在平面上的投影（射影）**：from 是那个点，plane 是定平面的三点。
    *  `foot` 给 true 时同时画一条 from→投影点的垂线（教材里那条）。 */
   projectPoints?: { name: string; from: string; plane: string[]; foot?: boolean }[]
+  /** **字母位置**：每个点可以指定字母放在哪个方位、离点多远（px，1~20）。
+   *  不写就用默认（从重心往外推的那套自动算法）。
+   *  换算成应用要的 labelOffsets 时按元素尺寸转成比例 —— 渲染器那套就是这个约定。 */
+  labelPos?: Record<string, { dir: LabelDir; dist: number }>
   /** **隐藏**（编辑器里的"眼睛"）：键的写法
    *  - `p:A` 点名 —— 不显示这个字母（点仍在，别的线还能用它）
    *  - `e:A|B` 一条棱/线（两点名按字典序拼）
@@ -455,6 +459,36 @@ export function solveView(
     scan(a0 - 4, a0 + 4, step, e0 - 4, e0 + 4, step)
   }
   return best
+}
+
+/** 字母的八个方位（罗盘方向；屏幕坐标系，N = 上） */
+export type LabelDir = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW'
+
+/** 八方位 → 单位方向（屏幕坐标：x 向右、y 向下，所以 N 是 −1） */
+export const LABEL_DIR_VEC: Record<LabelDir, [number, number]> = {
+  N: [0, -1], NE: [0.7071, -0.7071], E: [1, 0], SE: [0.7071, 0.7071],
+  S: [0, 1], SW: [-0.7071, 0.7071], W: [-1, 0], NW: [-0.7071, -0.7071],
+}
+
+/** 把"方位 + 距离(px)"换算成渲染器要的 labelOffsets（dx/dy 是占元素宽高的比例）。
+ *  w / h 是元素（或预览）的像素尺寸 —— 换算是按它来的，所以缩放元素时比例不变、
+ *  视觉距离会跟着缩放（跟应用里拖字母的行为一致）。 */
+export function labelOffsetsFrom(
+  m: Geom3D | null | undefined,
+  names: string[],
+  w: number,
+  h: number,
+): ({ dx: number; dy: number } | null)[] | undefined {
+  const lp = m?.labelPos
+  if (!lp || !Object.keys(lp).length || w <= 0 || h <= 0) return undefined
+  const out = names.map((n) => {
+    const p = lp[n]
+    if (!p || !LABEL_DIR_VEC[p.dir]) return null
+    const dist = Math.max(0, Math.min(20, p.dist || 0))
+    const v = LABEL_DIR_VEC[p.dir]
+    return { dx: (v[0] * dist) / w, dy: (v[1] * dist) / h }
+  })
+  return out.some(Boolean) ? out : undefined
 }
 
 /** 把三维模型投影成二维图形（归一化到 0~1，留 8% 边距），并**算出每条棱的虚实**。 */

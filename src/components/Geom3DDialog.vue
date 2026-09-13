@@ -13,7 +13,7 @@
 import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
-import { buildSolid, projectGeom, resolveVertices, solveView, type Geom3D } from '@/composables/geom3d'
+import { buildSolid, labelOffsetsFrom, projectGeom, resolveVertices, solveView, type Geom3D, type LabelDir } from '@/composables/geom3d'
 import { GEOM3D_PRESETS, GEOM3D_PROMPT } from '@/composables/geom3dPrompt'
 import { renderSolid, arcsSvg } from '@/composables/solid3d'
 import { closeGeom3D } from '@/ui/geom3d'
@@ -149,13 +149,24 @@ if (props.editId) {
 
 /** 预览 / 插入用的 SVG（参数顺序：kind, pts, w, h, stroke, sw, fill, dsh, vlabels,
  *  edgeStyles, selVertex, selEdge, labelOffsets, faceStyles, selFace, mesh —— mesh 在最后一位） */
+/** 字母位置：模型里的"方位 + 距离(px)"→ 渲染器要的比例（按当前预览尺寸换算） */
+const labelOffs = computed(() => {
+  const base = labelOffsetsFrom(model.value, order.value, W.value, H)
+  if (!base) return undefined
+  const n = proj.value ? proj.value.vlabels.length : base.length
+  // 渲染器的类型写着非空，但运行时对 null 是安全的（内部有 off && off.dx 判断）
+  const out: ({ dx: number; dy: number } | null)[] = []
+  for (let i = 0; i < n; i++) out.push(base[i] ?? null)
+  return out as { dx: number; dy: number }[]
+})
+
 const svg = computed(() => {
   const p = proj.value
   if (!p) return ''
   const solid = renderSolid('cube', p.points, W.value, H, '#1a1a1a', 2.6, 'transparent', '6 5',
     p.vlabels, p.edgeStyles.some(Boolean) ? p.edgeStyles : undefined, undefined,
     selKind.value === 'line' && selEdge.value !== null ? selEdge.value : undefined,
-    undefined, p.faceStyles.length ? p.faceStyles : undefined, undefined, p.mesh)
+    labelOffs.value, p.faceStyles.length ? p.faceStyles : undefined, undefined, p.mesh)
   // 圆柱 / 圆锥的底面是**弧图元**，renderSolid 不画它，单独叠一层（跟画布里的做法一致）
   let out = solid + arcsSvg(p.arcs, W.value, H, '#1a1a1a', 2.6)
   // 多选的点自己描一圈（renderSolid 只支持选中一个顶点）
@@ -552,6 +563,33 @@ function clearAdded() {
   lmMsg.value = ''
 }
 
+// ---------------- 字母位置（8 方位 + 距离） ----------------
+/** 方位键盘的排列（3×3，跟罗盘一致） */
+const DIR_PAD: (LabelDir | '')[] = ['NW', 'N', 'NE', 'W', '', 'E', 'SW', 'S', 'SE']
+const DIR_GLYPH: Record<string, string> = { N: '↑', NE: '↗', E: '→', SE: '↘', S: '↓', SW: '↙', W: '←', NW: '↖' }
+/** 当前选中点的方位/距离（多选时以第一个为准显示） */
+const curDir = computed<LabelDir | ''>(() => {
+  const n = selNames.value[0]
+  return (n && model.value?.labelPos?.[n]?.dir) || ''
+})
+const curDist = computed(() => {
+  const n = selNames.value[0]
+  return (n && model.value?.labelPos?.[n]?.dist) || 8
+})
+/** 设置字母方位 / 距离（空方位 = 恢复自动） */
+function setLabelPos(dir: LabelDir | '', dist?: number) {
+  if (!model.value || !selNames.value.length) return
+  const next = JSON.parse(raw.value) as Geom3D
+  const lp = { ...(next.labelPos || {}) }
+  for (const n of selNames.value) {
+    if (!dir) delete lp[n]
+    else lp[n] = { dir, dist: Math.max(1, Math.min(20, Math.round(dist ?? lp[n]?.dist ?? 8))) }
+  }
+  next.labelPos = lp
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+
 // ---------------- 图元显隐 ----------------
 /** 切换一条图元的隐藏状态（键的写法见 Geom3D.hidden 的注释） */
 function toggleHidden(key: string) {
@@ -753,6 +791,8 @@ function insert() {
     arcs: p.arcs.length ? p.arcs : undefined,
     faceStyles: p.faceStyles.length ? p.faceStyles : undefined,
     edgeStyles: p.edgeStyles.some(Boolean) ? p.edgeStyles : undefined,
+    // 字母位置：插进元素时按元素尺寸重算比例（元素尺寸和预览不一样）
+    labelOffsets: labelOffsetsFrom(m, order.value, W.value, H) ?? undefined,
     // **把源模型存进元素** —— 否则插进画布就"死"了，改不了视角也改不了模型
     geom3d: { model: m as unknown as Record<string, unknown>, azim: azim.value, elev: elev.value },
   }
@@ -1082,6 +1122,20 @@ function insert() {
                 @change="setPointLabel(($event.target as HTMLInputElement).value)"
               ></label>
               <button class="g3__btn" @click="setPointLabel('')">不显示字母</button>
+              <span class="g3__dirpad" title="字母放在哪个方位（罗盘方向）">
+                <button
+                  v-for="(d, k) in DIR_PAD" :key="'dir' + k"
+                  class="g3__dirbtn" :class="{ 'g3__dirbtn--on': !!d && curDir === d, 'g3__dirbtn--blank': !d }"
+                  :disabled="!d"
+                  @click="d && setLabelPos(d as LabelDir)"
+                >{{ d ? DIR_GLYPH[d] : '' }}</button>
+              </span>
+              <label class="g3__num">距离 <input
+                class="g3__inp g3__inp--sm" type="number" min="1" max="20" step="1"
+                :value="curDist"
+                @change="setLabelPos(curDir || 'E', +($event.target as HTMLInputElement).value)"
+              >px</label>
+              <button class="g3__btn" title="恢复默认的自动摆放" @click="setLabelPos('')">自动</button>
               <button class="g3__btn" :disabled="selNames.length !== 2" title="选两个点连成一条线" @click="connectSel()">连线</button>
               <button class="g3__btn" :disabled="selNames.length < 3" title="选三个点定一个平面（算出与多面体的截面）" @click="planeSel()">作平面</button>
               <button class="g3__btn" @click="selPoints = []; selKind = null">清空</button>
@@ -1140,6 +1194,11 @@ function insert() {
 .g3__plane { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #555; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 2px 4px; background: #fff; }
 .g3__plane b { color: #1668e0; font-weight: 600; }
 .g3__off { text-decoration: line-through; opacity: .45; }
+.g3__dirpad { display: grid; grid-template-columns: repeat(3, 20px); grid-template-rows: repeat(3, 20px); gap: 2px; }
+.g3__dirbtn { border: 1px solid var(--border, #ddd); background: #fff; border-radius: 4px; font-size: 12px; line-height: 1; cursor: pointer; padding: 0; color: #5a5a68; }
+.g3__dirbtn:hover:not(:disabled) { background: #eef3fb; }
+.g3__dirbtn--on { background: #1668e0; border-color: #1668e0; color: #fff; }
+.g3__dirbtn--blank { border: 0; background: none; cursor: default; }
 .g3__warn { font-size: 11px; color: #c0392b; }
 .g3__row--stack { align-items: flex-start; }
 .g3__verts { margin-top: 12px; }
