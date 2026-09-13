@@ -13,7 +13,7 @@
 import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
-import { buildSolid, labelOffsetsFrom, projectGeom, resolveVertices, solveView, type Geom3D, type LabelDir } from '@/composables/geom3d'
+import { buildSolid, labelOffsetsFrom, LABEL_DIR_VEC, projectGeom, resolveVertices, solveView, type Geom3D, type LabelDir } from '@/composables/geom3d'
 import { GEOM3D_PRESETS, GEOM3D_PROMPT } from '@/composables/geom3dPrompt'
 import { renderSolid, arcsSvg } from '@/composables/solid3d'
 import { closeGeom3D } from '@/ui/geom3d'
@@ -149,9 +149,22 @@ if (props.editId) {
 
 /** 预览 / 插入用的 SVG（参数顺序：kind, pts, w, h, stroke, sw, fill, dsh, vlabels,
  *  edgeStyles, selVertex, selEdge, labelOffsets, faceStyles, selFace, mesh —— mesh 在最后一位） */
-/** 字母位置：模型里的"方位 + 距离(px)"→ 渲染器要的比例（按当前预览尺寸换算） */
+/** 正在拖的字母：点名 + 实时偏移(px)。拖的时候只在本地更新、松手才写模型 ——
+ *  免得每帧都 JSON 往返一次 */
+const dragLabel = ref<{ name: string; dx: number; dy: number } | null>(null)
+
+/** 字母位置：模型里的偏移(px) → 渲染器要的比例（按当前预览尺寸换算） */
 const labelOffs = computed(() => {
   const base = labelOffsetsFrom(model.value, order.value, W.value, H)
+  const drag = dragLabel.value
+  if (drag && order.value.includes(drag.name)) {
+    const i = order.value.indexOf(drag.name)
+    const out = (base ? base.slice() : order.value.map(() => null)) as ({ dx: number; dy: number } | null)[]
+    out[i] = { dx: drag.dx / W.value, dy: drag.dy / H }
+    const n2 = proj.value ? proj.value.vlabels.length : out.length
+    while (out.length < n2) out.push(null)
+    return out as { dx: number; dy: number }[]
+  }
   if (!base) return undefined
   const n = proj.value ? proj.value.vlabels.length : base.length
   // 渲染器的类型写着非空，但运行时对 null 是安全的（内部有 off && off.dx 判断）
@@ -448,13 +461,59 @@ const orbiting = ref(false)
 let orbitLast: [number, number] = [0, 0]
 /** 这次按下到底"拖"了还是"点"了 —— 拖动过就不当点击，免得转视角顺手改了选择 */
 let orbitMoved = false
+/** 按下的地方是不是某个字母？是就进入"拖字母"模式（优先于转视角）。 */
+function hitLabel(e: PointerEvent): string | null {
+  const p = proj.value
+  if (!p) return null
+  const rect = (e.currentTarget as Element).getBoundingClientRect()
+  const cx = ((e.clientX - rect.left) / rect.width) * W.value
+  const cy = ((e.clientY - rect.top) / rect.height) * H
+  let best: string | null = null
+  let bestD = 18
+  for (let i = 0; i < p.points.length / 2; i++) {
+    const nm = order.value[i]
+    if (!nm) continue
+    const off = offOf(nm)
+    const lx = p.points[i * 2] * W.value + off.dx
+    // 没设过偏移的字母，渲染器会把它放在顶点上方约 gap 的位置 —— 命中时也往那儿找
+    const ly = p.points[i * 2 + 1] * H + off.dy - (off.dx || off.dy ? 0 : 14)
+    const d = Math.hypot(lx - cx, ly - cy)
+    if (d < bestD) { bestD = d; best = nm }
+  }
+  return best
+}
 function onOrbitDown(e: PointerEvent) {
+  const hit = hitLabel(e)
+  if (hit) {
+    const o = offOf(hit)
+    dragLabel.value = { name: hit, dx: o.dx, dy: o.dy }
+    selKind.value = 'point'
+    selEdge.value = null
+    const i = order.value.indexOf(hit)
+    if (i >= 0) selPoints.value = [i]
+    orbitMoved = true      // 别让这次按下被当成"点击选中"
+    orbiting.value = false
+    orbitLast = [e.clientX, e.clientY]
+    try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
+    return
+  }
   orbiting.value = true
   orbitMoved = false
   orbitLast = [e.clientX, e.clientY]
   try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
 }
 function onOrbitMove(e: PointerEvent) {
+  // 拖字母：只在本地更新偏移，松手才写模型
+  if (dragLabel.value) {
+    const rect = (e.currentTarget as Element).getBoundingClientRect()
+    const kx = W.value / rect.width
+    const ky = H / rect.height
+    const dx = (e.clientX - orbitLast[0]) * kx
+    const dy = (e.clientY - orbitLast[1]) * ky
+    orbitLast = [e.clientX, e.clientY]
+    dragLabel.value = { ...dragLabel.value, dx: dragLabel.value.dx + dx, dy: dragLabel.value.dy + dy }
+    return
+  }
   if (!orbiting.value) return
   const dx = e.clientX - orbitLast[0]
   const dy = e.clientY - orbitLast[1]
@@ -467,6 +526,14 @@ function onOrbitMove(e: PointerEvent) {
   elev.value = Math.max(-80, Math.min(80, Math.round(elev.value + dy * 0.45)))
 }
 function onOrbitUp(e: PointerEvent) {
+  // 松手 → 把拖出来的偏移写进模型
+  if (dragLabel.value) {
+    const d = dragLabel.value
+    dragLabel.value = null
+    setLabelOffset(d.dx, d.dy, [d.name])
+    orbiting.value = false
+    return
+  }
   const was = orbiting.value
   orbiting.value = false
   if (!was || orbitMoved) return
@@ -567,27 +634,59 @@ function clearAdded() {
 /** 方位键盘的排列（3×3，跟罗盘一致） */
 const DIR_PAD: (LabelDir | '')[] = ['NW', 'N', 'NE', 'W', '', 'E', 'SW', 'S', 'SE']
 const DIR_GLYPH: Record<string, string> = { N: '↑', NE: '↗', E: '→', SE: '↘', S: '↓', SW: '↙', W: '←', NW: '↖' }
-/** 当前选中点的方位/距离（多选时以第一个为准显示） */
+const DIRS = Object.keys(LABEL_DIR_VEC) as LabelDir[]
+
+/** 某点的字母偏移（px）。数据统一是偏移向量；早期写的 {dir,dist} 也认。 */
+function offOf(n: string): { dx: number; dy: number } {
+  const p = model.value?.labelPos?.[n]
+  if (!p) return { dx: 0, dy: 0 }
+  if (typeof p.dx === 'number' || typeof p.dy === 'number') return { dx: p.dx || 0, dy: p.dy || 0 }
+  if (p.dir && LABEL_DIR_VEC[p.dir]) {
+    const d = p.dist || 0
+    return { dx: LABEL_DIR_VEC[p.dir][0] * d, dy: LABEL_DIR_VEC[p.dir][1] * d }
+  }
+  return { dx: 0, dy: 0 }
+}
+const curOff = computed(() => (selNames.value[0] ? offOf(selNames.value[0]) : { dx: 0, dy: 0 }))
+const curDist = computed(() => Math.round(Math.hypot(curOff.value.dx, curOff.value.dy)) || 8)
+/** 当前偏移最接近哪个方位（给键盘打高亮） */
 const curDir = computed<LabelDir | ''>(() => {
-  const n = selNames.value[0]
-  return (n && model.value?.labelPos?.[n]?.dir) || ''
+  const o = curOff.value
+  const len = Math.hypot(o.dx, o.dy)
+  if (len < 0.5) return ''
+  let best: LabelDir = 'E', bd = -2
+  for (const d of DIRS) {
+    const v = LABEL_DIR_VEC[d]
+    const dot = (o.dx / len) * v[0] + (o.dy / len) * v[1]
+    if (dot > bd) { bd = dot; best = d }
+  }
+  return best
 })
-const curDist = computed(() => {
-  const n = selNames.value[0]
-  return (n && model.value?.labelPos?.[n]?.dist) || 8
-})
-/** 设置字母方位 / 距离（空方位 = 恢复自动） */
-function setLabelPos(dir: LabelDir | '', dist?: number) {
-  if (!model.value || !selNames.value.length) return
+/** 写偏移（空 = 恢复自动）。拖曳 / 键盘 / 距离都走这里。 */
+function setLabelOffset(dx: number | null, dy: number | null, who?: string[]) {
+  const names2 = who && who.length ? who : selNames.value
+  if (!model.value || !names2.length) return
   const next = JSON.parse(raw.value) as Geom3D
   const lp = { ...(next.labelPos || {}) }
-  for (const n of selNames.value) {
-    if (!dir) delete lp[n]
-    else lp[n] = { dir, dist: Math.max(1, Math.min(20, Math.round(dist ?? lp[n]?.dist ?? 8))) }
+  for (const n of names2) {
+    if (dx === null || dy === null) delete lp[n]
+    else lp[n] = { dx: Math.round(dx), dy: Math.round(dy) }
   }
   next.labelPos = lp
   raw.value = JSON.stringify(next, null, 1)
   parse()
+}
+/** 方位键盘：按当前距离（没设过就 8px）放到该方位 */
+function setLabelDir(d: LabelDir) {
+  const v = LABEL_DIR_VEC[d]
+  setLabelOffset(v[0] * curDist.value, v[1] * curDist.value)
+}
+/** 距离：沿当前方向（没方向就朝 E）改长度 */
+function setLabelDist(px: number) {
+  const dist = Math.max(1, Math.min(20, Math.round(px) || 8))
+  const d = curDir.value || 'E'
+  const v = LABEL_DIR_VEC[d]
+  setLabelOffset(v[0] * dist, v[1] * dist)
 }
 
 // ---------------- 图元显隐 ----------------
@@ -1127,15 +1226,15 @@ function insert() {
                   v-for="(d, k) in DIR_PAD" :key="'dir' + k"
                   class="g3__dirbtn" :class="{ 'g3__dirbtn--on': !!d && curDir === d, 'g3__dirbtn--blank': !d }"
                   :disabled="!d"
-                  @click="d && setLabelPos(d as LabelDir)"
+                  @click="d && setLabelDir(d as LabelDir)"
                 >{{ d ? DIR_GLYPH[d] : '' }}</button>
               </span>
               <label class="g3__num">距离 <input
                 class="g3__inp g3__inp--sm" type="number" min="1" max="20" step="1"
                 :value="curDist"
-                @change="setLabelPos(curDir || 'E', +($event.target as HTMLInputElement).value)"
+                @change="setLabelDist(+($event.target as HTMLInputElement).value)"
               >px</label>
-              <button class="g3__btn" title="恢复默认的自动摆放" @click="setLabelPos('')">自动</button>
+              <button class="g3__btn" title="恢复默认的自动摆放" @click="setLabelOffset(null, null)">自动</button>
               <button class="g3__btn" :disabled="selNames.length !== 2" title="选两个点连成一条线" @click="connectSel()">连线</button>
               <button class="g3__btn" :disabled="selNames.length < 3" title="选三个点定一个平面（算出与多面体的截面）" @click="planeSel()">作平面</button>
               <button class="g3__btn" @click="selPoints = []; selKind = null">清空</button>

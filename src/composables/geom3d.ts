@@ -51,10 +51,11 @@ export interface Geom3D {
   /** **点在平面上的投影（射影）**：from 是那个点，plane 是定平面的三点。
    *  `foot` 给 true 时同时画一条 from→投影点的垂线（教材里那条）。 */
   projectPoints?: { name: string; from: string; plane: string[]; foot?: boolean }[]
-  /** **字母位置**：每个点可以指定字母放在哪个方位、离点多远（px，1~20）。
+  /** **字母位置**：每个点可以指定字母相对顶点偏移多少像素（屏幕坐标，x 右 y 下）。
+   *  统一用偏移向量表示 —— 八方位键盘和"距离"都是从它推出来的，拖曳直接写它。
    *  不写就用默认（从重心往外推的那套自动算法）。
-   *  换算成应用要的 labelOffsets 时按元素尺寸转成比例 —— 渲染器那套就是这个约定。 */
-  labelPos?: Record<string, { dir: LabelDir; dist: number }>
+   *  （早期版本写过 {dir, dist}，读的时候仍然兼容。） */
+  labelPos?: Record<string, { dx?: number; dy?: number; dir?: LabelDir; dist?: number }>
   /** **隐藏**（编辑器里的"眼睛"）：键的写法
    *  - `p:A` 点名 —— 不显示这个字母（点仍在，别的线还能用它）
    *  - `e:A|B` 一条棱/线（两点名按字典序拼）
@@ -483,10 +484,17 @@ export function labelOffsetsFrom(
   if (!lp || !Object.keys(lp).length || w <= 0 || h <= 0) return undefined
   const out = names.map((n) => {
     const p = lp[n]
-    if (!p || !LABEL_DIR_VEC[p.dir]) return null
-    const dist = Math.max(0, Math.min(20, p.dist || 0))
-    const v = LABEL_DIR_VEC[p.dir]
-    return { dx: (v[0] * dist) / w, dy: (v[1] * dist) / h }
+    if (!p) return null
+    let ox = 0, oy = 0
+    if (typeof p.dx === 'number' || typeof p.dy === 'number') {
+      ox = p.dx || 0
+      oy = p.dy || 0
+    } else if (p.dir && LABEL_DIR_VEC[p.dir]) {
+      const d = p.dist || 0
+      ox = LABEL_DIR_VEC[p.dir][0] * d
+      oy = LABEL_DIR_VEC[p.dir][1] * d
+    } else return null
+    return { dx: ox / w, dy: oy / h }
   })
   return out.some(Boolean) ? out : undefined
 }
