@@ -484,6 +484,37 @@ function usePreset(json: string) {
   parse()
 }
 
+// ---------------- 顶点坐标（可直接改） ----------------
+/** 一张可编辑的顶点表：模型自带顶点 + 自由点可以改坐标；
+ *  定比分点 / 交点 / 截面点这些是**算出来的**，只读展示（灰掉）。 */
+const vertexRows = computed(() => {
+  const m = model.value
+  if (!m) return [] as { name: string; at: [number, number, number]; kind: 'base' | 'free' | 'derived'; i: number }[]
+  const rows: { name: string; at: [number, number, number]; kind: 'base' | 'free' | 'derived'; i: number }[] = []
+  Object.entries(m.vertices || {}).forEach(([n, at]) => rows.push({ name: n, at, kind: 'base', i: -1 }))
+  ;(m.freePoints || []).forEach((fp, i) => { if (!rows.some((r) => r.name === fp.name)) rows.push({ name: fp.name, at: fp.at, kind: 'free', i }) })
+  const known = new Set(rows.map((r) => r.name))
+  for (const r of order.value) if (!known.has(r)) rows.push({ name: r, at: [0, 0, 0], kind: 'derived', i: -1 })
+  return rows
+})
+/** 改一个顶点的坐标（只对 base / free 有效） */
+function setVertexAt(row: { name: string; kind: string; i: number }, k: number, v: number) {
+  if (!model.value || row.kind === 'derived' || !isFinite(v)) return
+  const next = JSON.parse(raw.value) as Geom3D
+  if (row.kind === 'base') {
+    const cur = next.vertices[row.name]
+    if (!cur) return
+    next.vertices[row.name] = [cur[0], cur[1], cur[2]]
+    next.vertices[row.name][k] = +v
+  } else if (row.kind === 'free' && next.freePoints?.[row.i]) {
+    const cur = next.freePoints[row.i].at
+    next.freePoints[row.i].at = [cur[0], cur[1], cur[2]]
+    next.freePoints[row.i].at[k] = +v
+  }
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+
 // ---------------- 我的预设（存本地） ----------------
 const MY_KEY = 'lj-mathslides-geom3d-presets'
 function loadMy(): { name: string; json: string }[] {
@@ -705,6 +736,23 @@ function insert() {
               </select>
               <button class="g3__btn" @click="addAux()">添加</button>
             </div>
+            <div v-if="vertexRows.length" class="g3__verts">
+              <div class="g3__lab">顶点坐标 <span class="g3__vsub">（白底可改；灰的是算出来的，只读）</span></div>
+              <div class="g3__vlist">
+                <div v-for="r in vertexRows" :key="'v' + r.name" class="g3__vrow">
+                  <b :class="{ 'g3__vname--derived': r.kind === 'derived' }">{{ r.name }}</b>
+                  <input
+                    v-for="k in 3" :key="'k' + k" type="number" step="0.1"
+                    :class="{ 'g3__vinp--ro': r.kind === 'derived' }"
+                    :readonly="r.kind === 'derived'"
+                    :value="r.kind === 'derived' ? '' : r.at[k - 1]"
+                    :placeholder="r.kind === 'derived' ? '算' : ''"
+                    @change="setVertexAt(r, k - 1, +($event.target as HTMLInputElement).value)"
+                  >
+                  <span class="g3__vtag">{{ r.kind === 'base' ? '模型' : r.kind === 'free' ? '自由' : '算' }}</span>
+                </div>
+              </div>
+            </div>
             <div v-if="myPresets.length" class="g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">我的预设：</span>
               <span v-for="p in myPresets" :key="'myp' + p.name" class="g3__plane">
@@ -718,7 +766,7 @@ function insert() {
               <label class="g3__num">x <input v-model.number="fpX" type="number" step="0.1"></label>
               <label class="g3__num">y <input v-model.number="fpY" type="number" step="0.1"></label>
               <label class="g3__num">z <input v-model.number="fpZ" type="number" step="0.1"></label>
-              <button class="g3__btn" @click="addFreePoint()">加这个点</button>
+              <button class="g3__btn" @click="addFreePoint()">加自由点</button>
             </div>
             <div class="g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">定比分点 P = A + t(B−A)：</span>
@@ -734,7 +782,7 @@ function insert() {
               <button class="g3__btn g3__btn--tiny" @click="mkT = 0.5">1/2</button>
               <button class="g3__btn g3__btn--tiny" @click="mkT = +(1 / 3).toFixed(4)">1/3</button>
               <input v-model="mkName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
-              <button class="g3__btn" @click="addMark()">加这个点</button>
+              <button class="g3__btn" @click="addMark()">加定比分点</button>
             </div>
             <div v-if="addedMarks.length || addedAux.length || addedFree.length" class="g3__row g3__row--top g3__row--stack">
               <span class="g3__tip g3__tip--inline">已加的（可删）：</span>
@@ -947,6 +995,16 @@ function insert() {
 .g3__plane { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #555; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 2px 4px; background: #fff; }
 .g3__plane b { color: #1668e0; font-weight: 600; }
 .g3__row--stack { align-items: flex-start; }
+.g3__verts { margin-top: 12px; }
+.g3__vsub { font-weight: 400; color: #8a8aa0; font-size: 11px; }
+.g3__vlist { max-height: 190px; overflow: auto; border: 1px solid var(--border, #ddd); border-radius: 6px; background: #fff; }
+.g3__vrow { display: flex; align-items: center; gap: 4px; padding: 3px 6px; border-bottom: 1px solid #f0f0f4; }
+.g3__vrow:last-child { border-bottom: 0; }
+.g3__vrow b { width: 34px; font-size: 12px; color: #1668e0; }
+.g3__vname--derived { color: #a0a0b0; }
+.g3__vrow input { width: 52px; border: 1px solid var(--border, #ddd); border-radius: 4px; padding: 2px 4px; font-size: 11px; background: #fff; }
+.g3__vinp--ro { background: #f5f5f8; color: #a0a0b0; }
+.g3__vtag { font-size: 10px; color: #9a9aa8; width: 26px; }
 .g3__meet { color: #777; font-size: 10px; }
 .g3__link { cursor: pointer; text-decoration: underline dotted; }
 .g3__link:hover { color: #0b4ea8; }
