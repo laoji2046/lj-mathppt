@@ -36,6 +36,8 @@ const liveSize = computed(() => {
 /** 桌面端：主窗口临时全屏置顶，把整张桌面截图铺满，用户直接在"桌面"上拖 —— 跟 Word/PPT 一个手感。
  *  关闭/完成时一定要还原，否则会把主窗口留在全屏。 */
 const native = ref(false)
+/** 桌面端抓图的诊断信息（几台显示器、桌面多大）—— 抓不全时一眼看出问题 */
+const diag = ref('')
 async function finish() {
   if (native.value) {
     native.value = false
@@ -52,6 +54,8 @@ async function capture() {
       native.value = true
       fullUrl.value = shot.dataUrl
       natural.value = { w: shot.w, h: shot.h }
+      diag.value = '已捕获 ' + (shot.monitors.length || 1) + ' 个显示器 · 桌面 ' + shot.w + '×' + shot.h +
+        (shot.monitors.length ? '（' + shot.monitors.map((m) => (m.name || '?') + ' ' + m.w + '×' + m.h + '@' + m.x + ',' + m.y).join('；') + '）' : '')
       state.value = 'ready'
       await setCaptureMode(true)
       bringToFront()
@@ -243,7 +247,7 @@ onBeforeUnmount(() => {
           浏览器没有自动把本窗口切到前台 —— 点一下本窗口（或点这里）就能框选了。
         </div>
         <div class="shot__bar">
-          <span class="shot__hint">在画面上拖一下即完成截取；Enter 整屏插入，Esc 取消。</span>
+          <span class="shot__hint">在画面上拖一下即完成截取；Enter 整屏插入，Esc 取消。<em v-if="diag" class="shot__diag">{{ diag }}</em></span>
           <div class="shot__actions">
             <button class="shot__btn" @click="finish()">取消</button>
             <button class="shot__btn" @click="insertFull">整屏插入</button>
@@ -296,6 +300,7 @@ onBeforeUnmount(() => {
 .shot--full .shot__hint { color: #d7dbe6; }
 .shot--full .shot__state { color: #cbd2e0; }
 .shot--full .shot__focus { display: none; }
+.shot__diag { display: block; margin-top: 2px; font-size: 10.5px; color: #9aa3b5; font-style: normal; }
 .shot__size { position: absolute; right: 0; bottom: -20px; padding: 1px 6px; border-radius: 4px; background: rgba(20,24,34,.82); color: #fff; font-size: 11px; line-height: 1.5; white-space: nowrap; pointer-events: none; }
 .shot__bar { display: flex; align-items: center; gap: 10px; padding: 12px 16px 14px; }
 .shot__hint { font-size: 12px; color: var(--muted); flex: 1; }

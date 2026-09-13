@@ -221,10 +221,15 @@ fn capture_desktop_inner() -> Result<serde_json::Value, String> {
     }
 
     let mut shots: Vec<(i32, i32, image::RgbaImage)> = Vec::new();
+    let mut monitor_info_json: Vec<serde_json::Value> = Vec::new();
     for m in &monitors {
         let img = m.capture_image().map_err(|e| e.to_string())?;
         let x = m.x().map_err(|e| e.to_string())?;
         let y = m.y().map_err(|e| e.to_string())?;
+        monitor_info_json.push(serde_json::json!({
+            "name": m.name().unwrap_or_default(),
+            "x": x, "y": y, "w": img.width(), "h": img.height()
+        }));
         shots.push((x, y, img));
     }
 
@@ -268,7 +273,9 @@ fn capture_desktop_inner() -> Result<serde_json::Value, String> {
         "w": canvas.width(),
         "h": canvas.height(),
         "minX": minx,
-        "minY": miny
+        "minY": miny,
+        // 诊断用：几台显示器、各自多大 —— 抓不全时能一眼看出是漏了显示器还是抓的是旧帧
+        "monitors": monitor_info_json
     }))
 }
 
@@ -279,8 +286,12 @@ fn capture_desktop_inner() -> Result<serde_json::Value, String> {
 #[tauri::command]
 fn capture_screens(window: tauri::WebviewWindow) -> Result<serde_json::Value, String> {
     let _ = window.hide();
-    // 等一等：窗口藏掉到桌面上真正重绘出来之间有几十到一两百毫秒（实测 260ms 足够稳）
-    std::thread::sleep(std::time::Duration::from_millis(260));
+    // 等窗口藏掉、桌面重绘出来
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    // **抓两次、丢掉第一张**：Windows 的桌面复制第一次调用经常拿到"上一帧"（窗口还在的那一帧），
+    // 表现就是"只截到应用下面那一层" ✗。第二张才是当前真正的合成结果。
+    let _ = capture_desktop_inner();
+    std::thread::sleep(std::time::Duration::from_millis(120));
     let out = capture_desktop_inner();
     // 无论抓到没抓到，都要把窗口还回来，否则应用就"消失"了
     let _ = window.show();

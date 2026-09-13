@@ -68,15 +68,28 @@ export interface ScreenShot {
   dataUrl: string
   w: number
   h: number
+  /** 诊断：抓到几台显示器、各自的位置尺寸（抓不全时能一眼看出问题） */
+  monitors: { name?: string; x: number; y: number; w: number; h: number }[]
 }
 
 /** 原生截**整个桌面**（多显示器拼接）。只有桌面端能做，浏览器返回 null。 */
 export async function captureScreens(): Promise<ScreenShot | null> {
   if (!isTauri()) return null
   try {
-    const r = await invoke<{ ok?: boolean; dataBase64?: string; w?: number; h?: number }>('capture_screens')
+    const r = await invoke<{
+      ok?: boolean
+      dataBase64?: string
+      w?: number
+      h?: number
+      monitors?: { name?: string; x: number; y: number; w: number; h: number }[]
+    }>('capture_screens')
     if (!r?.ok || !r.dataBase64) return null
-    return { dataUrl: 'data:image/png;base64,' + r.dataBase64, w: r.w || 0, h: r.h || 0 }
+    return {
+      dataUrl: 'data:image/png;base64,' + r.dataBase64,
+      w: r.w || 0,
+      h: r.h || 0,
+      monitors: r.monitors || [],
+    }
   } catch {
     return null
   }
