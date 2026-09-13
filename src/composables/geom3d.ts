@@ -351,7 +351,53 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
       const t = t0 + k
       return [+(r * Math.cos(t)).toFixed(4), +(r * Math.sin(t)).toFixed(4), 0]
     })
-    const nearPlus = (Math.cos(t0 + Math.PI / 2) * d[0] + Math.sin(t0 + Math.PI / 2) * d[1]) > 0
+    /** 空间点 → 屏幕坐标（未归一化） */
+    const scr3 = (x: number, y: number, z: number): [number, number] =>
+      [x * right[0] + y * right[1] + z * right[2], -(x * up[0] + y * up[1] + z * up[2])]
+    /** 屏幕上一点 → 该**水平面**内的 (x, y)：2×2 线性映射求逆 */
+    const planeXY = (sx: number, sy: number): [number, number] => {
+      const a11 = right[0], a12 = right[1], a21 = -up[0], a22 = -up[1]
+      const det = a11 * a22 - a12 * a21
+      if (Math.abs(det) < 1e-12) return [0, 0]
+      return [(sx * a22 - a12 * sy) / det, (a11 * sy - sx * a21) / det]
+    }
+    /** 水平面内、圆心 (0,0,z)、半径 r 的圆 → 投影椭圆 + **可见半圈的椭圆参数区间**。
+     *  要点：**3D 圆的参数 t 和投影椭圆的参数 θ 不是一回事**（差一个仿射变换）——
+     *  直接把 t 当 θ 用，虚实会整个反过来、母线也接不上椭圆（用户报过这个）。
+     *  做法：切点先在 3D 算，投影到 2D 后换算成椭圆参数；哪半可见由"该点深度是否为正"定。 */
+    const circleSplit = (z: number) => {
+      const c2 = scr3(0, 0, z)
+      const U = scr3(r, 0, z), V = scr3(0, r, z)
+      const e = ellipseFromConjugate(U[0] - c2[0], U[1] - c2[1], V[0] - c2[0], V[1] - c2[1])
+      const at = (th: number): [number, number] => {
+        const x = e.rx * Math.cos(th), y = e.ry * Math.sin(th)
+        const cp = Math.cos(e.rot), sp = Math.sin(e.rot)
+        return [c2[0] + x * cp - y * sp, c2[1] + x * sp + y * cp]
+      }
+      const paramOf = (sx: number, sy: number): number => {
+        const ux = sx - c2[0], uy = sy - c2[1]
+        const cp = Math.cos(-e.rot), sp = Math.sin(-e.rot)
+        const x = ux * cp - uy * sp, y = ux * sp + uy * cp
+        return Math.atan2(y / e.ry, x / e.rx)
+      }
+      const depthAt = (th: number): number => {
+        const s = at(th)
+        const q = planeXY(s[0], s[1])
+        return q[0] * d[0] + q[1] * d[1]
+      }
+      const t1 = [r * Math.cos(t0), r * Math.sin(t0), z] as [number, number, number]
+      const t2 = [-r * Math.cos(t0), -r * Math.sin(t0), z] as [number, number, number]
+      const th1 = paramOf(...scr3(t1[0], t1[1], t1[2]))
+      const th2 = paramOf(...scr3(t2[0], t2[1], t2[2]))
+      const norm2 = (v: number) => { let x = v % (Math.PI * 2); if (x < 0) x += Math.PI * 2; return x }
+      const fwd = norm2(th2 - th1)
+      const vis = depthAt(norm2(th1 + fwd / 2)) > 0
+      // **区间要用"沿正向走 fwd"来表达**：直接写 [th1, th2] 会踩坑 ——
+      // th2 可能算出来是 −π（反向），那样画出来的是另一半，虚实正好反（用户报过）。
+      const from = vis ? th1 : th2
+      const to = vis ? th1 + fwd : th2 + (Math.PI * 2 - fwd)
+      return { c2, e, from, to }
+    }
     const edges: [number, number, number][] = []
     let apex = -1, iA = -1, iB = -1
     if (type === 'sphere') {
@@ -359,15 +405,12 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
       // 赤道用上面那套共轭直径法；侧影圆直接给 rx = ry = r（视线方向是单位向量，屏幕半径就等于 r）。
       push('O', [0, 0, 0])
       const c0 = sc([0, 0, 0])
-      const eq = ellipseFromConjugate(r * (right[0] - 0), -(r * up[0]), r * right[1], -(r * up[1]))
-      // 赤道可见半圈：跟底面圆同一套判据（法向与视线垂直的两点切开）
-      const t0s = Math.atan2(-d[0], d[1])
-      const nearPlusS = (Math.cos(t0s + Math.PI / 2) * d[0] + Math.sin(t0s + Math.PI / 2) * d[1]) > 0
-      const halfS = nearPlusS ? t0s + Math.PI : t0s + 2 * Math.PI
+      // 赤道用跟底面圆**同一套**切点/虚实算法（3D 参数 ≠ 椭圆参数，别自己算一遍）
+      const eqS = circleSplit(0)
       const arcsS: { cx: number; cy: number; rx: number; ry: number; rot: number; a0: number; a1: number; dash: 0 | 1 }[] = [
-        { cx: c0[0], cy: c0[1], rx: r, ry: r, rot: 0, a0: 0, a1: Math.PI * 2, dash: 0 },      // 侧影圆
-        { cx: c0[0] + 0, cy: c0[1] + 0, ...eq, a0: t0s, a1: halfS, dash: 0 },                  // 赤道近半
-        { cx: c0[0], cy: c0[1], ...eq, a0: halfS, a1: t0s + Math.PI * 2, dash: 1 },            // 赤道远半
+        { cx: c0[0], cy: c0[1], rx: r, ry: r, rot: 0, a0: 0, a1: Math.PI * 2, dash: 0 },               // 侧影圆（整圈实线）
+        { cx: eqS.c2[0], cy: eqS.c2[1], ...eqS.e, a0: eqS.from, a1: eqS.to, dash: 0 },                  // 赤道近半
+        { cx: eqS.c2[0], cy: eqS.c2[1], ...eqS.e, a0: eqS.to, a1: eqS.from + Math.PI * 2, dash: 1 },    // 赤道远半
       ]
       const xs2 = [c0[0] - r, c0[0] + r]
       const ys2 = [c0[1] - r, c0[1] + r]
@@ -402,35 +445,27 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
       const iB1 = push(null, [tang[1][0], tang[1][1], h])
       edges.push([iA, iA1, 0], [iB, iB1, 0])
     }
-    // 圆的投影椭圆：底在 z=0、轴向 e1=(1,0,0)、e2=(0,1,0)
-    const circ = (z: number) => {
-      const c = sc([0, 0, z])
-      const U = sc([r, 0, z]), V = sc([0, r, z])
-      const e = ellipseFromConjugate(U[0] - c[0], U[1] - c[1], V[0] - c[0], V[1] - c[1])
-      return { cx: c[0], cy: c[1], ...e }
-    }
     const arcs: { cx: number; cy: number; rx: number; ry: number; rot: number; a0: number; a1: number; dash: 0 | 1 }[] = []
     // 底面：近半可见（实线）、远半被挡（虚线）—— 这就是教材里圆柱/圆锥底的那条画法
-    const eb = circ(0)
-    const half = nearPlus ? t0 + Math.PI : t0 + 2 * Math.PI
-    arcs.push({ ...eb, a0: t0, a1: half, dash: 0 })
-    arcs.push({ ...eb, a0: half, a1: t0 + 2 * Math.PI, dash: 1 })
+    const eb = circleSplit(0)
+    arcs.push({ cx: eb.c2[0], cy: eb.c2[1], ...eb.e, a0: eb.from, a1: eb.to, dash: 0 })
+    arcs.push({ cx: eb.c2[0], cy: eb.c2[1], ...eb.e, a0: eb.to, a1: eb.from + Math.PI * 2, dash: 1 })
     if (type === 'cylinder') {
       // 顶面：从上方看整圈都可见（实线）
-      const et = circ(h)
-      arcs.push({ ...et, a0: 0, a1: Math.PI * 2, dash: 0 })
+      const et = circleSplit(h)
+      arcs.push({ cx: et.c2[0], cy: et.c2[1], ...et.e, a0: 0, a1: Math.PI * 2, dash: 0 })
     }
     // 归一化：把顶点和椭圆包围盒一起算进去，整体居中
     const xs = P3.map((p) => sc(p)[0])
     const ys = P3.map((p) => sc(p)[1])
-    const rm = Math.max(eb.rx, eb.ry)
-    xs.push(eb.cx - rm, eb.cx + rm)
-    ys.push(eb.cy - rm, eb.cy + rm)
+    const rm = Math.max(eb.e.rx, eb.e.ry)
+    xs.push(eb.c2[0] - rm, eb.c2[0] + rm)
+    ys.push(eb.c2[1] - rm, eb.c2[1] + rm)
     if (type === 'cylinder') {
-      const et = circ(h)
-      const r2 = Math.max(et.rx, et.ry)
-      xs.push(et.cx - r2, et.cx + r2)
-      ys.push(et.cy - r2, et.cy + r2)
+      const et = circleSplit(h)
+      const r2 = Math.max(et.e.rx, et.e.ry)
+      xs.push(et.c2[0] - r2, et.c2[0] + r2)
+      ys.push(et.c2[1] - r2, et.c2[1] + r2)
     }
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
     const bw = Math.max(1e-6, x1 - x0), bh = Math.max(1e-6, y1 - y0)
