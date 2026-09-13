@@ -7,7 +7,7 @@ import type {
   GgbApp, IconElement, ImageElement, LineElement, MathElement, MathFigureElement,
   MathFigureKind, PenElement, RichTextElement, ShapeElement, SlideElement, TableElement, TextElement, WordArtPreset,
 } from '@/types'
-import { ARROW_HEADS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
+import { ARROW_HEADS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, IMAGE_ROT3D, IMAGE_SHADOWS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
 import { captureDesmosState } from '@/composables/useDesmos'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
@@ -35,6 +35,18 @@ function num(v: string | number, fallback = 0) {
   const n = typeof v === 'number' ? v : parseFloat(v)
   return Number.isFinite(n) ? n : fallback
 }
+
+/** 选阴影预设时把该预设的四个数字一并写进去（PPT 就是这个行为：预设会带出参数） */
+function applyShadowPreset(v: string) {
+  const p = IMAGE_SHADOWS.find((s) => s.v === v)
+  patch({
+    shadowPreset: v,
+    ...(p ? { shadowAlpha: p.d[0], shadowSize: p.d[1], shadowBlur: p.d[2], shadowDist: p.d[3] } : {}),
+  } as Partial<SlideElement>)
+}
+
+/** 柔化边缘预设（磅 → px，1 磅≈1.33px，这里取整到常用值） */
+const SOFT_EDGE_PRESETS = [0, 2, 5, 10, 20, 40, 80]
 
 const isText = computed(() => el.value?.type === 'text')
 const isShape = computed(() => el.value?.type === 'shape')
@@ -1157,6 +1169,40 @@ function layerTypeLabel(type: string) {
         <button class="quick__btn" style="width:100%;margin-top:4px;background:#e6f0fb;border-color:#b9d3f0;color:#2b5b9c" @click="openVectorize(image?.src || '', el.id)">✎ 转成矢量图形（几何插图 → 可拖顶点）</button>
         <p class="panel__hint">线稿类插图（几何图、函数图）可以识别成数学图形元素：顶点能拖、线能改虚实粗细、字母能改。</p>
         <h3 class="panel__title">图片特效（PowerPoint 风格）</h3>
+
+        <!-- 阴影：预设 + 颜色 / 透明度 / 大小 / 模糊 / 角度 / 距离（对齐 PPT「图片格式 → 阴影」） -->
+        <label class="field"><span>阴影预设</span>
+          <select :value="image?.shadowPreset || 'none'" @change="applyShadowPreset(($event.target as HTMLSelectElement).value)">
+            <option v-for="s in IMAGE_SHADOWS" :key="s.v" :value="s.v">{{ s.label }}</option>
+          </select>
+        </label>
+        <template v-if="(image?.shadowPreset || 'none') !== 'none'">
+          <label class="field"><span>阴影颜色</span>
+            <input type="color" :value="image?.shadowColor || '#000000'"
+              @input="patch({ shadowColor: ($event.target as HTMLInputElement).value } as Partial<SlideElement>)" />
+          </label>
+          <label class="field"><span>透明度 {{ Math.round((image?.shadowAlpha ?? 0.4) * 100) }}%</span>
+            <input type="range" :value="image?.shadowAlpha ?? 0.4" min="0" max="1" step="0.05"
+              @input="patch({ shadowAlpha: num(($event.target as HTMLInputElement).value, 0.4) } as Partial<SlideElement>)" />
+          </label>
+          <label class="field"><span>大小 {{ image?.shadowSize ?? 0 }}</span>
+            <input type="range" :value="image?.shadowSize ?? 0" min="0" max="40" step="1"
+              @input="patch({ shadowSize: num(($event.target as HTMLInputElement).value, 0) } as Partial<SlideElement>)" />
+          </label>
+          <label class="field"><span>模糊 {{ image?.shadowBlur ?? 10 }}</span>
+            <input type="range" :value="image?.shadowBlur ?? 10" min="0" max="80" step="1"
+              @input="patch({ shadowBlur: num(($event.target as HTMLInputElement).value, 10) } as Partial<SlideElement>)" />
+          </label>
+          <label class="field"><span>角度 {{ image?.shadowAngle ?? 90 }}°</span>
+            <input type="range" :value="image?.shadowAngle ?? 90" min="0" max="360" step="5"
+              @input="patch({ shadowAngle: num(($event.target as HTMLInputElement).value, 90) } as Partial<SlideElement>)" />
+          </label>
+          <label class="field"><span>距离 {{ image?.shadowDist ?? 5 }}</span>
+            <input type="range" :value="image?.shadowDist ?? 5" min="0" max="40" step="1"
+              @input="patch({ shadowDist: num(($event.target as HTMLInputElement).value, 5) } as Partial<SlideElement>)" />
+          </label>
+        </template>
+
         <label class="field"><span>发光颜色</span>
           <ColorSwatches :model-value="image?.glowColor || ''" allow-transparent @update:model-value="(v) => patch({ glowColor: v } as Partial<SlideElement>)" />
         </label>
@@ -1164,9 +1210,36 @@ function layerTypeLabel(type: string) {
           <input type="number" :value="image?.glowSize || 0" min="0" max="60"
             @input="patch({ glowSize: num(($event.target as HTMLInputElement).value, 0) } as Partial<SlideElement>)" />
         </label>
+        <label class="field"><span>发光透明度 {{ Math.round((image?.glowAlpha ?? 1) * 100) }}%</span>
+          <input type="range" :value="image?.glowAlpha ?? 1" min="0" max="1" step="0.05"
+            @input="patch({ glowAlpha: num(($event.target as HTMLInputElement).value, 1) } as Partial<SlideElement>)" />
+        </label>
         <label class="field"><span>映像</span>
           <select :value="image?.reflection || 'none'" @change="patch({ reflection: ($event.target as HTMLSelectElement).value as ImageElement['reflection'] } as Partial<SlideElement>)">
             <option v-for="r in IMAGE_REFLECTIONS" :key="r.v" :value="r.v">{{ r.label }}</option>
+          </select>
+        </label>
+        <template v-if="image?.reflection && image.reflection !== 'none'">
+          <label class="field"><span>映像透明度 {{ Math.round((image?.reflAlpha ?? 0.4) * 100) }}%</span>
+            <input type="range" :value="image?.reflAlpha ?? 0.4" min="0" max="1" step="0.05"
+              @input="patch({ reflAlpha: num(($event.target as HTMLInputElement).value, 0.4) } as Partial<SlideElement>)" />
+          </label>
+          <label class="field"><span>映像距离 {{ image?.reflDist ?? 0 }}</span>
+            <input type="range" :value="image?.reflDist ?? 0" min="0" max="40" step="1"
+              @input="patch({ reflDist: num(($event.target as HTMLInputElement).value, 0) } as Partial<SlideElement>)" />
+          </label>
+          <p class="panel__hint">映像的「大小 / 模糊」浏览器不支持（-webkit-box-reflect 只有间隙和渐变），只做了透明度与距离。</p>
+        </template>
+        <label class="field"><span>柔化边缘预设</span>
+          <select :value="String(image?.softEdge ?? 0)"
+            @change="patch({ softEdge: num(($event.target as HTMLSelectElement).value, 0) } as Partial<SlideElement>)">
+            <option v-for="n in SOFT_EDGE_PRESETS" :key="n" :value="String(n)">{{ n === 0 ? '无' : n + ' 磅' }}</option>
+          </select>
+        </label>
+        <label class="field"><span>三维旋转</span>
+          <select :value="image?.rot3d || 'none'"
+            @change="patch({ rot3d: ($event.target as HTMLSelectElement).value as NonNullable<ImageElement['rot3d']> } as Partial<SlideElement>)">
+            <option v-for="r in IMAGE_ROT3D" :key="r.v" :value="r.v">{{ r.label }}</option>
           </select>
         </label>
         <label class="field"><span>柔化边缘 (px)</span>

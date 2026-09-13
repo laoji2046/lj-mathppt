@@ -610,7 +610,57 @@ export interface ImageElement extends ElementBase {
   flipV?: boolean
   /** 圆角（px，默认 4） */
   radius?: number
+
+  // ---- 阴影（PowerPoint「图片格式 → 阴影」：预设 + 六个参数）----
+  /** 阴影预设 */
+  shadowPreset?: 'none' | 'outer' | 'outerStrong' | 'inner'
+  /** 阴影颜色（默认 #000000） */
+  shadowColor?: string
+  /** 阴影透明度 0~1（默认 0.4） */
+  shadowAlpha?: number
+  /** 阴影大小 px（外阴影=扩散，内阴影=扩展） */
+  shadowSize?: number
+  /** 阴影模糊 px */
+  shadowBlur?: number
+  /** 阴影角度（度，0=向右、90=向下） */
+  shadowAngle?: number
+  /** 阴影距离 px */
+  shadowDist?: number
+
+  // ---- 映像详细参数（预设仍用 reflection）----
+  /** 映像透明度 0~1 */
+  reflAlpha?: number
+  /** 映像距离 px（与图片的间隙） */
+  reflDist?: number
+
+  // ---- 发光透明度 ----
+  /** 发光透明度 0~1 */
+  glowAlpha?: number
+
+  // ---- 三维旋转（预设）----
+  /** 三维旋转预设 */
+  rot3d?: 'none' | 'perspective' | 'isometric' | 'tiltUp' | 'tiltDown' | 'tiltLeft' | 'tiltRight'
 }
+
+/** 阴影预设 */
+export const IMAGE_SHADOWS: { v: NonNullable<ImageElement['shadowPreset']>; label: string; d: [number, number, number, number] }[] = [
+  //                                  颜色, 透明度, 大小, 模糊, 角度, 距离   —— d = [alpha, size, blur, dist]
+  { v: 'none', label: '无阴影', d: [0, 0, 0, 0] },
+  { v: 'outer', label: '外部·中', d: [0.4, 0, 10, 5] },
+  { v: 'outerStrong', label: '外部·强', d: [0.6, 0, 20, 8] },
+  { v: 'inner', label: '内部', d: [0.45, 0, 10, 5] },
+]
+
+/** 三维旋转预设：perspective(px) + rotateX/rotateY/rotateZ(deg) */
+export const IMAGE_ROT3D: { v: NonNullable<ImageElement['rot3d']>; label: string; css: string }[] = [
+  { v: 'none', label: '无旋转', css: '' },
+  { v: 'perspective', label: '透视', css: 'perspective(900px) rotateY(-22deg)' },
+  { v: 'isometric', label: '等轴测', css: 'perspective(900px) rotateX(18deg) rotateY(-24deg)' },
+  { v: 'tiltUp', label: '上倾斜', css: 'perspective(900px) rotateX(24deg)' },
+  { v: 'tiltDown', label: '下倾斜', css: 'perspective(900px) rotateX(-24deg)' },
+  { v: 'tiltLeft', label: '左倾斜', css: 'perspective(900px) rotateY(-24deg)' },
+  { v: 'tiltRight', label: '右倾斜', css: 'perspective(900px) rotateY(24deg)' },
+]
 
 /** 重新着色预设（PowerPoint「颜色 → 重新着色」） */
 export const IMAGE_RECOLORS: { v: NonNullable<ImageElement['recolor']>; label: string }[] = [
@@ -636,6 +686,19 @@ const REFLECT_PRESETS: Record<Exclude<ImageElement['reflection'], undefined | 'n
   loose: [10, 'rgba(0,0,0,0.52)'],
 }
 
+/** 给颜色叠一个透明度：把 #rgb / #rrggbb 转成 rgba()，其它写法原样返回 */
+export function withAlpha(color: string, a: number): string {
+  const c = (color || '').trim()
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c)
+  if (!m) return c || 'rgba(0,0,0,' + a + ')'
+  let hex = m[1]
+  if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2]
+  const r = parseInt(hex.slice(0, 2), 16)
+  const g = parseInt(hex.slice(2, 4), 16)
+  const b = parseInt(hex.slice(4, 6), 16)
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')'
+}
+
 /** 生成图片特效 CSS（编辑器画布与 Reveal 导出共用，保证两端一致）。
  *  发光=drop-shadow 贴合透明形状；映像=-webkit-box-reflect（Firefox 优雅降级为无反射）；
  *  柔化边缘=双侧 mask 渐隐，保留矩形轮廓。 */
@@ -645,12 +708,16 @@ export function imageEffectCss(
     | 'glowColor' | 'glowSize' | 'reflection' | 'softEdge'
     | 'brightness' | 'contrast' | 'saturate' | 'hue' | 'recolor' | 'blur'
     | 'flipH' | 'flipV' | 'radius'
+    | 'shadowPreset' | 'shadowColor' | 'shadowAlpha' | 'shadowSize' | 'shadowBlur' | 'shadowAngle' | 'shadowDist'
+    | 'reflAlpha' | 'reflDist' | 'glowAlpha' | 'rot3d'
   >,
 ): string {
   const css: string[] = []
   // ⚠ 所有 filter 必须**合成一条** —— 写成两条会互相覆盖（原来发光那条是单独写的）
   const filters: string[] = []
-  if (el.glowSize && el.glowColor) filters.push('drop-shadow(0 0 ' + el.glowSize + 'px ' + el.glowColor + ')')
+  if (el.glowSize && el.glowColor) {
+    filters.push('drop-shadow(0 0 ' + el.glowSize + 'px ' + withAlpha(el.glowColor, el.glowAlpha ?? 1) + ')')
+  }
   if (el.brightness != null && el.brightness !== 100) filters.push('brightness(' + el.brightness + '%)')
   if (el.contrast != null && el.contrast !== 100) filters.push('contrast(' + el.contrast + '%)')
   if (el.saturate != null && el.saturate !== 100) filters.push('saturate(' + el.saturate + '%)')
@@ -661,14 +728,37 @@ export function imageEffectCss(
   else if (el.recolor === 'invert') filters.push('invert(1)')
   else if (el.recolor === 'wash') filters.push('saturate(0.4) brightness(1.1)')
   if (filters.length) css.push('filter: ' + filters.join(' '))
-  if (el.flipH || el.flipV) {
-    // 翻转靠 transform —— 注意元素本身的旋转在外层，这里是图片内部翻转，不冲突
-    css.push('transform: scale(' + (el.flipH ? -1 : 1) + ',' + (el.flipV ? -1 : 1) + ')')
-  }
+
+  // ⚠ transform 同样只能写一条 —— 翻转和三维旋转必须**合并**，否则后写的覆盖先写的
+  const tx: string[] = []
+  const rot = IMAGE_ROT3D.find((r) => r.v === el.rot3d)
+  if (rot && rot.css) tx.push(rot.css)
+  if (el.flipH || el.flipV) tx.push('scale(' + (el.flipH ? -1 : 1) + ',' + (el.flipV ? -1 : 1) + ')')
+  if (tx.length) css.push('transform: ' + tx.join(' '))
+
   if (el.radius != null && el.radius !== 4) css.push('border-radius: ' + el.radius + 'px')
+
+  // 阴影（PowerPoint 那六项）：角度 + 距离 → 偏移；大小 → 扩散；内外由 inset 区分。
+  // 用 box-shadow 而不是 drop-shadow，是为了拿到"大小(扩散)"和"内部"这两项。
+  if (el.shadowPreset && el.shadowPreset !== 'none') {
+    const inner = el.shadowPreset === 'inner'
+    const a = el.shadowAlpha ?? (inner ? 0.45 : 0.4)
+    const size = el.shadowSize ?? 0
+    const blur = el.shadowBlur ?? 10
+    const ang = ((el.shadowAngle ?? 90) * Math.PI) / 180
+    const dist = el.shadowDist ?? 5
+    const dx = Math.round(Math.cos(ang) * dist)
+    const dy = Math.round(Math.sin(ang) * dist)
+    css.push('box-shadow: ' + (inner ? 'inset ' : '') + dx + 'px ' + dy + 'px ' + blur + 'px ' + size + 'px ' +
+      withAlpha(el.shadowColor || '#000000', a))
+  }
+
   if (el.reflection && el.reflection !== 'none') {
     const g = REFLECT_PRESETS[el.reflection] ?? [0, 'rgba(0,0,0,0.4)']
-    css.push('-webkit-box-reflect: below ' + g[0] + 'px linear-gradient(to bottom, ' + g[1] + ', transparent)')
+    const dist = el.reflDist ?? g[0]
+    const alpha = el.reflAlpha ?? 0.4
+    // -webkit-box-reflect 只支持"间隙 + 渐变遮罩"，所以透明度/距离可调，大小/模糊没有对应参数
+    css.push('-webkit-box-reflect: below ' + dist + 'px linear-gradient(to bottom, rgba(0,0,0,' + alpha + '), transparent)')
   }
   if (el.softEdge) {
     const n = el.softEdge
