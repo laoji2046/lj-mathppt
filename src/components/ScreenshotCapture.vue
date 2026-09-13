@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type { SlideElement } from '@/types'
@@ -37,6 +37,9 @@ async function capture() {
     natural.value = { w: video.videoWidth, h: video.videoHeight }
     state.value = 'ready'
     stopStream()
+    // 抓完帧要把**本窗口拉到前台**：浏览器的共享选择器关掉后应用往往还在后面，
+    // 用户得先点回来才能框选（实测此时 document.hasFocus() 是 false）。
+    bringToFront()
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e)
     state.value = 'error'
@@ -44,6 +47,22 @@ async function capture() {
 }
 function stopStream() {
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null }
+}
+
+/** 把窗口拉到前台。window.focus() 有时会被浏览器忽略（尤其是刚关掉共享选择器时），
+ *  所以隔一小会儿再试一次；仍然没焦点就显示一句提示兜底 —— 总比让用户莫名其妙强。 */
+const needFocus = ref(false)
+function tryFocus() {
+  try { window.focus() } catch { /* 忽略 */ }
+  needFocus.value = !document.hasFocus()
+}
+function bringToFront() {
+  nextTick(() => {
+    tryFocus()
+    // 选择器完全关闭可能还要几十毫秒，再补一枪
+    setTimeout(tryFocus, 150)
+    setTimeout(tryFocus, 500)
+  })
 }
 
 // 选区拖拽
@@ -118,7 +137,10 @@ onBeforeUnmount(stopStream)
         <button class="shot__x" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </header>
 
-      <div v-if="state === 'loading'" class="shot__state">正在等待选择要捕获的屏幕/窗口…</div>
+      <div v-if="state === 'loading'" class="shot__state">
+        正在等待选择要捕获的屏幕/窗口…
+        <div class="shot__err-sub">选好之后如果本窗口没有自动到前面，点一下本窗口即可继续。</div>
+      </div>
       <div v-else-if="state === 'error'" class="shot__state shot__state--err">
         {{ err }}
         <div class="shot__err-sub">若浏览器拦截，请点击地址栏的「共享屏幕」/允许权限后重试。</div>
@@ -128,6 +150,9 @@ onBeforeUnmount(stopStream)
         <div class="shot__stage" ref="stage" @pointerdown="onDown" @pointermove="onMove" @pointerup="onUp">
           <img ref="imageRef" :src="fullUrl" class="shot__img" draggable="false" alt="截图预览" />
           <div v-if="sel" class="shot__sel" :style="{ left: sel.x + 'px', top: sel.y + 'px', width: sel.w + 'px', height: sel.h + 'px' }"></div>
+        </div>
+        <div v-if="needFocus" class="shot__focus" @click="tryFocus">
+          浏览器没有自动把本窗口切到前台 —— 点一下本窗口（或点这里）就能框选了。
         </div>
         <div class="shot__bar">
           <span class="shot__hint">在画面上拖拽框选要截取的区域；不框选则整屏插入。</span>
@@ -171,6 +196,7 @@ onBeforeUnmount(stopStream)
   box-shadow: 0 0 0 1px rgba(255,255,255,0.7) inset;
   pointer-events: none;
 }
+.shot__focus { margin: 8px 16px 0; padding: 8px 12px; border-radius: 7px; background: #fff6e5; border: 1px solid #f0d9a8; color: #8a6116; font-size: 12px; cursor: pointer; }
 .shot__bar { display: flex; align-items: center; gap: 10px; padding: 12px 16px 14px; }
 .shot__hint { font-size: 12px; color: var(--muted); flex: 1; }
 .shot__actions { display: flex; gap: 8px; }
