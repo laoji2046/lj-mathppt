@@ -211,8 +211,8 @@ fn read_local_image(name: String) -> serde_json::Value {
 /// 为什么要在 Rust 里做：浏览器只能截"用户授权共享的那个源"，而且必须先弹一次共享选择器 ✗。
 /// exe 里用原生截屏可以做到 Word/PPT 那种"直接在桌面上拖"的手感（前端把主窗口临时全屏置顶，
 /// 把这张图铺满，用户在上面拖选区即可）。
-#[tauri::command]
-fn capture_screens() -> Result<serde_json::Value, String> {
+/// 真正干活的：截整个虚拟桌面（不含任何"让开"逻辑，便于单测）。
+fn capture_desktop_inner() -> Result<serde_json::Value, String> {
     use xcap::Monitor;
 
     let monitors = Monitor::all().map_err(|e| e.to_string())?;
@@ -272,6 +272,21 @@ fn capture_screens() -> Result<serde_json::Value, String> {
     }))
 }
 
+/// 截屏（桌面端）：**先把本窗口让开**再抓。
+///
+/// 关键教训：如果窗口还在屏幕上（尤其是最大化时它盖满整个桌面），抓到的就**只有应用自己** ✗。
+/// 所以这里先 hide → 等合成器把下面的桌面画出来 → 抓 → 无论成败都把窗口恢复。
+#[tauri::command]
+fn capture_screens(window: tauri::WebviewWindow) -> Result<serde_json::Value, String> {
+    let _ = window.hide();
+    // 等一等：窗口藏掉到桌面上真正重绘出来之间有几十到一两百毫秒（实测 260ms 足够稳）
+    std::thread::sleep(std::time::Duration::from_millis(260));
+    let out = capture_desktop_inner();
+    // 无论抓到没抓到，都要把窗口还回来，否则应用就"消失"了
+    let _ = window.show();
+    out
+}
+
 /// 进入/退出"截屏覆盖"模式：主窗口临时全屏 + 置顶（退出时还原并重新聚焦）。
 ///
 /// 放在 Rust 里而不是前端调 window 插件，是为了避开 Tauri 2 的 capability 配置 —— 
@@ -280,7 +295,10 @@ fn capture_screens() -> Result<serde_json::Value, String> {
 fn set_capture_mode(window: tauri::WebviewWindow, on: bool) -> Result<(), String> {
     window.set_fullscreen(on).map_err(|e| e.to_string())?;
     window.set_always_on_top(on).map_err(|e| e.to_string())?;
-    if !on {
+    if on {
+        let _ = window.show();
+        let _ = window.set_focus();
+    } else {
         let _ = window.set_focus();
     }
     Ok(())
@@ -309,7 +327,7 @@ mod tests {
     /// 无显示器的环境（比如 CI）拿不到图，此时只要**优雅报错**也算过。
     #[test]
     fn capture_screens_smoke() {
-        match super::capture_screens() {
+        match super::capture_desktop_inner() {
             Ok(v) => {
                 let b64 = v.get("dataBase64").and_then(|x| x.as_str()).unwrap_or("");
                 let w = v.get("w").and_then(|x| x.as_u64()).unwrap_or(0);
