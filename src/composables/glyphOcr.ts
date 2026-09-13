@@ -207,6 +207,20 @@ function groupBoxes(boxes: GlyphBox[]) {
   return [...map.values()]
 }
 
+/** 大小写纠正表：扫描件小、字形糊的时候，有些大写字母会被认成小写。
+ *  实测 **C** 最容易中招（用户反馈：见 c 就 C，见 c_1 就 C_1）。
+ *  **只改基字母，下标原样保留**（c_1 → C_1）；表里没有的字母一律不动 ——
+ *  像 h、m 这些小写在这些图里本来就是对的，一起大写化反而错。
+ *  以后遇到别的"总被认错大小写"的字母，往这张表里加一条就行。 */
+const CASE_FIX: Record<string, string> = { c: 'C' }
+
+/** 把识别出来的标注做一次大小写纠正（c → C，c_1 → C_1） */
+export function fixLabelCase(s: string): string {
+  const m = /^([A-Za-z])([\s\S]*)$/.exec(s)
+  if (!m) return s
+  return (CASE_FIX[m[1].toLowerCase()] ?? m[1]) + m[2]
+}
+
 /** 入口：把"被挑出来的字母块"认成文本 */
 export function recognizeLabels(W: number, boxes: GlyphBox[]): LabelBox[] {
   if (!boxes.length) return []
@@ -255,7 +269,7 @@ export function recognizeLabels(W: number, boxes: GlyphBox[]): LabelBox[] {
     if (!text) continue
     const x0 = Math.min(...g.map((b) => b.x0)), x1 = Math.max(...g.map((b) => b.x1))
     const y0 = Math.min(...g.map((b) => b.y0)), y1 = Math.max(...g.map((b) => b.y1))
-    out.push({ text, conf: confN ? confSum / confN : 0, x0, y0, x1, y1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 })
+    out.push({ text: fixLabelCase(text), conf: confN ? confSum / confN : 0, x0, y0, x1, y1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 })
   }
   return out
 }
