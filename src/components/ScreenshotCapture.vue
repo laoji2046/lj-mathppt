@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
+import { captureScreens, isTauri, setCaptureMode } from '@/composables/useTauri'
 import type { SlideElement } from '@/types'
 
 const store = useDeckStore()
@@ -32,7 +33,32 @@ const liveSize = computed(() => {
   return w + ' × ' + h
 })
 
+/** 桌面端：主窗口临时全屏置顶，把整张桌面截图铺满，用户直接在"桌面"上拖 —— 跟 Word/PPT 一个手感。
+ *  关闭/完成时一定要还原，否则会把主窗口留在全屏。 */
+const native = ref(false)
+async function finish() {
+  if (native.value) {
+    native.value = false
+    await setCaptureMode(false)
+  }
+  emit('close')
+}
+
 async function capture() {
+  // ① 桌面端优先走**原生截全屏**：省掉浏览器那次"选共享窗口"，也不用先授权一个源
+  if (isTauri()) {
+    const shot = await captureScreens()
+    if (shot) {
+      native.value = true
+      fullUrl.value = shot.dataUrl
+      natural.value = { w: shot.w, h: shot.h }
+      state.value = 'ready'
+      await setCaptureMode(true)
+      bringToFront()
+      return
+    }
+  }
+  // ② 浏览器（或原生失败）回退到 getDisplayMedia
   try {
     if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
       throw new Error('当前环境不支持屏幕捕获（需 Chrome/Edge 等）')
@@ -136,7 +162,7 @@ function insertImage(url: string, nw: number, nh: number) {
   const f = Math.min(900 / w, 620 / h)
   if (f < 1) { w = Math.round(w * f); h = Math.round(h * f) }
   store.addElement('image', { src: url, w, h, fit: 'contain' } as Partial<SlideElement>)
-  emit('close')
+  void finish()
 }
 
 function confirmCrop() {
@@ -167,10 +193,10 @@ function insertFull() {
 /** 键盘：Esc 取消，Enter 确认选区（不框选时 = 整屏插入） */
 function onKey(e: KeyboardEvent) {
   if (state.value !== 'ready') {
-    if (e.key === 'Escape') emit('close')
+    if (e.key === 'Escape') void finish()
     return
   }
-  if (e.key === 'Escape') { emit('close'); return }
+  if (e.key === 'Escape') { void finish(); return }
   if (e.key === 'Enter') {
     if (sel.value && sel.value.w >= 8 && sel.value.h >= 8) confirmCrop()
     else insertFull()
@@ -188,11 +214,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="shot" @click.self="emit('close')">
+  <div class="shot" :class="{ 'shot--full': native }" @click.self="finish()">
     <div class="shot__box">
       <header class="shot__head">
         <span>屏幕截图</span>
-        <button class="shot__x" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
+        <button class="shot__x" @click="finish()"><AppIcon name="close" :size="13" /></button>
       </header>
 
       <div v-if="state === 'loading'" class="shot__state">
@@ -219,7 +245,7 @@ onBeforeUnmount(() => {
         <div class="shot__bar">
           <span class="shot__hint">在画面上拖一下即完成截取；Enter 整屏插入，Esc 取消。</span>
           <div class="shot__actions">
-            <button class="shot__btn" @click="emit('close')">取消</button>
+            <button class="shot__btn" @click="finish()">取消</button>
             <button class="shot__btn" @click="insertFull">整屏插入</button>
             <button class="shot__btn shot__btn--primary" @click="confirmCrop">截取选区</button>
           </div>
@@ -260,6 +286,16 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 .shot__focus { margin: 8px 16px 0; padding: 8px 12px; border-radius: 7px; background: #fff6e5; border: 1px solid #f0d9a8; color: #8a6116; font-size: 12px; cursor: pointer; }
+/* 桌面端"截屏覆盖"模式：铺满全屏、去掉窗口化的装饰，像 Word/PPT 那样直接在"桌面"上拖 */
+.shot--full { background: #0b0d12; }
+.shot--full .shot__box { width: 100vw; height: 100vh; max-width: none; border-radius: 0; box-shadow: none; display: flex; flex-direction: column; overflow: hidden; }
+.shot--full .shot__head { display: none; }
+.shot--full .shot__stage { flex: 1; margin: 0; border: 0; border-radius: 0; min-height: 0; }
+.shot--full .shot__img { max-width: 100%; max-height: 100%; }
+.shot--full .shot__bar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); background: rgba(20,24,34,.86); border-radius: 10px; padding: 8px 14px; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.shot--full .shot__hint { color: #d7dbe6; }
+.shot--full .shot__state { color: #cbd2e0; }
+.shot--full .shot__focus { display: none; }
 .shot__size { position: absolute; right: 0; bottom: -20px; padding: 1px 6px; border-radius: 4px; background: rgba(20,24,34,.82); color: #fff; font-size: 11px; line-height: 1.5; white-space: nowrap; pointer-events: none; }
 .shot__bar { display: flex; align-items: center; gap: 10px; padding: 12px 16px 14px; }
 .shot__hint { font-size: 12px; color: var(--muted); flex: 1; }

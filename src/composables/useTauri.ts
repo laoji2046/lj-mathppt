@@ -63,6 +63,35 @@ export async function readLocalImage(name: string): Promise<string> {
   }
 }
 
+export interface ScreenShot {
+  /** 可直接塞进 <img src> 的 data URL */
+  dataUrl: string
+  w: number
+  h: number
+}
+
+/** 原生截**整个桌面**（多显示器拼接）。只有桌面端能做，浏览器返回 null。 */
+export async function captureScreens(): Promise<ScreenShot | null> {
+  if (!isTauri()) return null
+  try {
+    const r = await invoke<{ ok?: boolean; dataBase64?: string; w?: number; h?: number }>('capture_screens')
+    if (!r?.ok || !r.dataBase64) return null
+    return { dataUrl: 'data:image/png;base64,' + r.dataBase64, w: r.w || 0, h: r.h || 0 }
+  } catch {
+    return null
+  }
+}
+
+/** 进/出"截屏覆盖"模式：主窗口临时全屏置顶（桌面端才有效） */
+export async function setCaptureMode(on: boolean): Promise<void> {
+  if (!isTauri()) return
+  try {
+    await invoke('set_capture_mode', { on })
+  } catch {
+    /* 忽略：拿不到就算了，最多是手感差一点 */
+  }
+}
+
 /** 写文本文件：桌面端走 Rust 的 export_json（能拿到真实路径），浏览器回退 blob 下载 */
 export async function saveTextFile(name: string, text: string): Promise<string> {
   if (isTauri()) {

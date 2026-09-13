@@ -205,6 +205,87 @@ fn read_local_image(name: String) -> serde_json::Value {
     }
 }
 
+
+/// 原生截屏：把**整个虚拟桌面**（多显示器按实际位置拼起来）截成一张 PNG，返回 base64。
+///
+/// 为什么要在 Rust 里做：浏览器只能截"用户授权共享的那个源"，而且必须先弹一次共享选择器 ✗。
+/// exe 里用原生截屏可以做到 Word/PPT 那种"直接在桌面上拖"的手感（前端把主窗口临时全屏置顶，
+/// 把这张图铺满，用户在上面拖选区即可）。
+#[tauri::command]
+fn capture_screens() -> Result<serde_json::Value, String> {
+    use xcap::Monitor;
+
+    let monitors = Monitor::all().map_err(|e| e.to_string())?;
+    if monitors.is_empty() {
+        return Err("没有检测到显示器".into());
+    }
+
+    let mut shots: Vec<(i32, i32, image::RgbaImage)> = Vec::new();
+    for m in &monitors {
+        let img = m.capture_image().map_err(|e| e.to_string())?;
+        let x = m.x().map_err(|e| e.to_string())?;
+        let y = m.y().map_err(|e| e.to_string())?;
+        shots.push((x, y, img));
+    }
+
+    // 虚拟桌面的包围盒（多显示器可能是负坐标）
+    let mut minx = i32::MAX;
+    let mut miny = i32::MAX;
+    let mut maxx = i32::MIN;
+    let mut maxy = i32::MIN;
+    for (x, y, img) in &shots {
+        minx = minx.min(*x);
+        miny = miny.min(*y);
+        maxx = maxx.max(*x + img.width() as i32);
+        maxy = maxy.max(*y + img.height() as i32);
+    }
+    let w = (maxx - minx).max(1) as u32;
+    let h = (maxy - miny).max(1) as u32;
+
+    let mut canvas = image::RgbaImage::from_pixel(w, h, image::Rgba([0, 0, 0, 255]));
+    for (x, y, img) in shots {
+        image::imageops::overlay(&mut canvas, &img, (x - minx) as i64, (y - miny) as i64);
+    }
+
+    let mut png: Vec<u8> = Vec::new();
+    {
+        use image::ImageEncoder;
+        let enc = image::codecs::png::PngEncoder::new(&mut png);
+        enc.write_image(
+            canvas.as_raw(),
+            canvas.width(),
+            canvas.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+    Ok(serde_json::json!({
+        "ok": true,
+        "dataBase64": b64,
+        "w": canvas.width(),
+        "h": canvas.height(),
+        "minX": minx,
+        "minY": miny
+    }))
+}
+
+/// 进入/退出"截屏覆盖"模式：主窗口临时全屏 + 置顶（退出时还原并重新聚焦）。
+///
+/// 放在 Rust 里而不是前端调 window 插件，是为了避开 Tauri 2 的 capability 配置 —— 
+/// 自己的命令不需要额外授权。
+#[tauri::command]
+fn set_capture_mode(window: tauri::WebviewWindow, on: bool) -> Result<(), String> {
+    window.set_fullscreen(on).map_err(|e| e.to_string())?;
+    window.set_always_on_top(on).map_err(|e| e.to_string())?;
+    if !on {
+        let _ = window.set_focus();
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -214,7 +295,9 @@ pub fn run() {
             user_dirs,
             export_json,
             images_dir,
-            read_local_image
+            read_local_image,
+            capture_screens,
+            set_capture_mode
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -222,6 +305,26 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    /// 原生截屏命令的烟雾测试：能跑通就说明 crate 接线、多显示器拼接、PNG 编码、base64 这几步没接错。
+    /// 无显示器的环境（比如 CI）拿不到图，此时只要**优雅报错**也算过。
+    #[test]
+    fn capture_screens_smoke() {
+        match super::capture_screens() {
+            Ok(v) => {
+                let b64 = v.get("dataBase64").and_then(|x| x.as_str()).unwrap_or("");
+                let w = v.get("w").and_then(|x| x.as_u64()).unwrap_or(0);
+                let h = v.get("h").and_then(|x| x.as_u64()).unwrap_or(0);
+                assert!(w > 0 && h > 0, "尺寸应该 > 0");
+                assert!(b64.len() > 100, "base64 太短");
+                use base64::Engine;
+                let png = base64::engine::general_purpose::STANDARD.decode(b64).expect("base64 应该能解");
+                assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a], "应该是合法 PNG");
+                println!("截到 {}x{}，PNG {} 字节", w, h, png.len());
+            }
+            Err(e) => println!("环境不支持截图（可接受）：{}", e),
+        }
+    }
+
     use super::*;
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
