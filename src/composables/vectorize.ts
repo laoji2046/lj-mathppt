@@ -212,11 +212,15 @@ export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array
         if (used[k]) continue
         const B = bars[k]
         for (const A of grp) {
-          if (Math.abs(A.ux * B.ux + A.uy * B.uy) < 0.985) continue
+          // 短划（十几像素）的**主轴方向估计有噪声**，10° 的对齐门槛会把同一条虚线上的短划拆开；
+          // 拆散之后每堆不足 2 个就会被当字母抹掉 —— 整条虚线随之消失
+          if (Math.abs(A.ux * B.ux + A.uy * B.uy) < 0.97) continue
           const vx = B.cx - A.cx, vy = B.cy - A.cy
           const d = Math.hypot(vx, vy)
           if (d > 8 + 6 * Math.max(A.len, B.len)) continue
-          if (Math.abs(vx * -A.uy + vy * A.ux) > 4) continue      // 到 A 所在直线的垂距
+          if (Math.abs(vx * -A.uy + vy * A.ux) > 7) continue      // 到 A 所在直线的垂距
+          // 4px 太严：虚线本身画得略有抖动，实测 A–E 那条线上各短块相对理想线偏了 2~12px，
+          // 一超限就被拆成孤立小块、凑不满 3 个 → 当字母抹掉 → 整条边消失
           const tB = vx * A.ux + vy * A.uy
           if (Math.abs(tB) > 0.5 * (A.len + B.len) + 14) continue  // 沿轴方向的间距
           grp.push(B); used[k] = true; grow = true; break
@@ -224,7 +228,9 @@ export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array
         if (grow) break
       }
     }
-    if (grp.length >= 3) groups.push(grp)
+    // ≥2 就算虚线：**只有两截的短虚线**（例如 D–E、C–F 那种）天生凑不满 3，
+    // 按 ≥3 判的话它们会被当字母碎片抹掉，用户看到的就是"这条边没识别出来"
+    if (grp.length >= 2) groups.push(grp)
     else for (const c of grp) texts.push(c)
   }
   const out = ink.slice()
