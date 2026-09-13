@@ -31,6 +31,14 @@ export interface Geom3D {
   primitive?: GeomPrimitive
   /** 截面 / 辅助面：按顺序列顶点名；fill 给颜色字符串表示填充，null 只描边 */
   cutPlanes?: { points: string[]; fill?: string | null }[]
+  /** **定比分点**：P = from + t·(to − from)。t=0.5 中点、1/3 三等分点、任意比都行。
+   *  解析出来的点会作为一个新顶点加进模型，后续连辅助线 / 定截面都能用它。
+   *  （原来只有一个写死的"竖棱中点"，这是它的推广。） */
+  marks?: { name: string; from: string; to: string; t: number }[]
+  /** **多点确定平面 → 自动求截面**：给 3 个（或更多）顶点，算出这个平面与该多面体的**真实截面多边形**
+   *  （逐面求交再接环）。跟 cutPlanes 的分工：那个是"你给的多边形直接画"，这个是"算出平面切在哪儿"。
+   *  凸多面体成立；三点不共线即可。 */
+  planeCuts?: { through: string[]; fill?: string | null }[]
 }
 
 export interface Geom3DView {
@@ -96,6 +104,60 @@ function ellipseFromConjugate(ux: number, uy: number, vx: number, vy: number) {
   const ry = Math.sqrt(Math.max(1e-12, l2))
   const rot = 0.5 * Math.atan2(2 * a12, a11 - a22)
   return { rx, ry, rot }
+}
+
+
+/** 平面与多面体的**截面多边形**：逐面求交得到若干线段，再首尾相接成环。
+ *  只对凸多面体成立 —— 教材里的截面题都是凸的。
+ *  返回三维点列（逆序无所谓，渲染只关心多边形）。 */
+function sectionPolygon(
+  P3: [number, number, number][],
+  faces: number[][],
+  p0: [number, number, number],
+  nrm: [number, number, number],
+): [number, number, number][] {
+  const segs: [number, number, number][][] = []
+  const same = (a: [number, number, number], b: [number, number, number]) =>
+    Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-6
+  for (const f of faces) {
+    const dist = f.map((i) => dot(sub(P3[i], p0), nrm))
+    const hit: [number, number, number][] = []
+    for (let k = 0; k < f.length; k++) {
+      const i0 = f[k], i1 = f[(k + 1) % f.length]
+      const d0 = dist[k], d1 = dist[(k + 1) % f.length]
+      if (Math.abs(d0) < 1e-9) { hit.push(P3[i0]); continue }
+      if (d0 * d1 < 0) {
+        const t = d0 / (d0 - d1)
+        hit.push([
+          P3[i0][0] + (P3[i1][0] - P3[i0][0]) * t,
+          P3[i0][1] + (P3[i1][1] - P3[i0][1]) * t,
+          P3[i0][2] + (P3[i1][2] - P3[i0][2]) * t,
+        ])
+      }
+    }
+    // 同一个点可能被相邻两条边各算一次 → 去重
+    const uniq: [number, number, number][] = []
+    for (const q of hit) if (!uniq.some((z) => same(z, q))) uniq.push(q)
+    if (uniq.length >= 2) segs.push(uniq)
+  }
+  if (!segs.length) return []
+  const ring: [number, number, number][] = [segs[0][0], segs[0][1]]
+  const used = new Set([0])
+  for (let guard = 0; guard < 400; guard++) {
+    const tail = ring[ring.length - 1]
+    let found = -1
+    let next: [number, number, number] | null = null
+    for (let i = 0; i < segs.length; i++) {
+      if (used.has(i)) continue
+      if (same(segs[i][0], tail)) { found = i; next = segs[i][1]; break }
+      if (same(segs[i][1], tail)) { found = i; next = segs[i][0]; break }
+    }
+    if (found < 0 || !next) break
+    used.add(found)
+    if (same(next, ring[0])) break
+    ring.push(next)
+  }
+  return ring.length >= 3 ? ring : []
 }
 
 /** 参数化生成常见几何体 —— 不依赖任何 AI，选类型 + 填参数就出模型。
@@ -393,11 +455,36 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   }
 
   // ---------------- 多面体（走面表） ----------------
-  const names = Object.keys(m.vertices)
+  // 先把**定比分点**解析出来，并进顶点表（后面的连线 / 定截面都能用它）
+  const vertsAll: Record<string, [number, number, number]> = { ...m.vertices }
+  for (const mk of m.marks || []) {
+    const A = vertsAll[mk.from], B = vertsAll[mk.to]
+    if (!A || !B || !mk.name) continue
+    vertsAll[mk.name] = [
+      +(A[0] + (B[0] - A[0]) * mk.t).toFixed(4),
+      +(A[1] + (B[1] - A[1]) * mk.t).toFixed(4),
+      +(A[2] + (B[2] - A[2]) * mk.t).toFixed(4),
+    ]
+  }
+  const names = Object.keys(vertsAll)
   const idx: Record<string, number> = {}
   names.forEach((n, i) => { idx[n] = i })
-  const P3 = names.map((n) => m.vertices[n]) as [number, number, number][]
+  const P3 = names.map((n) => vertsAll[n]) as [number, number, number][]
   if (!P3.length) return { points: [], mesh: { edges: [], faces: [] }, vlabels: [], arcs: [], aspect: 1, faceStyles: [] }
+
+  const faces = (m.faces || []).map((f) => f.map((n) => idx[n]).filter((k) => k !== undefined))
+  // **多点确定平面 → 求截面**：三个点定出平面，再逐面求交得到真正的截面多边形。
+  // （必须在归一化之前算，截面的顶点也要进包围盒，否则图会偏。）
+  const sections: { ring: [number, number, number][]; fill?: string | null }[] = []
+  for (const pc of m.planeCuts || []) {
+    const ids = (pc.through || []).map((n) => idx[n]).filter((k) => k !== undefined)
+    if (ids.length < 3) continue
+    const p0 = P3[ids[0]]
+    const nrm = norm(cross(sub(P3[ids[1]], p0), sub(P3[ids[2]], p0)))
+    if (!isFinite(nrm[0]) || Math.hypot(nrm[0], nrm[1], nrm[2]) < 1e-9) continue
+    const ring = sectionPolygon(P3, faces, p0, nrm)
+    if (ring.length >= 3) sections.push({ ring, fill: pc.fill })
+  }
 
   const raw = P3.map((p) => [dot(p, right), dot(p, up), dot(p, d)] as [number, number, number])
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
@@ -405,16 +492,35 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     if (r[0] < x0) x0 = r[0]; if (r[0] > x1) x1 = r[0]
     if (-r[1] < y0) y0 = -r[1]; if (-r[1] > y1) y1 = -r[1]
   }
+  for (const sec of sections) {
+    for (const p of sec.ring) {
+      const sx = dot(p, right), sy = -dot(p, up)
+      if (sx < x0) x0 = sx; if (sx > x1) x1 = sx
+      if (sy < y0) y0 = sy; if (sy > y1) y1 = sy
+    }
+  }
   const bw = Math.max(1e-6, x1 - x0), bh = Math.max(1e-6, y1 - y0)
   const s = 0.84 / Math.max(bw, bh)
   const ox = (1 - bw * s) / 2, oy = (1 - bh * s) / 2
   const points: number[] = []
   for (const r of raw) points.push(+(ox + (r[0] - x0) * s).toFixed(4), +(oy + (-r[1] - y0) * s).toFixed(4))
+  // 截面的顶点是**新点**（不是模型顶点）：追加到 points 末尾，没有字母
+  const secStart: number[] = []
+  const secIdx: number[][] = []
+  for (const sec of sections) {
+    const ids: number[] = []
+    for (const p of sec.ring) {
+      const sx = dot(p, right), sy = -dot(p, up)
+      ids.push(points.length / 2)
+      points.push(+(ox + (sx - x0) * s).toFixed(4), +(oy + (sy - y0) * s).toFixed(4))
+    }
+    secStart.push(0)
+    secIdx.push(ids)
+  }
 
   const c: [number, number, number] = [0, 0, 0]
   for (const p of P3) { c[0] += p[0] / P3.length; c[1] += p[1] / P3.length; c[2] += p[2] / P3.length }
 
-  const faces = (m.faces || []).map((f) => f.map((n) => idx[n]).filter((k) => k !== undefined))
   const frontFacing: boolean[] = []
   const faceNormal: [number, number, number][] = []
   faces.forEach((f) => {
@@ -487,7 +593,22 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     faces.push(ids)
     cutStyles.push({ fill: cp.fill || '#f0c674', opacity: 0.28 })
   }
+  // 平面截出来的截面：边 + 填充面（跟手写 cutPlanes 用不同色调，一眼能分清）
+  for (let si = 0; si < secIdx.length; si++) {
+    const ids = secIdx[si]
+    const ring = sections[si].ring
+    const nrm2 = norm(cross(sub(ring[1], ring[0]), sub(ring[2], ring[1])))
+    const front = dot(nrm2, d) > 0
+    for (let k = 0; k < ids.length; k++) {
+      const a = ids[k], b = ids[(k + 1) % ids.length]
+      if (edges.some((e) => (e[0] === a && e[1] === b) || (e[0] === b && e[1] === a))) continue
+      edges.push([a, b, front ? 0 : 1])
+    }
+    faces.push(ids)
+    cutStyles.push({ fill: sections[si].fill === null ? undefined : (sections[si].fill || '#8ecae6'), opacity: 0.3 })
+  }
   const vlabels = names.map((n) => (m.labels && !(n in m.labels) ? null : toLabelText(m.labels?.[n] || n)))
+  if (secIdx.length) vlabels.push(...secIdx.map((ids) => ids.map(() => null)).flat())
   const faceStyles = faces.map((_, i) => cutStyles[i - (faces.length - cutStyles.length)] || null)
   return { points, mesh: { edges, faces }, vlabels, arcs: [], aspect: bw / bh, faceStyles }
 }

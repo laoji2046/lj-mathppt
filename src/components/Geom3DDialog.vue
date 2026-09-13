@@ -185,6 +185,33 @@ function addAux() {
   parse()
 }
 
+// ---------------- 定比分点 ----------------
+/** 定比分点：P = A + t·(B−A)。中点 t=0.5、三等分点 t=1/3，任意比都行。 */
+const mkFrom = ref('')
+const mkTo = ref('')
+const mkT = ref(0.5)
+const mkName = ref('')
+/** 默认给还没用过的字母（M、N、E、F…）—— 教材里中点常叫 M / N / E */
+function nextMarkName(): string {
+  const used = new Set(Object.keys(model.value?.vertices || {}))
+  const used2 = new Set((model.value?.marks || []).map((x) => x.name))
+  for (const c of ['M', 'N', 'E', 'F', 'G', 'H', 'K', 'Q', 'R', 'S', 'T']) {
+    if (!used.has(c) && !used2.has(c)) return c
+  }
+  return 'M'
+}
+function addMark() {
+  const m = model.value
+  if (!m || !mkFrom.value || !mkTo.value || mkFrom.value === mkTo.value) return
+  const name = mkName.value.trim() || nextMarkName()
+  const next = JSON.parse(raw.value) as Geom3D
+  // 同一个字母重复定义会乱：先把旧的同名那条去掉
+  next.marks = [...(next.marks || []).filter((x) => x.name !== name), { name, from: mkFrom.value, to: mkTo.value, t: mkT.value }]
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+  mkName.value = ''
+}
+
 /** 加截面 / 辅助面：输入一串顶点名（空格或逗号分隔），按这个顺序围成多边形。
  *  例题里的"截面 A-C-B₁"就是这三个字。填充色浅黄，只描边就留空颜色。 */
 const cutText = ref('')
@@ -201,6 +228,23 @@ function addCut() {
   raw.value = JSON.stringify(next, null, 1)
   parse()
   cutText.value = ''
+}
+
+/** **多点确定平面 → 求截面**：给三个（或更多）点，算出平面与该多面体的真实截面多边形。 */
+const planeText = ref('')
+function addPlaneCut() {
+  const m = model.value
+  if (!m) return
+  const ids = planeText.value.split(/[\s,，]+/).map((s) => s.trim()).filter(Boolean)
+  if (ids.length < 3) { parseErr.value = '至少要三个点才能确定平面'; return }
+  const markNames = new Set((m.marks || []).map((x) => x.name))
+  const bad = ids.filter((n) => !(n in (m.vertices || {})) && !markNames.has(n))
+  if (bad.length) { parseErr.value = '平面里有不存在的点：' + bad.join('、'); return }
+  const next = JSON.parse(raw.value) as Geom3D
+  next.planeCuts = [...(next.planeCuts || []), { through: ids, fill: '#8ecae6' }]
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+  planeText.value = ''
 }
 
 /** 棱柱：给每条竖棱加一个中点（A2 / B2 / …）—— 教材里那排"中点"一点就齐。 */
@@ -294,6 +338,27 @@ function insert() {
               <button class="g3__btn" @click="addAux()">添加</button>
             </div>
             <div class="g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">定比分点 P = A + t(B−A)：</span>
+              <select v-model="mkFrom" class="g3__sel g3__sel--sm">
+                <option value="">从…</option>
+                <option v-for="n in order" :key="'mf' + n" :value="n">{{ n }}</option>
+              </select>
+              <select v-model="mkTo" class="g3__sel g3__sel--sm">
+                <option value="">到…</option>
+                <option v-for="n in order" :key="'mt' + n" :value="n">{{ n }}</option>
+              </select>
+              <label class="g3__num">t <input v-model.number="mkT" type="number" step="0.05" min="0" max="1"></label>
+              <button class="g3__btn g3__btn--tiny" @click="mkT = 0.5">1/2</button>
+              <button class="g3__btn g3__btn--tiny" @click="mkT = +(1 / 3).toFixed(4)">1/3</button>
+              <input v-model="mkName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
+              <button class="g3__btn" @click="addMark()">加这个点</button>
+            </div>
+            <div class="g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">多点定平面 → 求截面：</span>
+              <input v-model="planeText" class="g3__inp" placeholder="如 A C B1">
+              <button class="g3__btn" @click="addPlaneCut()">求截面</button>
+            </div>
+            <div class="g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">加截面 / 辅助面（顶点名，空格分隔）：</span>
               <input v-model="cutText" class="g3__inp" placeholder="如 A C B1">
               <label class="g3__num"><input v-model="cutFill" type="checkbox"> 填充</label>
@@ -377,6 +442,8 @@ function insert() {
 .g3__build { margin-top: 12px; padding: 8px 10px; border: 1px dashed var(--border, #ddd); border-radius: 6px; background: #fafafc; }
 .g3__tip--inline { margin: 0; }
 .g3__inp { flex: 1; min-width: 110px; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 5px 8px; font-size: 12px; }
+.g3__inp--sm { flex: 0 0 auto; width: 52px; min-width: 0; text-align: center; }
+.g3__btn--tiny { padding: 3px 6px; font-size: 11px; }
 .g3__f { font-size: 12px; color: #555; flex: 1; min-width: 170px; }
 .g3__f input { width: 100%; }
 .g3__tip { font-size: 12px; color: #6b6b76; line-height: 1.6; margin: 8px 0 0; }
