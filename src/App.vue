@@ -15,9 +15,11 @@ import TemplatePicker from '@/components/TemplatePicker.vue'
 import { ggbEdit, openGgbSuite, closeGgbSuite } from '@/ui/ggbEditor'
 import ImageEditorModal from '@/components/ImageEditorModal.vue'
 import VectorizeDialog from '@/components/VectorizeDialog.vue'
+import Geom3DDialog from '@/components/Geom3DDialog.vue'
 import AsyExportDialog from '@/components/AsyExportDialog.vue'
 import { asyExportEl, closeAsyExport } from '@/ui/asyExport'
 import { vectorizeOpen, vectorizeSrc, vectorizeReplaceId, vectorizeEditId, closeVectorize } from '@/ui/vectorize'
+import { geom3dOpen } from '@/ui/geom3d'
 import { imageEditOpen, imageEditId, closeImageEditor } from '@/ui/imageEditor'
 import MarkdownSourcePanel from '@/components/MarkdownSourcePanel.vue'
 import { viewMode } from '@/ui/view'
@@ -135,6 +137,7 @@ function onPresent() {
     <ImageEditorModal v-if="imageEditOpen && imageEditId" :id="imageEditId" @close="closeImageEditor()" />
     <VectorizeDialog v-if="vectorizeOpen && vectorizeSrc" :src="vectorizeSrc" :replace-id="vectorizeReplaceId" :edit-id="vectorizeEditId" @close="closeVectorize()" />
     <AsyExportDialog v-if="asyExportEl" :el="asyExportEl" @close="closeAsyExport()" />
+    <Geom3DDialog v-if="geom3dOpen" />
     <ContextMenu />
   </div>
 </template>

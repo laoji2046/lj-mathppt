@@ -57,6 +57,92 @@ function viewDir(azim: number, elev: number): [number, number, number] {
   return [Math.cos(e) * Math.cos(a), Math.cos(e) * Math.sin(a), Math.sin(e)]
 }
 
+
+/** 只做投影、不归一化也不判虚实 —— 给「截图描点对齐」解视角用。
+ *  约定跟 projectGeom 一致：x 向右、y 向里、z 向上；返回屏幕坐标（y 向上，画面里再翻）。 */
+export function projectRaw(m: Geom3D, azimDeg: number, elevDeg: number): Record<string, [number, number]> {
+  const d = viewDir(azimDeg, elevDeg)
+  const a = (azimDeg * Math.PI) / 180
+  const right = norm([-Math.sin(a), Math.cos(a), 0])
+  const up = cross(d, right)
+  const out: Record<string, [number, number]> = {}
+  for (const [n, p] of Object.entries(m.vertices)) {
+    out[n] = [dot(p, right), dot(p, up)]
+  }
+  return out
+}
+
+/** 用"在截图上点了哪几个顶点"反解视角。
+ *  正交投影下屏幕坐标 = (sx·x + tx, sy·y + ty)，给定视角后是**线性**的 —— 直接最小二乘解出四个参数，
+ *  所以只要在视角网格上粗搜 + 局部细化就够了，不用迭代优化。
+ *  返回 azim/elev 和归一化残差（残差 / 图形尺度，0 表示完全对上）。 */
+export function solveView(
+  m: Geom3D,
+  order: string[],
+  clicks: [number, number][],
+): { azim: number; elev: number; err: number } {
+  const n = Math.min(order.length, clicks.length)
+  if (n < 3) return { azim: 0, elev: 0, err: Infinity }
+  const cs = clicks.slice(0, n)
+  // 点集的尺度：用来把残差归一化，跟图像大小无关
+  let cx = 0, cy = 0
+  cs.forEach((c) => { cx += c[0] / n; cy += c[1] / n })
+  let sc = 0
+  cs.forEach((c) => { sc = Math.max(sc, Math.hypot(c[0] - cx, c[1] - cy)) })
+  sc = sc || 1
+
+  const fitAt = (azim: number, elev: number) => {
+    const raw = projectRaw(m, azim, elev)
+    let sxx = 0, sx = 0, sxc = 0, syy = 0, sy = 0, syc = 0
+    for (let i = 0; i < n; i++) {
+      const r = raw[order[i]]
+      if (!r) return { err: Infinity }
+      // 屏幕 y 向下，投影的 y 向上 → 这里先把符号并进 sy
+      sxx += r[0] * r[0]; sx += r[0]; sxc += r[0] * cs[i][0]
+      syy += r[1] * r[1]; sy += r[1]; syc += r[1] * cs[i][1]
+    }
+    const detx = n * sxx - sx * sx
+    const dety = n * syy - sy * sy
+    if (Math.abs(detx) < 1e-9 || Math.abs(dety) < 1e-9) return { err: Infinity }
+    // **缩放符号要夹住**：屏幕 x 必为正、屏幕 y 必为负（画布 y 向下）。
+    // 不夹的话 (azim, elev) 和 (azim+180, -elev) 的投影只差一个点镜像、残差一样小，
+    // 求解器会随机挑到镜像解 —— 形状看着对，**虚实却整个反了**。
+    let bx = (n * sxc - sx * sumC(cs, 0)) / detx
+    let by = (n * syc - sy * sumC(cs, 1)) / dety
+    bx = Math.abs(bx)
+    by = -Math.abs(by)
+    const tx = (sumC(cs, 0) - bx * sx) / n
+    const ty = (sumC(cs, 1) - by * sy) / n
+    let e = 0
+    for (let i = 0; i < n; i++) {
+      const r = raw[order[i]]
+      const dx = bx * r[0] + tx - cs[i][0]
+      const dy = by * r[1] + ty - cs[i][1]
+      e += (dx * dx + dy * dy) / n
+    }
+    return { err: Math.sqrt(e) / sc }
+  }
+  const sumC = (arr: [number, number][], k: 0 | 1) => arr.slice(0, n).reduce((s, c) => s + c[k], 0)
+
+  let best = { azim: 0, elev: 0, err: Infinity }
+  const scan = (a0: number, a1: number, da: number, e0: number, e1: number, de: number) => {
+    for (let az = a0; az <= a1; az += da) {
+      for (let el = e0; el <= e1; el += de) {
+        if (el <= -89 || el >= 89) continue
+        const r = fitAt(az, el)
+        if (r.err < best.err) best = { azim: az, elev: el, err: r.err }
+      }
+    }
+  }
+  scan(-180, 175, 5, -75, 75, 5)
+  // 局部细化两轮
+  for (const step of [1, 0.2]) {
+    const a0 = best.azim, e0 = best.elev
+    scan(a0 - 4, a0 + 4, step, e0 - 4, e0 + 4, step)
+  }
+  return best
+}
+
 /** 把三维模型投影成二维图形（归一化到 0~1，留 8% 边距），并**算出每条棱的虚实**。 */
 export function projectGeom(m: Geom3D, view: Geom3DView): {
   points: number[]

@@ -8,6 +8,7 @@ import { MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS } from '@/types'
 import { figureBox, viewAspect } from '@/composables/mathPlot'
 import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
 import { openVectorize } from '@/ui/vectorize'
+import { openGeom3D } from '@/ui/geom3d'
 import FigurePreview from './elements/MathFigureElement.vue'
 
 const store = useDeckStore()
@@ -118,6 +119,14 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
           <button class="card card--recast card--pick" title="选一张线稿（几何插图 / 函数图），自动识别成可拖顶点的数学图形" @click="pickImage">
             <span class="card__thumb"><span class="recast__plus">＋</span></span>
             <span class="card__name">从图片复刻…</span>
+          </button>
+          <button
+            class="card card--recast card--pick"
+            title="给一份「顶点 + 面表」的三维几何描述（JSON），投影成图形 —— 虚实由面表算出来，不靠猜；还能导入截图描点反解视角"
+            @click="openGeom3D(); emit('close')"
+          >
+            <span class="card__thumb"><span class="recast__plus">⬢</span></span>
+            <span class="card__name">三维立体图…</span>
           </button>
           <button
             v-for="p in SOLID_FIGURE_PRESETS"
