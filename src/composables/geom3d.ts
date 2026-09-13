@@ -39,6 +39,12 @@ export interface Geom3D {
    *  （逐面求交再接环）。跟 cutPlanes 的分工：那个是"你给的多边形直接画"，这个是"算出平面切在哪儿"。
    *  凸多面体成立；三点不共线即可。 */
   planeCuts?: { through: string[]; fill?: string | null }[]
+  /** **点样式**（按点名）：改标签文字（`null` = 不显示）、颜色、大小。
+   *  编辑器里选中一个点就能改这些。 */
+  pointStyles?: Record<string, { label?: string | null; color?: string; size?: number }>
+  /** **线样式**：键是两端点名按字典序拼的 `A|B`（无序，A-B 和 B-A 同一条）。
+   *  颜色 / 线宽 / 虚实 —— 编辑器里选中一条线就能改。 */
+  edgeStyles?: Record<string, { color?: string; width?: number; dash?: 0 | 1 }>
 }
 
 export interface Geom3DView {
@@ -160,6 +166,31 @@ function sectionPolygon(
     ring.push(next)
   }
   return ring.length >= 3 ? ring : []
+}
+
+/** 把模型的顶点 + **定比分点**解析成一张完整的顶点表（可传递：新点也能当端点）。
+ *  **投影和界面必须共用这一个** —— 否则投影出来的点顺序跟界面里的点列表对不上，
+ *  点选、连线就会错位。 */
+export function resolveVertices(m: Geom3D): Record<string, [number, number, number]> {
+  const out: Record<string, [number, number, number]> = { ...(m.vertices || {}) }
+  let pend = (m.marks || []).filter((k) => k && k.name)
+  for (let pass = 0; pass < 8 && pend.length; pass++) {
+    const next: typeof pend = []
+    let moved = false
+    for (const mk of pend) {
+      const A = out[mk.from], B = out[mk.to]
+      if (!A || !B) { next.push(mk); continue }
+      out[mk.name] = [
+        +(A[0] + (B[0] - A[0]) * mk.t).toFixed(4),
+        +(A[1] + (B[1] - A[1]) * mk.t).toFixed(4),
+        +(A[2] + (B[2] - A[2]) * mk.t).toFixed(4),
+      ]
+      moved = true
+    }
+    pend = next
+    if (!moved) break
+  }
+  return out
 }
 
 /** 参数化生成常见几何体 —— 不依赖任何 AI，选类型 + 填参数就出模型。
@@ -324,6 +355,8 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   aspect: number
   /** 与 mesh.faces 一一对应的面样式（截面用得到填充） */
   faceStyles: ({ fill?: string; opacity?: number } | null)[]
+  /** 与 mesh.edges 一一对应的线样式（颜色/线宽/虚实），编辑器改属性用 */
+  edgeStyles: ({ color?: string; width?: number; dash?: 'solid' | 'dash' | 'dot' } | null)[]
 } {
   const d = viewDir(view.azim, view.elev)
   const aDeg = (view.azim * Math.PI) / 180
@@ -452,7 +485,7 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
         rx: +(a.rx * s2).toFixed(4), ry: +(a.ry * s2).toFixed(4),
         rot: +a.rot.toFixed(4), a0: +a.a0.toFixed(4), a1: +a.a1.toFixed(4), dash: a.dash,
       }))
-      return { points: pts2, mesh: { edges: [], faces: [] }, vlabels, arcs: arcs2, aspect: bw2 / bh2, faceStyles: [] }
+      return { points: pts2, mesh: { edges: [], faces: [] }, vlabels, arcs: arcs2, aspect: bw2 / bh2, faceStyles: [], edgeStyles: [] }
     }
     const axial = !!m.primitive.axial
     const iO = (): number => names.findIndex((n) => n === 'O')
@@ -549,29 +582,29 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
       else axFace.push([iA, iB, names.findIndex((n) => n === 'B1'), names.findIndex((n) => n === 'A1')])
     }
     const axStyles = axFace.map(() => ({ fill: '#c9c9c9', opacity: 0.4 }))
+    // 曲面体的线样式：按两端点名查（母线、直径这些都能改颜色/线宽/虚实）
+    const esF = m.edgeStyles || {}
+    const ekeyF = (i: number, j: number) => [names[i], names[j]].sort().join('|')
+    const edgeStylesF = edges.map(([i, j]) => {
+      const o = esF[ekeyF(i, j)]
+      if (!o) return null
+      return { color: o.color, width: o.width, dash: o.dash === 1 ? 'dash' as const : o.dash === 0 ? 'solid' as const : undefined }
+    })
     return {
       points, mesh: { edges, faces: axFace }, vlabels, arcs: arcsOut, aspect: bw / bh,
       faceStyles: axStyles as ({ fill?: string; opacity?: number } | null)[],
+      edgeStyles: edgeStylesF,
     }
   }
 
   // ---------------- 多面体（走面表） ----------------
-  // 先把**定比分点**解析出来，并进顶点表（后面的连线 / 定截面都能用它）
-  const vertsAll: Record<string, [number, number, number]> = { ...m.vertices }
-  for (const mk of m.marks || []) {
-    const A = vertsAll[mk.from], B = vertsAll[mk.to]
-    if (!A || !B || !mk.name) continue
-    vertsAll[mk.name] = [
-      +(A[0] + (B[0] - A[0]) * mk.t).toFixed(4),
-      +(A[1] + (B[1] - A[1]) * mk.t).toFixed(4),
-      +(A[2] + (B[2] - A[2]) * mk.t).toFixed(4),
-    ]
-  }
+  // 顶点 + 定比分点（跟界面共用同一个解析，保证顺序一致）
+  const vertsAll = resolveVertices(m)
   const names = Object.keys(vertsAll)
   const idx: Record<string, number> = {}
   names.forEach((n, i) => { idx[n] = i })
   const P3 = names.map((n) => vertsAll[n]) as [number, number, number][]
-  if (!P3.length) return { points: [], mesh: { edges: [], faces: [] }, vlabels: [], arcs: [], aspect: 1, faceStyles: [] }
+  if (!P3.length) return { points: [], mesh: { edges: [], faces: [] }, vlabels: [], arcs: [], aspect: 1, faceStyles: [], edgeStyles: [] }
 
   const faces = (m.faces || []).map((f) => f.map((n) => idx[n]).filter((k) => k !== undefined))
   // **多点确定平面 → 求截面**：三个点定出平面，再逐面求交得到真正的截面多边形。
@@ -583,7 +616,12 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     const p0 = P3[ids[0]]
     const nrm = norm(cross(sub(P3[ids[1]], p0), sub(P3[ids[2]], p0)))
     if (!isFinite(nrm[0]) || Math.hypot(nrm[0], nrm[1], nrm[2]) < 1e-9) continue
-    const ring = sectionPolygon(P3, faces, p0, nrm)
+    // **平面与某个面重合**（用同一个面的三点作平面时就会）→ 直接拿那个面当截面。
+    // 不特判的话，求交会得到"整面重合"的退化段，接不成环，截面就悄没声地没了。
+    const coFace = faces.find(
+      (f) => f.length >= 3 && f.every((i) => Math.abs(dot(sub(P3[i], p0), nrm)) < 1e-6),
+    )
+    const ring = coFace ? coFace.map((i) => P3[i]) : sectionPolygon(P3, faces, p0, nrm)
     if (ring.length >= 3) sections.push({ ring, fill: pc.fill })
   }
 
@@ -708,8 +746,26 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     faces.push(ids)
     cutStyles.push({ fill: sections[si].fill === null ? undefined : (sections[si].fill || '#8ecae6'), opacity: 0.3 })
   }
-  const vlabels = names.map((n) => (m.labels && !(n in m.labels) ? null : toLabelText(m.labels?.[n] || n)))
+  // 点样式：编辑器里改过的标签优先（label 为 null 表示不显示这个字母）
+  const ps = m.pointStyles || {}
+  const vlabels = names.map((n) => {
+    const ov = ps[n]
+    if (ov && 'label' in ov) return ov.label == null ? null : toLabelText(ov.label)
+    if (m.labels && !(n in m.labels)) return null
+    return toLabelText(m.labels?.[n] || n)
+  })
   if (secIdx.length) vlabels.push(...secIdx.map((ids) => ids.map(() => null)).flat())
   const faceStyles = faces.map((_, i) => cutStyles[i - (faces.length - cutStyles.length)] || null)
-  return { points, mesh: { edges, faces }, vlabels, arcs: [], aspect: bw / bh, faceStyles }
+  // 线样式（编辑器改的属性）：按两端点名查，与 mesh.edges 一一对应
+  const es = m.edgeStyles || {}
+  const ekey = (i: number, j: number) => {
+    const a = names[i], b = names[j]
+    return a === undefined || b === undefined ? '' : [a, b].sort().join('|')
+  }
+  const edgeStylesOut = edges.map(([i, j]) => {
+    const o = es[ekey(i, j)]
+    if (!o) return null
+    return { color: o.color, width: o.width, dash: o.dash === 1 ? 'dash' as const : o.dash === 0 ? 'solid' as const : undefined }
+  })
+  return { points, mesh: { edges, faces }, vlabels, arcs: [], aspect: bw / bh, faceStyles, edgeStyles: edgeStylesOut }
 }

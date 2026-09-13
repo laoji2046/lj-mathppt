@@ -13,20 +13,59 @@
 import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
-import { buildSolid, projectGeom, solveView, type Geom3D } from '@/composables/geom3d'
+import { buildSolid, projectGeom, resolveVertices, solveView, type Geom3D } from '@/composables/geom3d'
 import { GEOM3D_PRESETS, GEOM3D_PROMPT } from '@/composables/geom3dPrompt'
 import { renderSolid, arcsSvg } from '@/composables/solid3d'
 import { closeGeom3D } from '@/ui/geom3d'
 
 const store = useDeckStore()
 const H = 620
+/** 当前投影（只算一次，预览 / 属性 / 命中测试共用） */
+const proj = computed(() => (model.value ? projectGeom(model.value, { azim: azim.value, elev: elev.value }) : null))
+
+// ---------------- 选择（点 / 线） ----------------
+/** 选中的点（可多选 —— 连线和作平面都要多点）。存的是投影 points 的下标，
+ *  跟 order 一一对应（resolveVertices 保证顺序一致）。 */
+const selPoints = ref<number[]>([])
+
+/** 选中的线：存 mesh.edges 的下标 */
+const selEdge = ref<number | null>(null)
+/** 当前选择类型：点可以多选，线单选 */
+const selKind = ref<'point' | 'line' | null>(null)
+/** 选中项的点名（点选择用） */
+const selNames = computed(() => selPoints.value.map((i) => order.value[i]).filter(Boolean))
+/** 选中点的当前标签（单选时用于输入框回显） */
+const selLabel = computed(() => {
+  const m = model.value
+  const n = selNames.value[0]
+  if (!m || !n) return ''
+  const ov = (m.pointStyles || {})[n]
+  if (ov && 'label' in ov) return ov.label == null ? '' : String(ov.label)
+  return n
+})
+/** 选中线的当前样式（用于回显） */
+const selEdgeStyle = computed(() => {
+  const m = model.value
+  const nm = selEdgeNames.value
+  if (!m || !nm) return { color: '#1a1a1a', width: 2.6, dash: 0 }
+  const o = (m.edgeStyles || {})[[...nm].sort().join('|')] || {}
+  return { color: o.color || '#1a1a1a', width: o.width ?? 2.6, dash: o.dash ?? 0 }
+})
+
+/** 选中线的两端点名 */
+const selEdgeNames = computed(() => {
+  const p = proj.value
+  if (!p || selEdge.value === null) return null
+  const e = p.mesh.edges[selEdge.value]
+  if (!e) return null
+  const a = order.value[e[0]], b = order.value[e[1]]
+  return a && b ? ([a, b] as [string, string]) : null
+})
 /** 元素框的宽按内容的宽高比给 —— 固定宽高会把投影拉变形（椭圆最明显）。
  *  这里从当前投影算，随视角变化（角度变了包围盒也变）。 */
 const W = computed(() => {
-  const m = model.value
-  if (!m) return 560
-  const asp = projectGeom(m, { azim: azim.value, elev: elev.value }).aspect
-  return Math.max(200, Math.min(900, Math.round(H * asp)))
+  const p = proj.value
+  return p ? Math.max(200, Math.min(900, Math.round(H * p.aspect))) : 560
 })
 
 /** 示例：正四棱柱 ABCD-A₁B₁C₁D₁（2×2×2），四条竖棱各一个中点，再从 C₂ 连四条辅助线 */
@@ -64,30 +103,9 @@ const fitErr = ref<number | null>(null)
 const alignBox = ref<HTMLElement | null>(null)
 
 const model = ref<Geom3D | null>(null)
-/** 可用的点名（按出现顺序）：模型顶点 + **定比分点解析出来的点**。
- *  定比分点存在 marks 里、到投影时才解析，所以这里必须自己解析一遍 ——
- *  否则"新加了点却不能拿它连辅助线/定平面"（用户报过这个）。
- *  可传递：一个定比分点可以拿另一个定比分点当端点。 */
-const order = computed(() => {
-  const m = model.value
-  if (!m) return []
-  const names = Object.keys(m.vertices || {})
-  const known = new Set(names)
-  let pend = (m.marks || []).filter((k) => k && k.name)
-  for (let pass = 0; pass < 8 && pend.length; pass++) {
-    const next: typeof pend = []
-    let moved = false
-    for (const mk of pend) {
-      if (known.has(mk.from) && known.has(mk.to)) {
-        if (!known.has(mk.name)) { names.push(mk.name); known.add(mk.name) }
-        moved = true
-      } else next.push(mk)
-    }
-    pend = next
-    if (!moved) break
-  }
-  return names
-})
+/** 可用的点名（按出现顺序）：模型顶点 + 定比分点解析出来的点。
+ *  **跟投影共用 resolveVertices** —— 顺序必须严格一致，否则点选的会是另一个点。 */
+const order = computed(() => (model.value ? Object.keys(resolveVertices(model.value)) : []))
 const nextName = computed(() => order.value[clicks.value.length] || '')
 
 function parse() {
@@ -114,23 +132,176 @@ parse()
 /** 预览 / 插入用的 SVG（参数顺序：kind, pts, w, h, stroke, sw, fill, dsh, vlabels,
  *  edgeStyles, selVertex, selEdge, labelOffsets, faceStyles, selFace, mesh —— mesh 在最后一位） */
 const svg = computed(() => {
-  const m = model.value
-  if (!m) return ''
-  const p = projectGeom(m, { azim: azim.value, elev: elev.value })
+  const p = proj.value
+  if (!p) return ''
   const solid = renderSolid('cube', p.points, W.value, H, '#1a1a1a', 2.6, 'transparent', '6 5',
-    p.vlabels, undefined, undefined, undefined, undefined, p.faceStyles.length ? p.faceStyles : undefined, undefined, p.mesh)
+    p.vlabels, p.edgeStyles.some(Boolean) ? p.edgeStyles : undefined, undefined,
+    selKind.value === 'line' && selEdge.value !== null ? selEdge.value : undefined,
+    undefined, p.faceStyles.length ? p.faceStyles : undefined, undefined, p.mesh)
   // 圆柱 / 圆锥的底面是**弧图元**，renderSolid 不画它，单独叠一层（跟画布里的做法一致）
-  return solid + arcsSvg(p.arcs, W.value, H, '#1a1a1a', 2.6)
+  let out = solid + arcsSvg(p.arcs, W.value, H, '#1a1a1a', 2.6)
+  // 多选的点自己描一圈（renderSolid 只支持选中一个顶点）
+  for (const i of selPoints.value) {
+    const cx = p.points[i * 2] * W.value, cy = p.points[i * 2 + 1] * H
+    out += '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="7" fill="none" stroke="#1668e0" stroke-width="2"/>'
+  }
+  return out
 })
 
 const edgeStat = computed(() => {
-  const m = model.value
-  if (!m) return ''
-  const p = projectGeom(m, { azim: azim.value, elev: elev.value })
+  const p = proj.value
+  if (!p) return ''
   const dash = p.mesh.edges.filter((e) => e[2]).length
   const arc = p.arcs.length ? '＋' + p.arcs.length + ' 段弧' : ''
   return p.mesh.edges.length + ' 条棱（' + dash + ' 虚线）' + arc
 })
+
+// ---------------- 点选 + 属性 ----------------
+/** 点到线段的距离（命中测试用） */
+function distToSeg(x: number, y: number, x1: number, y1: number, x2: number, y2: number) {
+  const dx = x2 - x1, dy = y2 - y1
+  const L = dx * dx + dy * dy
+  const t = L > 0 ? Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / L)) : 0
+  return Math.hypot(x - (x1 + t * dx), y - (y1 + t * dy))
+}
+/** 命中测试：先找点（15px 内，点可以多选累加），再找线（9px 内，单选）。
+ *  点优先 —— 点小、意图更明确。 */
+function pickAt(cx: number, cy: number) {
+  const p = proj.value
+  if (!p) return
+  const px = (i: number) => p.points[i * 2] * W.value
+  const py = (i: number) => p.points[i * 2 + 1] * H
+  const n = p.points.length / 2
+  let bestP = -1, bestD = 15
+  for (let i = 0; i < n; i++) {
+    const d = Math.hypot(px(i) - cx, py(i) - cy)
+    if (d < bestD) { bestD = d; bestP = i }
+  }
+  if (bestP >= 0 && order.value[bestP]) {
+    selKind.value = 'point'
+    selEdge.value = null
+    const cur = selPoints.value
+    selPoints.value = cur.includes(bestP) ? cur.filter((k) => k !== bestP) : [...cur, bestP]
+    return
+  }
+  let bestE = -1
+  bestD = 9
+  for (let k = 0; k < p.mesh.edges.length; k++) {
+    const [a, b] = p.mesh.edges[k]
+    const d = distToSeg(cx, cy, px(a), py(a), px(b), py(b))
+    if (d < bestD) { bestD = d; bestE = k }
+  }
+  if (bestE >= 0) { selKind.value = 'line'; selEdge.value = bestE; selPoints.value = [] }
+  else { selKind.value = null; selEdge.value = null; selPoints.value = [] }
+}
+
+/** 改选中点的标签（清空 = 不显示这个字母） */
+function setPointLabel(v: string) {
+  const m = model.value
+  if (!m || !selNames.value.length) return
+  const next = JSON.parse(raw.value) as Geom3D
+  const ps = { ...(next.pointStyles || {}) }
+  for (const nm of selNames.value) ps[nm] = { ...(ps[nm] || {}), label: v.trim() === '' ? null : v.trim() }
+  next.pointStyles = ps
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+/** 改选中线的样式（颜色 / 线宽 / 虚实） */
+function setEdgeStyle(patch: { color?: string; width?: number; dash?: 0 | 1 }) {
+  const nm = selEdgeNames.value
+  if (!nm || !model.value) return
+  const key = [...nm].sort().join('|')
+  const next = JSON.parse(raw.value) as Geom3D
+  const es = { ...(next.edgeStyles || {}) }
+  es[key] = { ...(es[key] || {}), ...patch }
+  next.edgeStyles = es
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+
+/** 平面列表（手画的截面 + 三点定的平面），用于调填充 / 删除 */
+const planes = computed(() => {
+  const m = model.value
+  if (!m) return [] as { kind: 'cut' | 'plane'; i: number; label: string; fill: string | null | undefined }[]
+  const out: { kind: 'cut' | 'plane'; i: number; label: string; fill: string | null | undefined }[] = []
+  ;(m.cutPlanes || []).forEach((cp, i) => out.push({ kind: 'cut', i, label: (cp.points || []).join('-'), fill: cp.fill }))
+  ;(m.planeCuts || []).forEach((cp, i) => out.push({ kind: 'plane', i, label: (cp.through || []).join('-'), fill: cp.fill }))
+  return out
+})
+/** 改平面填充色（null = 只描边不填充） */
+function setPlaneFill(kind: 'cut' | 'plane', idx: number, fill: string | null) {
+  if (!model.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  const arr = kind === 'cut' ? next.cutPlanes : next.planeCuts
+  if (!arr || !arr[idx]) return
+  arr[idx] = { ...arr[idx], fill }
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+function delPlane(kind: 'cut' | 'plane', idx: number) {
+  if (!model.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  const arr = kind === 'cut' ? next.cutPlanes : next.planeCuts
+  if (!arr) return
+  arr.splice(idx, 1)
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+
+/** 选两点 → 连成线（写成辅助线，虚实自动判） */
+function connectSel() {
+  if (selNames.value.length !== 2 || !model.value) return
+  const [a, b] = selNames.value
+  const next = JSON.parse(raw.value) as Geom3D
+  const aux = next.auxiliary || []
+  if (!aux.some((x) => (x.from === a && x.to === b) || (x.from === b && x.to === a))) {
+    next.auxiliary = [...aux, { from: a, to: b, style: 'auto' }]
+    raw.value = JSON.stringify(next, null, 1)
+    parse()
+  }
+}
+/** 选三点及以上 → 过这些点作平面（算出它与多面体的截面；共面时就是那个多边形） */
+function planeSel() {
+  if (selNames.value.length < 3 || !model.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  next.planeCuts = [...(next.planeCuts || []), { through: selNames.value.slice(), fill: '#8ecae6' }]
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+
+// ---------------- 拖拽转视角 ----------------
+/** 按住图形区拖动 = 转视角（水平改方位角、垂直改仰角），松手即止。
+ *  这是"三维编辑器"最基本的交互，也是后面点选/画线/画平面的地基。 */
+const orbiting = ref(false)
+let orbitLast: [number, number] = [0, 0]
+/** 这次按下到底"拖"了还是"点"了 —— 拖动过就不当点击，免得转视角顺手改了选择 */
+let orbitMoved = false
+function onOrbitDown(e: PointerEvent) {
+  orbiting.value = true
+  orbitMoved = false
+  orbitLast = [e.clientX, e.clientY]
+  try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
+}
+function onOrbitMove(e: PointerEvent) {
+  if (!orbiting.value) return
+  const dx = e.clientX - orbitLast[0]
+  const dy = e.clientY - orbitLast[1]
+  if (Math.abs(dx) + Math.abs(dy) > 2) orbitMoved = true
+  orbitLast = [e.clientX, e.clientY]
+  let a = azim.value - dx * 0.55
+  while (a > 180) a -= 360
+  while (a < -180) a += 360
+  azim.value = Math.round(a)
+  elev.value = Math.max(-80, Math.min(80, Math.round(elev.value + dy * 0.45)))
+}
+function onOrbitUp(e: PointerEvent) {
+  const was = orbiting.value
+  orbiting.value = false
+  if (!was || orbitMoved) return
+  // 是"点"不是"拖" → 命中测试（屏幕坐标 → 元素坐标，viewBox 用 none 所以是等比的）
+  const box = (e.currentTarget as Element).getBoundingClientRect()
+  pickAt(((e.clientX - box.left) / box.width) * W.value, ((e.clientY - box.top) / box.height) * H)
+}
 
 // ---------------- 截图描点对齐 ----------------
 function pickImage() { const el = document.getElementById('g3-img') as HTMLInputElement | null; el?.click() }
@@ -300,6 +471,7 @@ function insert() {
     kind: 'cube', points: p.points, mesh: p.mesh, vlabels: p.vlabels,
     arcs: p.arcs.length ? p.arcs : undefined,
     faceStyles: p.faceStyles.length ? p.faceStyles : undefined,
+    edgeStyles: p.edgeStyles.some(Boolean) ? p.edgeStyles : undefined,
     w: W.value, h: H, fill: 'transparent', stroke: '#1a1a1a', strokeWidth: 2.6,
   } as never)
   closeGeom3D()
@@ -382,6 +554,19 @@ function insert() {
               <input v-model="mkName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
               <button class="g3__btn" @click="addMark()">加这个点</button>
             </div>
+            <div v-if="planes.length" class="g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">平面属性：</span>
+              <span v-for="pl in planes" :key="pl.kind + pl.i" class="g3__plane">
+                <b>{{ pl.label }}</b>
+                <input
+                  type="color" class="g3__col" :value="pl.fill || '#f0c674'"
+                  title="填充色"
+                  @input="setPlaneFill(pl.kind, pl.i, ($event.target as HTMLInputElement).value)"
+                >
+                <button class="g3__btn g3__btn--tiny" title="只描边，不填充" @click="setPlaneFill(pl.kind, pl.i, null)">不填充</button>
+                <button class="g3__btn g3__btn--tiny" title="删掉这个平面" @click="delPlane(pl.kind, pl.i)">×</button>
+              </span>
+            </div>
             <div class="g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">多点定平面 → 求截面：</span>
               <input v-model="planeText" class="g3__inp" placeholder="如 A C B1">
@@ -436,7 +621,51 @@ function insert() {
         </div>
 
         <div class="g3__right">
-          <svg :viewBox="`0 0 ${W} ${H}`" width="100%" height="100%" v-html="svg" />
+          <div
+            class="g3__view"
+            :class="{ 'g3__view--drag': orbiting }"
+            title="按住拖动转视角；点一下选点/选线"
+            @pointerdown="onOrbitDown"
+            @pointermove="onOrbitMove"
+            @pointerup="onOrbitUp"
+            @pointerleave="onOrbitUp"
+          >
+            <svg :viewBox="`0 0 ${W} ${H}`" width="100%" height="100%" preserveAspectRatio="none" v-html="svg" />
+          </div>
+
+          <div class="g3__props">
+            <template v-if="selKind === 'point' && selNames.length">
+              <span class="g3__propslab">点 <b>{{ selNames.join('、') }}</b></span>
+              <label class="g3__num">字母 <input
+                class="g3__inp g3__inp--sm"
+                :value="selLabel"
+                @change="setPointLabel(($event.target as HTMLInputElement).value)"
+              ></label>
+              <button class="g3__btn" @click="setPointLabel('')">不显示字母</button>
+              <button class="g3__btn" :disabled="selNames.length !== 2" title="选两个点连成一条线" @click="connectSel()">连线</button>
+              <button class="g3__btn" :disabled="selNames.length < 3" title="选三个点定一个平面（算出与多面体的截面）" @click="planeSel()">作平面</button>
+              <button class="g3__btn" @click="selPoints = []; selKind = null">清空</button>
+            </template>
+            <template v-else-if="selKind === 'line' && selEdgeNames">
+              <span class="g3__propslab">线 <b>{{ selEdgeNames[0] }}–{{ selEdgeNames[1] }}</b></span>
+              <label class="g3__num">颜色 <input
+                type="color" class="g3__col"
+                :value="selEdgeStyle.color"
+                @input="setEdgeStyle({ color: ($event.target as HTMLInputElement).value })"
+              ></label>
+              <label class="g3__num">线宽 <input
+                type="range" min="1" max="6" step="0.5" style="width:80px"
+                :value="selEdgeStyle.width"
+                @input="setEdgeStyle({ width: +($event.target as HTMLInputElement).value })"
+              ></label>
+              <button class="g3__btn" :class="{ 'g3__btn--on': selEdgeStyle.dash === 0 }" @click="setEdgeStyle({ dash: 0 })">实线</button>
+              <button class="g3__btn" :class="{ 'g3__btn--on': selEdgeStyle.dash === 1 }" @click="setEdgeStyle({ dash: 1 })">虚线</button>
+              <button class="g3__btn" @click="selEdge = null; selKind = null">取消</button>
+            </template>
+            <span v-else class="g3__tip g3__tip--inline">
+              点一下图形里的点或线就能改属性；点可多选 —— 选 2 个点「连线」、选 3 个点「作平面」
+            </span>
+          </div>
         </div>
       </div>
 
@@ -457,7 +686,17 @@ function insert() {
 .g3__close { border: 0; background: none; cursor: pointer; color: var(--muted, #888); }
 .g3__body { flex: 1; display: flex; min-height: 0; }
 .g3__left { width: 420px; padding: 12px 14px; overflow: auto; border-right: 1px solid var(--border, #e6e6ea); }
-.g3__right { flex: 1; padding: 8px; display: flex; align-items: center; justify-content: center; background: #fff; }
+.g3__right { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.g3__view { flex: 1; padding: 8px; display: flex; align-items: center; justify-content: center; background: #fff; cursor: grab; user-select: none; touch-action: none; min-height: 0; }
+.g3__view--drag { cursor: grabbing; }
+.g3__view svg { pointer-events: none; }
+.g3__props { border-top: 1px solid var(--border, #e6e6ea); padding: 8px 12px; min-height: 40px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: #fbfbfd; }
+.g3__propslab { font-size: 12px; color: #444; }
+.g3__propslab b { color: #1668e0; }
+.g3__btn--on { background: #1668e0; border-color: #1668e0; color: #fff; }
+.g3__col { width: 30px; height: 20px; padding: 0; border: 1px solid var(--border, #ddd); border-radius: 4px; background: none; }
+.g3__plane { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #555; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 2px 4px; background: #fff; }
+.g3__plane b { color: #1668e0; font-weight: 600; }
 .g3__lab { font-size: 12px; font-weight: 700; color: #444; margin-bottom: 6px; }
 .g3__lab--mt { margin-top: 14px; }
 .g3__ta { width: 100%; height: 220px; font: 12px/1.5 Consolas, Menlo, monospace; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 8px; resize: vertical; box-sizing: border-box; }
