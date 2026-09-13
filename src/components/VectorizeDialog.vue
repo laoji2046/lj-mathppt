@@ -673,34 +673,108 @@ function createArc(a: number, b: number, ellipse: boolean) {
 }
 const note = ref('')
 
+/** 点到采样折线的距离（overlay 像素） */
+function distToCurve(x: number, y: number, cur: [number, number][]) {
+  let best = 1e9
+  for (let i = 1; i < cur.length; i++) {
+    const x0 = cur[i - 1][0], y0 = cur[i - 1][1]
+    const dx = cur[i][0] - x0, dy = cur[i][1] - y0
+    const L2 = dx * dx + dy * dy || 1e-9
+    let t = ((x - x0) * dx + (y - y0) * dy) / L2
+    t = Math.max(0, Math.min(1, t))
+    const d = Math.hypot(x - (x0 + t * dx), y - (y0 + t * dy))
+    if (d < best) best = d
+  }
+  return best
+}
+
+/** 按**顶点链**找出"这两点之间那串折线" —— 比按距离容差猜确定得多。
+ *  做法：先挑出"整条都落在这条新曲线附近"的边，**再在这个子图里找 a→b 的路径**。
+ *  （不能直接取图上最短路径：实测两端之间常常直接有一条边，而真正要换掉的是另一条更长的链。）
+ *  候选边还要满足：至少两段、每段都是碎线段（< 弦长 × 0.35，长直边被这条挡住）、
+ *  整串点明显偏离弦（> 弦长 × 5%，说明它本来就在凑曲线）。 */
+function absorbChain(a: number, b: number, cur: [number, number][], chord: number): number[] | null {
+  const tol = Math.max(20, chord * 0.09)
+  const nearEdge = (ei: number) => {
+    const e = edges.value[ei]
+    if (Math.hypot(px(e[1]) - px(e[0]), py(e[1]) - py(e[0])) > chord * 0.35) return false
+    for (const t of [0.25, 0.5, 0.75]) {
+      const x = px(e[0]) + (px(e[1]) - px(e[0])) * t
+      const y = py(e[0]) + (py(e[1]) - py(e[0])) * t
+      if (distToCurve(x, y, cur) > tol) return false
+    }
+    return true
+  }
+  const ok = new Set<number>()
+  edges.value.forEach((e, i) => { void e; if (nearEdge(i)) ok.add(i) })
+  if (!ok.size) return null
+  // 在 ok 子图里 BFS 找 a→b
+  const adj = new Map<number, number[]>()
+  for (const ei of ok) {
+    const e = edges.value[ei]
+    if (!adj.has(e[0])) adj.set(e[0], [])
+    if (!adj.has(e[1])) adj.set(e[1], [])
+    adj.get(e[0])!.push(ei)
+    adj.get(e[1])!.push(ei)
+  }
+  const prevE = new Map<number, number>()
+  const seen = new Set<number>([a])
+  const q = [a]
+  while (q.length) {
+    const v = q.shift() as number
+    for (const ei of adj.get(v) || []) {
+      const e = edges.value[ei]
+      const nx = e[0] === v ? e[1] : e[0]
+      if (seen.has(nx)) continue
+      seen.add(nx)
+      prevE.set(nx, ei)
+      if (nx === b) { q.length = 0; break }
+      q.push(nx)
+    }
+  }
+  if (!prevE.has(b)) return null
+  const path: number[] = []
+  let v = b
+  while (v !== a) {
+    const ei = prevE.get(v)
+    if (ei === undefined) return null
+    path.push(ei)
+    const e = edges.value[ei]
+    v = e[0] === v ? e[1] : e[0]
+  }
+  path.reverse()
+  if (path.length < 2) return null
+  // 整串点要明显偏离弦（否则它本来就是直的，不该当成"曲线近似"）
+  const ax = px(a), ay = py(a), bx = px(b), by = py(b)
+  const ux = (bx - ax) / (chord || 1), uy = (by - ay) / (chord || 1)
+  let maxPerp = 0
+  for (const ei of path) {
+    const e = edges.value[ei]
+    const mx = (px(e[0]) + px(e[1])) / 2, my = (py(e[0]) + py(e[1])) / 2
+    maxPerp = Math.max(maxPerp, Math.abs((mx - ax) * -uy + (my - ay) * ux))
+  }
+  if (maxPerp < chord * 0.05) return null
+  return path
+}
+
 /** 把"已经被这条曲线盖住"的折线吃掉（识别出来的椭圆是一串折线，手画椭圆弧会两层重叠）。
- *  判据：一条边取 3 个采样点**都**落在曲线附近才吃，且**只吃比这条弧的弦短很多的碎线段** ——
- *  否则会把结构线（比如 B–C 那条长直边）一起吃掉。
+ *  **先按顶点链找**（确定），再按距离补那些没被链覆盖到的碎线段。
  *  返回被吃掉的边数和"因此变孤立"的点；点用倒序删，调用方负责 pushSnap。 */
 function absorbCurve(cur: [number, number][], a: number, b: number, quiet: boolean) {
-  const near = (x: number, y: number, tol: number) => {
-    for (let i = 1; i < cur.length; i++) {
-      const x0 = cur[i - 1][0], y0 = cur[i - 1][1]
-      const dx = cur[i][0] - x0, dy = cur[i][1] - y0
-      const L2 = dx * dx + dy * dy || 1e-9
-      let t = ((x - x0) * dx + (y - y0) * dy) / L2
-      t = Math.max(0, Math.min(1, t))
-      if (Math.hypot(x - (x0 + t * dx), y - (y0 + t * dy)) < tol) return true
-    }
-    return false
-  }
-  // 手画的椭圆弧和识别出来的椭圆总有十几像素差（实测最近一条差 10.3px），门槛太紧就吃不着；
-  // 太松又会误伤结构线 —— 所以配合下面的长度限制一起用。
-  const TOL = 32
   const chord = Math.hypot(px(b) - px(a), py(b) - py(a))
+  const chain = absorbChain(a, b, cur, chord)
+  const drop: number[] = chain ? chain.slice() : []
+  // 按距离补漏：手画的椭圆弧和识别出来的椭圆总有十几像素差（实测最近一条差 10.3px），
+  // 门槛太紧就吃不着、太松又会误伤结构线 —— 所以配合**长度限制**一起用。
+  const TOL = 32
   const maxEdge = chord * 0.25
-  const drop: number[] = []
   edges.value.forEach((e, i) => {
+    if (drop.includes(i)) return
     if (Math.hypot(px(e[1]) - px(e[0]), py(e[1]) - py(e[0])) > maxEdge) return
     for (const t of [0.2, 0.5, 0.8]) {
       const x = px(e[0]) + (px(e[1]) - px(e[0])) * t
       const y = py(e[0]) + (py(e[1]) - py(e[0])) * t
-      if (!near(x, y, TOL)) return
+      if (distToCurve(x, y, cur) > TOL) return
     }
     drop.push(i)
   })
@@ -715,7 +789,10 @@ function absorbCurve(cur: [number, number][], a: number, b: number, quiet: boole
   }
   edges.value = keep
   del.sort((x, y) => y - x).forEach((i) => finishRemove(i))
-  if (!quiet) note.value = '已吃掉 ' + drop.length + ' 条重合的线' + (del.length ? ' 、' + del.length + ' 个多余的点' : '')
+  if (!quiet) {
+    note.value = '已吃掉 ' + drop.length + ' 条重合的线' + (chain ? '（按顶点链）' : '') +
+      (del.length ? ' 、' + del.length + ' 个多余的点' : '')
+  }
   return { gone: drop.length, del }
 }
 
