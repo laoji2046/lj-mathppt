@@ -110,8 +110,7 @@ async function onDocxPicked(e: Event) {
 
 const drawOpen = ref(false)
 const drawWrap = ref<HTMLElement | null>(null)
-const moreOpen = ref(false)
-const moreWrap = ref<HTMLElement | null>(null)
+
 const formulaMenuOpen = ref(false)
 const formulaWrap = ref<HTMLElement | null>(null)
 const formulaModalOpen = ref(false)
@@ -144,7 +143,6 @@ function closeAllDropdowns() {
   imgMenuOpen.value = false
   formulaMenuOpen.value = false
   drawOpen.value = false
-  moreOpen.value = false
   ggbMenuOpen.value = false
   dsmMenuOpen.value = false
 }
@@ -397,7 +395,6 @@ function flashToast() {
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { fileToast.value = '' }, 2500) as unknown as number
 }
-function toggleMoreMenu() { toggleShown(moreOpen) }
 function toggleFormulaMenu() { toggleShown(formulaMenuOpen) }
 function openFormulaModal() { formulaMenuOpen.value = false; store.clearDrawTool(); formulaModalOpen.value = true }
 function openFormulaLib() { formulaMenuOpen.value = false; store.clearDrawTool(); openFormulaLibrary() }
@@ -519,9 +516,6 @@ function onDocClick(e: MouseEvent) {
   if (drawOpen.value && drawWrap.value && !drawWrap.value.contains(e.target as Node)) {
     drawOpen.value = false
   }
-  if (moreOpen.value && moreWrap.value && !moreWrap.value.contains(e.target as Node)) {
-    moreOpen.value = false
-  }
   if (formulaMenuOpen.value && formulaWrap.value && !formulaWrap.value.contains(e.target as Node)) {
     formulaMenuOpen.value = false
   }
@@ -585,6 +579,8 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           <button v-for="d in drawButtons" :key="d.type" class="dropdown__item" :class="{ 'dropdown__item--on': store.drawTool === d.type }" :title="d.title || ('在画布空白处拖拽绘制 ' + d.label)" @click="toggleDraw(d.type); shapeMenuOpen = false">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="d.svg"></svg></span>{{ d.label }}
           </button>
+          <button class="dropdown__item" @click="openSymbol(); shapeMenuOpen = false"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.symbol"></svg></span>数学符号</button>
+          <button class="dropdown__item" @click="openIcon(); shapeMenuOpen = false"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.icon"></svg></span>图标库</button>
           <button class="dropdown__item" title="数学图形：抛物线 / 三角形 / 贝塞尔 / 自定义多边形等" @click="openFig(); shapeMenuOpen = false">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.fig"></svg></span>数学图形…
           </button>
@@ -652,22 +648,6 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         </div>
       </div>
 
-
-      <!-- 插入下拉：符号 / 图形 / 图标 / 图片库 -->
-      <div ref="moreWrap" class="dropdown">
-        <button
-          class="btn"
-          :class="{ 'btn--open': moreOpen }"
-          title="更多插入：数学符号 / 图形 / 图标"
-          @click="toggleMoreMenu"
-        >
-          <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.more"></svg></span>更多<span class="caret">▾</span>
-        </button>
-        <div v-if="moreOpen" class="dropdown__menu">
-          <button class="dropdown__item" @click="openSymbol(); moreOpen = false"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.symbol"></svg></span>数学符号</button>
-          <button class="dropdown__item" @click="openIcon(); moreOpen = false"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.icon"></svg></span>图标库</button>
-        </div>
-      </div>
 
       <!-- GeoGebra 下拉：空白小程序 / 打开本地 .ggb -->
       <div ref="ggbWrap" class="dropdown">
