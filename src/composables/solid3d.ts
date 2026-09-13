@@ -187,7 +187,9 @@ export function arcsSvg(arcs: FigureArc[] | undefined, w: number, h: number, str
     if (list.length < 2) continue
     let d = ''
     for (let k = 0; k < list.length; k++) d += (k ? ' L ' : 'M ') + list[k][0].toFixed(1) + ' ' + list[k][1].toFixed(1)
-    out += '<path d="' + d + '" fill="none" stroke="' + stroke + '" stroke-width="' + sw + '" stroke-linecap="round"' + (a.dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>'
+    // **平头（butt），不要圆头**：弧的两端正好落在母线上，圆头端帽会往外多出半个线宽，
+    // 看着就是"圆弧冒到母线外面一小截"（用户报过）。教材里的虚线也是平头的。
+    out += '<path d="' + d + '" fill="none" stroke="' + stroke + '" stroke-width="' + sw + '" stroke-linecap="butt"' + (a.dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>'
   }
   return out
 }
