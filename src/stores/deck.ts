@@ -5,7 +5,8 @@ import type {
 } from '@/types'
 import { createElement, findTheme, GRAPHIC_TYPES } from '@/types'
 import { findTemplate } from '@/templates/mathTemplates'
-import { findSlideLayout } from '@/templates/slideLayouts'
+import { findSlideLayout, type LayoutSlot } from '@/templates/slideLayouts'
+import { getTheme } from '@/templates/pptTheme'
 import { findBundle } from '@/templates/mathBundles'
 import { findProTemplate, findProBundle } from '@/templates/proTemplates'
 import { findMathAppletTemplate } from '@/templates/mathAppletTemplates'
@@ -517,11 +518,15 @@ export const useDeckStore = defineStore('deck', () => {
     currentIndex.value = index + 1
     clearSelection()
   }
-  /** 套用版式库里的某一套版式（会替换该页内容） */
+  /**
+   * 套用版式库里的某一套版式（会替换该页内容）。
+   *
+   * 样式一律**跟文稿主题走**：字号取 TypeScale 档位、字体取主题字体、颜色取主题色、
+   * 边距取主题网格 —— 这样套出来的页面跟模板页是同一种版面语言（设计宪法：别随手写死字号/颜色）。
+   */
   function applyLayoutToSlide(index: number, layoutId: string) {
-    const s = deck.value.slides[index]
     const layout = findSlideLayout(layoutId)
-    if (!s || !layout) return
+    if (!deck.value.slides[index] || !layout) return
     pushHistory()
     gotoSlide(index)
     const cur = deck.value.slides[index]
@@ -529,27 +534,53 @@ export const useDeckStore = defineStore('deck', () => {
     cur.bg = '#ffffff'
     delete cur.bgGradient
     delete cur.bgImage
+
+    const th = getTheme(deck.value.theme || 'edumath')
     const W = deck.value.width || 1920
     const H = deck.value.height || 1080
+    const rectOf = (s: LayoutSlot) => ({
+      x: Math.round(s.x * W),
+      y: Math.round(s.y * H),
+      w: Math.round(s.w * W),
+      h: Math.round(s.h * H),
+    })
+
     for (const slot of layout.slots) {
-      const rect = {
-        x: Math.round(slot.x * W),
-        y: Math.round(slot.y * H),
-        w: Math.round(slot.w * W),
-        h: Math.round(slot.h * H),
-      }
+      const r = rectOf(slot)
       if (slot.kind === 'image') {
-        addElement('image', { ...rect, src: '', fit: 'contain' } as Partial<SlideElement>)
-      } else {
-        addElement('text', {
-          ...rect,
-          text: slot.text || '',
-          fontSize: slot.fontSize || 24,
-          fontWeight: slot.fontWeight ?? 400,
-          align: slot.align || 'left',
-          color: '#1b1f27', fontFamily: 'sans', bgColor: 'transparent', shadow: 'none', valign: 'top',
-        } as Partial<SlideElement>)
+        addElement('image', { ...r, src: '', fit: 'contain' } as Partial<SlideElement>)
+        continue
       }
+      const isTitle = slot.kind === 'title'
+      const isSub = slot.kind === 'subtitle'
+      addElement('text', {
+        ...r,
+        text: slot.text || '',
+        fontSize: isTitle ? th.type.h1 : isSub ? th.type.h2 : th.type.body,
+        fontFamily: isTitle ? th.fontTitle : th.fontBody,
+        fontWeight: isTitle ? 700 : isSub ? 600 : 400,
+        color: isTitle ? th.text : isSub ? th.muted : th.text,
+        align: slot.align || 'left',
+        bgColor: 'transparent',
+        shadow: 'none',
+        // 标题垂直居中（版面更稳），正文顶对齐并开自动换行
+        valign: isTitle ? 'middle' : 'top',
+        lineHeight: isTitle ? 1.15 : 1.6,
+        wrap: !isTitle,
+        letterSpacing: 0,
+      } as Partial<SlideElement>)
+    }
+
+    // 页眉细线：只给"标题在顶上"的内容页加（封面/章节页的标题是居中的，不加）——
+    // 跟模板页保持同一种版面语言；主题里 showHeader=false 时不加
+    const topTitle = layout.slots.find((s) => s.kind === 'title' && s.y < 0.2)
+    if (th.showHeader && topTitle) {
+      addElement('shape', {
+        shape: 'rect',
+        x: th.grid.margin, y: Math.round(H * 0.05),
+        w: W - th.grid.margin * 2, h: 2,
+        fill: th.line, stroke: 'none', strokeWidth: 0,
+      } as Partial<SlideElement>)
     }
     clearSelection()
   }

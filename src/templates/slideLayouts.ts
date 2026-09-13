@@ -30,62 +30,62 @@ export const SLIDE_LAYOUTS: SlideLayout[] = [
   {
     id: 'titleSlide', label: '标题幻灯片',
     slots: [
-      { kind: 'title', x: X0, y: 0.34, w: W, h: 0.16, text: '标题', fontSize: 64, fontWeight: 700, align: 'center' },
-      { kind: 'subtitle', x: X0, y: 0.52, w: W, h: 0.10, text: '副标题', fontSize: 28, fontWeight: 400, align: 'center' },
+      { kind: 'title', x: X0, y: 0.34, w: W, h: 0.16, text: '单击此处添加标题', fontSize: 64, fontWeight: 700, align: 'center' },
+      { kind: 'subtitle', x: X0, y: 0.52, w: W, h: 0.10, text: '单击此处添加副标题', fontSize: 28, fontWeight: 400, align: 'center' },
     ],
   },
   {
     id: 'titleContent', label: '标题和内容',
     slots: [
-      { kind: 'title', x: X0, y: 0.08, w: W, h: 0.14, text: '标题', fontSize: 44, fontWeight: 700, align: 'left' },
-      { kind: 'text', x: X0, y: 0.28, w: W, h: 0.60, text: '正文内容', fontSize: 24, fontWeight: 400, align: 'left' },
+      { kind: 'title', x: X0, y: 0.08, w: W, h: 0.14, text: '单击此处添加标题', fontSize: 44, fontWeight: 700, align: 'left' },
+      { kind: 'text', x: X0, y: 0.28, w: W, h: 0.60, text: '• 单击此处添加文本', fontSize: 24, fontWeight: 400, align: 'left' },
     ],
   },
   {
     id: 'section', label: '节标题',
     slots: [
-      { kind: 'title', x: X0, y: 0.36, w: W, h: 0.18, text: '节标题', fontSize: 56, fontWeight: 700, align: 'center' },
-      { kind: 'text', x: X0, y: 0.56, w: W, h: 0.08, text: '本节内容', fontSize: 22, fontWeight: 400, align: 'center' },
+      { kind: 'title', x: X0, y: 0.36, w: W, h: 0.18, text: '单击此处添加标题', fontSize: 56, fontWeight: 700, align: 'center' },
+      { kind: 'text', x: X0, y: 0.56, w: W, h: 0.08, text: '单击此处添加副标题', fontSize: 22, fontWeight: 400, align: 'center' },
     ],
   },
   {
     id: 'twoCol', label: '两栏内容',
     slots: [
-      { kind: 'title', x: X0, y: 0.08, w: W, h: 0.14, text: '标题', fontSize: 44, fontWeight: 700, align: 'left' },
-      { kind: 'text', x: X0, y: 0.28, w: 0.40, h: 0.60, text: '左栏内容', fontSize: 22, align: 'left' },
-      { kind: 'text', x: 0.52, y: 0.28, w: 0.40, h: 0.60, text: '右栏内容', fontSize: 22, align: 'left' },
+      { kind: 'title', x: X0, y: 0.08, w: W, h: 0.14, text: '单击此处添加标题', fontSize: 44, fontWeight: 700, align: 'left' },
+      { kind: 'text', x: X0, y: 0.28, w: 0.40, h: 0.60, text: '• 单击此处添加文本', fontSize: 22, align: 'left' },
+      { kind: 'text', x: 0.52, y: 0.28, w: 0.40, h: 0.60, text: '• 单击此处添加文本', fontSize: 22, align: 'left' },
     ],
   },
   {
     id: 'compare', label: '比较',
     slots: [
-      { kind: 'title', x: X0, y: 0.08, w: W, h: 0.12, text: '标题', fontSize: 40, fontWeight: 700, align: 'left' },
+      { kind: 'title', x: X0, y: 0.08, w: W, h: 0.12, text: '单击此处添加标题', fontSize: 40, fontWeight: 700, align: 'left' },
       { kind: 'subtitle', x: X0, y: 0.24, w: 0.40, h: 0.08, text: '方案 A', fontSize: 22, fontWeight: 600, align: 'left' },
       { kind: 'subtitle', x: 0.52, y: 0.24, w: 0.40, h: 0.08, text: '方案 B', fontSize: 22, fontWeight: 600, align: 'left' },
-      { kind: 'text', x: X0, y: 0.34, w: 0.40, h: 0.54, text: '内容', fontSize: 20, align: 'left' },
-      { kind: 'text', x: 0.52, y: 0.34, w: 0.40, h: 0.54, text: '内容', fontSize: 20, align: 'left' },
+      { kind: 'text', x: X0, y: 0.34, w: 0.40, h: 0.54, text: '• 单击此处添加文本', fontSize: 20, align: 'left' },
+      { kind: 'text', x: 0.52, y: 0.34, w: 0.40, h: 0.54, text: '• 单击此处添加文本', fontSize: 20, align: 'left' },
     ],
   },
   {
     id: 'titleOnly', label: '仅标题',
     slots: [
-      { kind: 'title', x: X0, y: 0.08, w: W, h: 0.16, text: '标题', fontSize: 44, fontWeight: 700, align: 'left' },
+      { kind: 'title', x: X0, y: 0.08, w: W, h: 0.16, text: '单击此处添加标题', fontSize: 44, fontWeight: 700, align: 'left' },
     ],
   },
   { id: 'blank', label: '空白', slots: [] },
   {
     id: 'contentTitle', label: '内容与标题',
     slots: [
-      { kind: 'text', x: X0, y: 0.10, w: W, h: 0.52, text: '内容', fontSize: 24, align: 'left' },
-      { kind: 'title', x: X0, y: 0.70, w: W, h: 0.14, text: '标题', fontSize: 40, fontWeight: 700, align: 'left' },
+      { kind: 'text', x: X0, y: 0.10, w: W, h: 0.52, text: '• 单击此处添加文本', fontSize: 24, align: 'left' },
+      { kind: 'title', x: X0, y: 0.70, w: W, h: 0.14, text: '单击此处添加标题', fontSize: 40, fontWeight: 700, align: 'left' },
     ],
   },
   {
     id: 'imageTitle', label: '图片与标题',
     slots: [
-      { kind: 'title', x: X0, y: 0.06, w: W, h: 0.12, text: '标题', fontSize: 40, fontWeight: 700, align: 'left' },
+      { kind: 'title', x: X0, y: 0.06, w: W, h: 0.12, text: '单击此处添加标题', fontSize: 40, fontWeight: 700, align: 'left' },
       { kind: 'image', x: X0, y: 0.22, w: 0.46, h: 0.66 },
-      { kind: 'text', x: 0.58, y: 0.22, w: 0.34, h: 0.66, text: '说明文字', fontSize: 20, align: 'left' },
+      { kind: 'text', x: 0.58, y: 0.22, w: 0.34, h: 0.66, text: '单击此处添加文本', fontSize: 20, align: 'left' },
     ],
   },
 ]
