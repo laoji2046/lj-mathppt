@@ -357,6 +357,19 @@ function vertHull(): [number, number][] {
   return convexHull(P)
 }
 
+/** 「按字母补线」按钮：侧棱 + 面的边两条一起跑，提示合并成一条。
+ *  先把 note 清掉 —— 否则第二次点（没有可补的）会留着上一次的"补了 N 条"，看着像又补了一次。 */
+function refillByLetters() {
+  note.value = ''
+  const parts: string[] = []
+  inferCorrespondingEdges()
+  if (note.value) parts.push(note.value)
+  note.value = ''
+  inferFacePolygons()
+  if (note.value) parts.push(note.value)
+  note.value = parts.length ? parts.join('；') : '没有需要补的线（字母齐了，或者位置关系对不上）'
+}
+
 /** 按字母补线：图上只要有 **X 和 X_1**（同底字母 + 下标 1，下标用 _1 或 ^1 都认）这种一对，
  *  它们之间就一定有一条线（立体图里的侧棱，C–C₁、B–B₁…），识别漏了要补上 —— 用户明确说"这条线必画"。
  *  重名只取第一个；已经连了的跳过；补出来的默认实线，不对的话在图上点一下就能改虚实。
@@ -385,15 +398,9 @@ function inferCorrespondingEdges(): number {
   const mx = cand.reduce((s, c) => s + c.dx, 0) / cand.length
   const my = cand.reduce((s, c) => s + c.dy, 0) / cand.length
   const tol = Math.max(8, 0.2 * Math.hypot(mx, my))
-  // **只连"端点"**：一条边都没有的孤立点不参与补线（用户：不是端点就不需要连）。
-  // 在补之前先取一次快照，免得后补的边把孤立点"变成"端点。
-  const isEnd = (v: number) => edges.value.some((e) => e[0] === v || e[1] === v)
-  const end0 = new Set<number>()
-  for (let v = 0; v < nVerts.value; v++) if (isEnd(v)) end0.add(v)
-  let added = 0, dashed = 0, odd = 0, notEnd = 0
+  let added = 0, dashed = 0, odd = 0
   const hull = vertHull()
   for (const c of cand) {
-    if (!end0.has(c.i) || !end0.has(c.j)) { notEnd++; continue }
     if (Math.hypot(c.dx - mx, c.dy - my) > tol) odd++
     if (edges.value.some((e) => (e[0] === c.i && e[1] === c.j) || (e[0] === c.j && e[1] === c.i))) continue
     const d = inferDashFor(c.j, c.i, hull)
@@ -401,9 +408,8 @@ function inferCorrespondingEdges(): number {
     added++
     if (d) dashed++
   }
-  if (added || odd || notEnd) {
+  if (added || odd) {
     note.value = '按字母补了 ' + added + ' 条侧棱（X–X₁）' + (dashed ? '，其中 ' + dashed + ' 条虚线' : '') +
-      (notEnd ? '；' + notEnd + ' 对因端点没连线（不是端点）跳过' : '') +
       (odd ? '；其中 ' + odd + ' 对位移不一致，字母可能认错，请核对' : '')
   }
   return added
@@ -456,8 +462,6 @@ function inferFacePolygons(): number {
       if (k + 1 < arr.length && arr[k + 1].base === arr[k].base) { runOK = false; break }
     }
     if (!runOK) continue
-    // 环上每个点都必须是**端点**（一条边都没连的孤立点不算面顶点）
-    if (arr.some((x) => !edges.value.some((e) => e[0] === x.i || e[1] === x.i))) continue
     const P = arr.map((x) => [px(x.i), py(x.i)] as [number, number])
     if (!isConvexRing(P)) continue
     const hull = vertHull()
@@ -1582,7 +1586,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 {{ ellipseMode ? '结束画椭圆弧' : '＋ 画椭圆弧' }}
               </button>
               <button class="vd__btn" title="同底字母配下标 1 的一对（C 和 C₁）之间一定有线，识别漏了就补上"
-                @click="inferCorrespondingEdges() + inferFacePolygons()">按字母补线（侧棱 + 面的边）</button>
+                @click="refillByLetters()">按字母补线（侧棱 + 面的边）</button>
               <button v-if="selE !== null" class="vd__btn" @click="toggleDash">实线 / 虚线 切换</button>
             </div>
             <p v-if="linkMode" class="vd__tip vd__tip--on">
