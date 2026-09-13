@@ -80,7 +80,24 @@ function catmullRom(P: [number, number][], per = 12): [number, number][] {
  *  2 个控制点用 bulge 的圆；**3 个控制点用过三点的圆**（往弧上加控制点时形状完全不变）；4 个以上用 Catmull-Rom。 */
 export function arcPolyline(a: FigureArc, points: number[] | undefined, w: number, h: number): [number, number][] {
   const idx = arcIdx(a)
-  if (!idx || !points) return []
+  // **自由式椭圆弧**（没有顶点下标，直接给 cx/cy/rx/ry/rot/a0/a1）—— 三维投影出来的底面圆走这条。
+  // 漏了它的话，圆柱/圆锥的底面会整条不显示（踩过）。
+  if (!idx) {
+    if (a.cx === undefined || a.cy === undefined || a.rx === undefined || a.ry === undefined) return []
+    const cx = a.cx * w, cy = a.cy * h, rx = a.rx * w, ry = a.ry * h
+    const rot = a.rot || 0, cp = Math.cos(rot), sp = Math.sin(rot)
+    const a0 = a.a0 ?? 0, a1 = a.a1 ?? Math.PI * 2
+    const span = a1 - a0
+    const N = Math.max(16, Math.min(140, Math.ceil(Math.abs(span) * Math.max(rx, ry) / 4)))
+    const out: [number, number][] = []
+    for (let k = 0; k <= N; k++) {
+      const t = a0 + (span * k) / N
+      const x = rx * Math.cos(t), y = ry * Math.sin(t)
+      out.push([cx + x * cp - y * sp, cy + x * sp + y * cp])
+    }
+    return out
+  }
+  if (!points) return []
   const P: [number, number][] = []
   for (const k of idx) {
     if (k < 0 || k * 2 + 1 >= points.length) return []

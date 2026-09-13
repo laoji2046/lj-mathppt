@@ -27,6 +27,8 @@ export interface Geom3D {
   auxiliary?: { from: string; to: string; style?: 'solid' | 'dashed' | 'auto' }[]
   /** 只标注列出的顶点；省略则全标。写 'A1' 会变成应用里的 A_1 */
   labels?: Record<string, string>
+  /** 圆柱 / 圆锥：顶点表留空也行，形状由这里产生（底面圆 → 投影成椭圆弧） */
+  primitive?: GeomPrimitive
 }
 
 export interface Geom3DView {
@@ -59,11 +61,36 @@ function viewDir(azim: number, elev: number): [number, number, number] {
 
 
 
+
+/** 圆柱 / 圆锥：圆形底在投影里是椭圆，用**弧图元**表达（不是折线）。
+ *  n 是采样数，只影响"看起来圆不圆"，60 够用。 */
+export interface GeomPrimitive {
+  type: 'cylinder' | 'cone'
+  /** 底面半径 */
+  r: number
+  /** 高 */
+  h: number
+}
+
+/** 由两个**共轭半直径**向量还原椭圆：半轴 rx/ry + 旋转角 rot。
+ *  （圆在仿射映射下的像一定是椭圆，所以只要知道圆的两个轴向量的投影就够了，
+ *   不必去采样点再拟合。） */
+function ellipseFromConjugate(ux: number, uy: number, vx: number, vy: number) {
+  const uu = ux * ux + uy * uy, vv = vx * vx + vy * vy, uv = ux * vx + uy * vy
+  const E = (uu + vv) / 2, F = (uu - vv) / 2, G = uv
+  const s = Math.hypot(F, G)
+  const rx = Math.sqrt(Math.max(1e-12, E + s))
+  const ry = Math.sqrt(Math.max(1e-12, E - s))
+  let rot = 0.5 * Math.atan2(2 * uv, uu - vv)
+  if (ry > rx) { rot += Math.PI / 2; return { rx: ry, ry: rx, rot } }
+  return { rx, ry, rot }
+}
+
 /** 参数化生成常见几何体 —— 不依赖任何 AI，选类型 + 填参数就出模型。
  *  顶点命名按教材习惯：底面 A、B、C…，上底 A1、B1、C1…，锥顶 P，底面中心 O。 */
 export interface BuildOpts {
-  /** 'cube' 正方体 | 'box' 长方体 | 'prism' 正 n 棱柱 | 'pyramid' 正 n 棱锥 */
-  type: 'cube' | 'box' | 'prism' | 'pyramid'
+  /** 'cube' 正方体 | 'box' 长方体 | 'prism' 正 n 棱柱 | 'pyramid' 正 n 棱锥 | 'cylinder' 圆柱 | 'cone' 圆锥 */
+  type: 'cube' | 'box' | 'prism' | 'pyramid' | 'cylinder' | 'cone'
   /** 底面边数（棱柱 / 棱锥用） */
   n?: number
   /** 底面边长（正方体忽略，用 size） */
@@ -81,6 +108,10 @@ const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 export function buildSolid(o: BuildOpts): Geom3D {
   const verts: Record<string, [number, number, number]> = {}
   const faces: string[][] = []
+  // 圆柱 / 圆锥：交给 primitive —— 底面圆投影成椭圆弧，不是折线
+  if (o.type === 'cylinder' || o.type === 'cone') {
+    return { vertices: {}, primitive: { type: o.type, r: o.a ?? 1.2, h: o.h ?? 2.4 } }
+  }
   if (o.type === 'cube' || o.type === 'box') {
     const w = o.type === 'cube' ? (o.size ?? 2) : (o.a ?? 2)
     const d = o.type === 'cube' ? (o.size ?? 2) : (o.b ?? 1.4)
@@ -212,23 +243,119 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   points: number[]
   mesh: { edges: [number, number, number][]; faces: number[][] }
   vlabels: (string | null)[]
+  arcs: { cx: number; cy: number; rx: number; ry: number; rot: number; a0: number; a1: number; dash: 0 | 1 }[]
+  /** 内容宽高比（宽/高）—— 元素框要按它给，否则投影会被拉变形（椭圆尤其明显） */
+  aspect: number
 } {
+  const d = viewDir(view.azim, view.elev)
+  const aDeg = (view.azim * Math.PI) / 180
+  const right = norm([-Math.sin(aDeg), Math.cos(aDeg), 0])
+  const up = cross(d, right)
+  // 屏幕坐标：x 向右、y 向下（所以 up 取负）
+  const sc = (p: [number, number, number]): [number, number] => [dot(p, right), -dot(p, up)]
+
+  // ---------------- primitive：圆柱 / 圆锥 ----------------
+  if (m.primitive) {
+    const { type, r, h } = m.primitive
+    const names: string[] = []
+    const P3: [number, number, number][] = []
+    const vlabels: (string | null)[] = []
+    const push = (name: string | null, p: [number, number, number]) => {
+      names.push(name || ('_' + names.length))
+      P3.push(p)
+      vlabels.push(name ? toLabelText(name) : null)
+      return names.length - 1
+    }
+    // 侧影母线的落点：圆上**法向与视线垂直**的两点 —— cos t·d₀ + sin t·d₁ = 0。
+    // （不是深度极值点！那两个点是"最近/最远"，跟投影椭圆的左右端点是两回事 —— 踩过，
+    //   写错的话两条母线会挤到圆中间去，圆柱看着就只剩一根竖线。）
+    const t0 = Math.atan2(-d[0], d[1])
+    const tang: [number, number, number][] = [0, Math.PI].map((k) => {
+      const t = t0 + k
+      return [+(r * Math.cos(t)).toFixed(4), +(r * Math.sin(t)).toFixed(4), 0]
+    })
+    const nearPlus = (Math.cos(t0 + Math.PI / 2) * d[0] + Math.sin(t0 + Math.PI / 2) * d[1]) > 0
+    const edges: [number, number, number][] = []
+    let apex = -1, iA = -1, iB = -1
+    if (type === 'cone') {
+      apex = push('P', [0, 0, h])
+      push('O', [0, 0, 0])
+      iA = push(null, tang[0])
+      iB = push(null, tang[1])
+      edges.push([apex, iA, 0], [apex, iB, 0])
+    } else {
+      push('O', [0, 0, 0])
+      push('O1', [0, 0, h])
+      iA = push(null, tang[0])
+      iB = push(null, tang[1])
+      const iA1 = push(null, [tang[0][0], tang[0][1], h])
+      const iB1 = push(null, [tang[1][0], tang[1][1], h])
+      edges.push([iA, iA1, 0], [iB, iB1, 0])
+    }
+    // 圆的投影椭圆：底在 z=0、轴向 e1=(1,0,0)、e2=(0,1,0)
+    const circ = (z: number) => {
+      const c = sc([0, 0, z])
+      const U = sc([r, 0, z]), V = sc([0, r, z])
+      const e = ellipseFromConjugate(U[0] - c[0], U[1] - c[1], V[0] - c[0], V[1] - c[1])
+      return { cx: c[0], cy: c[1], ...e }
+    }
+    const arcs: { cx: number; cy: number; rx: number; ry: number; rot: number; a0: number; a1: number; dash: 0 | 1 }[] = []
+    // 底面：近半可见（实线）、远半被挡（虚线）—— 这就是教材里圆柱/圆锥底的那条画法
+    const eb = circ(0)
+    const half = nearPlus ? t0 + Math.PI : t0 + 2 * Math.PI
+    arcs.push({ ...eb, a0: t0, a1: half, dash: 0 })
+    arcs.push({ ...eb, a0: half, a1: t0 + 2 * Math.PI, dash: 1 })
+    if (type === 'cylinder') {
+      // 顶面：从上方看整圈都可见（实线）
+      const et = circ(h)
+      arcs.push({ ...et, a0: 0, a1: Math.PI * 2, dash: 0 })
+    }
+    // 归一化：把顶点和椭圆包围盒一起算进去，整体居中
+    const xs = P3.map((p) => sc(p)[0])
+    const ys = P3.map((p) => sc(p)[1])
+    const rm = Math.max(eb.rx, eb.ry)
+    xs.push(eb.cx - rm, eb.cx + rm)
+    ys.push(eb.cy - rm, eb.cy + rm)
+    if (type === 'cylinder') {
+      const et = circ(h)
+      const r2 = Math.max(et.rx, et.ry)
+      xs.push(et.cx - r2, et.cx + r2)
+      ys.push(et.cy - r2, et.cy + r2)
+    }
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
+    const bw = Math.max(1e-6, x1 - x0), bh = Math.max(1e-6, y1 - y0)
+    const s = 0.84 / Math.max(bw, bh)
+    const ox = (1 - bw * s) / 2, oy = (1 - bh * s) / 2
+    const points: number[] = []
+    for (const p of P3) {
+      const q = sc(p)
+      points.push(+(ox + (q[0] - x0) * s).toFixed(4), +(oy + (q[1] - y0) * s).toFixed(4))
+    }
+    const arcsOut = arcs.map((a) => ({
+      cx: +(ox + (a.cx - x0) * s).toFixed(4),
+      cy: +(oy + (a.cy - y0) * s).toFixed(4),
+      rx: +(a.rx * s).toFixed(4),
+      ry: +(a.ry * s).toFixed(4),
+      rot: +a.rot.toFixed(4),
+      a0: +a.a0.toFixed(4),
+      a1: +a.a1.toFixed(4),
+      dash: a.dash,
+    }))
+    return { points, mesh: { edges, faces: [] }, vlabels, arcs: arcsOut, aspect: bw / bh }
+  }
+
+  // ---------------- 多面体（走面表） ----------------
   const names = Object.keys(m.vertices)
   const idx: Record<string, number> = {}
   names.forEach((n, i) => { idx[n] = i })
   const P3 = names.map((n) => m.vertices[n]) as [number, number, number][]
-  if (!P3.length) return { points: [], mesh: { edges: [], faces: [] }, vlabels: [] }
+  if (!P3.length) return { points: [], mesh: { edges: [], faces: [] }, vlabels: [], arcs: [], aspect: 1 }
 
-  const d = viewDir(view.azim, view.elev)                       // 指向相机
-  const right = norm([-Math.sin((view.azim * Math.PI) / 180), Math.cos((view.azim * Math.PI) / 180), 0])
-  const up = cross(d, right)                                    // 屏幕上方
-
-  // 正交投影：屏幕坐标 = (p·right, p·up)，深度 = p·d（越大越靠近相机）
   const raw = P3.map((p) => [dot(p, right), dot(p, up), dot(p, d)] as [number, number, number])
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
   for (const r of raw) {
     if (r[0] < x0) x0 = r[0]; if (r[0] > x1) x1 = r[0]
-    if (-r[1] < y0) y0 = -r[1]; if (-r[1] > y1) y1 = -r[1]     // 屏幕 y 向下 → 取负
+    if (-r[1] < y0) y0 = -r[1]; if (-r[1] > y1) y1 = -r[1]
   }
   const bw = Math.max(1e-6, x1 - x0), bh = Math.max(1e-6, y1 - y0)
   const s = 0.84 / Math.max(bw, bh)
@@ -236,12 +363,10 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   const points: number[] = []
   for (const r of raw) points.push(+(ox + (r[0] - x0) * s).toFixed(4), +(oy + (-r[1] - y0) * s).toFixed(4))
 
-  // 体心（用来把面法向校正为朝外）
   const c: [number, number, number] = [0, 0, 0]
   for (const p of P3) { c[0] += p[0] / P3.length; c[1] += p[1] / P3.length; c[2] += p[2] / P3.length }
 
   const faces = (m.faces || []).map((f) => f.map((n) => idx[n]).filter((k) => k !== undefined))
-  // 每个面：算朝外法向，判断是否正面朝向相机
   const frontFacing: boolean[] = []
   const faceNormal: [number, number, number][] = []
   faces.forEach((f) => {
@@ -249,12 +374,11 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     let n = norm(cross(sub(B, A), sub(C, B)))
     const fc: [number, number, number] = [0, 0, 0]
     for (const k of f) { fc[0] += P3[k][0] / f.length; fc[1] += P3[k][1] / f.length; fc[2] += P3[k][2] / f.length }
-    if (dot(n, sub(fc, c)) < 0) n = [-n[0], -n[1], -n[2]]          // 校正为朝外
+    if (dot(n, sub(fc, c)) < 0) n = [-n[0], -n[1], -n[2]]
     faceNormal.push(n)
     frontFacing.push(dot(n, d) > 1e-6)
   })
 
-  // 棱：面表里出现的每一对相邻顶点；**属于至少一个正面朝向的面就可见**（凸体成立）
   const edgeMap = new Map<string, { i: number; j: number; front: boolean }>()
   const addEdge = (i: number, j: number, kind: 'front' | 'back') => {
     const key = Math.min(i, j) + '_' + Math.max(i, j)
@@ -266,7 +390,6 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     for (let k = 0; k < f.length; k++) addEdge(f[k], f[(k + 1) % f.length], frontFacing[fi] ? 'front' : 'back')
   })
   for (const [a, b] of m.edges || []) if (idx[a] !== undefined && idx[b] !== undefined) addEdge(idx[a], idx[b], 'front')
-  // 辅助线：穿到体内算虚线。凸体判"点在体内"= 在每个面的内侧（用朝外法向）
   const inside = (p: [number, number, number]) => {
     if (!faces.length) return false
     for (let fi = 0; fi < faces.length; fi++) {
@@ -283,7 +406,6 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     if (a.style === 'dashed') dash = 1
     else if (a.style === 'solid') dash = 0
     else {
-      // auto：取中点（靠两端一点，避免正好落在面上）判断是否在体内
       const t = 0.25, p: [number, number, number] = [
         P3[i][0] + (P3[j][0] - P3[i][0]) * t,
         P3[i][1] + (P3[j][1] - P3[i][1]) * t,
@@ -300,5 +422,5 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     if (!dup) edges.push([a.i, a.j, a.dash])
   }
   const vlabels = names.map((n) => (m.labels && !(n in m.labels) ? null : toLabelText(m.labels?.[n] || n)))
-  return { points, mesh: { edges, faces }, vlabels }
+  return { points, mesh: { edges, faces }, vlabels, arcs: [], aspect: bw / bh }
 }

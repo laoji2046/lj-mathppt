@@ -15,12 +15,19 @@ import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import { buildSolid, projectGeom, solveView, type Geom3D } from '@/composables/geom3d'
 import { GEOM3D_PRESETS, GEOM3D_PROMPT } from '@/composables/geom3dPrompt'
-import { renderSolid } from '@/composables/solid3d'
+import { renderSolid, arcsSvg } from '@/composables/solid3d'
 import { closeGeom3D } from '@/ui/geom3d'
 
 const store = useDeckStore()
-const W = 560
 const H = 620
+/** 元素框的宽按内容的宽高比给 —— 固定宽高会把投影拉变形（椭圆最明显）。
+ *  这里从当前投影算，随视角变化（角度变了包围盒也变）。 */
+const W = computed(() => {
+  const m = model.value
+  if (!m) return 560
+  const asp = projectGeom(m, { azim: azim.value, elev: elev.value }).aspect
+  return Math.max(200, Math.min(900, Math.round(H * asp)))
+})
 
 /** 示例：正四棱柱 ABCD-A₁B₁C₁D₁（2×2×2），四条竖棱各一个中点，再从 C₂ 连四条辅助线 */
 const SAMPLE = `{
@@ -64,8 +71,10 @@ function parse() {
   parseErr.value = ''
   try {
     const m = JSON.parse(raw.value) as Geom3D & { view?: { azim?: number; elev?: number } }
-    if (!m || typeof m !== 'object' || !m.vertices || !Object.keys(m.vertices).length) {
-      parseErr.value = '缺少 vertices'; model.value = null; return
+    // 圆柱 / 圆锥只用 primitive、没有 vertices，别把它们拒了
+    const hasVerts = !!m.vertices && Object.keys(m.vertices).length > 0
+    if (!m || typeof m !== 'object' || (!hasVerts && !m.primitive)) {
+      parseErr.value = '缺少 vertices（或者给 primitive）'; model.value = null; return
     }
     model.value = m
     if (m.view) {
@@ -85,8 +94,10 @@ const svg = computed(() => {
   const m = model.value
   if (!m) return ''
   const p = projectGeom(m, { azim: azim.value, elev: elev.value })
-  return renderSolid('cube', p.points, W, H, '#1a1a1a', 2.6, 'transparent', '6 5',
+  const solid = renderSolid('cube', p.points, W.value, H, '#1a1a1a', 2.6, 'transparent', '6 5',
     p.vlabels, undefined, undefined, undefined, undefined, undefined, undefined, p.mesh)
+  // 圆柱 / 圆锥的底面是**弧图元**，renderSolid 不画它，单独叠一层（跟画布里的做法一致）
+  return solid + arcsSvg(p.arcs, W.value, H, '#1a1a1a', 2.6)
 })
 
 const edgeStat = computed(() => {
@@ -94,7 +105,8 @@ const edgeStat = computed(() => {
   if (!m) return ''
   const p = projectGeom(m, { azim: azim.value, elev: elev.value })
   const dash = p.mesh.edges.filter((e) => e[2]).length
-  return p.mesh.edges.length + ' 条棱（' + dash + ' 虚线）'
+  const arc = p.arcs.length ? '＋' + p.arcs.length + ' 段弧' : ''
+  return p.mesh.edges.length + ' 条棱（' + dash + ' 虚线）' + arc
 })
 
 // ---------------- 截图描点对齐 ----------------
@@ -147,7 +159,7 @@ function usePreset(json: string) {
 }
 
 // ---------------- 搭模型（不依赖 AI） ----------------
-const bType = ref<'cube' | 'box' | 'prism' | 'pyramid'>('prism')
+const bType = ref<'cube' | 'box' | 'prism' | 'pyramid' | 'cylinder' | 'cone'>('prism')
 const bN = ref(4)
 const bA = ref(2)
 const bB = ref(1.4)
@@ -198,7 +210,8 @@ function insert() {
   const p = projectGeom(m, { azim: azim.value, elev: elev.value })
   store.addElement('mathfig', {
     kind: 'cube', points: p.points, mesh: p.mesh, vlabels: p.vlabels,
-    w: W, h: H, fill: 'transparent', stroke: '#1a1a1a', strokeWidth: 2.6,
+    arcs: p.arcs.length ? p.arcs : undefined,
+    w: W.value, h: H, fill: 'transparent', stroke: '#1a1a1a', strokeWidth: 2.6,
   } as never)
   closeGeom3D()
 }
@@ -233,9 +246,11 @@ function insert() {
                 <option value="pyramid">正 n 棱锥</option>
                 <option value="cube">正方体</option>
                 <option value="box">长方体</option>
+                <option value="cylinder">圆柱</option>
+                <option value="cone">圆锥</option>
               </select>
               <label v-if="bType === 'prism' || bType === 'pyramid'" class="g3__num">n <input v-model.number="bN" type="number" min="3" max="12"></label>
-              <label class="g3__num">{{ bType === 'cube' ? '棱长' : '长/底边' }} <input v-model.number="bA" type="number" step="0.1"></label>
+              <label class="g3__num">{{ bType === 'cube' ? '棱长' : (bType === 'cylinder' || bType === 'cone' ? '底半径' : '长/底边') }} <input v-model.number="bA" type="number" step="0.1"></label>
               <label v-if="bType === 'box'" class="g3__num">宽 <input v-model.number="bB" type="number" step="0.1"></label>
               <label class="g3__num">高 <input v-model.number="bH" type="number" step="0.1"></label>
               <button class="g3__btn" @click="build()">生成</button>
