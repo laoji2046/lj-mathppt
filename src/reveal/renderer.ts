@@ -1,4 +1,4 @@
-import type { Deck, Slide, SlideElement, TextElement } from '@/types'
+import type { Deck, Slide, SlideElement, TableElement, TextElement } from '@/types'
 import { createApp, h } from 'vue'
 import MathFigureElement from '@/components/elements/MathFigureElement.vue'
 import { animRevealClass, animTimingStyle, bulletMarker, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
@@ -560,7 +560,7 @@ function elementToHtmlInner(el: SlideElement): string {
       const rowIdx = Math.floor(idx / cols)
       const bg = isH ? el.headerColor : (el.altRowColor && rowIdx % 2 === 0 ? el.altRowColor : '#ffffff')
       const col = isH ? (el.headerTextColor || '#ffffff') : (el.cellColor || '#111111')
-      return '<div style="background:' + esc(bg) + ';color:' + esc(col) + ';font-weight:' + (isH ? 700 : 400) + ';padding:' + pad + 'px ' + (pad + 2) + 'px;text-align:' + align + ';overflow:hidden;word-break:break-word;box-sizing:border-box;line-height:1.4">' + esc(cv ?? '') + '</div>'
+      return '<div style="background:' + esc(bg) + ';color:' + esc(col) + ';font-weight:' + (isH ? 700 : 400) + ';padding:' + pad + 'px ' + (pad + 2) + 'px;text-align:' + align + ';overflow:hidden;word-break:break-word;box-sizing:border-box;line-height:1.4">' + normalizeMixed(cv ?? '') + '</div>'
     }).join('')
     return `<div style="${box}${rot}"${cls}${fragIdx}><div style="display:grid;grid-template-columns:repeat(${cols},1fr);grid-auto-rows:auto;gap:1px;background:${esc(el.borderColor)};font-size:${el.fontSize}px">${cellHtml}</div></div>`
   }
@@ -664,7 +664,10 @@ export function slideToHtml(s: Slide): string {
 export function renderDeckToRevealHtml(deck: Deck, opts: RenderOptions = {}): string {
   const local = (opts.assets ?? 'local') === 'local'
   const slides = renderSlidesStack(deck.slides)
-  const hasMath = deck.slides.some((s) => s.elements.some((e) => e.type === 'math' || e.type === 'richtex'))
+  // 数学图形 / 公式 / 混排，以及**表格单元格里写了 \(LaTeX\)** —— 都要把 MathJax 带上
+  const hasMath = deck.slides.some((s) => s.elements.some((e) =>
+    e.type === 'math' || e.type === 'richtex' ||
+    (e.type === 'table' && (e as TableElement).rows.some((r) => r.some((c) => String(c).indexOf('\\(') >= 0)))))
   const hasGgb = deck.slides.some((s) => s.elements.some((e) => e.type === 'geogebra'))
   const hasDesmos = deck.slides.some((s) => s.elements.some((e) => e.type === 'desmos'))
   const hasPdf = deck.slides.some((s) => s.elements.some((e) => e.type === 'embed' && (e as any).kind === 'pdf'))

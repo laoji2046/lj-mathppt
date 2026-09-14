@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { normalizeMixed } from '@/types'
+import { typesetMixed } from '@/composables/useMathJax'
 import type { CSSProperties } from 'vue'
 import type { TableElement } from '@/types'
 import type { SlideElement } from '@/types'
@@ -10,6 +12,33 @@ const store = useDeckStore()
 
 /** 双击进入内联编辑：单元格变 contenteditable，失焦写回，Esc 退出 */
 const editing = ref(false)
+const gridEl = ref<HTMLElement | null>(null)
+
+/**
+ * 单元格渲染：支持 \(LaTeX\) 行内公式（跟「混排公式」元素同一套 MathJax 排版）。
+ * ⚠ 编辑时必须显示**原文** —— MathJax 排完之后 DOM 里是渲染结果，
+ *   直接读 innerText 会把公式读成一片乱字符（混排公式元素踩过同一个坑）。
+ */
+let renderSeq = 0
+async function renderCells() {
+  const my = ++renderSeq
+  await nextTick()
+  const host = gridEl.value
+  if (!host) return
+  const cells = Array.from(host.querySelectorAll<HTMLElement>('[data-cell]'))
+  if (editing.value) {
+    cells.forEach((c) => { const raw = c.getAttribute('data-raw') || ''; if (c.innerText !== raw) c.innerText = raw })
+    return
+  }
+  for (const c of cells) {
+    const raw = c.getAttribute('data-raw') || ''
+    if (raw.indexOf('\\(') < 0) { if (c.innerText !== raw) c.innerText = raw; continue }
+    await typesetMixed(c, normalizeMixed(raw))
+    if (my !== renderSeq) return
+  }
+}
+onMounted(renderCells)
+watch(() => [props.el.rows, editing.value], renderCells, { deep: true })
 
 const cols = computed(() => props.el.rows[0]?.length || 1)
 const flat = computed(() => {
@@ -68,17 +97,19 @@ function onEsc(e: KeyboardEvent) {
 
 <template>
   <div class="table-el" :class="{ 'table-el--edit': editing }" @dblclick.stop.prevent="startEdit">
-    <div class="table-grid" :style="gridStyle">
+    <div ref="gridEl" class="table-grid" :style="gridStyle">
       <div
         v-for="(item, idx) in flat"
         :key="idx"
+        :data-cell="item.r + '-' + item.c"
+        :data-raw="item.v"
         :style="cellStyle(item)"
         :contenteditable="editing ? 'plaintext-only' : 'false'"
         @blur="onCellBlur(item, $event)"
         @keydown.esc="onEsc"
       >{{ item.v }}</div>
     </div>
-    <div v-if="!editing" class="table-el__hint">双击编辑数据 / 表头</div>
+    <div v-if="!editing" class="table-el__hint">双击编辑数据 / 表头；单元格里写 \(x^2\) 就是公式</div>
   </div>
 </template>
 
