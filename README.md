@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1256**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1257**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,29 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-14（v2026.09.1257）
+
+**1257 · 版式浮窗不再顶出屏幕：自己封顶 + 延后一帧测量**
+
+用户补充："版式弹出窗口总是和菜单「版式」项高度平齐，导致不能完全显示、只能用滚动条"。
+
+两个原因 ✗：
+
+1. **浮窗没有高度上限** —— `.lg__grid` 只有 `overflow-y:auto`，**没有 `max-height`** ✗，
+   内容把整窗顶高 → 锚点在下方时整块跑出屏幕 ✓；
+2. **量尺寸太早** —— `nextTick` 时缩略图/CSS 布局还没定型，量到的高度偏小 → 夹取等于没生效 ✓。
+
+**修法**：
+
+    .lg--float .lg__box { max-height: calc(100vh - 16px); display:flex; flex-direction:column; }
+    .lg__grid { flex:1 1 auto; min-height:0; overflow-y:auto; }   ← 滚动改到卡片区内部
+    夹取前 await 一帧 requestAnimationFrame ✓（让布局定型再量）
+
+这样浮窗**永远在视口内** ✓，需要滚动时也是**浮窗内部**滚 ✓，不会整窗跑出屏幕 ✓。
+
+**⚠ 验证状态**：构建通过、绑定确认（模板用 floatPos ✓、CSS 有 max-height ✓），
+但**未实测** ✗ —— 请用户确认。
 
 ### 2026-09-14（v2026.09.1256）
 

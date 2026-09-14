@@ -27,6 +27,8 @@ watch(
     if (!layoutGalleryOpen.value || !a) return
     floatPos.value = { x: a.x, y: a.y }
     await nextTick()
+    // ⚠ 再等一帧：缩略图/CSS 布局要一帧才定型，太早量会量到偏小的高度 → 夹取失效
+    await new Promise((r) => requestAnimationFrame(() => r(null)))
     if (boxEl.value) floatPos.value = placeInViewport(boxEl.value, a.x, a.y)
   },
   { immediate: true },
@@ -86,10 +88,14 @@ function slotStyle(s: LayoutSlot) {
 /* 悬停菜单项弹出时：不压暗背景、贴着菜单项出现（PowerPoint 的版式浮层就是这个感觉） */
 .lg--float { background: transparent; display: block; }
 .lg__box { background: var(--panel); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: min(920px, 94vw); max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; }
-.lg--float .lg__box { border-radius: var(--radius); width: min(680px, 92vw); }
+/* ⚠ 浮窗必须**自己封顶**：原来只有 grid 的 overflow-y:auto，没有 max-height ✗ →
+   内容把整窗顶高，锚点在下方时整块跑出屏幕，只能靠滚动条看（用户实测）。
+   现在把盒高限制在视口内，滚动发生在**卡片区内部** ✓。 */
+.lg--float .lg__box { border-radius: var(--radius); width: min(680px, 92vw);
+  max-height: calc(100vh - 16px); display: flex; flex-direction: column; }
 .lg__head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; font-weight: 600; }
 .lg__x { border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--muted); }
-.lg__grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 16px; overflow-y: auto; }
+.lg__grid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 16px; overflow-y: auto; }
 .lg__card { border: 1px solid var(--border); background: var(--panel); border-radius: var(--radius); padding: 8px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease); }
 .lg__card:hover { border-color: var(--brand); background: var(--brand-50); }
 .lg__prev { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #fff; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
