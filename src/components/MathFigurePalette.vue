@@ -202,7 +202,9 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
 .palette {
   position: fixed;
   inset: 0;
-  z-index: 400;
+  /* 必须**压得住 A4 文档弹窗**（.pm 是 2000）—— 图形库可以从文档里打开，
+     低于它就会"弹了但被盖住"，看着像点了没反应 ✗。 */
+  z-index: 2200;
   background: rgba(20, 24, 34, 0.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
