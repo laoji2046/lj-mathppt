@@ -3,9 +3,11 @@ import { computed, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { loadMathJax } from '@/composables/useMathJax'
 import { imagesDir, isTauri, readLocalImage } from '@/composables/useTauri'
+import { useDeckStore } from '@/stores/deck'
+import { MATH_FIGURE_OPTIONS } from '@/types'
 
 /**
- * 试卷 / 讲义模式（A4 分页 + 题号识别），移植自参考版 LJ-PPT 的 PaperMode。
+ * PDF 生成（A4 分页 + 题号识别），移植自参考版 LJ-PPT 的 PaperMode。
  * - 左侧：输入（# 标题、## 方块标题、### 小标题、1. 大题号、(1) 小题号、$公式$）+ 字体/排版/模板控制。
  * - 右侧：A4 预览（MathJax 渲染公式），支持缩放、插入图片([图N])、保存 PDF。
  */
@@ -561,6 +563,82 @@ function insertImage() {
   }
   fi.click()
 }
+// ---- 插入数学图形：把画布上图形的 SVG 栅格化成 PNG，走跟插入图片完全同一条路（[图N]）----
+const store = useDeckStore()
+const figOpen = ref(false)
+/** 文稿里所有数学图形（带所在页码与类型名） */
+const figList = computed(() =>
+  store.deck.slides.flatMap((s, si) =>
+    s.elements.filter((e) => e.type === 'mathfig').map((e) => ({
+      id: e.id,
+      slide: si,
+      label: MATH_FIGURE_OPTIONS.find((o) => o.v === (e as { kind?: string }).kind)?.label
+        || (e as { kind?: string }).kind || '数学图形',
+    })),
+  ),
+)
+
+/** SVG → PNG dataURL（2 倍分辨率、白底，PDF 里最稳） */
+async function svgToPng(svg: SVGSVGElement, scale = 2): Promise<string> {
+  const clone = svg.cloneNode(true) as SVGSVGElement
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  const vb = svg.viewBox?.baseVal
+  const w = (vb && vb.width) || svg.clientWidth || 400
+  const h = (vb && vb.height) || svg.clientHeight || 300
+  clone.setAttribute('width', String(w))
+  clone.setAttribute('height', String(h))
+  const text = new XMLSerializer().serializeToString(clone)
+  const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(text)
+  const img = await new Promise<HTMLImageElement>((res, rej) => {
+    const im = new Image()
+    im.onload = () => res(im)
+    im.onerror = () => rej(new Error('图形转图片失败'))
+    im.src = url
+  })
+  const cv = document.createElement('canvas')
+  cv.width = Math.max(1, Math.round(w * scale))
+  cv.height = Math.max(1, Math.round(h * scale))
+  const ctx = cv.getContext('2d')!
+  ctx.fillStyle = '#ffffff' // 白底：打印/导出更干净，也避免透明底在某些阅读器里发灰
+  ctx.fillRect(0, 0, cv.width, cv.height)
+  ctx.drawImage(img, 0, 0, cv.width, cv.height)
+  return cv.toDataURL('image/png')
+}
+
+/** 取某图形元素当前的 SVG：不在当前页时临时切过去取一下再切回来 */
+async function grabFigureSvg(elId: string, slideIndex: number): Promise<SVGSVGElement | null> {
+  const back = store.currentIndex
+  const switched = slideIndex !== back
+  if (switched) {
+    store.gotoSlide(slideIndex)
+    await new Promise((r) => setTimeout(r, 60)) // 等一帧，让画布把该页渲染出来
+  }
+  const svg = document.querySelector('[data-el-id="' + elId + '"] svg') as SVGSVGElement | null
+  const copy = svg ? (svg.cloneNode(true) as SVGSVGElement) : null
+  if (switched) {
+    store.gotoSlide(back)
+  }
+  return copy
+}
+
+async function insertFigure(id: string, slideIndex: number, label: string) {
+  figOpen.value = false
+  try {
+    const svg = await grabFigureSvg(id, slideIndex)
+    if (!svg) {
+      window.alert('取不到这个图形的图形数据，请先切到它所在的页面再试')
+      return
+    }
+    const png = await svgToPng(svg)
+    const n = ++imgSeq.value
+    images.value[n] = { src: png, address: label }
+    input.value += '[图' + n + ']'
+    render()
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : String(e))
+  }
+}
+
 function insertHdrFooterImage(target: 'header' | 'footer') {
   const fi = document.createElement('input')
   fi.type = 'file'
@@ -776,7 +854,7 @@ watch([headerText, footerText], () => render())
       <div class="pm__backdrop"></div>
       <div class="pm__box">
         <header class="pm__head">
-          <span>试卷 / 讲义模式（A4）</span>
+          <span>PDF 生成 · A4 文档</span>
           <button class="pm__x" @click="emit('close')" title="关闭"><AppIcon name="close" :size="13" /></button>
         </header>
         <div class="pm__body">
@@ -851,7 +929,22 @@ watch([headerText, footerText], () => render())
                 <button class="pm__btn" title="在光标处插入指定高度空白" @click="blankOpen = !blankOpen">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 19h16"/><path d="M9 9v6M15 9v6" stroke-dasharray="2 2"/></svg><span>空白</span>
                 </button>
-                <button class="pm__btn" title="在光标处插入本地图片" @click="insertImage">
+                <span class="pm__figwrap">
+    <button class="pm__btn" :title="'把文稿里的数学图形插到光标处（共 ' + figList.length + ' 个）'" @click="figOpen = !figOpen">
+      <AppIcon name="graphic" :size="14" />插入数学图形
+    </button>
+    <div v-if="figOpen" class="pm__figlist">
+      <div v-if="!figList.length" class="pm__figempty">文稿里还没有数学图形 —— 先在画布上放一个（工具栏「数学图形」）</div>
+      <button
+        v-for="f in figList" :key="f.id" class="pm__figitem"
+        :title="'插入第 ' + (f.slide + 1) + ' 页的这个图形'"
+        @click="insertFigure(f.id, f.slide, f.label)"
+      >
+        <span class="pm__figslide">P{{ f.slide + 1 }}</span>{{ f.label }}
+      </button>
+    </div>
+  </span>
+  <button class="pm__btn" title="在光标处插入本地图片" @click="insertImage">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg><span>图片</span>
                 </button>
                 <button class="pm__btn pm__btn--primary" title="直接生成多页 PDF" @click="savePdf">
@@ -908,7 +1001,7 @@ watch([headerText, footerText], () => render())
     <div v-if="helpOpen" class="pm__help">
       <div class="pm__helpbox">
         <header class="pm__helphead">
-          <strong>试卷 / 讲义 · 语法帮助</strong>
+          <strong>PDF 生成 · 语法帮助</strong>
           <button class="pm__x" @click="helpOpen = false"><AppIcon name="close" :size="13" /></button>
         </header>
         <div class="pm__helpbody">
@@ -960,6 +1053,13 @@ watch([headerText, footerText], () => render())
   border-radius: 8px; padding: 5px 10px; cursor: pointer; font-size: 12px; font-weight: 500;
   transition: background 0.15s, border-color 0.15s, transform 0.06s;
 }
+/* 插入数学图形：按钮 + 下拉图形清单 */
+.pm__figwrap { position: relative; display: inline-flex; }
+.pm__figlist { position: absolute; top: 100%; left: 0; z-index: 40; margin-top: 4px; min-width: 240px; max-height: 46vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 5px; }
+.pm__figitem { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none; background: none; padding: 6px 8px; font-size: 12.5px; color: var(--text); border-radius: var(--radius-sm); cursor: pointer; }
+.pm__figitem:hover { background: var(--brand-50); color: var(--brand-800); }
+.pm__figslide { flex: 0 0 auto; font-size: 10.5px; color: var(--muted); background: var(--gray-50); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.pm__figempty { padding: 8px; font-size: 12px; color: var(--muted); line-height: 1.6; }
 .pm__btn:hover { background: var(--gray-50); border-color: var(--border-strong); }
 .pm__btn:active { transform: scale(0.97); }
 .pm__btn svg { flex: none; }

@@ -737,8 +737,8 @@ onBeforeUnmount(() => {
       <button class="btn" title="模板库：高中数学讲义模板 / 专业模板" @click="openTemplates">
         <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.templates"></svg></span>模板库
       </button>
-      <button class="btn" title="试卷/讲义模式（A4）" @click="openPaper">
-        <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.paper"></svg></span>试卷/讲义
+      <button class="btn" title="PDF 生成：把 Markdown / 试卷写成 A4 文档并导出 PDF" @click="openPaper">
+        <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.paper"></svg></span>PDF生成
       </button>
       <button class="btn btn--primary" @click="present">
         <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.play"></svg></span>演示
