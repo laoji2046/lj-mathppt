@@ -1,4 +1,6 @@
 import type { Deck, Slide, SlideElement, TextElement } from '@/types'
+import { createApp, h } from 'vue'
+import MathFigureElement from '@/components/elements/MathFigureElement.vue'
 import { animRevealClass, animTimingStyle, bulletMarker, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
 import { SOLID_VCOUNT, renderSolid, solidVerts, arcsSvg, type EdgeStyle, type FaceStyle, type SolidMesh } from '@/composables/solid3d'
 
@@ -36,7 +38,31 @@ function esc(s: string): string {
     .replace(/"/g, '&quot;')
 }
 
-/** 数学图形的 SVG 内部标记（编辑器与导出共用同一套图形） */
+/**
+ * 用**真正的图形组件**渲染出一段 SVG 标记。
+ *
+ * 为什么这么做：原来这里有一份**手写的 figureInner**，只覆盖了一部分 kind ✗ ——
+ * 函数图像里 linear / cubic / abs … 一整批没实现，缺的那批就渲染成**空 SVG**，
+ * 于是缩略图、应用内演示、导出的 HTML 里**全都看不见**（用户实测报障）。
+ * 补 40 个 kind 只是把同一个漂移问题往后拖 ✗；改成直接挂载真组件、读它的 <svg>，
+ * 从此**只有一份实现**，再也不会两边不一致。
+ */
+function renderFigureSvg(el: SlideElement): string {
+  try {
+    const host = document.createElement('div')
+    const app = createApp({ render: () => h(MathFigureElement as never, { el } as never) })
+    app.mount(host)
+    const svg = host.querySelector('svg')
+    const out = svg ? svg.outerHTML : ''
+    app.unmount()
+    return out
+  } catch (err) {
+    console.warn('[导出] 图形渲染失败，退回内置实现', err)
+    return ''
+  }
+}
+
+/** 数学图形的 SVG 内部标记（保留为兜底：万一真组件挂载失败） */
 function figureInner(
   kind: string, w: number, h: number,
   stroke: string, strokeWidth: number, fill: string,
@@ -501,6 +527,12 @@ function elementToHtml(el: SlideElement): string {
   }
 
   if (el.type === 'mathfig') {
+    // 优先用**真组件**渲染（与画布逐像素一致）；失败才退回内置实现
+    const real = renderFigureSvg(el)
+    if (real) {
+      const fitted = real.replace('<svg ', '<svg width="100%" height="100%" preserveAspectRatio="none" ')
+      return `<div style="${box}${rot}"${cls}${fragIdx}>${fitted}</div>`
+    }
     return `<div style="${box}${rot}"${cls}${fragIdx}><svg width="100%" height="100%" viewBox="0 0 ${el.w} ${el.h}" preserveAspectRatio="none">${figureInner(el.kind, el.w, el.h, el.stroke, el.strokeWidth, el.fill, el.points, el.strokeDash, el.depth, el.vlabels, el.edgeStyles, el.labelOffsets, el.faceStyles, el.mesh)}${arcsSvg(el.arcs, el.w, el.h, el.stroke, el.strokeWidth, '6 5', el.points)}</svg></div>`
   }
 
