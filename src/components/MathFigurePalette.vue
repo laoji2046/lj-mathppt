@@ -32,6 +32,8 @@ const current = computed(() => groups.value.find((g) => g.cat === cat.value) ?? 
  * - 有数学视图（函数 / 圆锥曲线）的，按视图宽高比给框，配合 fit="contain" 等比缩放起来不歪；
  * - 平面 / 立体 / 标注类本来就是按框自适应画的，直接用 140×80 + 默认拉伸。
  */
+/** 文档里插图的最大高度（与 PaperModal 的 .paper-img / .paper-img-inline 保持一致） */
+const PAPER_IMG_MAX_H = 180
 const PV_H = 80
 function previewEl(kind: MathFigureKind) {
   const a = viewAspect(kind)
@@ -53,18 +55,38 @@ function labelOf(kind: MathFigureKind): string {
  * 点卡片：设了 sink（PDF 文档正开着）就把**卡片自己那张 SVG** 交出去，
  * 由调用方栅格化插进文档 —— 不用先放到画布上；否则按老规矩插到画布。
  */
+/**
+ * 把卡片里那张"预览版"SVG 归一化：卡片的 viewBox 是预览小框（比如 71×80），
+ * 而线宽是**绝对像素**（1.6）—— 直接拿去按文档尺寸渲染，线就会变得很粗 ✗。
+ * 这里按"真正插到画布上时该有的宽度"把线宽同比缩小，几何形状一点不动。
+ */
+function normalizeStrokes(svg: SVGSVGElement, explicitW?: number): SVGSVGElement {
+  const clone = svg.cloneNode(true) as SVGSVGElement
+  const vb = svg.viewBox?.baseVal
+  if (!vb || !vb.width || !vb.height) return clone
+  // 目标宽度 = **它在文档里真正显示出来的宽度**：
+  // 文档 CSS 把插图限高 180px（.paper-img-inline / .paper-img），所以按这个高度和图形宽高比反推。
+  // （一开始我按"画布上元素的宽度"缩，结果文档里只显示一百来像素，线细得快看不见 ✗。）
+  const targetW = explicitW && explicitW > 0 ? Math.min(explicitW, PAPER_IMG_MAX_H * (vb.width / vb.height)) : PAPER_IMG_MAX_H * (vb.width / vb.height)
+  const k = vb.width / targetW
+  if (k >= 0.999) return clone
+  clone.querySelectorAll('[stroke-width]').forEach((n) => {
+    const v = parseFloat(n.getAttribute('stroke-width') || '')
+    if (Number.isFinite(v)) n.setAttribute('stroke-width', String(+(v * k).toFixed(4)))
+  })
+  return clone
+}
+
 function onPick(kind: MathFigureKind, e: MouseEvent) {
   const sink = figPaletteSink.value
-  if (!sink) {
-    insert(kind)
-    return
-  }
   const svg = (e.currentTarget as HTMLElement)?.querySelector('svg')
-  if (!svg) {
+  if (!sink || !svg) {
     insert(kind)
+    if (sink) { closeFigPalette(); emit('close') }
     return
   }
-  sink(svg as SVGSVGElement, labelOf(kind))
+  const box = figureBox(kind)
+  sink(normalizeStrokes(svg as SVGSVGElement, box?.w), labelOf(kind))
   closeFigPalette()
   emit('close')
 }
@@ -81,6 +103,20 @@ function insert(kind: MathFigureKind) {
 }
 
 /** 复刻图：连同顶点 / 边拓扑 / 字母一起插入，并按原图宽高比给尺寸 */
+/** 复刻图形的卡片走同一条"交给 sink"的路（原来只会在画布上插入 ✗ —— 文档里点它没反应） */
+function onPickPreset(p: (typeof SOLID_FIGURE_PRESETS)[number], e: MouseEvent) {
+  const sink = figPaletteSink.value
+  const svg = (e.currentTarget as HTMLElement)?.querySelector('svg')
+  if (!sink || !svg) {
+    insertPreset(p)
+    if (sink) { closeFigPalette(); emit('close') }
+    return
+  }
+  sink(normalizeStrokes(svg as SVGSVGElement, p.w), p.name)
+  closeFigPalette()
+  emit('close')
+}
+
 function insertPreset(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
   store.addElement('mathfig', {
     ...p.el,
@@ -162,7 +198,7 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
             :key="p.id"
             class="card card--recast"
             :title="p.note ? p.name + ' ｜ ' + p.note : p.name"
-            @click="insertPreset(p)"
+            @click="onPickPreset(p, $event)"
           >
             <span class="card__thumb">
               <span
