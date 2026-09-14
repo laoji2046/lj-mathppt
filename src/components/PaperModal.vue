@@ -580,14 +580,22 @@ const figList = computed(() =>
 )
 
 /** SVG → PNG dataURL（2 倍分辨率、白底，PDF 里最稳） */
-async function svgToPng(svg: SVGSVGElement, scale = 2): Promise<string> {
+/** 出图的目标像素宽度：图形库里的卡片 viewBox 只有几十宽，按 2× 出图只有一百多像素，
+ *  贴到文档里被放大就显糊 —— 用户反馈"从页面插入的曲线很美观"就是这个原因（页面那条取的.viewBox 有 520 宽）。
+ *  这里统一按目标像素宽度出图，线宽是 user 单位、跟着一起放大，观感不受影响。 */
+const EXPORT_PX_W = 1200
+
+async function svgToPng(svg: SVGSVGElement, scale?: number): Promise<string> {
   const clone = svg.cloneNode(true) as SVGSVGElement
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
   const vb = svg.viewBox?.baseVal
   const w = (vb && vb.width) || svg.clientWidth || 400
   const h = (vb && vb.height) || svg.clientHeight || 300
-  clone.setAttribute('width', String(w))
-  clone.setAttribute('height', String(h))
+  // 没指定倍数时，按目标像素宽度算（保底 2×，别缩水）
+  const k = scale ?? Math.max(2, EXPORT_PX_W / w)
+  // 让 SVG 本身以**目标分辨率**渲染（浏览器会按这个尺寸重新栅格化，而不是先画小再放大 ✗）
+  clone.setAttribute('width', String(Math.round(w * k)))
+  clone.setAttribute('height', String(Math.round(h * k)))
   const text = new XMLSerializer().serializeToString(clone)
   const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(text)
   const img = await new Promise<HTMLImageElement>((res, rej) => {
@@ -597,8 +605,8 @@ async function svgToPng(svg: SVGSVGElement, scale = 2): Promise<string> {
     im.src = url
   })
   const cv = document.createElement('canvas')
-  cv.width = Math.max(1, Math.round(w * scale))
-  cv.height = Math.max(1, Math.round(h * scale))
+  cv.width = Math.max(1, Math.round(w * k))
+  cv.height = Math.max(1, Math.round(h * k))
   const ctx = cv.getContext('2d')!
   ctx.fillStyle = '#ffffff' // 白底：打印/导出更干净，也避免透明底在某些阅读器里发灰
   ctx.fillRect(0, 0, cv.width, cv.height)
