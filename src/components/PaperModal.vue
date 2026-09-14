@@ -621,6 +621,24 @@ async function grabFigureSvg(elId: string, slideIndex: number): Promise<SVGSVGEl
   return copy
 }
 
+/** 缩略图缓存：id -> svg dataURL（打开面板时逐个抓，切页动作被弹窗挡住，用户看不到闪） */
+const figThumbs = ref<Record<string, string>>({})
+function svgDataUrl(svg: SVGSVGElement): string {
+  const clone = svg.cloneNode(true) as SVGSVGElement
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(clone))
+}
+/** 打开面板：把还没抓过缩略图的图形补齐（带真实预览，选的时候看得见） */
+async function openFigPicker() {
+  figOpen.value = !figOpen.value
+  if (!figOpen.value) return
+  for (const f of figList.value) {
+    if (figThumbs.value[f.id]) continue
+    const svg = await grabFigureSvg(f.id, f.slide)
+    if (svg) figThumbs.value[f.id] = svgDataUrl(svg)
+  }
+}
+
 async function insertFigure(id: string, slideIndex: number, label: string) {
   figOpen.value = false
   try {
@@ -930,18 +948,26 @@ watch([headerText, footerText], () => render())
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 19h16"/><path d="M9 9v6M15 9v6" stroke-dasharray="2 2"/></svg><span>空白</span>
                 </button>
                 <span class="pm__figwrap">
-    <button class="pm__btn" :title="'把文稿里的数学图形插到光标处（共 ' + figList.length + ' 个）'" @click="figOpen = !figOpen">
+    <button class="pm__btn" :title="'把文稿里的数学图形插到光标处（共 ' + figList.length + ' 个）'" @click="openFigPicker()">
       <AppIcon name="graphic" :size="14" />插入数学图形
     </button>
-    <div v-if="figOpen" class="pm__figlist">
-      <div v-if="!figList.length" class="pm__figempty">文稿里还没有数学图形 —— 先在画布上放一个（工具栏「数学图形」）</div>
-      <button
-        v-for="f in figList" :key="f.id" class="pm__figitem"
-        :title="'插入第 ' + (f.slide + 1) + ' 页的这个图形'"
-        @click="insertFigure(f.id, f.slide, f.label)"
-      >
-        <span class="pm__figslide">P{{ f.slide + 1 }}</span>{{ f.label }}
-      </button>
+    <!-- 图形选择面板：带真实缩略图（选图形得看得见图形） -->
+    <div v-if="figOpen" class="pm__figpanel">
+      <div class="pm__fighead">文稿里的数学图形（{{ figList.length }} 个）</div>
+      <div v-if="!figList.length" class="pm__figempty">还没有 —— 先在画布上放一个（工具栏「数学图形」）</div>
+      <div v-else class="pm__figgrid">
+        <button
+          v-for="f in figList" :key="f.id" class="pm__figcard"
+          :title="'插入第 ' + (f.slide + 1) + ' 页的这个图形'"
+          @click="insertFigure(f.id, f.slide, f.label)"
+        >
+          <span class="pm__figthumb">
+            <img v-if="figThumbs[f.id]" :src="figThumbs[f.id]" alt="" />
+            <span v-else class="pm__figloading">…</span>
+          </span>
+          <span class="pm__figcap">P{{ f.slide + 1 }} · {{ f.label }}</span>
+        </button>
+      </div>
     </div>
   </span>
   <button class="pm__btn" title="在光标处插入本地图片" @click="insertImage">
@@ -1055,10 +1081,15 @@ watch([headerText, footerText], () => render())
 }
 /* 插入数学图形：按钮 + 下拉图形清单 */
 .pm__figwrap { position: relative; display: inline-flex; }
-.pm__figlist { position: absolute; top: 100%; left: 0; z-index: 40; margin-top: 4px; min-width: 240px; max-height: 46vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 5px; }
-.pm__figitem { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none; background: none; padding: 6px 8px; font-size: 12.5px; color: var(--text); border-radius: var(--radius-sm); cursor: pointer; }
-.pm__figitem:hover { background: var(--brand-50); color: var(--brand-800); }
-.pm__figslide { flex: 0 0 auto; font-size: 10.5px; color: var(--muted); background: var(--gray-50); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.pm__figpanel { position: absolute; top: 100%; left: 0; z-index: 40; margin-top: 4px; width: 420px; max-height: 60vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 8px; }
+.pm__fighead { font-size: 11.5px; color: var(--muted); padding: 2px 4px 8px; }
+.pm__figgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pm__figcard { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border); background: #fff; border-radius: var(--radius-sm); padding: 5px; cursor: pointer; }
+.pm__figcard:hover { border-color: var(--brand); background: var(--brand-50); }
+.pm__figthumb { display: flex; align-items: center; justify-content: center; height: 74px; overflow: hidden; background: #fff; }
+.pm__figthumb img { max-width: 100%; max-height: 74px; display: block; }
+.pm__figloading { color: var(--muted); font-size: 12px; }
+.pm__figcap { font-size: 10.5px; color: var(--muted); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pm__figempty { padding: 8px; font-size: 12px; color: var(--muted); line-height: 1.6; }
 .pm__btn:hover { background: var(--gray-50); border-color: var(--border-strong); }
 .pm__btn:active { transform: scale(0.97); }
