@@ -404,13 +404,34 @@ export function compileExpr(src: string): ((x: number) => number) | null {
   } catch { return null }
 }
 
+/** 自定义函数里的一条曲线：表达式 + 自己的颜色 / 虚实 / 粗细 */
+export interface CustomFnLine {
+  expr: string
+  /** 线条颜色；不填用元素自身的 stroke */
+  color?: string
+  /** 虚实：solid 实线 / dash 虚线 / dot 点线 */
+  dash?: 'solid' | 'dash' | 'dot'
+  /** 线宽；不填用元素自身的 strokeWidth */
+  width?: number
+  /** 关掉这条曲线（保留表达式，方便临时对比） */
+  visible?: boolean
+}
+
 /** 自定义函数图的配置 */
 export interface CustomFn {
-  expr: string
+  /** 单条表达式（旧存档用这个字段） */
+  expr?: string
+  /** 多条函数（新）：每条可单独设颜色 / 虚实 / 粗细，可叠加对比 */
+  lines?: CustomFnLine[]
   x0: number; x1: number
   y0: number; y1: number
   grid?: boolean
   axes?: boolean
+}
+
+/** 虚实 → stroke-dasharray */
+function dashArrayOf(dash: CustomFnLine['dash']): string {
+  return dash === 'dash' ? ' stroke-dasharray="7 5"' : dash === 'dot' ? ' stroke-dasharray="1.5 4"' : ''
 }
 
 /** 网格（浅色细线，画在曲线下面） */
@@ -439,17 +460,26 @@ function gridSvg(view: View, w: number, h: number, m: Mapper): string {
 /** 自定义函数图：网格 / 坐标轴 / 曲线，三样都可开关。
  *  表达式解析不了就返回 null，调用方给提示。 */
 export function customFigure(cfg: CustomFn, w: number, h: number, stroke: string, sw: number): string | null {
-  const f = compileExpr(cfg.expr)
-  if (!f) return null
+  // 兼容：新存档用 lines[]，旧存档只有一条 expr
+  const lines: CustomFnLine[] = cfg.lines && cfg.lines.length ? cfg.lines : (cfg.expr ? [{ expr: cfg.expr }] : [])
   const view: View = { xmin: cfg.x0, xmax: cfg.x1, ymin: cfg.y0, ymax: cfg.y1 }
   const m = mapper(view, w, h)
   let s = cfg.grid ? gridSvg(view, w, h, m) : ""
   if (cfg.axes !== false) s += axesSvg(view, w, h, stroke, sw, true)
-  const d = plotFunction(f, view, w, h, 600)
-  if (d) {
-    s += '<path d="' + d + '" fill="none" stroke="' + stroke + '" stroke-width="' + n1(sw) +
-      '" stroke-linecap="round" stroke-linejoin="round"/>'
+  // 每条曲线用自己的颜色/虚实/粗细；**某条写错不影响其它条**（只有全错才返回 null）
+  let any = false
+  for (const ln of lines) {
+    if (ln.visible === false) continue
+    const f = compileExpr(ln.expr || '')
+    if (!f) continue
+    const d = plotFunction(f, view, w, h, 600)
+    if (!d) continue
+    any = true
+    s += '<path d="' + d + '" fill="none" stroke="' + (ln.color || stroke) +
+      '" stroke-width="' + n1(ln.width && ln.width > 0 ? ln.width : sw) + '"' + dashArrayOf(ln.dash) +
+      ' stroke-linecap="round" stroke-linejoin="round"/>'
   }
+  if (!any && lines.length) return null
   return s
 }
 export function functionFigure(kind: string, w: number, h: number, stroke: string, sw: number, params?: Record<string, number>): string {

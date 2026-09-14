@@ -121,11 +121,38 @@ function reopenVectorize() {
   openVectorize(m.vectorizeCtx.src, null, m.id)
 }
 
-/** 自定义函数：表达式能不能解析（不能就提示，别静默画不出来） */
+/** 自定义函数：当前所有曲线（新存档用 lines[]，旧存档回退到单条 expr） */
+const customLines = computed(() => {
+  const c = mathfig.value?.custom
+  if (!c) return [] as { expr: string; color?: string; dash?: 'solid' | 'dash' | 'dot'; width?: number; visible?: boolean }[]
+  if (c.lines && c.lines.length) return c.lines
+  return [{ expr: c.expr || '' }]
+})
+/** 自定义函数：**只要有一条写错就提示**（写错的那条不画，其它条照画） */
 const customBad = computed(() => {
   if (mathfig.value?.kind !== 'custom') return false
-  return compileExpr(mathfig.value.custom?.expr || '') === null
+  return customLines.value.some((l) => l.visible !== false && compileExpr(l.expr || '') === null)
 })
+function setLines(next: { expr: string; color?: string; dash?: 'solid' | 'dash' | 'dot'; width?: number; visible?: boolean }[]) {
+  setCustom({ lines: next, expr: undefined } as never)
+}
+/** 改第 i 条曲线的某一项 */
+function setLine(i: number, patch: Record<string, unknown>) {
+  const list = customLines.value.map((x) => ({ ...x }))
+  if (!list[i]) return
+  list[i] = { ...list[i], ...patch } as never
+  setLines(list as never)
+}
+function addLine() {
+  const list = customLines.value.map((x) => ({ ...x }))
+  const palette = ['#1668e0', '#e0402f', '#0f9d58', '#8e44ad', '#e08b16', '#1a1a1a']
+  list.push({ expr: '', color: palette[list.length % palette.length] })
+  setLines(list as never)
+}
+function removeLine(i: number) {
+  const list = customLines.value.filter((_, k) => k !== i).map((x) => ({ ...x }))
+  setLines((list.length ? list : [{ expr: '' }]) as never)
+}
 /** 改自定义函数的某一项 */
 function setCustom(p: Partial<NonNullable<MathFigureElement['custom']>>) {
   const cur = mathfig.value?.custom || { expr: 'x^2', x0: -4, x1: 4, y0: -2, y1: 6 }
@@ -936,15 +963,35 @@ function layerTypeLabel(type: string) {
 
         <!-- 自定义函数（空白）：表达式 / 定义域 / 值域 / 网格 / 坐标轴 -->
         <template v-if="mathfig?.kind === 'custom'">
-          <label class="field"><span>y =</span>
-            <input
-              class="cfn__expr"
-              :value="mathfig.custom?.expr ?? ''"
-              placeholder="如 x^2-2x+1、2sin(x)、1/x"
-              @change="setCustom({ expr: ($event.target as HTMLInputElement).value })"
-            />
-          </label>
-          <p v-if="customBad" class="cfn__err">表达式看不懂 —— 支持 + − * / ^、括号、pi/e、sin/cos/tan/ln/sqrt/abs/exp…（2x 这种写法也认）</p>
+          <div class="cfn__lines">
+            <div v-for="(ln, i) in customLines" :key="i" class="cfn__line">
+              <input
+                class="cfn__expr"
+                :value="ln.expr"
+                placeholder="如 x^2-2x+1、2sin(x)、1/x"
+                @change="setLine(i, { expr: ($event.target as HTMLInputElement).value })"
+              />
+              <input
+                class="cfn__color" type="color" :value="ln.color || mathfig?.stroke || '#1a1a1a'"
+                title="这条曲线的颜色"
+                @input="setLine(i, { color: ($event.target as HTMLInputElement).value })"
+              />
+              <select class="cfn__dash" :value="ln.dash || 'solid'" title="虚实"
+                @change="setLine(i, { dash: ($event.target as HTMLSelectElement).value })">
+                <option value="solid">实线</option>
+                <option value="dash">虚线</option>
+                <option value="dot">点线</option>
+              </select>
+              <input
+                class="cfn__w" type="number" min="0" max="12" step="0.5" :value="ln.width ?? 0"
+                title="线宽（0 = 跟随元素）"
+                @input="setLine(i, { width: num(($event.target as HTMLInputElement).value, 0) })"
+              />
+              <button class="cfn__del" title="删掉这条" @click="removeLine(i)">×</button>
+            </div>
+            <button class="quick__btn cfn__add" @click="addLine()">＋ 加一条函数</button>
+          </div>
+          <p v-if="customBad" class="cfn__err">有一条表达式看不懂（那条不画，其它照画）—— 支持 + − * / ^、括号、pi/e、sin/cos/tan/ln/sqrt/abs/exp…（2x 这种写法也认）</p>
           <label class="field"><span>定义域</span>
             <span class="cfn__pair">
               x ∈ [<input type="number" step="0.5" :value="mathfig.custom?.x0 ?? -4" @change="setCustom({ x0: num(($event.target as HTMLInputElement).value, -4) })" />,
@@ -1626,6 +1673,16 @@ function layerTypeLabel(type: string) {
 /* 自定义函数（空白）的小表单 */
 .field--row { display: flex; align-items: center; gap: 6px; }
 .field--row > span { display: inline; margin: 0; }
+/* 多函数列表：每行 = 表达式 + 颜色 + 虚实 + 线宽 + 删除 */
+.cfn__lines { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.cfn__line { display: flex; align-items: center; gap: 6px; }
+.cfn__line .cfn__expr { flex: 1; min-width: 0; }
+.cfn__color { width: 30px; height: 26px; padding: 0; border: 1px solid var(--border, #e2e2e8); border-radius: 6px; background: none; cursor: pointer; }
+.cfn__dash { width: 62px; }
+.cfn__w { width: 52px; }
+.cfn__del { width: 24px; height: 24px; border: 1px solid var(--border, #e2e2e8); border-radius: 6px; background: #fff; color: #8a8a94; cursor: pointer; line-height: 1; }
+.cfn__del:hover { color: #e0402f; border-color: #e0402f; }
+.cfn__add { margin-top: 2px; }
 .cfn__pair { display: flex; align-items: center; gap: 4px; }
 .cfn__pair input { width: 62px !important; }
 .cfn__err { margin: 4px 0 8px; font-size: 11px; color: #c0392b; line-height: 1.5; }

@@ -549,7 +549,10 @@ export interface MathFigureElement extends ElementBase {
   /** 自定义函数（空白）：表达式 + 定义域/值域 + 网格/坐标轴开关。
    *  表达式语法见 mathPlot.compileExpr（+ − * / ^、括号、pi/e、sin/cos/ln/sqrt…，支持 2x 这种隐式乘法） */
   custom?: {
-    expr: string
+    /** 单条表达式（旧存档） */
+    expr?: string
+    /** 多条函数：每条可单独设颜色 / 虚实 / 粗细（新） */
+    lines?: import('@/composables/mathPlot').CustomFnLine[]
     /** 定义域 */
     x0: number
     x1: number
