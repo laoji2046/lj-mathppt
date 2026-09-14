@@ -21,6 +21,7 @@ import { isTauri } from '@/composables/useTauri'
 import SettingsPanel from './SettingsPanel.vue'
 import { ICONS as I } from '@/ui/icons'
 import { docxToMarkdown } from '@/docx/docxToMarkdown'
+import { pptxToDeck } from '@/pptx/pptxToDeck'
 import PdfImportDialog from './PdfImportDialog.vue'
 import { pdfImportOpen, pdfImportFile, openPdfImport, closePdfImport } from '@/ui/pdfImport'
 import { markdownToDeck } from '@/composables/mdDeck'
@@ -83,6 +84,8 @@ function onDeckJsonPicked(e: Event) {
 /** 导入 Word（.docx）：本地解析 → Markdown → 走应用自己的 Markdown 导入管线（图片内嵌成 data URL） */
 const docxInput = ref<HTMLInputElement | null>(null)
 function pickDocx() { fileOpen.value = false; docxInput.value?.click() }
+const pptxInput = ref<HTMLInputElement | null>(null)
+function pickPptx() { fileOpen.value = false; pptxInput.value?.click() }
 /** 导入 PDF：先弹窗探测（有没有文本层）再决定怎么导 */
 const pdfInput = ref<HTMLInputElement | null>(null)
 function pickPdf() { fileOpen.value = false; pdfInput.value?.click() }
@@ -93,6 +96,30 @@ function onPdfPicked(e: Event) {
   if (file) openPdfImport(file)
 }
 function onPdfDone(msg: string) { fileToast.value = msg; flashToast() }
+
+/** 导入 PPT(.pptx)：解包 → 逐页读形状 → 生成课件 JSON（文字/公式/图片/表格） */
+async function onPptxPicked(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  fileToast.value = '正在解析 PPT…'
+  flashToast()
+  try {
+    const buf = new Uint8Array(await file.arrayBuffer())
+    const { deck, stats } = await pptxToDeck(buf)
+    const ok2 = store.importDeck(deck)
+    if (!ok2) throw new Error('生成的演示无效（已取消，未影响当前内容）')
+    const warn = stats.skippedVector > 0
+      ? ' · 跳过 ' + stats.skippedVector + ' 个 WMF/EMF 矢量图（浏览器不能渲染）'
+      : ''
+    fileToast.value = 'PPT 导入完成：' + deck.slides.length + ' 页 · 公式 ' + stats.formulas +
+      ' · 图片 ' + stats.images + ' · 表格 ' + stats.tables + warn
+  } catch (err) {
+    fileToast.value = 'PPT 导入失败：' + (err instanceof Error ? err.message : String(err))
+  }
+  flashToast()
+}
 
 async function onDocxPicked(e: Event) {
   const input = e.target as HTMLInputElement
@@ -594,6 +621,9 @@ onBeforeUnmount(() => {
           <button class="dropdown__item" title="当前页截图为 PNG（2 倍分辨率）" @click="exportPng"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.png"></svg></span>导出 PNG（当前页）</button>
           <button class="dropdown__item" title="Markdown 源码：导出或导入（--- 横向 / -- 垂直 / Note: 备注）" @click="setViewMode('split')"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>MD 源码（导出/导入 Markdown）</button>
           <button class="dropdown__item" title="导入之前导出的演示 JSON（.json）" @click="pickDeckJson"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>导入演示 JSON</button>
+        <button class="dropdown__item" title="导入 PPT（.pptx）：本地解析，文字 / 公式 / 图片 / 表格一并搬过来" @click="pickPptx">
+          <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.file"></svg></span>导入 PPT(.pptx)
+        </button>
         <button class="dropdown__item" title="导入 Word 文档（.docx）：本地解析、图片内嵌，一题一页" @click="pickDocx"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>导入 Word 文档（.docx）</button>
         <button class="dropdown__item" title="导入 PDF（.pdf）：自动判断有没有文本层 —— 有就抽成可编辑文字，没有就每页一张图" @click="pickPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导入 PDF（.pdf）</button>
         </div>
@@ -689,6 +719,7 @@ onBeforeUnmount(() => {
       <input ref="deckJsonInput" type="file" accept=".json,application/json" style="display:none" @change="onDeckJsonPicked" />
     <input ref="docxInput" type="file" accept=".docx" style="display:none" @change="onDocxPicked" />
     <input ref="pdfInput" type="file" accept=".pdf,application/pdf" style="display:none" @change="onPdfPicked" />
+    <input ref="pptxInput" type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" style="display:none" @change="onPptxPicked" />
 
       <!-- 公式下拉：混排公式（粘贴 LaTeX）/ 空白公式 -->
       <div ref="formulaWrap" class="dropdown">
