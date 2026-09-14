@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1242**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1243**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,37 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-14（v2026.09.1243）
+
+**1243 · 表格单元格插数学图形（标记 `{{fig:kind}}`）**
+
+单元格里写 **`{{fig:cube}}`** ✓ → 渲染成**行内 SVG**（高度跟着字号 1.35em ✓），
+画布与导出/演示**同一份实现** ✓。
+
+**做法（严格照 v1229 的纪律）**：
+
+- 新增 `composables/figureRender.ts`：`mathFigureElOfKind()` + `renderFigureSvg()` + `inlineFiguresInText()`；
+- `renderer.ts` 里那份**本地** `renderFigureSvg` **删掉**，改用共用模块 ✓（图形库的表驱动也走这里）；
+- 表格单元格：`inlineFiguresInText(raw)` → 塞进 `innerHTML`（`normalizeMixed` **不转义** ✓，所以 SVG 能直通 ✓）；
+- 导出表格单元格：`normalizeMixed(inlineFiguresInText(cv ?? ''))` ✓。
+
+**机制自证**：单元格渲染链与已验证的 `$x^2$` **完全同一条**（`normalizeMixed` + `typesetMixed` ✓），
+差别只在于先把 `{{fig:…}}` 换成 SVG ✓。
+
+**⚠ 验证状态（如实）**：
+
+    ✓ 构建通过；画布与导出两处都调用了共用函数
+    ✗ **`{{fig:cube}}` 本身没验到** —— CDP 脚本连续第 7 次坏在"取表格"那步
+      （`JSON.parse` 收到了页面的 TypeError，说明建表格那两步没走通）
+    → 请用户手动敲一次确认（比我再改脚本快得多）
+
+**附带踩坑（值得记）**：
+
+    我用 `cur.slice(start, indexOf("\n}\n", ...))` 去删 renderer 里的旧函数 ✗ ——
+    结果 `indexOf` 匹配到了**文件很后面**的一个 `\n}\n`，一次删掉 465 行 ✗✗。
+    靠 `git checkout -- <file>` 恢复 ✓，之后改用**精确 edit**（把要删的块先 read 出来再整体替换）✓。
+    教训：**永远不要用"找结束标记"的字节切片去改文件** ✗ —— 用 read + 精确 edit。
 
 ### 2026-09-14（v2026.09.1242）
 

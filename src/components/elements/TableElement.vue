@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { normalizeMixed } from '@/types'
 import { typesetMixed } from '@/composables/useMathJax'
+import { inlineFiguresInText } from '@/composables/figureRender'
 import type { CSSProperties } from 'vue'
 import type { TableElement } from '@/types'
 import type { SlideElement } from '@/types'
@@ -31,9 +32,15 @@ async function renderCells() {
   if (editing.value) return
   for (const c of cells) {
     const raw = c.getAttribute('data-raw') || ''
-    // 有 \( \) 或 $ … $（markdown 公式）才排版；都没有就当普通文字
-    if (raw.indexOf('\\(') < 0 && raw.indexOf('$') < 0) { if (c.innerText !== raw) c.innerText = raw; continue }
-    await typesetMixed(c, normalizeMixed(raw))
+    // {{fig:kind}} → 行内 SVG（用真组件渲染，跟画布上的图形同一份实现）
+    const html = inlineFiguresInText(raw)
+    const hasMath = html.indexOf('\\(') >= 0 || html.indexOf('$') >= 0
+    if (!hasMath) {
+      // 只有图形/纯文字：直接落内容（typesetMixed 会顺手把 $ 归一化，这里也一样）
+      c.innerHTML = normalizeMixed(html)
+      continue
+    }
+    await typesetMixed(c, html)
     if (my !== renderSeq) return
   }
 }
