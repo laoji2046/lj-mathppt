@@ -18,6 +18,34 @@
 @keyframes anim-in-shrink { from { opacity: 0; scale: 1.7 } to { opacity: 1; scale: 1 } }
 @keyframes anim-in-rotate { from { opacity: 0; rotate: -10deg; scale: 0.9 } to { opacity: 1; rotate: 0deg; scale: 1 } }
 
+/* ---- 强调动画：入场之后自动接着播一次 ---- */
+@keyframes anim-em-pulse { 0% { scale: 1 } 40% { scale: 1.18 } 70% { scale: 0.96 } 100% { scale: 1 } }
+@keyframes anim-em-bounce { 0%, 100% { translate: 0 0 } 30% { translate: 0 -14px } 55% { translate: 0 0 } 75% { translate: 0 -6px } }
+@keyframes anim-em-shake { 0%, 100% { translate: 0 0 } 20% { translate: -8px 0 } 40% { translate: 8px 0 } 60% { translate: -6px 0 } 80% { translate: 6px 0 } }
+@keyframes anim-em-spin { from { rotate: 0deg } to { rotate: 360deg } }
+@keyframes anim-em-grow { from { scale: 1 } to { scale: 1.25 } }
+@keyframes anim-em-shrink { from { scale: 1 } to { scale: 0.78 } }
+@keyframes anim-em-flash { 0%, 100% { opacity: 1 } 25%, 75% { opacity: 0.25 } 50% { opacity: 1 } }
+
+.anim-em-pulse,
+.anim-em-bounce,
+.anim-em-shake,
+.anim-em-spin,
+.anim-em-grow,
+.anim-em-shrink,
+.anim-em-flash {
+  animation-duration: var(--anim-dur, 0.6s);
+  animation-delay: var(--anim-delay, 0s);
+  animation-timing-function: ease-in-out;
+}
+.anim-em-pulse { animation-name: anim-em-pulse; }
+.anim-em-bounce { animation-name: anim-em-bounce; }
+.anim-em-shake { animation-name: anim-em-shake; }
+.anim-em-spin { animation-name: anim-em-spin; }
+.anim-em-grow { animation-name: anim-em-grow; }
+.anim-em-shrink { animation-name: anim-em-shrink; }
+.anim-em-flash { animation-name: anim-em-flash; }
+
 .anim-in-fade,
 .anim-in-left,
 .anim-in-right,
@@ -27,7 +55,8 @@
 .anim-in-grow,
 .anim-in-shrink,
 .anim-in-rotate {
-  animation-duration: 0.55s;
+  animation-duration: var(--anim-dur, 0.55s);
+  animation-delay: var(--anim-delay, 0ms);
   animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
   animation-fill-mode: both;
 }

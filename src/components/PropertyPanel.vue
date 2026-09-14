@@ -7,9 +7,9 @@ import type {
   GgbApp, IconElement, ImageElement, LineElement, MathElement, MathFigureElement,
   MathFigureKind, PenElement, RichTextElement, ShapeElement, SlideElement, TableElement, TextElement, WordArtPreset,
 } from '@/types'
-import type { AnimIn, BulletKind } from '@/types'
+import type { AnimEm, AnimIn, BulletKind } from '@/types'
 import { playAnimPreview } from '@/ui/animPreview'
-import { ANIM_INS, ARROW_HEADS, BULLETS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, IMAGE_ROT3D, IMAGE_SHADOWS, SHAPE_MASKS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
+import { ANIM_EMS, ANIM_INS, ARROW_HEADS, BULLETS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, IMAGE_ROT3D, IMAGE_SHADOWS, SHAPE_MASKS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
 import { captureDesmosState } from '@/composables/useDesmos'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
@@ -676,8 +676,25 @@ function layerTypeLabel(type: string) {
             <option v-for="a in ANIM_INS" :key="a.v" :value="a.v">{{ a.label }}</option>
           </select>
         </label>
-        <div v-if="el.animIn && el.animIn !== 'none'" style="display:flex;gap:6px;margin-top:6px">
-          <button class="quick__btn" style="flex:1" @click="playAnimPreview(el.id, el.animIn as AnimIn)">▶ 预览动画</button>
+        <label class="field" style="margin-top:6px">
+          <span>强调动画（入场后自动播一次）</span>
+          <select :value="el.animEm || 'none'"
+            @change="patch({ animEm: ($event.target as HTMLSelectElement).value as AnimEm } as Partial<SlideElement>)">
+            <option v-for="a in ANIM_EMS" :key="a.v" :value="a.v">{{ a.label }}</option>
+          </select>
+        </label>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <label class="field" style="flex:1"><span>时长 (ms)</span>
+            <input type="number" :value="el.animDuration ?? 550" min="100" max="4000" step="50"
+              @input="patch({ animDuration: num(($event.target as HTMLInputElement).value, 550) } as Partial<SlideElement>)" />
+          </label>
+          <label class="field" style="flex:1"><span>延迟 (ms)</span>
+            <input type="number" :value="el.animDelay ?? 0" min="0" max="4000" step="50"
+              @input="patch({ animDelay: num(($event.target as HTMLInputElement).value, 0) } as Partial<SlideElement>)" />
+          </label>
+        </div>
+        <div v-if="(el.animIn && el.animIn !== 'none') || (el.animEm && el.animEm !== 'none')" style="display:flex;gap:6px;margin-top:6px">
+          <button class="quick__btn" style="flex:1" @click="playAnimPreview(el.id, (el.animIn || 'none') as AnimIn, (el.animEm || 'none') as AnimEm)">▶ 预览动画</button>
         </div>
         <p v-if="el.animIn && el.animIn !== 'none'" class="panel__hint">
           勾选上面的「渐显动画」= 演示时<strong>点击后</strong>才出现；不勾 = 随本页一起出现（动画照跑）。

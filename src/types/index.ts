@@ -36,6 +36,11 @@ interface ElementBase extends Rect {
   fragmentIndex?: number
   /** 入场动画（配合上面的 fragment：勾选渐显才会"点击后出现"） */
   animIn?: AnimIn
+  /** 强调动画：入场之后自动接着播一次 */
+  animEm?: AnimEm
+  /** 动画时长 / 延迟（ms） */
+  animDuration?: number
+  animDelay?: number
   /** 元素阴影（box-shadow）：开启后按 shadowColor 渲染色投影（颜色可选） */
   shadowOn?: boolean
   shadowColor?: string
@@ -980,6 +985,30 @@ export const ANIM_INS: { v: AnimIn; label: string; reveal: string; cls: string }
   { v: 'shrink', label: '由大变小', reveal: 'shrink', cls: 'anim-in-shrink' },
   { v: 'rotate', label: '旋转进入', reveal: 'fade-up', cls: 'anim-in-rotate' },
 ]
+
+/** 强调动画（PowerPoint「动画 → 强调」那一组）—— 入场之后自动接着播一次 */
+export type AnimEm = 'none' | 'pulse' | 'shake' | 'spin' | 'grow' | 'shrink' | 'flash' | 'bounce'
+
+export const ANIM_EMS: { v: AnimEm; label: string; cls: string }[] = [
+  { v: 'none', label: '无', cls: '' },
+  { v: 'pulse', label: '脉冲（放大回弹）', cls: 'anim-em-pulse' },
+  { v: 'bounce', label: '弹跳', cls: 'anim-em-bounce' },
+  { v: 'shake', label: '抖动', cls: 'anim-em-shake' },
+  { v: 'spin', label: '旋转一圈', cls: 'anim-em-spin' },
+  { v: 'grow', label: '放大', cls: 'anim-em-grow' },
+  { v: 'shrink', label: '缩小', cls: 'anim-em-shrink' },
+  { v: 'flash', label: '闪烁', cls: 'anim-em-flash' },
+]
+
+export function animEmphasisClass(kind: AnimEm | undefined): string {
+  return ANIM_EMS.find((a) => a.v === kind)?.cls ?? ''
+}
+/** 时长/延迟：写在元素上，编辑器与导出用同一组 CSS 变量 */
+export function animTimingStyle(el: { animDuration?: number; animDelay?: number }): string {
+  const d = el.animDuration && el.animDuration > 0 ? el.animDuration : 550
+  const l = el.animDelay && el.animDelay > 0 ? el.animDelay : 0
+  return '--anim-dur:' + d + 'ms;--anim-delay:' + l + 'ms'
+}
 
 /** 取 Reveal 导出要拼的 fragment 类名（空串表示用默认淡入） */
 export function animRevealClass(kind: AnimIn | undefined): string {

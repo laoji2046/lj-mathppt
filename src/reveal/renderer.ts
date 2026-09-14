@@ -1,5 +1,5 @@
 import type { Deck, Slide, SlideElement, TextElement } from '@/types'
-import { animRevealClass, bulletMarker, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
+import { animRevealClass, animTimingStyle, bulletMarker, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
 import { SOLID_VCOUNT, renderSolid, solidVerts, arcsSvg, type EdgeStyle, type FaceStyle, type SolidMesh } from '@/composables/solid3d'
 
 /**
@@ -373,13 +373,18 @@ function chartInner(
 }
 
 function elementToHtml(el: SlideElement): string {
-  const box = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.w}px;height:${el.h}px;` +
+  // 动画时长/延迟走 CSS 变量（--anim-dur / --anim-delay），编辑器与导出一致
+  const animTiming = (el.animIn && el.animIn !== 'none') || (el.animEm && el.animEm !== 'none')
+    ? ';' + animTimingStyle(el)
+    : ''
+  const box = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.w}px;height:${el.h}px;` + animTiming +
     (el.shadowOn ? `box-shadow:${el.shadowX ?? 0}px ${el.shadowY ?? 6}px ${el.shadowBlur ?? 18}px ${el.shadowColor || '#000000'}55;` : '')
   const rot = el.rot ? `transform:rotate(${el.rot}deg);` : ''
   // 入场动画：拼上 Reveal **内置**的 fragment 类（fade-up / zoom-in / grow …），不自己写 JS
   const animCls = el.fragment ? animRevealClass(el.animIn) : ''
   const cls = el.fragment ? ' class="fragment' + (animCls ? ' ' + animCls : '') + '"' : ''
-  const fragIdx = el.fragment && typeof el.fragmentIndex === 'number' ? ' data-fragment-index="' + el.fragmentIndex + '"' : ''
+  const fragIdx = (el.fragment && typeof el.fragmentIndex === 'number' ? ' data-fragment-index="' + el.fragmentIndex + '"' : '') + +
+    (el.animEm && el.animEm !== 'none' ? ' data-anim-em="' + el.animEm + '"' : '')
 
   if (el.type === 'text') {
     const t = el as TextElement
@@ -662,6 +667,21 @@ export function renderDeckToRevealHtml(deck: Deck, opts: RenderOptions = {}): st
   #fx-boot { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
     background:#ffffff; color:#888780; font:14px/1.6 system-ui, sans-serif; z-index:99; }
   #fx-boot.hide { display:none; }
+  /* 强调动画（与编辑器 styles/anim.css 同一套 keyframes，时长/延迟走 --anim-dur/--anim-delay） */
+  @keyframes anim-em-pulse { 0% { scale: 1 } 40% { scale: 1.18 } 70% { scale: .96 } 100% { scale: 1 } }
+  @keyframes anim-em-bounce { 0%,100% { translate: 0 0 } 30% { translate: 0 -14px } 55% { translate: 0 0 } 75% { translate: 0 -6px } }
+  @keyframes anim-em-shake { 0%,100% { translate: 0 0 } 20% { translate: -8px 0 } 40% { translate: 8px 0 } 60% { translate: -6px 0 } 80% { translate: 6px 0 } }
+  @keyframes anim-em-spin { from { rotate: 0deg } to { rotate: 360deg } }
+  @keyframes anim-em-grow { from { scale: 1 } to { scale: 1.25 } }
+  @keyframes anim-em-shrink { from { scale: 1 } to { scale: .78 } }
+  @keyframes anim-em-flash { 0%,100% { opacity: 1 } 25%,75% { opacity: .25 } 50% { opacity: 1 } }
+  .anim-em-pulse { animation: anim-em-pulse var(--anim-dur, .6s) ease-in-out var(--anim-delay, 0s) both; }
+  .anim-em-bounce { animation: anim-em-bounce var(--anim-dur, .6s) ease-in-out var(--anim-delay, 0s) both; }
+  .anim-em-shake { animation: anim-em-shake var(--anim-dur, .6s) ease-in-out var(--anim-delay, 0s) both; }
+  .anim-em-spin { animation: anim-em-spin var(--anim-dur, .6s) linear var(--anim-delay, 0s) both; }
+  .anim-em-grow { animation: anim-em-grow var(--anim-dur, .6s) ease-in-out var(--anim-delay, 0s) both; }
+  .anim-em-shrink { animation: anim-em-shrink var(--anim-dur, .6s) ease-in-out var(--anim-delay, 0s) both; }
+  .anim-em-flash { animation: anim-em-flash var(--anim-dur, .6s) ease-in-out var(--anim-delay, 0s) both; }
   #fx-laser-canvas { position:fixed; inset:0; left:0; top:0; z-index:999; cursor:crosshair; touch-action:none; pointer-events:none; display:none; }
 </style>
 ${hasMath ? `<script>
@@ -984,6 +1004,17 @@ ${slides}
     Reveal.on('slidechanged', function(e){
       prepare(e && e.currentSlide);
       tellHost();
+    });
+    // 强调动画：元素出现后再播一次（去类→强制回流→加回，保证连点也能重播）
+    Reveal.on('fragmentshown', function(e){
+      var f = e && e.fragment;
+      if (!f || !f.getAttribute) return;
+      var em = f.getAttribute('data-anim-em');
+      if (!em) return;
+      var c = 'anim-em-' + em;
+      f.classList.remove(c);
+      void f.offsetWidth;
+      f.classList.add(c);
     });
     // ---------- 打印模式：全部页面挂载 + 就绪通知 ----------
     // view:'print' 下 Reveal 把每页包成 .pdf-page 堆叠展示（无 transform），
