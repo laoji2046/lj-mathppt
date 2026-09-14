@@ -126,7 +126,6 @@ function onEsc(e: KeyboardEvent) {
         @keydown.esc="onEsc"
       >{{ item.v }}</div>
     </div>
-    <div v-if="!editing" class="table-el__hint">双击编辑数据 / 表头；单元格里写 \(x^2\) 就是公式</div>
   </div>
 </template>
 
@@ -134,6 +133,4 @@ function onEsc(e: KeyboardEvent) {
 .table-el { width: 100%; height: 100%; overflow: auto; box-sizing: border-box; position: relative; }
 .table-grid { width: 100%; }
 .table-el--edit .table-grid > div { border: 1px dashed var(--brand); min-height: 28px; }
-.table-el__hint { position: absolute; top: -1px; right: 2px; font-size: 11px; color: #fff; background: rgba(106,82,200,0.85); border-radius: 4px; padding: 1px 6px; pointer-events: none; opacity: 0; transition: opacity .12s; }
-.table-el:hover .table-el__hint { opacity: 1; }
 </style>
