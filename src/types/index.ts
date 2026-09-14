@@ -593,10 +593,17 @@ export interface ChartElement extends ElementBase {
   color: string
 }
 
+/** 合并单元格：锚点在 (r,c)，向右 cs 列、向下 rs 行（被覆盖的格子照旧留在 rows 里，但不渲染） */
+export interface TableMerge { r: number; c: number; rs: number; cs: number }
+
 export interface TableElement extends ElementBase {
   type: 'table'
   /** rows[0] 为表头 */
   rows: string[][]
+  /** 合并单元格（教材表格必需：左列跨行、标题跨列）。不写 = 不合并，老存档照旧 ✓ */
+  merges?: TableMerge[]
+  /** 表标题，如「表 4-1」：居中显示在表格上方，跨全宽 */
+  caption?: string
   headerColor: string
   borderColor: string
   fontSize: number

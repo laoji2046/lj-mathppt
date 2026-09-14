@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { normalizeMixed } from '@/types'
 import { typesetMixed } from '@/composables/useMathJax'
 import { inlineFiguresInText } from '@/composables/figureRender'
+import { layoutTable, type TableCell } from '@/composables/tableLayout'
 import type { CSSProperties } from 'vue'
 import type { TableElement } from '@/types'
 import type { SlideElement } from '@/types'
@@ -15,8 +16,11 @@ const store = useDeckStore()
 const editing = ref(false)
 const gridEl = ref<HTMLElement | null>(null)
 
+/** 排版：rows + merges → 要渲染的格子（跨行跨列算法与导出一份，见 tableLayout.ts） */
+const layout = computed(() => layoutTable(props.el.rows, props.el.merges))
+
 /**
- * 单元格渲染：支持 \(LaTeX\) 行内公式（跟「混排公式」元素同一套 MathJax 排版）。
+ * 单元格渲染：支持 \(LaTeX\) / $…$ 行内公式，以及 {{fig:kind}} 行内图形。
  * ⚠ 编辑时必须显示**原文** —— MathJax 排完之后 DOM 里是渲染结果，
  *   直接读 innerText 会把公式读成一片乱字符（混排公式元素踩过同一个坑）。
  */
@@ -26,17 +30,16 @@ async function renderCells() {
   await nextTick()
   const host = gridEl.value
   if (!host) return
-  const cells = Array.from(host.querySelectorAll<HTMLElement>('[data-cell]'))
+  // 单元格与表标题都带 data-raw（标题里也可能有公式）
+  const cells = Array.from(host.querySelectorAll<HTMLElement>('[data-raw]'))
   // ⚠ 编辑态**什么都不做**：单元格由 Vue 通过 :key 重建（内容天然是原文），
   //   在这里重写 innerText 会把节点换掉 → 光标/焦点丢失 → 表现为"双击不能编辑"（踩过）
   if (editing.value) return
   for (const c of cells) {
     const raw = c.getAttribute('data-raw') || ''
-    // {{fig:kind}} → 行内 SVG（用真组件渲染，跟画布上的图形同一份实现）
     const html = inlineFiguresInText(raw)
     const hasMath = html.indexOf('\\(') >= 0 || html.indexOf('$') >= 0
     if (!hasMath) {
-      // 只有图形/纯文字：直接落内容（typesetMixed 会顺手把 $ 归一化，这里也一样）
       c.innerHTML = normalizeMixed(html)
       continue
     }
@@ -44,33 +47,20 @@ async function renderCells() {
     if (my !== renderSeq) return
   }
 }
-onMounted(() => {
-  renderCells()
-})
+onMounted(() => { renderCells() })
+watch(() => [props.el.rows, props.el.merges, props.el.caption, editing.value], renderCells, { deep: true })
 
-watch(() => [props.el.rows, editing.value], renderCells, { deep: true })
-
-const cols = computed(() => props.el.rows[0]?.length || 1)
-const flat = computed(() => {
-  const out: { v: string; r: number; c: number }[] = []
-  props.el.rows.forEach((row, r) => row.forEach((cv, c) => out.push({ v: cv ?? '', r, c })))
-  return out
-})
-
-/** 网格：列 1fr 等宽铺满宽；行 auto 按内容自适应；gap=1px+背景=边框色 成网格线 */
-const gridStyle = computed(() => ({
-  display: 'grid',
-  gridTemplateColumns: 'repeat(' + cols.value + ', 1fr)',
-  gridAutoRows: 'auto',
-  gap: '1px',
-  background: props.el.borderColor,
-  fontSize: props.el.fontSize + 'px',
+/** 表格整体样式：真 <table>，边框用 border-collapse 画（原来靠 grid gap 的假边框换掉了） */
+const tableStyle = computed(() => ({
   width: '100%',
+  borderCollapse: 'collapse' as const,
+  tableLayout: 'fixed' as const,
+  fontSize: props.el.fontSize + 'px',
 }))
-function cellStyle(item: { r: number }): CSSProperties {
-  const isH = item.r === 0
+function cellStyle(cell: TableCell): CSSProperties {
+  const isH = cell.r === 0
   const pad = props.el.cellPad ?? 6
-  const bg = isH ? props.el.headerColor : (props.el.altRowColor && item.r % 2 === 0 ? props.el.altRowColor : '#ffffff')
+  const bg = isH ? props.el.headerColor : (props.el.altRowColor && cell.r % 2 === 0 ? props.el.altRowColor : '#ffffff')
   return {
     background: bg,
     color: isH ? (props.el.headerTextColor || '#ffffff') : (props.el.cellColor || '#1a1a1a'),
@@ -82,6 +72,8 @@ function cellStyle(item: { r: number }): CSSProperties {
     boxSizing: 'border-box',
     lineHeight: 1.4,
     outline: 'none',
+    verticalAlign: 'middle',
+    border: '1px solid ' + props.el.borderColor,
     cursor: editing.value ? 'text' : 'default',
   }
 }
@@ -89,7 +81,7 @@ function startEdit(e?: MouseEvent) {
   // 记住双击落在哪个格子（点空白区域就退回第一格）
   const hit = (e && e.target instanceof HTMLElement ? e.target.closest('[data-cell]') : null) as HTMLElement | null
   editing.value = true
-  // ⚠ 必须**显式聚焦并落光标** —— 网格用 :key 重建过，浏览器那套"点到哪就是哪"的自动聚焦不作数 ✗
+  // ⚠ 必须**显式聚焦并落光标** —— 表格用 :key 重建过，浏览器那套"点到哪就是哪"的自动聚焦不作数
   requestAnimationFrame(() => {
     const host = gridEl.value
     if (!host) return
@@ -122,23 +114,32 @@ function onEsc(e: KeyboardEvent) {
 
 <template>
   <div class="table-el" :class="{ 'table-el--edit': editing }" @dblclick.stop.prevent="startEdit">
-    <div ref="gridEl" class="table-grid" :key="editing ? 'edit' : 'view'" :style="gridStyle">
-      <div
-        v-for="(item, idx) in flat"
-        :key="idx"
-        :data-cell="item.r + '-' + item.c"
-        :data-raw="item.v"
-        :style="cellStyle(item)"
-        :contenteditable="editing ? 'plaintext-only' : 'false'"
-        @blur="onCellBlur(item, $event)"
-        @keydown.esc="onEsc"
-      >{{ item.v }}</div>
-    </div>
+    <table ref="gridEl" class="table-grid" :key="editing ? 'edit' : 'view'" :style="tableStyle">
+      <caption v-if="el.caption" class="table-cap" :data-raw="el.caption" :contenteditable="editing ? 'plaintext-only' : 'false'">{{ el.caption }}</caption>
+      <tbody>
+        <tr v-for="(line, ri) in layout.grid" :key="ri">
+          <td
+            v-for="cell in line"
+            :key="cell.r + '-' + cell.c"
+            :data-cell="cell.r + '-' + cell.c"
+            :data-raw="cell.text"
+            :rowspan="cell.rs > 1 ? cell.rs : undefined"
+            :colspan="cell.cs > 1 ? cell.cs : undefined"
+            :style="cellStyle(cell)"
+            :contenteditable="editing ? 'plaintext-only' : 'false'"
+            @blur="onCellBlur(cell, $event)"
+            @keydown.esc="onEsc"
+          >{{ cell.text }}</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </template>
 
 <style scoped>
 .table-el { width: 100%; height: 100%; overflow: auto; box-sizing: border-box; position: relative; }
 .table-grid { width: 100%; }
-.table-el--edit .table-grid > div { border: 1px dashed var(--brand); min-height: 28px; }
+.table-cap { caption-side: top; text-align: center; font-weight: 700; padding: 0 0 4px; outline: none; }
+.table-el--edit .table-grid > tbody > tr > td { border: 1px dashed var(--brand) !important; min-height: 28px; }
+.table-el--edit .table-cap { border: 1px dashed var(--brand); }
 </style>

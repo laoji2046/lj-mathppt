@@ -1,5 +1,6 @@
 import type { Deck, Slide, SlideElement, TableElement, TextElement } from '@/types'
 import { inlineFiguresInText, renderFigureSvg } from '@/composables/figureRender'
+import { layoutTable } from '@/composables/tableLayout'
 import { animRevealClass, animTimingStyle, bulletMarker, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
 import { SOLID_VCOUNT, renderSolid, solidVerts, arcsSvg, type EdgeStyle, type FaceStyle, type SolidMesh } from '@/composables/solid3d'
 
@@ -526,20 +527,30 @@ function elementToHtmlInner(el: SlideElement): string {
   }
 
   if (el.type === 'table') {
-    const cols = (el.rows[0] && el.rows[0].length) || 1
+    // 与画布**共用**同一套排版（tableLayout：rows + merges → 跨行跨列）。
+    // 原来这里自己算了一遍 grid ✗ —— 加合并之后两边必然不一致（v1229 图形那次就是这么栽的）
     const pad = el.cellPad ?? 6
     const align = el.cellAlign || 'center'
-    const flat = el.rows.flat()
-    const cellHtml = flat.map((cv, idx) => {
-      const isH = idx < (el.rows[0]?.length || 0)
-      const rowIdx = Math.floor(idx / cols)
-      const bg = isH ? el.headerColor : (el.altRowColor && rowIdx % 2 === 0 ? el.altRowColor : '#ffffff')
+    const L = layoutTable(el.rows, el.merges)
+    const border = '1px solid ' + esc(el.borderColor)
+    const rowsHtml = L.grid.map((line) => '<tr>' + line.map((cell) => {
+      const isH = cell.r === 0
+      const bg = isH ? el.headerColor : (el.altRowColor && cell.r % 2 === 0 ? el.altRowColor : '#ffffff')
       const col = isH ? (el.headerTextColor || '#ffffff') : (el.cellColor || '#111111')
-      return '<div style="background:' + esc(bg) + ';color:' + esc(col) + ';font-weight:' + (isH ? 700 : 400) + ';padding:' + pad + 'px ' + (pad + 2) + 'px;text-align:' + align + ';overflow:hidden;word-break:break-word;box-sizing:border-box;line-height:1.4">' + normalizeMixed(inlineFiguresInText(cv ?? '')) + '</div>'
-    }).join('')
-    return `<div style="${box}${rot}"${cls}${fragIdx}><div style="display:grid;grid-template-columns:repeat(${cols},1fr);grid-auto-rows:auto;gap:1px;background:${esc(el.borderColor)};font-size:${el.fontSize}px">${cellHtml}</div></div>`
+      const span =
+        (cell.rs > 1 ? ' rowspan="' + cell.rs + '"' : '') +
+        (cell.cs > 1 ? ' colspan="' + cell.cs + '"' : '')
+      return '<td' + span + ' style="background:' + esc(bg) + ';color:' + esc(col) +
+        ';font-weight:' + (isH ? 700 : 400) + ';padding:' + pad + 'px ' + (pad + 2) + 'px;text-align:' + esc(align) +
+        ';border:' + border + ';word-break:break-word;box-sizing:border-box;line-height:1.4;vertical-align:middle">' +
+        normalizeMixed(inlineFiguresInText(cell.text)) + '</td>'
+    }).join('') + '</tr>').join('')
+    const cap = el.caption
+      ? '<caption style="caption-side:top;text-align:center;font-weight:700;padding:0 0 4px">' +
+        normalizeMixed(inlineFiguresInText(el.caption)) + '</caption>'
+      : ''
+    return `<div style="${box}${rot}"${cls}${fragIdx}><table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:${el.fontSize}px">${cap}<tbody>${rowsHtml}</tbody></table></div>`
   }
-
   if (el.type === 'icon') {
     const size = Math.round(Math.min(el.w, el.h) * 0.72)
     return `<div style="${box}${rot}"${cls}${fragIdx}><div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;line-height:1;font-size:${size}px;color:${esc(el.color)}">${esc(el.icon)}</div></div>`
