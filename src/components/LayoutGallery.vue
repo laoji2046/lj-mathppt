@@ -92,10 +92,12 @@ function slotStyle(s: LayoutSlot) {
    内容把整窗顶高，锚点在下方时整块跑出屏幕，只能靠滚动条看（用户实测）。
    现在把盒高限制在视口内，滚动发生在**卡片区内部** ✓。 */
 .lg--float .lg__box { border-radius: var(--radius); width: min(680px, 92vw);
-  max-height: calc(100vh - 16px); display: flex; flex-direction: column; }
+  /* 平时不该有滚动条：9 个版式 3 行就该全显示完 ✓
+     所以上限取"屏幕一半左右"，而不是"整屏减一点"（那样还是会很高、要滚） */
+  max-height: min(58vh, 470px); display: flex; flex-direction: column; }
 .lg__head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; font-weight: 600; }
 .lg__x { border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--muted); }
-.lg__grid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 16px; overflow-y: auto; }
+.lg__grid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 12px; overflow-y: auto; }
 .lg__card { border: 1px solid var(--border); background: var(--panel); border-radius: var(--radius); padding: 8px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease); }
 .lg__card:hover { border-color: var(--brand); background: var(--brand-50); }
 .lg__prev { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #fff; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
