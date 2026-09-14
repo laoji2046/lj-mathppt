@@ -163,8 +163,10 @@ function onEsc(e: KeyboardEvent) {
 .table-grid { width: 100%; }
 .table-el--edit .table-grid > div { border: 1px dashed var(--brand); min-height: 28px; }
 /* 编辑态的悬浮小工具条（插公式等） */
-.table-el__tools { position: absolute; top: -30px; left: 0; display: flex; gap: 6px; z-index: 5; }
-.table-el__btn { border: 1px solid var(--brand, #1668e0); background: #fff; color: var(--brand, #1668e0);
+/* ⚠ 必须放在表格**框内** —— .table-el 有 overflow:auto，放外面（top:-30px）会被整块裁掉，
+   用户根本看不见（今天就栽在这个"只验 DOM 存在、没验可见"上） */
+.table-el__tools { position: absolute; top: 3px; right: 3px; display: flex; gap: 6px; z-index: 6; }
+.table-el__btn { border: 1px solid var(--brand, #1668e0); background: rgba(255,255,255,.96); color: var(--brand, #1668e0);
   border-radius: 6px; padding: 3px 9px; font-size: 12px; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
 .table-el__btn:hover { background: var(--brand, #1668e0); color: #fff; }
 .table-el__hint { position: absolute; top: -1px; right: 2px; font-size: 11px; color: #fff; background: rgba(106,82,200,0.85); border-radius: 4px; padding: 1px 6px; pointer-events: none; opacity: 0; transition: opacity .12s; }
