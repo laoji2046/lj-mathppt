@@ -64,10 +64,12 @@ function normalizeStrokes(svg: SVGSVGElement, explicitW?: number): SVGSVGElement
   const clone = svg.cloneNode(true) as SVGSVGElement
   const vb = svg.viewBox?.baseVal
   if (!vb || !vb.width || !vb.height) return clone
-  // 目标宽度 = **它在文档里真正显示出来的宽度**：
-  // 文档 CSS 把插图限高 180px（.paper-img-inline / .paper-img），所以按这个高度和图形宽高比反推。
-  // （一开始我按"画布上元素的宽度"缩，结果文档里只显示一百来像素，线细得快看不见 ✗。）
-  const targetW = explicitW && explicitW > 0 ? Math.min(explicitW, PAPER_IMG_MAX_H * (vb.width / vb.height)) : PAPER_IMG_MAX_H * (vb.width / vb.height)
+  // 目标宽度 = **画布上这个元素该有的宽度**（kind 用 figureBox(kind).w，复刻图用 p.w）——
+  // 这样文档里的图和画布上观感完全一致（图小的时候线也细）。
+  // ⚠ 别再拿"文档里的显示宽度"去封顶 ✗：函数图像的预览框很窄（viewBox 只有 71 宽），
+  //   封顶之后线宽几乎没缩，插进文档还是明显偏粗（用户实测反馈过两次）。
+  //   只有在拿不到目标宽度时才退回"按文档显示高度反推"。
+  const targetW = explicitW && explicitW > 0 ? explicitW : PAPER_IMG_MAX_H * (vb.width / vb.height)
   const k = vb.width / targetW
   if (k >= 0.999) return clone
   clone.querySelectorAll('[stroke-width]').forEach((n) => {
