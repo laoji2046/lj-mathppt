@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1253**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1254**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,22 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-14（v2026.09.1254）
+
+**1254 · 修「部分元素右键弹出浏览器菜单」**
+
+用户报：右键某些元素会出现浏览器右键菜单。用 `contextmenu` 事件的 `defaultPrevented` 逐处量：
+
+    .el-frame  ✓接管     .text-el ✓     .table-el ✓     td ✓     缩略图 ✓
+    属性面板的输入框 → prevented = false ✗ ← 就是这里（用户截图里正是「时长/延迟」那两个数字框）
+
+**修法**：在 App 根部统一接管 `contextmenu` ✓，但**保留例外**：
+文本框(`input[type=text/search/url/email/password]`) / `textarea` / 可编辑区 —— 那里的复制粘贴有用 ✓；
+数字框、颜色框这类弹菜单没意义的，一律 preventDefault ✓。
+（原来各处元素自己处理 ✓，但面板/画布空白等"没人管"的地方就漏了 ✗。）
+
+**验证**：重跑同一探针，7 处全部 `prevented: true` ✓。
 
 ### 2026-09-14（v2026.09.1253）
 

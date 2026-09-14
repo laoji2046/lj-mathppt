@@ -80,7 +80,34 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
+/**
+ * 右键：应用自己接管。
+ * 漏掉时会出现浏览器的右键菜单（用户实测：属性面板那排数字框上就会弹 ✗）。
+ * 但**真正的文本编辑**（文本框 / textarea / 可编辑区）保留浏览器菜单 —— 那里的复制粘贴有用。
+ */
+function onContextMenu(e: MouseEvent) {
+  const t = e.target as HTMLElement | null
+  if (!t) return
+  const tag = t.tagName
+  if (tag === 'TEXTAREA') return
+  if (tag === 'INPUT') {
+    const type = (t as HTMLInputElement).type
+    if (type === 'text' || type === 'search' || type === 'url' || type === 'email' || type === 'password') return
+    e.preventDefault()   // 数字/颜色/日期…这些弹菜单没用
+    return
+  }
+  if (t.isContentEditable) return
+  e.preventDefault()
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+  document.addEventListener('contextmenu', onContextMenu)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+  document.removeEventListener('contextmenu', onContextMenu)
+})
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 /**
