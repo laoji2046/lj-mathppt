@@ -68,7 +68,7 @@ function elOfPreset(p: (typeof SOLID_FIGURE_PRESETS)[number]): SlideElement {
  */
 export function inlineFiguresInText(text: string): string {
   if (!text || text.indexOf('{{fig:') < 0) return text
-  // 整段就一个图形标记（教材"图像"格那种）→ 当成块级大图居中，默认 4.6em
+  // 整段就一个图形标记（教材"图像"格那种）→ 当成块级大图居中，默认 7.5em（≈128px，占大半格）
   const solo = text.trim().match(/^\{\{fig:([^{}:]+)(?::(\d+))?\}\}$/)
   return text.replace(FIG_MARK_RE, (whole, name: string, px?: string) => {
     const preset = presetByName(name)
@@ -84,7 +84,7 @@ export function inlineFiguresInText(text: string): string {
     const soloHere = !!solo && solo[1] === name.trim()
     const pxNum = px ? Number(px) : 0
     // 默认：整格一个图 → 4.6em（块级居中）；夹在文字里 → 1.6em；写了 :px 就按 px
-    const em = soloHere ? 4.6 : 1.6
+    const em = soloHere ? 7.5 : 1.6
     const h = pxNum ? pxNum + 'px' : em + 'em'
     const w = pxNum ? Math.round(pxNum * ratio) + 'px' : (em * ratio).toFixed(2) + 'em'
     const fitted = svg.replace('<svg ', '<svg style="width:100%;height:100%;display:block" ')
