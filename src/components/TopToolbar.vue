@@ -135,16 +135,9 @@ function openFig() {
 function toggleShapeMenu() { toggleShown(shapeMenuOpen) }
 function addRect() { shapeMenuOpen.value = false; store.clearDrawTool(); store.addElement('shape', { shape: 'rect' } as Partial<SlideElement>) }
 function addEllipse() { shapeMenuOpen.value = false; store.clearDrawTool(); store.addElement('shape', { shape: 'ellipse' } as Partial<SlideElement>) }
-/** 关闭所有下拉菜单（互斥：打开一个时关闭其它，避免叠在一起） */
+/** 关闭所有下拉菜单（互斥：打开一个时关闭其它，避免叠在一起）——同样走登记表 */
 function closeAllDropdowns() {
-  fileOpen.value = false
-  shapeMenuOpen.value = false
-  embedMenuOpen.value = false
-  imgMenuOpen.value = false
-  formulaMenuOpen.value = false
-  drawOpen.value = false
-  ggbMenuOpen.value = false
-  dsmMenuOpen.value = false
+  for (const d of DROPDOWNS) d.open.value = false
 }
 function toggleShown(openRef: Ref<boolean>) {
   if (openRef.value) { openRef.value = false; return }
@@ -506,25 +499,41 @@ async function onDsmPicked(e: Event) {
   }
 }
 
+/**
+ * 所有下拉菜单的登记表：一处登记，外部点击统一处理。
+ *
+ * 原来是一个个手写 if ✗ —— 结果漏了「绘制/形状」「图片」「嵌入」三个，
+ * 表现就是"点开菜单后不选项就没法关掉"。这类漏洞靠"记得补"是治不住的，改成表驱动。
+ */
+const DROPDOWNS: { open: Ref<boolean>; wrap: Ref<HTMLElement | null> }[] = [
+  { open: fileOpen, wrap: fileWrap },
+  { open: shapeMenuOpen, wrap: shapeWrap },
+  { open: imgMenuOpen, wrap: imgWrap },
+  { open: embedMenuOpen, wrap: embedWrap },
+  { open: formulaMenuOpen, wrap: formulaWrap },
+  { open: drawOpen, wrap: drawWrap },
+  { open: ggbMenuOpen, wrap: ggbWrap },
+  { open: dsmMenuOpen, wrap: dsmWrap },
+]
+
 function onDocClick(e: MouseEvent) {
-  if (ggbMenuOpen.value && ggbWrap.value && !ggbWrap.value.contains(e.target as Node)) {
-    ggbMenuOpen.value = false
-  }
-  if (dsmMenuOpen.value && dsmWrap.value && !dsmWrap.value.contains(e.target as Node)) {
-    dsmMenuOpen.value = false
-  }
-  if (drawOpen.value && drawWrap.value && !drawWrap.value.contains(e.target as Node)) {
-    drawOpen.value = false
-  }
-  if (formulaMenuOpen.value && formulaWrap.value && !formulaWrap.value.contains(e.target as Node)) {
-    formulaMenuOpen.value = false
-  }
-  if (fileOpen.value && fileWrap.value && !fileWrap.value.contains(e.target as Node)) {
-    fileOpen.value = false
+  const t = e.target as Node
+  for (const d of DROPDOWNS) {
+    if (d.open.value && d.wrap.value && !d.wrap.value.contains(t)) d.open.value = false
   }
 }
-onMounted(() => document.addEventListener('click', onDocClick))
-onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
+/** Esc 也关下拉（跟右键菜单的 Esc 行为保持一致） */
+function onDocKey(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeAllDropdowns()
+}
+onMounted(() => {
+  document.addEventListener('click', onDocClick)
+  document.addEventListener('keydown', onDocKey)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClick)
+  document.removeEventListener('keydown', onDocKey)
+})
 </script>
 
 <template>
