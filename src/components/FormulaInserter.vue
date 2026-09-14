@@ -8,7 +8,6 @@ import type { SlideElement } from '@/types'
 import ColorSwatches from './ColorSwatches.vue'
 import { FORMULA_LIBRARY, FORMULA_TAGS, formulaTags } from '@/templates/formulaLibrary'
 import type { FormulaItem } from '@/templates/formulaLibrary'
-import { formulaLibSink } from '@/ui/formulaLibrary'
 
 const store = useDeckStore()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -192,9 +191,6 @@ function keyOf(f: FormulaItem) { return f.latex + '|' + f.label }
 
 /** 单击：把公式追加进输入框（连续点多个就依次排成多行） */
 function appendFormula(f: FormulaItem) {
-  // 有 sink（例如"表格单元格正在编辑"）→ 把 LaTeX 直接交出去，面板不关，可连续点
-  const sink = formulaLibSink.value
-  if (sink) { sink(f.latex); return }
   const cur = latex.value.replace(/\s+$/, '')
   const added = cur ? '\n' + f.latex : f.latex
   latex.value = cur + added
