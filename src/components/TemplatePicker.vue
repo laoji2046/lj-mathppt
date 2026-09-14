@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import { mathTemplates } from '@/templates/mathTemplates'
 import { mathBundles } from '@/templates/mathBundles'

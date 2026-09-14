@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import AppIcon from './AppIcon.vue'
 import type { Deck } from '@/types'
 import { renderDeckToRevealHtml } from '@/reveal/renderer'
 import { renderPdfInto } from '@/composables/usePdf'
