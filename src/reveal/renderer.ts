@@ -1,5 +1,5 @@
 import type { Deck, Slide, SlideElement, TextElement } from '@/types'
-import { bulletMarker, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
+import { animRevealClass, bulletMarker, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
 import { SOLID_VCOUNT, renderSolid, solidVerts, arcsSvg, type EdgeStyle, type FaceStyle, type SolidMesh } from '@/composables/solid3d'
 
 /**
@@ -376,7 +376,9 @@ function elementToHtml(el: SlideElement): string {
   const box = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.w}px;height:${el.h}px;` +
     (el.shadowOn ? `box-shadow:${el.shadowX ?? 0}px ${el.shadowY ?? 6}px ${el.shadowBlur ?? 18}px ${el.shadowColor || '#000000'}55;` : '')
   const rot = el.rot ? `transform:rotate(${el.rot}deg);` : ''
-  const cls = el.fragment ? ' class="fragment"' : ''
+  // 入场动画：拼上 Reveal **内置**的 fragment 类（fade-up / zoom-in / grow …），不自己写 JS
+  const animCls = el.fragment ? animRevealClass(el.animIn) : ''
+  const cls = el.fragment ? ' class="fragment' + (animCls ? ' ' + animCls : '') + '"' : ''
   const fragIdx = el.fragment && typeof el.fragmentIndex === 'number' ? ' data-fragment-index="' + el.fragmentIndex + '"' : ''
 
   if (el.type === 'text') {

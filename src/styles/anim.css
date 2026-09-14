@@ -1,0 +1,42 @@
+/**
+ * 入场动画（编辑器预览用）。
+ *
+ * 两个关键点：
+ * 1. 观感刻意与 Reveal 内置的 fragment 类对齐 —— 导出用 .fragment.fade-up 等，编辑器用这里的
+ *    .anim-in-*，两端看到的一致。
+ * 2. 用**独立的 translate / scale / rotate 属性**，而不是 transform ✗ ——
+ *    元素外层本来就带着 rotate(deg)（元素自己的旋转），动画若写 transform 会把它覆盖掉；
+ *    独立属性与 transform 天然叠加，互不干扰（Chrome/WebView2 都支持）。
+ */
+@keyframes anim-in-fade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes anim-in-left { from { opacity: 0; translate: -48px 0 } to { opacity: 1; translate: 0 0 } }
+@keyframes anim-in-right { from { opacity: 0; translate: 48px 0 } to { opacity: 1; translate: 0 0 } }
+@keyframes anim-in-top { from { opacity: 0; translate: 0 -48px } to { opacity: 1; translate: 0 0 } }
+@keyframes anim-in-bottom { from { opacity: 0; translate: 0 48px } to { opacity: 1; translate: 0 0 } }
+@keyframes anim-in-zoom { from { opacity: 0; scale: 1.35 } to { opacity: 1; scale: 1 } }
+@keyframes anim-in-grow { from { opacity: 0; scale: 0.35 } to { opacity: 1; scale: 1 } }
+@keyframes anim-in-shrink { from { opacity: 0; scale: 1.7 } to { opacity: 1; scale: 1 } }
+@keyframes anim-in-rotate { from { opacity: 0; rotate: -10deg; scale: 0.9 } to { opacity: 1; rotate: 0deg; scale: 1 } }
+
+.anim-in-fade,
+.anim-in-left,
+.anim-in-right,
+.anim-in-top,
+.anim-in-bottom,
+.anim-in-zoom,
+.anim-in-grow,
+.anim-in-shrink,
+.anim-in-rotate {
+  animation-duration: 0.55s;
+  animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+  animation-fill-mode: both;
+}
+.anim-in-fade { animation-name: anim-in-fade; }
+.anim-in-left { animation-name: anim-in-left; }
+.anim-in-right { animation-name: anim-in-right; }
+.anim-in-top { animation-name: anim-in-top; }
+.anim-in-bottom { animation-name: anim-in-bottom; }
+.anim-in-zoom { animation-name: anim-in-zoom; }
+.anim-in-grow { animation-name: anim-in-grow; }
+.anim-in-shrink { animation-name: anim-in-shrink; }
+.anim-in-rotate { animation-name: anim-in-rotate; }

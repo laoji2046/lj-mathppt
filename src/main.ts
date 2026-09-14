@@ -4,6 +4,7 @@ import App from './App.vue'
 import AppIcon from './components/AppIcon.vue'
 import { APP_NAME, APP_VERSION } from './ui/appInfo'
 import './styles/main.css'
+import './styles/anim.css'
 
 // 标题里带版本号 —— 任务栏/浏览器标签页一眼能看出跑的是哪个构建
 // （打包出来的 exe 和浏览器里的页面会各自停留在不同版本，没有这个很难分辨）

@@ -34,6 +34,8 @@ interface ElementBase extends Rect {
   fragment?: boolean
   /** 渐显出现顺序/分组编号（越小越先；相同编号一起出现）。可控 data-fragment-index */
   fragmentIndex?: number
+  /** 入场动画（配合上面的 fragment：勾选渐显才会"点击后出现"） */
+  animIn?: AnimIn
   /** 元素阴影（box-shadow）：开启后按 shadowColor 渲染色投影（颜色可选） */
   shadowOn?: boolean
   shadowColor?: string
@@ -955,6 +957,38 @@ export type SlideElement =
   | IconElement
   | EmbedElement
   | RichTextElement
+
+/** 入场动画（PowerPoint「动画 → 进入」那一组） */
+export type AnimIn = 'none' | 'fade' | 'left' | 'right' | 'top' | 'bottom' | 'zoom' | 'grow' | 'shrink' | 'rotate'
+
+/**
+ * 入场效果表。
+ * - `reveal` 是 Reveal **内置**的 fragment 类名，导出时直接拼上去（不自己写 JS ✗）。
+ *   注意 Reveal 的语义是按"位移方向"命名的：fade-up = 从下方进来、fade-down = 从上方、
+ *   fade-left = 从左侧进来、fade-right = 从右侧进来（对着它的 transform 核过 ✓）。
+ * - `cls` 是编辑器预览用的 CSS 类（定义在 styles/anim.css），两边观感保持一致。
+ */
+export const ANIM_INS: { v: AnimIn; label: string; reveal: string; cls: string }[] = [
+  { v: 'none', label: '无', reveal: '', cls: '' },
+  { v: 'fade', label: '淡入', reveal: '', cls: 'anim-in-fade' },
+  { v: 'left', label: '从左飞入', reveal: 'fade-left', cls: 'anim-in-left' },
+  { v: 'right', label: '从右飞入', reveal: 'fade-right', cls: 'anim-in-right' },
+  { v: 'top', label: '从上方掉入', reveal: 'fade-down', cls: 'anim-in-top' },
+  { v: 'bottom', label: '从下方升起', reveal: 'fade-up', cls: 'anim-in-bottom' },
+  { v: 'zoom', label: '放大进入', reveal: 'zoom-in', cls: 'anim-in-zoom' },
+  { v: 'grow', label: '由小变大', reveal: 'grow', cls: 'anim-in-grow' },
+  { v: 'shrink', label: '由大变小', reveal: 'shrink', cls: 'anim-in-shrink' },
+  { v: 'rotate', label: '旋转进入', reveal: 'fade-up', cls: 'anim-in-rotate' },
+]
+
+/** 取 Reveal 导出要拼的 fragment 类名（空串表示用默认淡入） */
+export function animRevealClass(kind: AnimIn | undefined): string {
+  return ANIM_INS.find((a) => a.v === kind)?.reveal ?? ''
+}
+/** 取编辑器预览用的 CSS 类名 */
+export function animEditorClass(kind: AnimIn | undefined): string {
+  return ANIM_INS.find((a) => a.v === kind)?.cls ?? ''
+}
 
 export interface Slide {
   id: string

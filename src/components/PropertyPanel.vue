@@ -7,8 +7,9 @@ import type {
   GgbApp, IconElement, ImageElement, LineElement, MathElement, MathFigureElement,
   MathFigureKind, PenElement, RichTextElement, ShapeElement, SlideElement, TableElement, TextElement, WordArtPreset,
 } from '@/types'
-import type { BulletKind } from '@/types'
-import { ARROW_HEADS, BULLETS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, IMAGE_ROT3D, IMAGE_SHADOWS, SHAPE_MASKS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
+import type { AnimIn, BulletKind } from '@/types'
+import { playAnimPreview } from '@/ui/animPreview'
+import { ANIM_INS, ARROW_HEADS, BULLETS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, IMAGE_ROT3D, IMAGE_SHADOWS, SHAPE_MASKS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
 import { captureDesmosState } from '@/composables/useDesmos'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
@@ -668,6 +669,20 @@ function layerTypeLabel(type: string) {
           <input type="number" :value="el.fragmentIndex ?? ''"
             @input="patch({ fragmentIndex: num(($event.target as HTMLInputElement).value) } as Partial<SlideElement>)" />
         </label>
+        <label class="field" style="margin-top:6px">
+          <span>入场动画</span>
+          <select :value="el.animIn || 'none'"
+            @change="patch({ animIn: ($event.target as HTMLSelectElement).value as AnimIn } as Partial<SlideElement>)">
+            <option v-for="a in ANIM_INS" :key="a.v" :value="a.v">{{ a.label }}</option>
+          </select>
+        </label>
+        <div v-if="el.animIn && el.animIn !== 'none'" style="display:flex;gap:6px;margin-top:6px">
+          <button class="quick__btn" style="flex:1" @click="playAnimPreview(el.id, el.animIn as AnimIn)">▶ 预览动画</button>
+        </div>
+        <p v-if="el.animIn && el.animIn !== 'none'" class="panel__hint">
+          勾选上面的「渐显动画」= 演示时<strong>点击后</strong>才出现；不勾 = 随本页一起出现（动画照跑）。
+          导出用 Reveal 内置的 fragment 类，不用自己写脚本。
+        </p>
         <label class="prop-check" style="margin-top:8px">
           <input type="checkbox" :checked="!!el.shadowOn" @change="patch({ shadowOn: ($event.target as HTMLInputElement).checked } as Partial<SlideElement>)" />
           <span>元素阴影（投影，颜色可选）</span>
