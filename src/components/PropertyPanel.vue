@@ -7,9 +7,9 @@ import type {
   GgbApp, IconElement, ImageElement, LineElement, MathElement, MathFigureElement,
   MathFigureKind, PenElement, RichTextElement, ShapeElement, SlideElement, TableElement, TextElement, WordArtPreset,
 } from '@/types'
-import type { AnimEm, AnimIn, BulletKind } from '@/types'
+import type { AnimEm, AnimIn, AnimOut, BulletKind } from '@/types'
 import { playAnimPreview } from '@/ui/animPreview'
-import { ANIM_EMS, ANIM_INS, ARROW_HEADS, BULLETS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, IMAGE_ROT3D, IMAGE_SHADOWS, SHAPE_MASKS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
+import { ANIM_EMS, ANIM_INS, ANIM_OUTS, ARROW_HEADS, BULLETS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, IMAGE_ROT3D, IMAGE_SHADOWS, SHAPE_MASKS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
 import { captureDesmosState } from '@/composables/useDesmos'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
@@ -726,8 +726,20 @@ function layerTypeLabel(type: string) {
               @input="patch({ animDelay: num(($event.target as HTMLInputElement).value, 0) } as Partial<SlideElement>)" />
           </label>
         </div>
-        <div v-if="(el.animIn && el.animIn !== 'none') || (el.animEm && el.animEm !== 'none')" style="display:flex;gap:6px;margin-top:6px">
-          <button class="quick__btn" style="flex:1" @click="playAnimPreview(el.id, (el.animIn || 'none') as AnimIn, (el.animEm || 'none') as AnimEm, el.animDuration ?? 550)">▶ 预览动画</button>
+        <label class="field" style="margin-top:6px">
+          <span>退场动画（由"退出触发点"决定时机）</span>
+          <select :value="el.animOut || 'none'"
+            @change="patch({ animOut: ($event.target as HTMLSelectElement).value as AnimOut } as Partial<SlideElement>)">
+            <option v-for="a in ANIM_OUTS" :key="a.v" :value="a.v">{{ a.label }}</option>
+          </select>
+        </label>
+        <label v-if="el.animOut && el.animOut !== 'none'" class="field" style="margin-top:6px">
+          <span>退场顺序编号（与渐显同一套编号，越小越先）</span>
+          <input type="number" :value="el.animOutIndex ?? ''"
+            @input="patch({ animOutIndex: num(($event.target as HTMLInputElement).value) } as Partial<SlideElement>)" />
+        </label>
+        <div v-if="(el.animIn && el.animIn !== 'none') || (el.animEm && el.animEm !== 'none') || (el.animOut && el.animOut !== 'none')" style="display:flex;gap:6px;margin-top:6px">
+          <button class="quick__btn" style="flex:1" @click="playAnimPreview(el.id, (el.animIn || 'none') as AnimIn, (el.animEm || 'none') as AnimEm, el.animDuration ?? 550, (el.animOut || 'none') as AnimOut)">▶ 预览动画</button>
         </div>
         <p v-if="el.animIn && el.animIn !== 'none'" class="panel__hint">
           勾选上面的「渐显动画」= 演示时<strong>点击后</strong>才出现；不勾 = 随本页一起出现（动画照跑）。

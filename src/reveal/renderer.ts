@@ -398,7 +398,17 @@ function chartInner(
   return out
 }
 
+/** 元素 + 它的退场触发点（零尺寸 fragment）。
+ *  只在外面包一层 —— 内部有 16 个 return，逐个去挂容易漏 ✗ */
 function elementToHtml(el: SlideElement): string {
+  return elementToHtmlInner(el) + (el.animOut && el.animOut !== 'none'
+    ? '<span class="fragment fx-out" data-anim-out="' + el.animOut + '"' +
+      (typeof el.animOutIndex === 'number' ? ' data-fragment-index="' + el.animOutIndex + '"' : '') +
+      '></span>'
+    : '')
+}
+
+function elementToHtmlInner(el: SlideElement): string {
   // 动画时长/延迟走 CSS 变量（--anim-dur / --anim-delay），编辑器与导出一致
   const animTiming = (el.animIn && el.animIn !== 'none') || (el.animEm && el.animEm !== 'none')
     ? ';' + animTimingStyle(el)
@@ -699,6 +709,21 @@ export function renderDeckToRevealHtml(deck: Deck, opts: RenderOptions = {}): st
   #fx-boot { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
     background:#ffffff; color:#888780; font:14px/1.6 system-ui, sans-serif; z-index:99; }
   #fx-boot.hide { display:none; }
+  .fx-out { position: absolute; width: 0; height: 0; padding: 0; margin: 0; border: 0; opacity: 0; pointer-events: none; }
+  @keyframes anim-out-fade { from { opacity: 1 } to { opacity: 0 } }
+  @keyframes anim-out-left { from { opacity: 1; translate: 0 0 } to { opacity: 0; translate: -130% 0 } }
+  @keyframes anim-out-right { from { opacity: 1; translate: 0 0 } to { opacity: 0; translate: 130% 0 } }
+  @keyframes anim-out-top { from { opacity: 1; translate: 0 0 } to { opacity: 0; translate: 0 -120% } }
+  @keyframes anim-out-bottom { from { opacity: 1; translate: 0 0 } to { opacity: 0; translate: 0 120% } }
+  @keyframes anim-out-zoom { from { opacity: 1; scale: 1 } to { opacity: 0; scale: 1.7 } }
+  @keyframes anim-out-shrink { from { opacity: 1; scale: 1 } to { opacity: 0; scale: .15 } }
+  .anim-out-fade { animation: anim-out-fade var(--anim-dur, .55s) ease-in-out var(--anim-delay, 0s) both; }
+  .anim-out-left { animation: anim-out-left var(--anim-dur, .55s) ease-in-out var(--anim-delay, 0s) both; }
+  .anim-out-right { animation: anim-out-right var(--anim-dur, .55s) ease-in-out var(--anim-delay, 0s) both; }
+  .anim-out-top { animation: anim-out-top var(--anim-dur, .55s) ease-in-out var(--anim-delay, 0s) both; }
+  .anim-out-bottom { animation: anim-out-bottom var(--anim-dur, .55s) ease-in-out var(--anim-delay, 0s) both; }
+  .anim-out-zoom { animation: anim-out-zoom var(--anim-dur, .55s) ease-in-out var(--anim-delay, 0s) both; }
+  .anim-out-shrink { animation: anim-out-shrink var(--anim-dur, .55s) ease-in-out var(--anim-delay, 0s) both; }
   /* 飞入 / 缩放的幅度：Reveal 内置只有 20px，投影后几乎看不出位移 ✗；
      这里按“从画面外进来”给百分比（相对元素自身大小），并用 :not(.visible) 提高优先级覆盖，
      不需要 !important。数值与编辑器 styles/anim.css 保持一致。 */
@@ -1047,10 +1072,16 @@ ${slides}
       prepare(e && e.currentSlide);
       tellHost();
     });
-    // 强调动画：元素出现后再播一次（去类→强制回流→加回，保证连点也能重播）
+    // 强调 / 退场动画：元素出现后再播一次（去类→强制回流→加回，保证连点也能重播）
     Reveal.on('fragmentshown', function(e){
       var f = e && e.fragment;
       if (!f || !f.getAttribute) return;
+      var out = f.getAttribute('data-anim-out');
+      if (out) {
+        var t = f.previousElementSibling;
+        if (t) { var oc = 'anim-out-' + out; t.classList.remove(oc); void t.offsetWidth; t.classList.add(oc); }
+        return;
+      }
       var em = f.getAttribute('data-anim-em');
       if (!em) return;
       var c = 'anim-em-' + em;

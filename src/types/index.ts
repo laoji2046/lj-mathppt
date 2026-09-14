@@ -38,6 +38,10 @@ interface ElementBase extends Rect {
   animIn?: AnimIn
   /** 强调动画：入场之后自动接着播一次 */
   animEm?: AnimEm
+  /** 退场动画（由"退出触发点"决定时机） */
+  animOut?: AnimOut
+  /** 退场触发点的出现序号（与 fragmentIndex 同一套编号，越小越先） */
+  animOutIndex?: number
   /** 动画时长 / 延迟（ms） */
   animDuration?: number
   animDelay?: number
@@ -1016,6 +1020,24 @@ export function animTimingStyle(el: { animDuration?: number; animDelay?: number 
   const d = el.animDuration && el.animDuration > 0 ? el.animDuration : 550
   const l = el.animDelay && el.animDelay > 0 ? el.animDelay : 0
   return '--anim-dur:' + d + 'ms;--anim-delay:' + l + 'ms'
+}
+
+/** 退场动画（PPT「动画 → 退出」）—— 由"退出触发点"决定时机：导出里是一个零尺寸 fragment，点一下它才退场 */
+export type AnimOut = 'none' | 'fade' | 'left' | 'right' | 'top' | 'bottom' | 'zoom' | 'shrink'
+
+export const ANIM_OUTS: { v: AnimOut; label: string; cls: string }[] = [
+  { v: 'none', label: '无', cls: '' },
+  { v: 'fade', label: '淡出', cls: 'anim-out-fade' },
+  { v: 'left', label: '向左飞出', cls: 'anim-out-left' },
+  { v: 'right', label: '向右飞出', cls: 'anim-out-right' },
+  { v: 'top', label: '向上飞出', cls: 'anim-out-top' },
+  { v: 'bottom', label: '向下飞出', cls: 'anim-out-bottom' },
+  { v: 'zoom', label: '放大消失', cls: 'anim-out-zoom' },
+  { v: 'shrink', label: '缩小消失', cls: 'anim-out-shrink' },
+]
+
+export function animOutClass(kind: AnimOut | undefined): string {
+  return ANIM_OUTS.find((a) => a.v === kind)?.cls ?? ''
 }
 
 /** 取 Reveal 导出要拼的 fragment 类名（空串表示用默认淡入） */

@@ -6,7 +6,7 @@ import { openShapeEdit } from '@/ui/shapeEditor'
 import { requestInlineEdit } from '@/ui/inlineEdit'
 import { useDeckStore } from '@/stores/deck'
 import { useContextMenu } from '@/composables/useContextMenu'
-import { animEditorClass, animEmphasisClass, animTimingStyle } from '@/types'
+import { animEditorClass, animEmphasisClass, animOutClass, animTimingStyle } from '@/types'
 import { animPreview } from '@/ui/animPreview'
 import TextElement from './elements/TextElement.vue'
 import ShapeElement from './elements/ShapeElement.vue'
@@ -110,7 +110,9 @@ function onDblClick() {
     :class="[
       { 'el-frame--selected': selected && !isLineLike },
       animPreview && animPreview.id === el.id
-        ? (animPreview.phase === 'em' ? animEmphasisClass(animPreview.em) : animEditorClass(animPreview.kind))
+        ? (animPreview.phase === 'em' ? animEmphasisClass(animPreview.em)
+          : animPreview.phase === 'out' ? animOutClass(animPreview.out)
+          : animEditorClass(animPreview.kind))
         : '',
     ]"
     :style="[frameStyle, animPreview && animPreview.id === el.id ? animTimingStyle(el) : '']"

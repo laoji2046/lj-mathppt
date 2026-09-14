@@ -56,3 +56,27 @@
 .anim-in-grow { animation-name: anim-in-grow; }
 .anim-in-shrink { animation-name: anim-in-shrink; }
 .anim-in-rotate { animation-name: anim-in-rotate; }
+
+/* ---- 退场动画（PPT「退出」）：由"退出触发点"决定时机 ---- */
+@keyframes anim-out-fade { from { opacity: 1 } to { opacity: 0 } }
+@keyframes anim-out-left { from { opacity: 1; translate: 0 0 } to { opacity: 0; translate: -130% 0 } }
+@keyframes anim-out-right { from { opacity: 1; translate: 0 0 } to { opacity: 0; translate: 130% 0 } }
+@keyframes anim-out-top { from { opacity: 1; translate: 0 0 } to { opacity: 0; translate: 0 -120% } }
+@keyframes anim-out-bottom { from { opacity: 1; translate: 0 0 } to { opacity: 0; translate: 0 120% } }
+@keyframes anim-out-zoom { from { opacity: 1; scale: 1 } to { opacity: 0; scale: 1.7 } }
+@keyframes anim-out-shrink { from { opacity: 1; scale: 1 } to { opacity: 0; scale: 0.15 } }
+
+.anim-out-fade, .anim-out-left, .anim-out-right, .anim-out-top,
+.anim-out-bottom, .anim-out-zoom, .anim-out-shrink {
+  animation-duration: var(--anim-dur, 0.55s);
+  animation-delay: var(--anim-delay, 0ms);
+  animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+  animation-fill-mode: both;   /* 退场后保持"消失"状态 */
+}
+.anim-out-fade { animation-name: anim-out-fade; }
+.anim-out-left { animation-name: anim-out-left; }
+.anim-out-right { animation-name: anim-out-right; }
+.anim-out-top { animation-name: anim-out-top; }
+.anim-out-bottom { animation-name: anim-out-bottom; }
+.anim-out-zoom { animation-name: anim-out-zoom; }
+.anim-out-shrink { animation-name: anim-out-shrink; }
