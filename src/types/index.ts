@@ -606,6 +606,8 @@ export interface TableElement extends ElementBase {
   caption?: string
   /** 格内 {{fig:kind}} 图形的默认高度(px)；不写用内置默认。标记里写 :数字 仍优先 */
   figHeight?: number
+  /** 边框画法：all=全网格（默认）；three=**三线表**（只画顶/表头下/底三条，教材常用） */
+  borderMode?: 'all' | 'three'
   headerColor: string
   borderColor: string
   fontSize: number

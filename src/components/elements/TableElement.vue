@@ -59,6 +59,19 @@ const tableStyle = computed(() => ({
 function cellStyle(cell: TableCell): CSSProperties {
   const isH = cell.r === 0
   const pad = props.el.cellPad ?? 6
+  // 边框：all=全网格；three=**三线表**（顶线 / 表头下线 / 底线，教材常用）
+  const line = '1px solid ' + props.el.borderColor
+  const three = (props.el.borderMode || 'all') === 'three'
+  const lastRow = layout.value.rows - 1
+  const rEnd = cell.r + cell.rs - 1
+  const bd = three
+    ? {
+        borderTop: cell.r === 0 ? line : 'none',
+        borderBottom: cell.r === 0 || rEnd === lastRow ? line : 'none',
+        borderLeft: 'none',
+        borderRight: 'none',
+      }
+    : { borderTop: line, borderBottom: line, borderLeft: line, borderRight: line }
   const bg = isH ? props.el.headerColor : (props.el.altRowColor && cell.r % 2 === 0 ? props.el.altRowColor : '#ffffff')
   return {
     background: bg,
@@ -72,7 +85,7 @@ function cellStyle(cell: TableCell): CSSProperties {
     lineHeight: 1.4,
     outline: 'none',
     verticalAlign: 'middle',
-    border: '1px solid ' + props.el.borderColor,
+    ...bd,
     cursor: editing.value ? 'text' : 'default',
   }
 }

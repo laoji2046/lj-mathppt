@@ -533,6 +533,13 @@ function elementToHtmlInner(el: SlideElement): string {
     const align = el.cellAlign || 'center'
     const L = layoutTable(el.rows, el.merges)
     const border = '1px solid ' + esc(el.borderColor)
+    const three = (el.borderMode || 'all') === 'three'
+    const lastRow = L.rows - 1
+    // 三线表：只画顶线 / 表头下线 / 底线
+    const borderOf = (cell: { r: number; rs: number }) => (three
+      ? 'border-top:' + (cell.r === 0 ? border : 'none') + ';border-bottom:' +
+        (cell.r === 0 || cell.r + cell.rs - 1 === lastRow ? border : 'none') + ';border-left:none;border-right:none'
+      : 'border:' + border)
     const rowsHtml = L.grid.map((line) => '<tr>' + line.map((cell) => {
       const isH = cell.r === 0
       const bg = isH ? el.headerColor : (el.altRowColor && cell.r % 2 === 0 ? el.altRowColor : '#ffffff')
@@ -542,7 +549,7 @@ function elementToHtmlInner(el: SlideElement): string {
         (cell.cs > 1 ? ' colspan="' + cell.cs + '"' : '')
       return '<td' + span + ' style="background:' + esc(bg) + ';color:' + esc(col) +
         ';font-weight:' + (isH ? 700 : 400) + ';padding:' + pad + 'px ' + (pad + 2) + 'px;text-align:' + esc(align) +
-        ';border:' + border + ';word-break:break-word;box-sizing:border-box;line-height:1.4;vertical-align:middle">' +
+        ';' + borderOf(cell) + ';word-break:break-word;box-sizing:border-box;line-height:1.4;vertical-align:middle">' +
         normalizeMixed(inlineFiguresInText(cell.text, el.figHeight)) + '</td>'
     }).join('') + '</tr>').join('')
     const cap = el.caption

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, type Ref , shallowRef, type ComponentPublicInstance } from 'vue'
 import { useDeckStore } from '@/stores/deck'
+import { TABLE_TEMPLATES } from '@/templates/tableTemplates'
 import { renderDeckToRevealHtml } from '@/reveal/renderer'
 import type { ElementType, EmbedKind, SlideElement } from '@/types'
 import SymbolPalette from './SymbolPalette.vue'
@@ -45,6 +46,13 @@ const versionOpen = ref(false)
 const settingsOpen = ref(false)
 const fileOpen = ref(false)
 const fileWrap = ref<HTMLElement | null>(null)
+const tableMenuOpen = ref(false)
+/** ⚠ 这个 ref 用在 v-for 里 —— Vue 会把普通 ref 收集成**数组** ✗（外部点击检测会炸）。
+ *  所以用**函数式 ref**：Vue 逐个元素调用它，我们只留最后一个。 */
+const tableWrap = shallowRef<HTMLElement | null>(null)
+function setTableWrap(el: Element | ComponentPublicInstance | null) {
+  if (el instanceof HTMLElement) tableWrap.value = el
+}
 const fileToast = ref('')
 const deckJsonInput = ref<HTMLInputElement | null>(null)
 const saveAsOpen = ref(false)
@@ -121,6 +129,22 @@ function addFromToolbar(type: ElementType) {
   store.clearDrawTool()
   store.addElement(type)
 }
+/** 表格：从模板插一张整表（三线表 / 对比表 / 表 4-1 式 …） */
+function applyTableTemplate(t: (typeof TABLE_TEMPLATES)[number]) {
+  tableMenuOpen.value = false
+  store.clearDrawTool()
+  store.addElement('table', {
+    rows: t.rows.map((r) => [...r]),
+    merges: t.merges ? t.merges.map((m) => ({ ...m })) : undefined,
+    caption: t.caption,
+    figHeight: t.figHeight,
+    borderMode: t.borderMode,
+    w: t.w ?? 560,
+    h: t.h ?? 240,
+  } as never)
+}
+function toggleTableMenu() { toggleShown(tableMenuOpen) }
+
 /** 绘制工具（线/箭头/笔/多边形）：再点同类型退出 */
 function toggleDraw(t: 'line' | 'arrow' | 'pen' | 'poly') {
   store.setDrawTool(store.drawTool === t ? null : t)
@@ -515,6 +539,7 @@ const DROPDOWNS: { open: Ref<boolean>; wrap: Ref<HTMLElement | null> }[] = [
   { open: drawOpen, wrap: drawWrap },
   { open: ggbMenuOpen, wrap: ggbWrap },
   { open: dsmMenuOpen, wrap: dsmWrap },
+  { open: tableMenuOpen, wrap: tableWrap },
 ]
 
 function onDocClick(e: MouseEvent) {
@@ -579,9 +604,25 @@ onBeforeUnmount(() => {
       <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.md"></svg></span>MD 源码
     </button>
     <div class="group">
-      <button v-for="b in addButtons" :key="b.type" class="btn" @click="addFromToolbar(b.type)">
-        <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="b.svg"></svg></span>{{ b.label }}
-      </button>
+      <template v-for="b in addButtons" :key="b.type">
+        <!-- 表格：下拉选模板（三线表 / 对比表 / 表 4-1 式 …） -->
+        <div v-if="b.type === 'table'" :ref="setTableWrap" class="dropdown">
+          <button class="btn" :class="{ 'btn--open': tableMenuOpen }" title="插入表格：可选模板（含教材三线表）" @click="toggleTableMenu()">
+            <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="b.svg"></svg></span>{{ b.label }}<span class="btn__caret">▾</span>
+          </button>
+          <div v-if="tableMenuOpen" class="dropdown__menu">
+            <button
+              v-for="t in TABLE_TEMPLATES" :key="t.id" class="dropdown__item"
+              :title="t.hint || t.name" @click="applyTableTemplate(t)"
+            >
+              <span class="dropdown__icon">▦</span>{{ t.name }}
+            </button>
+          </div>
+        </div>
+        <button v-else class="btn" @click="addFromToolbar(b.type)">
+          <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="b.svg"></svg></span>{{ b.label }}
+        </button>
+      </template>
 
       <!-- 形状下拉：矩形 / 椭圆 / 数学图形 -->
       <div ref="shapeWrap" class="dropdown">

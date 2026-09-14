@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1250**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1251**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,31 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-14（v2026.09.1251）
+
+**1251 · 表格模板（含教材三线表）**
+
+「表格」按钮从"直接插空白表"改成**下拉选模板**：
+
+    三线表（教材常用）          只画顶线 / 表头下线 / 底线
+    双栏对比表
+    函数图像与性质（表 4-1 式）  左列跨行 + 格内图形 + 公式 + 标题
+    统计表
+    空白表格 3×3
+
+新增 `templates/tableTemplates.ts`（数据）+ `TableElement.borderMode: 'all' | 'three'`：
+**三线表**在三处（画布 / 导出）都按"顶线+表头下线+底线"渲染 ✓。
+
+**验证（CDP）**：
+
+    下拉列出 5 个模板 ✓
+    插「表 4-1 式」→ 4 行 / rowspan 1 / caption「表 4-1」/ 格内图形 2 / 格内公式 8 ✓
+    插「三线表」→ 首格 border-top/bottom = 1px/1px，末格 border-bottom = 1px，左右 = 0 ✓
+
+**踩坑**：那个下拉在 `v-for` 里 ✗ —— Vue 把普通 `ref` 收集成**数组**，
+外部点击检测调用 `wrap.value.contains()` 直接报 TypeError ✓。
+改用**函数式 ref**（`shallowRef` + `setTableWrap(el)` ✓）解决 —— 这是"ref 在 v-for 里"的通用坑，值得记。
 
 ### 2026-09-14（v2026.09.1250）
 
