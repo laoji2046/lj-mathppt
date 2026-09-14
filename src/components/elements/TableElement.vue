@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { normalizeMixed } from '@/types'
-import { typesetMixed } from '@/composables/useMathJax'
+import { typesetHosts } from '@/composables/useMathJax'
 import { inlineFiguresInText } from '@/composables/figureRender'
 import { layoutTable, type TableCell } from '@/composables/tableLayout'
 import type { CSSProperties } from 'vue'
@@ -17,6 +17,10 @@ const editing = ref(false)
 const gridEl = ref<HTMLElement | null>(null)
 
 /** 排版：rows + merges → 要渲染的格子（跨行跨列算法与导出一份，见 tableLayout.ts） */
+/** 单元格/表标题的显示 HTML：图形替换 + $..$ 归一化。**纯函数**，由 Vue 用 v-html 渲染 */
+function cellHtml(t: string) {
+  return normalizeMixed(inlineFiguresInText(t || '', props.el.figHeight))
+}
 const layout = computed(() => layoutTable(props.el.rows, props.el.merges))
 
 /**
@@ -24,28 +28,17 @@ const layout = computed(() => layoutTable(props.el.rows, props.el.merges))
  * ⚠ 编辑时必须显示**原文** —— MathJax 排完之后 DOM 里是渲染结果，
  *   直接读 innerText 会把公式读成一片乱字符（混排公式元素踩过同一个坑）。
  */
-let renderSeq = 0
 async function renderCells() {
-  const my = ++renderSeq
   await nextTick()
   const host = gridEl.value
   if (!host) return
   // 单元格与表标题都带 data-raw（标题里也可能有公式）
-  const cells = Array.from(host.querySelectorAll<HTMLElement>('[data-raw]'))
+  const cells = Array.from(host.querySelectorAll<HTMLElement>('[data-mixed]'))
   // ⚠ 编辑态**什么都不做**：单元格由 Vue 通过 :key 重建（内容天然是原文），
   //   在这里重写 innerText 会把节点换掉 → 光标/焦点丢失 → 表现为"双击不能编辑"（踩过）
   if (editing.value) return
-  for (const c of cells) {
-    const raw = c.getAttribute('data-raw') || ''
-    const html = inlineFiguresInText(raw, props.el.figHeight)
-    const hasMath = html.indexOf('\\(') >= 0 || html.indexOf('$') >= 0
-    if (!hasMath) {
-      c.innerHTML = normalizeMixed(html)
-      continue
-    }
-    await typesetMixed(c, html)
-    if (my !== renderSeq) return
-  }
+  // 内容由 Vue 渲染（v-html），这里**只负责排版** —— 两边都写 innerHTML 会互相覆盖
+  await typesetHosts(cells.filter((c) => /\\\(|\$/.test(c.getAttribute('data-raw') || '')))
 }
 onMounted(() => { renderCells() })
 // ⚠ 改动表格的任何"影响渲染"的字段都要进这个列表 —— 漏一个就会出现"改了没反应"
@@ -121,7 +114,10 @@ function onEsc(e: KeyboardEvent) {
 <template>
   <div class="table-el" :class="{ 'table-el--edit': editing }" @dblclick.stop.prevent="startEdit">
     <table ref="gridEl" class="table-grid" :key="editing ? 'edit' : 'view'" :style="tableStyle">
-      <caption v-if="el.caption" class="table-cap" :data-raw="el.caption" :contenteditable="editing ? 'plaintext-only' : 'false'">{{ el.caption }}</caption>
+      <caption v-if="el.caption" class="table-cap" :data-raw="el.caption" :contenteditable="editing ? 'plaintext-only' : 'false'">
+        <template v-if="editing">{{ el.caption }}</template>
+        <span v-else data-mixed :data-raw="el.caption" v-html="cellHtml(el.caption)"></span>
+      </caption>
       <tbody>
         <tr v-for="(line, ri) in layout.grid" :key="ri">
           <td
@@ -135,7 +131,10 @@ function onEsc(e: KeyboardEvent) {
             :contenteditable="editing ? 'plaintext-only' : 'false'"
             @blur="onCellBlur(cell, $event)"
             @keydown.esc="onEsc"
-          >{{ cell.text }}</td>
+          >
+            <template v-if="editing">{{ cell.text }}</template>
+            <span v-else data-mixed :data-raw="cell.text" v-html="cellHtml(cell.text)"></span>
+          </td>
         </tr>
       </tbody>
     </table>

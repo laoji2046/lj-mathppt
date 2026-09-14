@@ -205,7 +205,22 @@ function typesetSerial(hosts: HTMLElement[]): Promise<unknown> {
 
 /** 把「混排」文本（正文 + \(...\) 内联公式）排版进宿主；
  *  正文与公式都随宿主的 font-size / color / font-family。 */
+/**
+ * **只排版、不写内容** —— 宿主的 innerHTML 由框架（Vue 的 v-html）负责时用这个。
+ * 与 typesetMixed 的区别：那个会先 host.innerHTML = …，两套并行就会"抢文本节点"，
+ * 表现是内容偶尔回退成原文（表格单元格踩过）。同一块内容**只能有一个主** ✓。
+ */
+export async function typesetHosts(hosts: HTMLElement[]) {
+  if (!hosts.length) return
+  await loadMathJax()
+  await typesetSerial(hosts)
+}
+
+/** ⚠ 下面这个函数会**写 innerHTML**，与"框架负责内容"不能同时用（二选一）。 */
 export async function typesetMixed(host: HTMLElement, text: string) {
+  // ⚠ 这个函数会**写 innerHTML**。同一块内容请只用一个"主"：
+  //   要么它负责内容（此时别让框架也渲染），要么框架负责内容（那就用 typesetHosts 只排版）。
+  //   两套并行会抢文本节点 → 内容偶尔回退成原文（表格单元格踩过）。
   // 先落内容再等引擎：内容不该依赖 MathJax 是否就绪/成功，
   // 否则引擎一慢或一失败，宿主就整块空白（缩略图踩过这个坑）。
   host.innerHTML = normalizeMixed(text)

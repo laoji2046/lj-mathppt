@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1249**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1250**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,31 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-14（v2026.09.1250）
+
+**1250 · 修「格子偶尔回退成 {{fig:xxx}} 原文」—— 内容只留一个主**
+
+**病根**：单元格内容**有两个主** ✗ —— Vue 渲染 `{{ cell.text }}`，我又用 `renderCells()`
+命令式写 `innerHTML` ✗；两者抢同一个文本节点，谁后动手谁说了算 → 偶尔回到原文。
+
+**修法（按"同一块内容只能有一个主"这条纪律）**：
+
+1. 内容**整个交给 Vue**：单元格与表标题都改成
+   `<template v-if="editing">{{ 原文 }}</template>` + `<span v-else v-html="cellHtml(text)">` ✗；
+2. 新增 `useMathJax.typesetHosts(hosts)` —— **只排版、不写 innerHTML** ✗；
+   原来的 `typesetMixed` 会先 `host.innerHTML = …`，只能二选一（已在它的注释里写明 ⚠）；
+3. `renderCells()` 退化为"只对含公式的格排版"，不再动内容 ✓。
+
+为什么 v-html 能留住 MathJax 的结果 ✓：**v-html 的值没变时 Vue 不会去 patch 那个节点** ✓，
+所以 MathJax 改写过的 DOM 不会被覆盖回去 ✓。
+
+**验证（重点验回归：反复重渲染后是否还会回退）**：
+
+    ① 初次渲染     图格有 svg ✓ 公式格 mjx ✓ 全表无 "{{fig" 残留 ✓
+    ② 连加三行后   （Vue 重渲染）仍然 ✓
+    ③ 选中元素后   （再重渲染）仍然 ✓
+    ④ 缩略图       svg 2 个 ✓ 无花括号 ✓
 
 ### 2026-09-14（v2026.09.1249）
 
