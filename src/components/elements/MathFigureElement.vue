@@ -74,7 +74,21 @@ const innerHtml = computed(() => {
   if (CONIC_KINDS.includes(kind)) return conicFigure(kind, w, h, stroke, s, fillColor, props.el.params)
 
   // 三维多面体统一走顶点模型渲染（支持拖拽顶点编辑）
-  if (SOLID_VCOUNT[kind]) return renderSolid(kind, pts.value, w, h, stroke, s, fillColor, dashed, props.el.vlabels, props.el.edgeStyles, solidSel.elementId === props.el.id ? (solidSel.vertex ?? undefined) : undefined, solidSel.elementId === props.el.id ? (solidSel.edge ?? undefined) : undefined, props.el.labelOffsets, props.el.faceStyles, solidSel.elementId === props.el.id ? (solidSel.face ?? undefined) : undefined, props.el.mesh)
+  if (SOLID_VCOUNT[kind]) {
+    // 「显示点」开关：关掉时字母也不画，得到干净的线稿
+    const showPts = props.el.showPoints !== false
+    const labels = showPts ? props.el.vlabels : (props.el.vlabels || []).map(() => null)
+    const solid = renderSolid(kind, pts.value, w, h, stroke, s, fillColor, dashed, labels, props.el.edgeStyles, solidSel.elementId === props.el.id ? (solidSel.vertex ?? undefined) : undefined, solidSel.elementId === props.el.id ? (solidSel.edge ?? undefined) : undefined, props.el.labelOffsets, props.el.faceStyles, solidSel.elementId === props.el.id ? (solidSel.face ?? undefined) : undefined, props.el.mesh)
+    if (!showPts) return solid
+    // 顶点小圆点（画在图形之上；半径跟元素尺寸挂钩，缩放时比例不变）
+    const r = Math.max(2, Math.min(w, h) * 0.013)
+    const p = pts.value
+    let dots = ''
+    for (let i = 0; i + 1 < p.length; i += 2) {
+      dots += '<circle cx="' + (p[i] * w).toFixed(1) + '" cy="' + (p[i + 1] * h).toFixed(1) + '" r="' + r.toFixed(1) + '" fill="' + stroke + '"/>'
+    }
+    return solid + dots
+  }
 
   switch (kind) {
     // 抛物线 / 正余弦 / 指数 / 对数：旧的手绘贝塞尔版本已删除，

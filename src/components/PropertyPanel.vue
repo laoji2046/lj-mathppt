@@ -107,6 +107,12 @@ const line = computed(() => el.value as LineElement | undefined)
 const arrow = computed(() => el.value as ArrowElement | undefined)
 const pen = computed(() => el.value as PenElement | undefined)
 const mathfig = computed(() => el.value as MathFigureElement | undefined)
+/** 是否有"顶点"概念（立体几何 / 复刻图形 / 可拖顶点图形）—— 有才显示「显示点」开关 */
+const hasVertices = computed(() => {
+  const k = mathfig.value?.kind
+  if (!k) return false
+  return !!(SOLID_VCOUNT[k as keyof typeof SOLID_VCOUNT] || mathfig.value?.points?.length)
+})
 const isEditableFig = computed(() => mathfig.value?.kind === 'polygon' || mathfig.value?.kind === 'bezier')
 /** 「图片转图形」生成的元素：带着原图和识别框回到那个弹窗，继续改顶点 / 边 / 字母 */
 function reopenVectorize() {
@@ -918,6 +924,16 @@ function layerTypeLabel(type: string) {
             </optgroup>
           </select>
         </label>
+        <!-- 显示点：顶点小圆点 + 字母。关掉就是干净的线稿（只有线） -->
+        <label v-if="hasVertices" class="prop-check" style="margin-top:6px">
+          <input
+            type="checkbox"
+            :checked="mathfig?.showPoints !== false"
+            @change="patch({ showPoints: ($event.target as HTMLInputElement).checked } as Partial<SlideElement>)"
+          />
+          <span>显示点（顶点圆点 + 字母）</span>
+        </label>
+
         <!-- 自定义函数（空白）：表达式 / 定义域 / 值域 / 网格 / 坐标轴 -->
         <template v-if="mathfig?.kind === 'custom'">
           <label class="field"><span>y =</span>
