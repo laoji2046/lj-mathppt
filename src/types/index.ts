@@ -604,6 +604,8 @@ export interface TableElement extends ElementBase {
   merges?: TableMerge[]
   /** 表标题，如「表 4-1」：居中显示在表格上方，跨全宽 */
   caption?: string
+  /** 格内 {{fig:kind}} 图形的默认高度(px)；不写用内置默认。标记里写 :数字 仍优先 */
+  figHeight?: number
   headerColor: string
   borderColor: string
   fontSize: number

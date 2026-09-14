@@ -37,7 +37,7 @@ async function renderCells() {
   if (editing.value) return
   for (const c of cells) {
     const raw = c.getAttribute('data-raw') || ''
-    const html = inlineFiguresInText(raw)
+    const html = inlineFiguresInText(raw, props.el.figHeight)
     const hasMath = html.indexOf('\\(') >= 0 || html.indexOf('$') >= 0
     if (!hasMath) {
       c.innerHTML = normalizeMixed(html)
@@ -48,7 +48,13 @@ async function renderCells() {
   }
 }
 onMounted(() => { renderCells() })
-watch(() => [props.el.rows, props.el.merges, props.el.caption, editing.value], renderCells, { deep: true })
+// ⚠ 改动表格的任何"影响渲染"的字段都要进这个列表 —— 漏一个就会出现"改了没反应"
+//   （figHeight 就漏过一次：图形高度改了但没重绘）
+watch(
+  () => [props.el.rows, props.el.merges, props.el.caption, props.el.figHeight, editing.value],
+  renderCells,
+  { deep: true },
+)
 
 /** 表格整体样式：真 <table>，边框用 border-collapse 画（原来靠 grid gap 的假边框换掉了） */
 const tableStyle = computed(() => ({

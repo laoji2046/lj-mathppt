@@ -66,7 +66,7 @@ function elOfPreset(p: (typeof SOLID_FIGURE_PRESETS)[number]): SlideElement {
  * 把文本里的 {{fig:kind}} 换成**行内 SVG**（高度跟随字号，1.35em）。
  * 用在表格单元格、以及导出的单元格正文里 —— 两边共用，保证一致。
  */
-export function inlineFiguresInText(text: string): string {
+export function inlineFiguresInText(text: string, defaultPx?: number): string {
   if (!text || text.indexOf('{{fig:') < 0) return text
   // 整段就一个图形标记（教材"图像"格那种）→ 当成块级大图居中，默认 7.5em（≈128px，占大半格）
   const solo = text.trim().match(/^\{\{fig:([^{}:]+)(?::(\d+))?\}\}$/)
@@ -82,8 +82,9 @@ export function inlineFiguresInText(text: string): string {
     //   inline-block 的宽度又指望里面的 svg，两头互等 → 算成 0 宽 ✗（DOM 里有、画出来看不见）
     const ratio = (el.w && el.h) ? el.w / el.h : 1.6
     const soloHere = !!solo && solo[1] === name.trim()
-    const pxNum = px ? Number(px) : 0
-    // 默认：整格一个图 → 4.6em（块级居中）；夹在文字里 → 1.6em；写了 :px 就按 px
+    // 优先级：标记里的 :数字 > 表格设定的 figHeight > 内置默认
+    // 注意 Number()：表格的 figHeight 可能以字符串传进来（输入框），不转就会走成非法长度
+    const pxNum = px ? Number(px) : (defaultPx && Number(defaultPx) > 0 ? Number(defaultPx) : 0)
     const em = soloHere ? 7.5 : 1.6
     const h = pxNum ? pxNum + 'px' : em + 'em'
     const w = pxNum ? Math.round(pxNum * ratio) + 'px' : (em * ratio).toFixed(2) + 'em'

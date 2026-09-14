@@ -9,6 +9,7 @@ import type {
 } from '@/types'
 import type { AnimEm, AnimIn, AnimOut, BulletKind } from '@/types'
 import { playAnimPreview } from '@/ui/animPreview'
+import { openFigPalette } from '@/ui/figPalette'
 import { ANIM_EMS, ANIM_INS, ANIM_OUTS, ARROW_HEADS, BULLETS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, IMAGE_ROT3D, IMAGE_SHADOWS, SHAPE_MASKS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
 import { captureDesmosState } from '@/composables/useDesmos'
 import { layoutTable, mergeAt, unmergeAt } from '@/composables/tableLayout'
@@ -440,6 +441,18 @@ function isCovered(r: number, c: number) {
 function doMerge(dir: 'right' | 'down') {
   if (!tableEl.value || !curCell.value) return
   patch({ merges: mergeAt(tableEl.value.rows, tableEl.value.merges, curCell.value.r, curCell.value.c, dir) } as Partial<SlideElement>)
+}
+/** 把图形标记写进"当前格"（图形库里点一张卡片就调这里） */
+function insertFigMark(key: string) {
+  const cc = curCell.value
+  if (!cc || !tableEl.value) return
+  const cur = String(tableEl.value.rows[cc.r]?.[cc.c] ?? '')
+  setCell(cc.r, cc.c, (cur ? cur + ' ' : '') + '{{fig:' + key + '}}')
+}
+/** 打开图形库；选了哪张就插到当前格 */
+function pickFig() {
+  if (!curCell.value) return
+  openFigPalette((_svg, _label, key) => insertFigMark(key))
 }
 function doUnmerge() {
   if (!tableEl.value || !curCell.value) return
@@ -1182,6 +1195,14 @@ function layerTypeLabel(type: string) {
             @input="patch({ caption: ($event.target as HTMLInputElement).value } as Partial<SlideElement>)"
           />
         </label>
+        <label class="field" style="margin-top:8px"><span>图形高度 (px)</span>
+          <input
+            type="number" min="0" max="800" step="4" placeholder="留空用默认（整格单图约 128）"
+            :value="tableEl?.figHeight ?? ''"
+            @input="patch({ figHeight: num(($event.target as HTMLInputElement).value, 0) || undefined } as Partial<SlideElement>)"
+          />
+        </label>
+        <button class="panel__mini" :disabled="!curCell" style="margin-top:6px;width:100%" @click="pickFig">插入图形到当前格…</button>
         <div class="tbl__merge">
           <button class="panel__mini" :disabled="!curCell" @click="doMerge('right')">向右合并</button>
           <button class="panel__mini" :disabled="!curCell" @click="doMerge('down')">向下合并</button>

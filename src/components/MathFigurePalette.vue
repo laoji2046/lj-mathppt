@@ -99,7 +99,7 @@ async function onPick(kind: MathFigureKind) {
     return
   }
   const svg = await grabByRealRender(realElOfKind(kind))
-  if (svg) sink(svg, labelOf(kind))
+  if (svg) sink(svg, labelOf(kind), kind)
   else insert(kind)
   closeFigPalette()
   emit('close')
@@ -125,7 +125,7 @@ async function onPickPreset(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
     return
   }
   const svg = await grabByRealRender(realElOfPreset(p))
-  if (svg) sink(svg, p.name)
+  if (svg) sink(svg, p.name, p.name)
   else insertPreset(p)
   closeFigPalette()
   emit('close')

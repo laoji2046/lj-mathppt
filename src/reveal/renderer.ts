@@ -543,11 +543,11 @@ function elementToHtmlInner(el: SlideElement): string {
       return '<td' + span + ' style="background:' + esc(bg) + ';color:' + esc(col) +
         ';font-weight:' + (isH ? 700 : 400) + ';padding:' + pad + 'px ' + (pad + 2) + 'px;text-align:' + esc(align) +
         ';border:' + border + ';word-break:break-word;box-sizing:border-box;line-height:1.4;vertical-align:middle">' +
-        normalizeMixed(inlineFiguresInText(cell.text)) + '</td>'
+        normalizeMixed(inlineFiguresInText(cell.text, el.figHeight)) + '</td>'
     }).join('') + '</tr>').join('')
     const cap = el.caption
       ? '<caption style="caption-side:top;text-align:center;font-weight:700;padding:0 0 4px">' +
-        normalizeMixed(inlineFiguresInText(el.caption)) + '</caption>'
+        normalizeMixed(inlineFiguresInText(el.caption, el.figHeight)) + '</caption>'
       : ''
     return `<div style="${box}${rot}"${cls}${fragIdx}><table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:${el.fontSize}px">${cap}<tbody>${rowsHtml}</tbody></table></div>`
   }
