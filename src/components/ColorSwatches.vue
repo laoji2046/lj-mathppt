@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** 颜色面板：预设色板 + 自定义取色 + 可选「透明」 */
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import ColorPickerPopup from './ColorPickerPopup.vue'
 
 const props = defineProps<{
   modelValue?: string
@@ -41,6 +42,38 @@ const swStyle = computed(() => {
 function pick(c: string) { emit('update:modelValue', c) }
 function onCustom(e: Event) { emit('update:modelValue', (e.target as HTMLInputElement).value) }
 function isOn(c: string) { return props.modelValue === c }
+
+// ---- 更多颜色：打开 PPT 风格的取色面板（主题色 / 标准色 / 其他颜色 / 取色器）----
+const popupOpen = ref(false)
+const triggerRef = ref<HTMLElement | null>(null)
+const popPos = ref({ x: 0, y: 0 })
+function openPopup() {
+  const r = triggerRef.value?.getBoundingClientRect()
+  if (r) {
+    // 贴住触发点，并保证不跑出视口
+    popPos.value = {
+      x: Math.max(8, Math.min(r.left, window.innerWidth - 252)),
+      y: Math.max(8, Math.min(r.bottom + 6, window.innerHeight - 430)),
+    }
+  }
+  popupOpen.value = true
+}
+function closePopup() { popupOpen.value = false }
+function onDocDown(e: MouseEvent) {
+  if (!popupOpen.value) return
+  const t = e.target as HTMLElement
+  if (t.closest('.cp') || t.closest('.sw__more')) return
+  popupOpen.value = false
+}
+function onEsc(e: KeyboardEvent) { if (e.key === 'Escape') popupOpen.value = false }
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocDown, true)
+  document.addEventListener('keydown', onEsc)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocDown, true)
+  document.removeEventListener('keydown', onEsc)
+})
 </script>
 
 <template>
@@ -59,6 +92,20 @@ function isOn(c: string) { return props.modelValue === c }
       <input type="color" :value="modelValue || '#000000'" @input="onCustom" />
       <span>自定义</span>
     </label>
+    <button
+      ref="triggerRef" class="sw__more" type="button"
+      title="更多颜色：主题色 / 标准色 / 其他颜色 / 取色器（跟 PowerPoint 一样）"
+      @click.stop="openPopup"
+    ></button>
+
+    <ColorPickerPopup
+      v-if="popupOpen"
+      :style="{ position: 'fixed', left: popPos.x + 'px', top: popPos.y + 'px', zIndex: 500 }"
+      :model-value="modelValue"
+      :allow-transparent="allowTransparent"
+      @update:model-value="pick"
+      @close="closePopup"
+    />
   </div>
 </template>
 
@@ -71,6 +118,10 @@ function isOn(c: string) { return props.modelValue === c }
   margin-top: 4px;
 }
 .sw--compact { gap: 4px; margin-top: 0; }
+/* 「更多颜色」入口：用一块小彩虹最自解释（点开是 PPT 那个主题色面板） */
+.sw__more { width: var(--sw-size, 24px); height: var(--sw-size, 24px); border: 1px solid var(--border-strong); border-radius: 4px; cursor: pointer; padding: 0; flex: 0 0 auto;
+  background: conic-gradient(from 0deg, #e53935, #e8871e, #f4d03f, #2f9e63, #2d7dd2, #7c4bb8, #e53935); }
+.sw__more:hover { outline: 2px solid var(--brand); outline-offset: 1px; }
 .sw__c {
   width: var(--sw-size, 24px);
   height: var(--sw-size, 24px);
