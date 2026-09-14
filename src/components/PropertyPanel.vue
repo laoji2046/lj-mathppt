@@ -11,6 +11,7 @@ import type { AnimEm, AnimIn, AnimOut, BulletKind } from '@/types'
 import { playAnimPreview } from '@/ui/animPreview'
 import { ANIM_EMS, ANIM_INS, ANIM_OUTS, ARROW_HEADS, BULLETS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, IMAGE_ROT3D, IMAGE_SHADOWS, SHAPE_MASKS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
 import { captureDesmosState } from '@/composables/useDesmos'
+import { layoutTable, mergeAt, unmergeAt } from '@/composables/tableLayout'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
 import { openShapeEdit } from '@/ui/shapeEditor'
@@ -429,6 +430,20 @@ function addCol() {
 function delRow(i: number) {
   if (!tableEl.value) return
   patch({ rows: tableEl.value.rows.filter((_, idx) => idx !== i) } as Partial<SlideElement>)
+}
+/** 合并操作作用的"当前格"：在面板的单元格网格里点一下即选定（会高亮） */
+const curCell = ref<{ r: number; c: number } | null>(null)
+/** 这个格子是不是被别的合并格盖住了（灰掉、别编辑它） */
+function isCovered(r: number, c: number) {
+  return layoutTable(tableEl.value?.rows || [], tableEl.value?.merges).grid.every((line) => !line.some((x) => x.r === r && x.c === c))
+}
+function doMerge(dir: 'right' | 'down') {
+  if (!tableEl.value || !curCell.value) return
+  patch({ merges: mergeAt(tableEl.value.rows, tableEl.value.merges, curCell.value.r, curCell.value.c, dir) } as Partial<SlideElement>)
+}
+function doUnmerge() {
+  if (!tableEl.value || !curCell.value) return
+  patch({ merges: unmergeAt(tableEl.value.merges, curCell.value.r, curCell.value.c) } as Partial<SlideElement>)
 }
 function delCol(j: number) {
   if (!tableEl.value) return
@@ -1143,7 +1158,9 @@ function layerTypeLabel(type: string) {
               v-for="(c, j) in row"
               :key="j"
               class="tbl__cell"
+              :class="{ 'tbl__cell--cur': curCell && curCell.r === i && curCell.c === j, 'tbl__cell--cov': isCovered(i, j) }"
               :value="c ?? ''"
+              @focus="curCell = { r: i, c: j }"
               @input="setCell(i, j, ($event.target as HTMLInputElement).value)"
             />
             <button class="tbl__del" title="删除第 {{ i + 1 }} 行" @click="delRow(i)"><AppIcon name="trash" :size="12" /></button>
@@ -1158,6 +1175,19 @@ function layerTypeLabel(type: string) {
             @click="delCol(j)"
           >删列{{ j + 1 }}</button>
         </div>
+        <label class="field" style="margin-top:8px"><span>表标题</span>
+          <input
+            :value="tableEl?.caption ?? ''"
+            placeholder="如 表 4-1（留空则不显示）"
+            @input="patch({ caption: ($event.target as HTMLInputElement).value } as Partial<SlideElement>)"
+          />
+        </label>
+        <div class="tbl__merge">
+          <button class="panel__mini" :disabled="!curCell" @click="doMerge('right')">向右合并</button>
+          <button class="panel__mini" :disabled="!curCell" @click="doMerge('down')">向下合并</button>
+          <button class="panel__mini" :disabled="!curCell" @click="doUnmerge()">取消合并</button>
+        </div>
+        <p class="panel__hint">先在上面的格子里点一下（会高亮），再点合并 —— 每点一次扩一格；灰掉的格子是被合并盖住的。</p>
         <label class="field" style="margin-top:8px"><span>表头色</span>
           <ColorSwatches :model-value="tableEl?.headerColor" @update:model-value="(v) => patch({ headerColor: v } as Partial<SlideElement>)" />
         </label>
