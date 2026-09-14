@@ -432,6 +432,42 @@ label("$A$", (2.399, 2.306));
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
 
+### 2026-09-15（v2026.09.1260）
+
+**1260 · PPT(.pptx) → 课件 JSON —— 导入做通了**
+
+用户要求把 PPT 课件转成本应用的课件 JSON。实测样张 `2.2基本不等式(第一课时).pptx`（18 页）。
+
+**做法（零新依赖，全部复用现有设施）**：
+
+    docx/zip.ts        已有的 zip 读取（原生 DecompressionStream）—— pptx 同一套 ✓
+    docx/xml.ts        已有的迷你 XML 解析器 ✓
+    新增 src/pptx/ommlToLatex.ts   OMML → LaTeX
+    新增 src/pptx/pptxToDeck.ts    解包 → 排页序 → 逐形状 → 元素
+    入口：工具栏「文件 ▾ → 导入 PPT(.pptx)」→ store.importDeck()
+
+**映射**：p:sp 文字 → text 元素；含公式的 → **richtex**（正文与 \(…\) 混排）；
+p:pic + ppt/media(png/jpeg/gif) → image（data URL 内嵌）；a:tbl → table（含 gridSpan/rowSpan → merges）；
+**WMF/EMF/OLE 一律跳过**（实测证明它们只是 OLE 公式的预览图 ✗，真公式是原生 OMML ✓）。
+
+**实测结果**（18 页样张）：
+
+    转换 18 页 / 画布 1280×720（与 pptx 尺寸一致，不用缩放）· 73ms · 输出 0.13 MB
+    文本框 132 · 含公式的混排元素 24 · 表格 2 · 图片 4 · 公式 43
+    importDeck 返回 true ✓ → 全稿 138 元素
+    截图确认：第 6 页「√ab ≤ (a+b)/2」已是排好版的 LaTeX，且与中文混排 ✓
+
+**过程中修掉的三个真问题**（都是"看结构"才发现的 ✓）：
+
+1. **OMML 里用的是数学字母数字符号**（𝒂=U+1D44E、𝟐=U+1D7D0）✗ —— MathJax 认不出这些码位；
+   加了整段 U+1D400 区的归一化（30 个样式块 → ASCII），样式交给 LaTeX 自己表示 ✓；
+2. **rels 读取层级错了** —— `Relationships` 是根的下一层，`Relationship` 在它下面 ✗；
+   原来取的是根的直接子节点 → 映射表全空 → 所有图片拿不到地址 ✓；
+3. **mc:AlternateContent 没处理** —— 真内容在 `mc:Choice`、老的 VML/WMF 在 `mc:Fallback` ✗；
+   现在只走 Choice ✓（这也正是把"公式预览"与"真公式"区分开的关键 ✓）。
+
+**已知不做（v1）**：主题色用近似（schemeClr 要查母版）/ 动画切换不转 / 复杂 OMML（矩阵、多行对齐）降级成文字。
+
 ### 2026-09-15（v2026.09.1259）
 
 **1259 · 版式浮窗高度改为"按内容自动计算"（并揪出真凶：一个重复的 maxHeight）**
