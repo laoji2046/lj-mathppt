@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { MathFigureElement, SlideElement } from '@/types'
 import { lineDashCss } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
-import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg } from '@/composables/solid3d'
+import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg, vertexDotsSvg } from '@/composables/solid3d'
 import { CONIC_KINDS, FUNCTION_KINDS, conicFigure, customFigure, functionFigure } from '@/composables/mathPlot'
 import { solidSel, selectSolidVertex, selectSolidEdge, selectSolidFace, clearSolidSel } from '@/composables/solidSel'
 
@@ -78,14 +78,8 @@ const innerHtml = computed(() => {
     // 字母始终画；顶点圆点默认**不画**（只有勾了 showDots 才画，保持原来的观感）
     const solid = renderSolid(kind, pts.value, w, h, stroke, s, fillColor, dashed, props.el.vlabels, props.el.edgeStyles, solidSel.elementId === props.el.id ? (solidSel.vertex ?? undefined) : undefined, solidSel.elementId === props.el.id ? (solidSel.edge ?? undefined) : undefined, props.el.labelOffsets, props.el.faceStyles, solidSel.elementId === props.el.id ? (solidSel.face ?? undefined) : undefined, props.el.mesh)
     if (props.el.showDots !== true) return solid
-    // 顶点小圆点（画在图形之上；半径跟元素尺寸挂钩，缩放时比例不变）
-    const r = Math.max(2, Math.min(w, h) * 0.013)
-    const p = pts.value
-    let dots = ''
-    for (let i = 0; i + 1 < p.length; i += 2) {
-      dots += '<circle cx="' + (p[i] * w).toFixed(1) + '" cy="' + (p[i + 1] * h).toFixed(1) + '" r="' + r.toFixed(1) + '" fill="' + stroke + '"/>'
-    }
-    return solid + dots
+    // 顶点小圆点：与三维弹窗预览共用 vertexDotsSvg（只此一份实现）
+    return solid + vertexDotsSvg(pts.value, w, h, stroke)
   }
 
   switch (kind) {

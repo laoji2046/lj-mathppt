@@ -371,6 +371,22 @@ function labelSvg(s: string, x: number, y: number, color: string, fs: number): s
 }
 
 /** 依据归一化顶点渲染该立体。可见边实线、隐藏边虚线；支持逐边覆盖与顶点字母。 */
+/**
+ * 顶点小圆点（教材风）。**编辑器画布、缩略图、导出、三维弹窗预览共用这一个函数** ——
+ * 别各写一份：今天刚修过"两份实现迟早漂移"（数学图形在缩略图/演示里空白就是这么来的）。
+ * 半径跟元素尺寸挂钩，缩放/改尺寸时比例不变。
+ */
+export function vertexDotsSvg(pts: number[], w: number, h: number, stroke: string, scale = 0.013): string {
+  if (!pts || pts.length < 2) return ''
+  const r = Math.max(2, Math.min(w, h) * scale)
+  let out = ''
+  for (let i = 0; i + 1 < pts.length; i += 2) {
+    out += '<circle cx="' + (pts[i] * w).toFixed(1) + '" cy="' + (pts[i + 1] * h).toFixed(1) +
+      '" r="' + r.toFixed(1) + '" fill="' + stroke + '"/>'
+  }
+  return out
+}
+
 export function renderSolid(kind: string, pts: number[], w: number, h: number, stroke: string, strokeWidth: number, fillColor: string, _dsh: string, vlabels?: (string | null)[], edgeStyles?: (EdgeStyle | null)[], selVertex?: number, selEdge?: number, labelOffsets?: { dx: number; dy: number }[], faceStyles?: (FaceStyle | null)[], selFace?: number, mesh?: SolidMesh | null): string {
   const n = Math.floor(pts.length / 2)
   const s = strokeWidth || 2

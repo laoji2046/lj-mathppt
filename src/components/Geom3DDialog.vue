@@ -15,7 +15,7 @@ import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import { buildSolid, labelOffsetsFrom, LABEL_DIR_VEC, projectGeom, resolveVertices, solveView, type Geom3D, type LabelDir } from '@/composables/geom3d'
 import { GEOM3D_PRESETS, GEOM3D_PROMPT } from '@/composables/geom3dPrompt'
-import { renderSolid, arcsSvg } from '@/composables/solid3d'
+import { renderSolid, arcsSvg, vertexDotsSvg } from '@/composables/solid3d'
 import { closeGeom3D } from '@/ui/geom3d'
 import type { MathFigureElement } from '@/types'
 
@@ -135,9 +135,13 @@ function parse() {
 }
 parse()
 
+/** 顶点小圆点：默认不画（只有字母，与原观感一致）；插入/保存时会写进元素 */
+const showDots = ref(false)
+
 // 从画布上的三维图形回来 → 还原模型和视角（继续改）
 if (props.editId) {
   const el = findEl(props.editId)
+  showDots.value = (el as { showDots?: boolean } | undefined)?.showDots === true
   const g = el?.geom3d
   if (g?.model && Object.keys(g.model).length) {
     raw.value = JSON.stringify(g.model, null, 1)
@@ -152,6 +156,7 @@ if (props.editId) {
 /** 正在拖的字母：点名 + 实时偏移(px)。拖的时候只在本地更新、松手才写模型 ——
  *  免得每帧都 JSON 往返一次 */
 const dragLabel = ref<{ name: string; dx: number; dy: number } | null>(null)
+
 
 /** 字母位置：模型里的偏移(px) → 渲染器要的比例（按当前预览尺寸换算） */
 const labelOffs = computed(() => {
@@ -182,6 +187,8 @@ const svg = computed(() => {
     labelOffs.value, p.faceStyles.length ? p.faceStyles : undefined, undefined, p.mesh)
   // 圆柱 / 圆锥的底面是**弧图元**，renderSolid 不画它，单独叠一层（跟画布里的做法一致）
   let out = solid + arcsSvg(p.arcs, W.value, H, '#1a1a1a', 2.6)
+  // 顶点圆点：与画布/缩略图/导出共用同一个函数（只此一份实现）
+  if (showDots.value) out = vertexDotsSvg(p.points, W.value, H, '#1a1a1a') + out
   // 多选的点自己描一圈（renderSolid 只支持选中一个顶点）
   for (const i of selPoints.value) {
     const cx = p.points[i * 2] * W.value, cy = p.points[i * 2 + 1] * H
@@ -894,6 +901,7 @@ function insert() {
     labelOffsets: labelOffsetsFrom(m, order.value, W.value, H) ?? undefined,
     // **把源模型存进元素** —— 否则插进画布就"死"了，改不了视角也改不了模型
     geom3d: { model: m as unknown as Record<string, unknown>, azim: azim.value, elev: elev.value },
+    showDots: showDots.value || undefined,
   }
   const el = props.editId ? findEl(props.editId) : undefined
   if (el) {
@@ -920,6 +928,13 @@ function insert() {
             <button :class="{ 'g3__tab--on': tab === 'model' }" @click="tab = 'model'">① 模型</button>
             <button :class="{ 'g3__tab--on': tab === 'draw' }" @click="tab = 'draw'">② 作图</button>
             <button :class="{ 'g3__tab--on': tab === 'list' }" @click="tab = 'list'">③ 图元</button>
+          </div>
+          <div class="g3__sec g3__sec--model g3__row">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+              <input v-model="showDots" type="checkbox" />
+              <span>显示顶点圆点</span>
+            </label>
+            <span class="g3__tip g3__tip--inline">默认只有字母（与原观感一致）；勾上才是教材风的小圆点</span>
           </div>
           <div class="g3__sec g3__sec--model g3__lab">几何描述（JSON：vertices 必填，faces 决定虚实）</div>
           <div class="g3__sec g3__sec--model g3__row g3__row--top">
