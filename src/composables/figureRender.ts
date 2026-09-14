@@ -3,6 +3,7 @@ import MathFigureElement from '@/components/elements/MathFigureElement.vue'
 import { createElement } from '@/types'
 import type { MathFigureElement as MFigEl, MathFigureKind, SlideElement } from '@/types'
 import { figureBox } from '@/composables/mathPlot'
+import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
 
 /**
  * 数学图形的"共用渲染"。
@@ -38,8 +39,28 @@ export function renderFigureSvg(el: SlideElement): string {
   }
 }
 
-/** 单元格里的图形标记：{{fig:cube}} —— 也可写 {{fig:cube}} 之外什么都不加 */
-export const FIG_MARK_RE = /\{\{fig:([A-Za-z0-9_]+)\}\}/g
+/**
+ * 单元格里的图形标记：{{fig:cube}}
+ * 取值可以是：
+ *   ① 图形库的 kind 代号（cube / linear / sine / circle / parabola / cylinder …，共 74 种）
+ *   ② **复刻图形**那批 preset 的**名字**（如 {{fig:正方体 ABCD-A₁B₁C₁D₁（含三棱锥）}}）—— 它们不是 kind，
+ *      但用户常用的四棱锥/正方体都在那里，所以按名字也认一遍。
+ * 名字里可能有空格/中文，所以这里不限制字符集，只到第一个 }} 为止。
+ */
+export const FIG_MARK_RE = /\{\{fig:([^{}]+)\}\}/g
+
+/** 按名字找复刻图形 preset */
+function presetByName(name: string) {
+  const n = name.trim()
+  return SOLID_FIGURE_PRESETS.find((p) => p.name === n || p.name.split(/[（(]/)[0].trim() === n)
+}
+
+/** 把一个 preset 变成 mathfig 元素（与图形库插入时同一套参数） */
+function elOfPreset(p: (typeof SOLID_FIGURE_PRESETS)[number]): SlideElement {
+  const el = createElement('mathfig', { x: 0, y: 0 })
+  Object.assign(el, { ...p.el, w: p.w, h: p.h, fill: 'transparent', stroke: '#1a1a1a', strokeWidth: 2.8 })
+  return el
+}
 
 /**
  * 把文本里的 {{fig:kind}} 换成**行内 SVG**（高度跟随字号，1.35em）。
@@ -47,10 +68,12 @@ export const FIG_MARK_RE = /\{\{fig:([A-Za-z0-9_]+)\}\}/g
  */
 export function inlineFiguresInText(text: string): string {
   if (!text || text.indexOf('{{fig:') < 0) return text
-  return text.replace(FIG_MARK_RE, (whole, kind: string) => {
-    const el = mathFigureElOfKind(kind as MathFigureKind)
+  return text.replace(FIG_MARK_RE, (whole, name: string) => {
+    const preset = presetByName(name)
+    const el = preset ? elOfPreset(preset) : mathFigureElOfKind(name.trim() as MathFigureKind)
     const svg = renderFigureSvg(el)
-    if (!svg) return whole
+    // 认不出来的 kind / 名字 → **原样留着**，别让它悄悄消失（打错字要看得出来）
+    if (!svg || !/[<(](path|line|polygon|polyline|circle|ellipse|rect)\b/.test(svg)) return whole
     // 组件给的 svg 带 width/height="100%"，这里用 style 覆盖（CSS 优先于表现属性）
     const fitted = svg.replace('<svg ', '<svg style="height:100%;width:auto;vertical-align:middle" ')
     return '<span class="tbl-fig" style="display:inline-block;height:1.35em;vertical-align:-0.32em">' + fitted + '</span>'
