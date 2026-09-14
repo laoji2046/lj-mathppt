@@ -85,12 +85,70 @@ export interface TextElement extends ElementBase {
   letterSpacing?: number
   /** 行高（倍数） */
   lineHeight?: number
+
+  /** 项目符号：none=无；dot•/circle○/square▪/dash–；number=1. alpha=a) roman=i */
+  bullet?: BulletKind
+  /** 项目符号的悬挂缩进（px）：符号占的位置，正文从这里开始 */
+  bulletIndent?: number
+  /** 整段左缩进（px） */
+  indent?: number
+  /** 段前 / 段后间距（px）—— 这里"段"指一行（元素是按行排的） */
+  paraBefore?: number
+  paraAfter?: number
   /** 垂直对齐：top/middle/bottom */
   valign?: 'top' | 'middle' | 'bottom'
   /** 文字发光（PowerPoint 艺术字）：颜色 + 模糊半径 */
   glowColor?: string
   glowBlur?: number
 }
+
+/** 项目符号种类 */
+export type BulletKind = 'none' | 'dot' | 'circle' | 'square' | 'dash' | 'number' | 'alpha' | 'roman'
+
+/** 项目符号预设（下拉用） */
+export const BULLETS: { v: BulletKind; label: string }[] = [
+  { v: 'none', label: '无' },
+  { v: 'dot', label: '● 实心圆点' },
+  { v: 'circle', label: '○ 空心圆点' },
+  { v: 'square', label: '▪ 方块' },
+  { v: 'dash', label: '– 短横' },
+  { v: 'number', label: '1. 阿拉伯数字' },
+  { v: 'alpha', label: 'a) 小写字母' },
+  { v: 'roman', label: 'i. 罗马数字' },
+]
+
+const ROMAN = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x', 'xi', 'xii']
+
+/** 取第 i 行的项目符号文本（编辑器与 Reveal 导出共用，保证两端一致） */
+export function bulletMarker(kind: BulletKind | undefined, i: number): string {
+  switch (kind) {
+    case 'dot': return '●'
+    case 'circle': return '○'
+    case 'square': return '▪'
+    case 'dash': return '–'
+    case 'number': return i + 1 + '.'
+    case 'alpha': return String.fromCharCode(97 + (i % 26)) + ')'
+    case 'roman': return (ROMAN[i] || String(i + 1)) + '.'
+    default: return ''
+  }
+}
+
+/** 段落相关的行内样式（缩进 / 段间距），编辑器与导出共用 */
+export function paragraphLineStyle(el: {
+  bullet?: BulletKind; bulletIndent?: number; indent?: number; paraBefore?: number; paraAfter?: number
+} | null | undefined, i: number, total: number): string {
+  if (!el) return ''
+  const ind = el.indent || 0
+  const bul = el.bullet && el.bullet !== 'none' ? (el.bulletIndent ?? 22) : 0
+  const parts = ['padding-left:' + (ind + bul) + 'px']
+  if (i > 0 && el.paraBefore) parts.push('margin-top:' + el.paraBefore + 'px')
+  if (i < total - 1 && el.paraAfter) parts.push('margin-bottom:' + el.paraAfter + 'px')
+  if (bul) {
+    parts.push('text-indent:-' + bul + 'px') // 符号悬挂到左边
+  }
+  return parts.join(';')
+}
+
 
 /** 生成文本特效 CSS（渐变 / 描边 / 字距 / 行高；编辑器与 Reveal 共用） */
 export function textEffectCss(
@@ -576,6 +634,12 @@ export interface RichTextElement extends ElementBase {
   wrap?: boolean
   /** 行属性：按 text 的 \n 分行，每行可单独设颜色 / 字体 */
   lineStyles?: { color?: string; fontFamily?: string }[]
+  // ---- 段落 / 项目符号（与 TextElement 同一套，混排也能用）----
+  bullet?: BulletKind
+  bulletIndent?: number
+  indent?: number
+  paraBefore?: number
+  paraAfter?: number
 }
 
 export interface ImageElement extends ElementBase {

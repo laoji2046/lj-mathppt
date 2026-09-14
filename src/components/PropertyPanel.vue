@@ -7,7 +7,8 @@ import type {
   GgbApp, IconElement, ImageElement, LineElement, MathElement, MathFigureElement,
   MathFigureKind, PenElement, RichTextElement, ShapeElement, SlideElement, TableElement, TextElement, WordArtPreset,
 } from '@/types'
-import { ARROW_HEADS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, IMAGE_ROT3D, IMAGE_SHADOWS, SHAPE_MASKS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
+import type { BulletKind } from '@/types'
+import { ARROW_HEADS, BULLETS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, IMAGE_ROT3D, IMAGE_SHADOWS, SHAPE_MASKS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
 import { captureDesmosState } from '@/composables/useDesmos'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
@@ -705,6 +706,34 @@ function layerTypeLabel(type: string) {
             <option v-for="s in ARROW_HEADS" :key="s.v" :value="s.v">{{ s.label }}</option>
           </select>
         </label>
+      </div>
+
+      <!-- 段落 / 项目符号（对齐 PowerPoint「开始 → 段落」）：文字与混排共用 -->
+      <div v-if="isText || isRichtex" class="panel__section">
+        <h3 class="panel__title">段落</h3>
+        <label class="field"><span>项目符号</span>
+          <select :value="(isText ? text?.bullet : richtex?.bullet) || 'none'"
+            @change="patch({ bullet: ($event.target as HTMLSelectElement).value as BulletKind } as Partial<SlideElement>)">
+            <option v-for="b in BULLETS" :key="b.v" :value="b.v">{{ b.label }}</option>
+          </select>
+        </label>
+        <label class="field"><span>符号缩进 (px)</span>
+          <input type="number" :value="(isText ? text?.bulletIndent : richtex?.bulletIndent) ?? 22" min="0" max="120"
+            @input="patch({ bulletIndent: num(($event.target as HTMLInputElement).value, 22) } as Partial<SlideElement>)" />
+        </label>
+        <label class="field"><span>左缩进 (px)</span>
+          <input type="number" :value="(isText ? text?.indent : richtex?.indent) || 0" min="0" max="400"
+            @input="patch({ indent: num(($event.target as HTMLInputElement).value, 0) } as Partial<SlideElement>)" />
+        </label>
+        <label class="field"><span>段前 (px)</span>
+          <input type="number" :value="(isText ? text?.paraBefore : richtex?.paraBefore) || 0" min="0" max="80"
+            @input="patch({ paraBefore: num(($event.target as HTMLInputElement).value, 0) } as Partial<SlideElement>)" />
+        </label>
+        <label class="field"><span>段后 (px)</span>
+          <input type="number" :value="(isText ? text?.paraAfter : richtex?.paraAfter) || 0" min="0" max="80"
+            @input="patch({ paraAfter: num(($event.target as HTMLInputElement).value, 0) } as Partial<SlideElement>)" />
+        </label>
+        <p class="panel__hint">元素是**按行**排的：每一行就是一个"段"，所以段前/段后作用在行与行之间。项目符号会把符号挂在左边、正文右移。</p>
       </div>
 
       <div v-if="isText" class="panel__section">

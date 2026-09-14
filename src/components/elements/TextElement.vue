@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import type { TextElement } from '@/types'
-import { fontStack, textEffectCss, textShadowCss } from '@/types'
+import { bulletMarker, fontStack, paragraphLineStyle, textEffectCss, textShadowCss } from '@/types'
 import { inlineEditReq } from '@/ui/inlineEdit'
 
 const props = defineProps<{ el: TextElement }>()
@@ -38,6 +38,11 @@ const textStyle = computed(() => {
   const fx = textEffectCss(props.el)
   return (base.length ? base.join(';') + ';' : '') + fx
 })
+
+// ---- 段落 / 项目符号：按行拆开渲染（原来整段一个文本节点 ✗，没法逐行加符号）----
+const lines = computed(() => String(props.el.text ?? '').split('\n'))
+const markerOf = (i: number) => bulletMarker(props.el.bullet, i)
+const lineStyleOf = (i: number) => paragraphLineStyle(props.el, i, lines.value.length)
 
 async function beginEdit() {
   editing.value = true
@@ -77,7 +82,11 @@ watch(inlineEditReq, (v) => { if (v && v.id === props.el.id && !editing.value) b
       @keydown.esc.prevent="endEdit"
       @keydown.enter.ctrl.prevent="endEdit"
     >{{ el.text }}</div>
-    <span v-else :style="textStyle" @dblclick.stop="beginEdit">{{ el.text }}</span>
+    <div v-else class="text-el__body" :style="textStyle" @dblclick.stop="beginEdit">
+      <div v-for="(ln, i) in lines" :key="i" class="text-el__line" :style="lineStyleOf(i)">
+        <span v-if="markerOf(i)" class="text-el__mk">{{ markerOf(i) }}</span>{{ ln }}
+      </div>
+    </div>
   </div>
 </template>
 
@@ -94,6 +103,10 @@ watch(inlineEditReq, (v) => { if (v && v.id === props.el.id && !editing.value) b
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
+/* 逐行容器：保留原先行首空格，行为与之前的 pre-wrap 一致 */
+.text-el__body { white-space: pre-wrap; width: 100%; }
+.text-el__line { white-space: pre-wrap; }
+.text-el__mk { display: inline-block; min-width: 1.1em; margin-right: 0.35em; }
 .text-el__editor {
   width: 100%;
   outline: 2px solid #534ab7;

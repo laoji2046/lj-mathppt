@@ -1,5 +1,5 @@
 import type { Deck, Slide, SlideElement, TextElement } from '@/types'
-import { fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
+import { bulletMarker, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
 import { SOLID_VCOUNT, renderSolid, solidVerts, arcsSvg, type EdgeStyle, type FaceStyle, type SolidMesh } from '@/composables/solid3d'
 
 /**
@@ -394,7 +394,14 @@ function elementToHtml(el: SlideElement): string {
       `text-align:${t.align};line-height:1.4;white-space:pre-wrap;word-break:break-word;overflow:hidden;` +
       `justify-content:${t.align === 'left' ? 'flex-start' : t.align === 'right' ? 'flex-end' : 'center'};` +
       (fx ? fx : '')
-    return `<div style="${box}${rot}"${cls}${fragIdx}><div style="${inner}">${esc(t.text)}</div></div>`
+    // 逐行渲染 + 项目符号（与编辑器同一套工具函数，保证两端一致）
+    const lines = String(t.text ?? '').split('\n')
+    const body = lines.map((ln, i) => {
+      const mk = bulletMarker(t.bullet, i)
+      const mkHtml = mk ? `<span style="display:inline-block;min-width:1.1em;margin-right:.35em">${esc(mk)}</span>` : ''
+      return `<div style="${paragraphLineStyle(t, i, lines.length)}">${mkHtml}${esc(ln)}</div>`
+    }).join('')
+    return `<div style="${box}${rot}"${cls}${fragIdx}><div style="${inner}"><div style="width:100%;white-space:pre-wrap">${body}</div></div></div>`
   }
 
   if (el.type === 'shape') {
@@ -545,12 +552,17 @@ function elementToHtml(el: SlideElement): string {
       `background:${hasBg ? esc(el.bgColor) : 'transparent'};` +
       `padding:${hasBg ? '6px 12px' : '0'};border-radius:${hasBg ? '6px' : '0'};`
     // 行属性：按 \n 分行，每行可单独设颜色/字体
-    const lineHtml = String(el.text || '').split('\n').map((ln, i) => {
+    const richLines = String(el.text || '').split('\n')
+    const lineHtml = richLines.map((ln, i) => {
       const ls = (el.lineStyles && el.lineStyles[i]) || null
+      const mk = bulletMarker(el.bullet, i)
+      const mkHtml = mk ? '<span style="display:inline-block;min-width:1.1em;margin-right:.35em">' + esc(mk) + '</span>' : ''
+      const wrapStart = '<div style="' + paragraphLineStyle(el, i, richLines.length) + '">' + mkHtml
       let st = ''
       if (ls) { st = ' style="'; if (ls.color) st += 'color:' + esc(ls.color) + ';'; if (ls.fontFamily) st += 'font-family:' + esc(fontStack(ls.fontFamily)) + ';'; st += '"' }
-      return ls ? '<span' + st + '>' + esc(normalizeMixed(ln)) + '</span>' : esc(normalizeMixed(ln))
-    }).join('\n')
+      const bodyHtml = ls ? '<span' + st + '>' + esc(normalizeMixed(ln)) + '</span>' : esc(normalizeMixed(ln))
+      return wrapStart + bodyHtml + '</div>'
+    }).join('')
     return `<div style="${box}${rot}"${cls}${fragIdx}><div class="fx-mixed" data-cap="${el.fitMode === 'shrink' ? 1 : 4}" data-align="${el.align}" style="${inner}"><div class="fx-mixed-inner" style="width:fit-content;max-width:100%;transform-origin:${el.align === 'left' ? 'left' : el.align === 'right' ? 'right' : 'center'} center;text-align:${el.align};">${lineHtml}</div></div></div>`
   }
 
