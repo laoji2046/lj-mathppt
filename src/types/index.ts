@@ -641,7 +641,36 @@ export interface ImageElement extends ElementBase {
   // ---- 三维旋转（预设）----
   /** 三维旋转预设 */
   rot3d?: 'none' | 'perspective' | 'isometric' | 'tiltUp' | 'tiltDown' | 'tiltLeft' | 'tiltRight'
+
+  /** 裁剪为形状（PowerPoint「裁剪 → 裁剪为形状」）：none=原样 */
+  shapeMask?: ShapeMaskId
+  /**
+   * 非破坏性裁剪（PowerPoint「裁剪」）：四边各裁掉多少，比例 0~0.9。
+   * **不重编码图片** —— 随时可以改回来，这是跟「图片编辑器」里那种把结果烤进数据的裁剪的区别。
+   */
+  crop?: { l: number; r: number; t: number; b: number }
 }
+
+/** 裁剪为形状的形状清单 */
+export type ShapeMaskId =
+  | 'none' | 'rounded' | 'circle' | 'ellipse' | 'triangle' | 'diamond'
+  | 'pentagon' | 'hexagon' | 'star' | 'arrow' | 'heart' | 'parallelogram'
+
+/** 形状的 CSS：圆/椭圆用 border-radius（边缘更平滑），其余用 clip-path */
+export const SHAPE_MASKS: { v: ShapeMaskId; label: string; css: string }[] = [
+  { v: 'none', label: '原图（不裁剪）', css: '' },
+  { v: 'rounded', label: '圆角矩形', css: 'border-radius:14px' },
+  { v: 'circle', label: '圆形', css: 'border-radius:50%' },
+  { v: 'ellipse', label: '椭圆', css: 'border-radius:50%' },
+  { v: 'triangle', label: '三角形', css: 'clip-path:polygon(50% 2%, 98% 98%, 2% 98%)' },
+  { v: 'diamond', label: '菱形', css: 'clip-path:polygon(50% 1%, 99% 50%, 50% 99%, 1% 50%)' },
+  { v: 'pentagon', label: '五边形', css: 'clip-path:polygon(50% 1%, 99% 37%, 81% 98%, 19% 98%, 1% 37%)' },
+  { v: 'hexagon', label: '六边形', css: 'clip-path:polygon(25% 2%, 75% 2%, 99% 50%, 75% 98%, 25% 98%, 1% 50%)' },
+  { v: 'star', label: '五角星', css: 'clip-path:polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)' },
+  { v: 'arrow', label: '箭头', css: 'clip-path:polygon(0% 28%, 62% 28%, 62% 4%, 100% 50%, 62% 96%, 62% 72%, 0% 72%)' },
+  { v: 'heart', label: '心形', css: 'clip-path:polygon(50% 100%, 8% 58%, 2% 30%, 12% 10%, 32% 6%, 50% 22%, 68% 6%, 88% 10%, 98% 30%, 92% 58%)' },
+  { v: 'parallelogram', label: '平行四边形', css: 'clip-path:polygon(22% 2%, 100% 2%, 78% 98%, 0% 98%)' },
+]
 
 /** 阴影预设 */
 export const IMAGE_SHADOWS: { v: NonNullable<ImageElement['shadowPreset']>; label: string; d: [number, number, number, number] }[] = [
@@ -687,6 +716,17 @@ const REFLECT_PRESETS: Record<Exclude<ImageElement['reflection'], undefined | 'n
   loose: [10, 'rgba(0,0,0,0.52)'],
 }
 
+/**
+ * 裁剪为形状的 CSS —— **必须加在"裁剪框"那层**，不能加在 <img> 上：
+ * 非破坏性裁剪会把图片放大到 100% 以上，蒙版的百分比如果按放大后的图算就对不上了。
+ */
+export function imageMaskCss(el: Pick<ImageElement, 'shapeMask' | 'radius'>): string {
+  const mask = SHAPE_MASKS.find((m) => m.v === el.shapeMask)
+  if (mask && mask.css) return mask.css + '; overflow:hidden'
+  if (el.radius != null && el.radius !== 4) return 'border-radius:' + el.radius + 'px; overflow:hidden'
+  return 'overflow:hidden'
+}
+
 /** 给颜色叠一个透明度：把 #rgb / #rrggbb 转成 rgba()，其它写法原样返回 */
 export function withAlpha(color: string, a: number): string {
   const c = (color || '').trim()
@@ -711,6 +751,7 @@ export function imageEffectCss(
     | 'flipH' | 'flipV' | 'radius'
     | 'shadowPreset' | 'shadowColor' | 'shadowAlpha' | 'shadowSize' | 'shadowBlur' | 'shadowAngle' | 'shadowDist'
     | 'reflAlpha' | 'reflDist' | 'glowAlpha' | 'rot3d'
+    | 'shapeMask' | 'crop'
   >,
 ): string {
   const css: string[] = []
@@ -738,6 +779,21 @@ export function imageEffectCss(
   if (tx.length) css.push('transform: ' + tx.join(' '))
 
   if (el.radius != null && el.radius !== 4) css.push('border-radius: ' + el.radius + 'px')
+
+  // 非破坏性裁剪：把裁剩下的那块放大到填满元素框（配合外层 overflow:hidden）。
+  // w/h 用百分比、偏移用负 margin —— 纯 CSS，不碰原图数据。
+  const cr = el.crop
+  if (cr) {
+    const cw = Math.max(0.1, 1 - (cr.l || 0) - (cr.r || 0))
+    const ch = Math.max(0.1, 1 - (cr.t || 0) - (cr.b || 0))
+    if (cw < 0.999 || ch < 0.999) {
+      css.push('width:' + (100 / cw).toFixed(3) + '%')
+      css.push('height:' + (100 / ch).toFixed(3) + '%')
+      css.push('margin-left:' + (-((cr.l || 0) / cw) * 100).toFixed(3) + '%')
+      css.push('margin-top:' + (-((cr.t || 0) / ch) * 100).toFixed(3) + '%')
+      css.push('object-fit:fill') // 裁剪框要对准像素，必须让图正好铺满
+    }
+  }
 
   // 阴影（PowerPoint 那六项）：角度 + 距离 → 偏移；大小 → 扩散；内外由 inset 区分。
   // 用 box-shadow 而不是 drop-shadow，是为了拿到"大小(扩散)"和"内部"这两项。

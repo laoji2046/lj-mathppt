@@ -7,7 +7,7 @@ import type {
   GgbApp, IconElement, ImageElement, LineElement, MathElement, MathFigureElement,
   MathFigureKind, PenElement, RichTextElement, ShapeElement, SlideElement, TableElement, TextElement, WordArtPreset,
 } from '@/types'
-import { ARROW_HEADS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, IMAGE_ROT3D, IMAGE_SHADOWS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
+import { ARROW_HEADS, CHART_TYPE_OPTIONS, FONT_OPTIONS, GRAPHIC_TYPES, ICON_LIBRARY, IMAGE_RECOLORS, IMAGE_REFLECTIONS, IMAGE_ROT3D, IMAGE_SHADOWS, SHAPE_MASKS, LINE_STYLES, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS, SHADOW_OPTIONS, SLIDE_TRANSITIONS, WORDART_PRESETS } from '@/types'
 import { captureDesmosState } from '@/composables/useDesmos'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
@@ -35,6 +35,17 @@ function num(v: string | number, fallback = 0) {
   const n = typeof v === 'number' ? v : parseFloat(v)
   return Number.isFinite(n) ? n : fallback
 }
+
+/** 非破坏性裁剪：写某一边裁掉的比例（0~0.9） */
+function setCrop(side: 'l' | 'r' | 't' | 'b', percent: number) {
+  const cur = image.value?.crop || { l: 0, r: 0, t: 0, b: 0 }
+  patch({ crop: { ...cur, [side]: Math.max(0, Math.min(90, percent)) / 100 } } as Partial<SlideElement>)
+}
+const cropPct = (v?: number) => Math.round((v || 0) * 100)
+const hasCrop = computed(() => {
+  const c = image.value?.crop
+  return !!c && (c.l > 0 || c.r > 0 || c.t > 0 || c.b > 0)
+})
 
 /** 选阴影预设时把该预设的四个数字一并写进去（PPT 就是这个行为：预设会带出参数） */
 function applyShadowPreset(v: string) {
@@ -1169,6 +1180,33 @@ function layerTypeLabel(type: string) {
         <button class="quick__btn" style="width:100%;margin-top:4px;background:#ede9fb;border-color:#c9b8f0;color:#5b43ad" @click="openImageEditor(el.id)">✂ 图片编辑器（裁剪 / 旋转 / 翻转 / 滤镜）</button>
         <button class="quick__btn" style="width:100%;margin-top:4px;background:#e6f0fb;border-color:#b9d3f0;color:#2b5b9c" @click="openVectorize(image?.src || '', el.id)">✎ 转成矢量图形（几何插图 → 可拖顶点）</button>
         <p class="panel__hint">线稿类插图（几何图、函数图）可以识别成数学图形元素：顶点能拖、线能改虚实粗细、字母能改。</p>
+        <h3 class="panel__title">裁剪</h3>
+        <label class="field"><span>裁剪为形状</span>
+          <select :value="image?.shapeMask || 'none'"
+            @change="patch({ shapeMask: ($event.target as HTMLSelectElement).value as NonNullable<ImageElement['shapeMask']> } as Partial<SlideElement>)">
+            <option v-for="m in SHAPE_MASKS" :key="m.v" :value="m.v">{{ m.label }}</option>
+          </select>
+        </label>
+        <label class="field"><span>左 {{ cropPct(image?.crop?.l) }}%</span>
+          <input type="range" :value="cropPct(image?.crop?.l)" min="0" max="90" step="1"
+            @input="setCrop('l', num(($event.target as HTMLInputElement).value, 0))" />
+        </label>
+        <label class="field"><span>右 {{ cropPct(image?.crop?.r) }}%</span>
+          <input type="range" :value="cropPct(image?.crop?.r)" min="0" max="90" step="1"
+            @input="setCrop('r', num(($event.target as HTMLInputElement).value, 0))" />
+        </label>
+        <label class="field"><span>上 {{ cropPct(image?.crop?.t) }}%</span>
+          <input type="range" :value="cropPct(image?.crop?.t)" min="0" max="90" step="1"
+            @input="setCrop('t', num(($event.target as HTMLInputElement).value, 0))" />
+        </label>
+        <label class="field"><span>下 {{ cropPct(image?.crop?.b) }}%</span>
+          <input type="range" :value="cropPct(image?.crop?.b)" min="0" max="90" step="1"
+            @input="setCrop('b', num(($event.target as HTMLInputElement).value, 0))" />
+        </label>
+        <button v-if="hasCrop" class="quick__btn" style="width:100%;margin-top:4px"
+          @click="patch({ crop: undefined } as Partial<SlideElement>)">重置裁剪</button>
+        <p class="panel__hint">裁剪是**非破坏性**的：只记比例、不重编码图片，随时能改回来。（「图片编辑器」里那种裁剪会把结果烤进图片数据，两者用途不同。）</p>
+
         <h3 class="panel__title">图片特效（PowerPoint 风格）</h3>
 
         <!-- 阴影：预设 + 颜色 / 透明度 / 大小 / 模糊 / 角度 / 距离（对齐 PPT「图片格式 → 阴影」） -->

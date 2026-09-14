@@ -1,5 +1,5 @@
 import type { Deck, Slide, SlideElement, TextElement } from '@/types'
-import { fontStack, imageEffectCss, lineDashCss, normalizeMixed, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
+import { fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
 import { SOLID_VCOUNT, renderSolid, solidVerts, arcsSvg, type EdgeStyle, type FaceStyle, type SolidMesh } from '@/composables/solid3d'
 
 /**
@@ -556,10 +556,12 @@ function elementToHtml(el: SlideElement): string {
 
   // image
   const fx = imageEffectCss(el as any)
+  // 裁剪为形状 / 非破坏性裁剪都要一个"裁剪框"层，跟编辑器里的结构保持一致
+  const clip = 'width:100%;height:100%;' + imageMaskCss(el as any)
   const inner = `width:100%;height:100%;object-fit:${el.fit};display:block;border-radius:4px;` + (fx ? `;` + fx : ``)
   const fallback = `width:100%;height:100%;background:#f1efe8;`
   return `<div style="${box}${rot}"${cls}${fragIdx}>` +
-    (el.src ? `<img src="${esc(el.src)}" alt="" style="${inner}" />` : `<div style="${fallback}"></div>`) +
+    (el.src ? `<div style="${clip}"><img src="${esc(el.src)}" alt="" style="${inner}" /></div>` : `<div style="${fallback}"></div>`) +
     `</div>`
 }
 
