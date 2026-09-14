@@ -667,7 +667,10 @@ export function renderDeckToRevealHtml(deck: Deck, opts: RenderOptions = {}): st
   // 数学图形 / 公式 / 混排，以及**表格单元格里写了 \(LaTeX\)** —— 都要把 MathJax 带上
   const hasMath = deck.slides.some((s) => s.elements.some((e) =>
     e.type === 'math' || e.type === 'richtex' ||
-    (e.type === 'table' && (e as TableElement).rows.some((r) => r.some((c) => String(c).indexOf('\\(') >= 0)))))
+    (e.type === 'table' && (e as TableElement).rows.some((r) => r.some((c) => {
+      const t = String(c)
+      return t.indexOf('\\(') >= 0 || t.indexOf('$') >= 0
+    })))))
   const hasGgb = deck.slides.some((s) => s.elements.some((e) => e.type === 'geogebra'))
   const hasDesmos = deck.slides.some((s) => s.elements.some((e) => e.type === 'desmos'))
   const hasPdf = deck.slides.some((s) => s.elements.some((e) => e.type === 'embed' && (e as any).kind === 'pdf'))
@@ -756,7 +759,7 @@ export function renderDeckToRevealHtml(deck: Deck, opts: RenderOptions = {}): st
 </style>
 ${hasMath ? `<script>
   window.MathJax = {
-    tex: { inlineMath: [['\\\\(','\\\\)']], displayMath: [['$$','$$'], ['\\\\[','\\\\]']],
+    tex: { inlineMath: [['$','$'], ['\\\\(','\\\\)']], displayMath: [['$$','$$'], ['\\\\[','\\\\]']],
            macros: { R:'\\\\mathbb{R}', N:'\\\\mathbb{N}', Z:'\\\\mathbb{Z}', Q:'\\\\mathbb{Q}', C:'\\\\mathbb{C}', E:'\\\\mathbb{E}', comb:'\\\\binom{#1}{#2}', perm:'\\\\frac{#1!}{(#1-#2)!}', abs:'\\\\left|#1\\\\right|', norm:'\\\\left\\\\|#1\\\\right\\\\|', dd:'\\\\mathrm{d}', ee:'\\\\mathrm{e}', ii:'\\\\mathrm{i}', half:'\\\\frac{1}{2}' } },
     startup: { typeset: false }, svg: { fontCache: 'none' }
   };

@@ -31,7 +31,8 @@ async function renderCells() {
   if (editing.value) return
   for (const c of cells) {
     const raw = c.getAttribute('data-raw') || ''
-    if (raw.indexOf('\\(') < 0) { if (c.innerText !== raw) c.innerText = raw; continue }
+    // 有 \( \) 或 $ … $（markdown 公式）才排版；都没有就当普通文字
+    if (raw.indexOf('\\(') < 0 && raw.indexOf('$') < 0) { if (c.innerText !== raw) c.innerText = raw; continue }
     await typesetMixed(c, normalizeMixed(raw))
     if (my !== renderSeq) return
   }
