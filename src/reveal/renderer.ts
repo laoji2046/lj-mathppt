@@ -667,6 +667,16 @@ export function renderDeckToRevealHtml(deck: Deck, opts: RenderOptions = {}): st
   #fx-boot { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
     background:#ffffff; color:#888780; font:14px/1.6 system-ui, sans-serif; z-index:99; }
   #fx-boot.hide { display:none; }
+  /* 飞入 / 缩放的幅度：Reveal 内置只有 20px，投影后几乎看不出位移 ✗；
+     这里按“从画面外进来”给百分比（相对元素自身大小），并用 :not(.visible) 提高优先级覆盖，
+     不需要 !important。数值与编辑器 styles/anim.css 保持一致。 */
+  .reveal .fragment.fade-up:not(.visible) { transform: translate(0, 110%); }
+  .reveal .fragment.fade-down:not(.visible) { transform: translate(0, -110%); }
+  .reveal .fragment.fade-left:not(.visible) { transform: translate(-130%, 0); }
+  .reveal .fragment.fade-right:not(.visible) { transform: translate(130%, 0); }
+  .reveal .fragment.zoom-in:not(.visible) { transform: scale(1.6); }
+  .reveal .fragment.grow:not(.visible) { transform: scale(0.25); }
+  .reveal .fragment.shrink:not(.visible) { transform: scale(1.9); }
   /* 强调动画（与编辑器 styles/anim.css 同一套 keyframes，时长/延迟走 --anim-dur/--anim-delay） */
   @keyframes anim-em-pulse { 0% { scale: 1 } 40% { scale: 1.18 } 70% { scale: .96 } 100% { scale: 1 } }
   @keyframes anim-em-bounce { 0%,100% { translate: 0 0 } 30% { translate: 0 -14px } 55% { translate: 0 0 } 75% { translate: 0 -6px } }

@@ -694,7 +694,7 @@ function layerTypeLabel(type: string) {
           </label>
         </div>
         <div v-if="(el.animIn && el.animIn !== 'none') || (el.animEm && el.animEm !== 'none')" style="display:flex;gap:6px;margin-top:6px">
-          <button class="quick__btn" style="flex:1" @click="playAnimPreview(el.id, (el.animIn || 'none') as AnimIn, (el.animEm || 'none') as AnimEm)">▶ 预览动画</button>
+          <button class="quick__btn" style="flex:1" @click="playAnimPreview(el.id, (el.animIn || 'none') as AnimIn, (el.animEm || 'none') as AnimEm, el.animDuration ?? 550)">▶ 预览动画</button>
         </div>
         <p v-if="el.animIn && el.animIn !== 'none'" class="panel__hint">
           勾选上面的「渐显动画」= 演示时<strong>点击后</strong>才出现；不勾 = 随本页一起出现（动画照跑）。

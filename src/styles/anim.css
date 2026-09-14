@@ -1,42 +1,44 @@
 /**
- * 入场动画（编辑器预览用）。
+ * 入场 / 强调动画（编辑器预览用）。
  *
- * 两个关键点：
- * 1. 观感刻意与 Reveal 内置的 fragment 类对齐 —— 导出用 .fragment.fade-up 等，编辑器用这里的
- *    .anim-in-*，两端看到的一致。
- * 2. 用**独立的 translate / scale / rotate 属性**，而不是 transform ✗ ——
- *    元素外层本来就带着 rotate(deg)（元素自己的旋转），动画若写 transform 会把它覆盖掉；
- *    独立属性与 transform 天然叠加，互不干扰（Chrome/WebView2 都支持）。
+ * 关键点：
+ * 1. 观感与 Reveal 内置 fragment 对齐（导出的覆盖规则见 renderer.ts 的 style，两边数值一致）。
+ * 2. 用独立的 translate / scale / rotate 属性而不是 transform —— 元素外层本来就带 rotate(deg)，
+ *    动画写 transform 会把它覆盖掉；独立属性与 transform 天然叠加。
+ * 3. 平移距离一律用百分比（相对元素自身大小）—— 原来写死 48px / 14px，
+ *    画布一缩放就只剩一两厘米，看着像没动（用户实测反馈）。飞入类按"从画面外飞进来"给，所以是 ±130% 这种量级。
  */
 @keyframes anim-in-fade { from { opacity: 0 } to { opacity: 1 } }
-@keyframes anim-in-left { from { opacity: 0; translate: -48px 0 } to { opacity: 1; translate: 0 0 } }
-@keyframes anim-in-right { from { opacity: 0; translate: 48px 0 } to { opacity: 1; translate: 0 0 } }
-@keyframes anim-in-top { from { opacity: 0; translate: 0 -48px } to { opacity: 1; translate: 0 0 } }
-@keyframes anim-in-bottom { from { opacity: 0; translate: 0 48px } to { opacity: 1; translate: 0 0 } }
-@keyframes anim-in-zoom { from { opacity: 0; scale: 1.35 } to { opacity: 1; scale: 1 } }
-@keyframes anim-in-grow { from { opacity: 0; scale: 0.35 } to { opacity: 1; scale: 1 } }
-@keyframes anim-in-shrink { from { opacity: 0; scale: 1.7 } to { opacity: 1; scale: 1 } }
-@keyframes anim-in-rotate { from { opacity: 0; rotate: -10deg; scale: 0.9 } to { opacity: 1; rotate: 0deg; scale: 1 } }
+@keyframes anim-in-left { from { opacity: 0; translate: -130% 0 } to { opacity: 1; translate: 0 0 } }
+@keyframes anim-in-right { from { opacity: 0; translate: 130% 0 } to { opacity: 1; translate: 0 0 } }
+@keyframes anim-in-top { from { opacity: 0; translate: 0 -120% } to { opacity: 1; translate: 0 0 } }
+@keyframes anim-in-bottom { from { opacity: 0; translate: 0 120% } to { opacity: 1; translate: 0 0 } }
+@keyframes anim-in-zoom { from { opacity: 0; scale: 1.6 } to { opacity: 1; scale: 1 } }
+@keyframes anim-in-grow { from { opacity: 0; scale: 0.25 } to { opacity: 1; scale: 1 } }
+@keyframes anim-in-shrink { from { opacity: 0; scale: 1.9 } to { opacity: 1; scale: 1 } }
+@keyframes anim-in-rotate { from { opacity: 0; rotate: -25deg; scale: 0.6 } to { opacity: 1; rotate: 0deg; scale: 1 } }
 
 /* ---- 强调动画：入场之后自动接着播一次 ---- */
-@keyframes anim-em-pulse { 0% { scale: 1 } 40% { scale: 1.18 } 70% { scale: 0.96 } 100% { scale: 1 } }
-@keyframes anim-em-bounce { 0%, 100% { translate: 0 0 } 30% { translate: 0 -14px } 55% { translate: 0 0 } 75% { translate: 0 -6px } }
-@keyframes anim-em-shake { 0%, 100% { translate: 0 0 } 20% { translate: -8px 0 } 40% { translate: 8px 0 } 60% { translate: -6px 0 } 80% { translate: 6px 0 } }
+@keyframes anim-em-pulse { 0% { scale: 1 } 40% { scale: 1.22 } 70% { scale: .95 } 100% { scale: 1 } }
+@keyframes anim-em-bounce { 0%,100% { translate: 0 0 } 30% { translate: 0 -45% } 55% { translate: 0 0 } 75% { translate: 0 -18% } }
+@keyframes anim-em-shake { 0%,100% { translate: 0 0 } 20% { translate: -8% 0 } 40% { translate: 8% 0 } 60% { translate: -5% 0 } 80% { translate: 5% 0 } }
 @keyframes anim-em-spin { from { rotate: 0deg } to { rotate: 360deg } }
-@keyframes anim-em-grow { from { scale: 1 } to { scale: 1.25 } }
-@keyframes anim-em-shrink { from { scale: 1 } to { scale: 0.78 } }
-@keyframes anim-em-flash { 0%, 100% { opacity: 1 } 25%, 75% { opacity: 0.25 } 50% { opacity: 1 } }
+@keyframes anim-em-grow { from { scale: 1 } to { scale: 1.3 } }
+@keyframes anim-em-shrink { from { scale: 1 } to { scale: .7 } }
+@keyframes anim-em-flash { 0%,100% { opacity: 1 } 25%,75% { opacity: .2 } 50% { opacity: 1 } }
 
-.anim-em-pulse,
-.anim-em-bounce,
-.anim-em-shake,
-.anim-em-spin,
-.anim-em-grow,
-.anim-em-shrink,
-.anim-em-flash {
+/* 容器规则：时长/延迟走元素上的 CSS 变量 */
+.anim-em-pulse, .anim-em-bounce, .anim-em-shake, .anim-em-spin, .anim-em-grow, .anim-em-shrink, .anim-em-flash {
   animation-duration: var(--anim-dur, 0.6s);
   animation-delay: var(--anim-delay, 0s);
   animation-timing-function: ease-in-out;
+}
+.anim-in-fade, .anim-in-left, .anim-in-right, .anim-in-top, .anim-in-bottom,
+.anim-in-zoom, .anim-in-grow, .anim-in-shrink, .anim-in-rotate {
+  animation-duration: var(--anim-dur, 0.55s);
+  animation-delay: var(--anim-delay, 0ms);
+  animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+  animation-fill-mode: both;
 }
 .anim-em-pulse { animation-name: anim-em-pulse; }
 .anim-em-bounce { animation-name: anim-em-bounce; }
@@ -45,21 +47,6 @@
 .anim-em-grow { animation-name: anim-em-grow; }
 .anim-em-shrink { animation-name: anim-em-shrink; }
 .anim-em-flash { animation-name: anim-em-flash; }
-
-.anim-in-fade,
-.anim-in-left,
-.anim-in-right,
-.anim-in-top,
-.anim-in-bottom,
-.anim-in-zoom,
-.anim-in-grow,
-.anim-in-shrink,
-.anim-in-rotate {
-  animation-duration: var(--anim-dur, 0.55s);
-  animation-delay: var(--anim-delay, 0ms);
-  animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
-  animation-fill-mode: both;
-}
 .anim-in-fade { animation-name: anim-in-fade; }
 .anim-in-left { animation-name: anim-in-left; }
 .anim-in-right { animation-name: anim-in-right; }

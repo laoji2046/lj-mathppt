@@ -11,7 +11,7 @@ export const animPreview = ref<{ id: string; kind: AnimIn; em: AnimEm; phase: 'i
 let t1: number | undefined
 let t2: number | undefined
 
-export function playAnimPreview(id: string, kind: AnimIn, em: AnimEm = 'none') {
+export function playAnimPreview(id: string, kind: AnimIn, em: AnimEm = 'none', duration = 550) {
   if (!id) return
   const hasIn = kind && kind !== 'none'
   const hasEm = em && em !== 'none'
@@ -24,7 +24,8 @@ export function playAnimPreview(id: string, kind: AnimIn, em: AnimEm = 'none') {
     const n = (animPreview.value?.n ?? 0) + 1
     if (hasIn) {
       animPreview.value = { id, kind, em, phase: 'in', n }
-      t1 = window.setTimeout(() => showEm(), 620)
+      // 入场时长按用户设的来 —— 写死 620ms 会把长动画提前掐断 ✗（实测反馈）
+      t1 = window.setTimeout(() => showEm(), Math.max(200, duration) + 80)
     } else {
       showEm()
     }
@@ -35,6 +36,6 @@ export function playAnimPreview(id: string, kind: AnimIn, em: AnimEm = 'none') {
       return
     }
     animPreview.value = { id, kind, em, phase: 'em', n: (animPreview.value?.n ?? 0) + 1 }
-    t2 = window.setTimeout(() => { animPreview.value = null }, 1600)
+    t2 = window.setTimeout(() => { animPreview.value = null }, Math.max(800, duration) + 900)
   }
 }
