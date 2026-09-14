@@ -27,10 +27,9 @@ async function renderCells() {
   const host = gridEl.value
   if (!host) return
   const cells = Array.from(host.querySelectorAll<HTMLElement>('[data-cell]'))
-  if (editing.value) {
-    cells.forEach((c) => { const raw = c.getAttribute('data-raw') || ''; if (c.innerText !== raw) c.innerText = raw })
-    return
-  }
+  // ⚠ 编辑态**什么都不做**：单元格由 Vue 通过 :key 重建（内容天然是原文），
+  //   在这里重写 innerText 会把节点换掉 → 光标/焦点丢失 → 表现为"双击不能编辑"（踩过）
+  if (editing.value) return
   for (const c of cells) {
     const raw = c.getAttribute('data-raw') || ''
     if (raw.indexOf('\\(') < 0) { if (c.innerText !== raw) c.innerText = raw; continue }
@@ -117,9 +116,25 @@ function cellStyle(item: { r: number }): CSSProperties {
     cursor: editing.value ? 'text' : 'default',
   }
 }
-function startEdit() {
+function startEdit(e?: MouseEvent) {
+  // 记住双击落在哪个格子（点空白区域就退回第一格）
+  const hit = (e && e.target instanceof HTMLElement ? e.target.closest('[data-cell]') : null) as HTMLElement | null
   editing.value = true
-  requestAnimationFrame(() => { const c = document.activeElement as HTMLElement; if (c && c.isContentEditable) c.focus() })
+  // ⚠ 必须**显式聚焦并落光标** —— 网格用 :key 重建过，浏览器那套"点到哪就是哪"的自动聚焦不作数 ✗
+  requestAnimationFrame(() => {
+    const host = gridEl.value
+    if (!host) return
+    const cell = (hit && host.contains(hit) ? hit : host.querySelector<HTMLElement>('[data-cell]'))
+    if (!cell) return
+    cell.focus()
+    const r = document.createRange()
+    r.selectNodeContents(cell)
+    r.collapse(false)
+    const sel = window.getSelection()
+    sel?.removeAllRanges()
+    sel?.addRange(r)
+    savedRange = r.cloneRange()
+  })
 }
 function onCellBlur(item: { r: number; c: number }, e: FocusEvent) {
   const node = e.target as HTMLElement
@@ -139,7 +154,7 @@ function onEsc(e: KeyboardEvent) {
 
 <template>
   <div class="table-el" :class="{ 'table-el--edit': editing }" @dblclick.stop.prevent="startEdit">
-    <div ref="gridEl" class="table-grid" :style="gridStyle">
+    <div ref="gridEl" class="table-grid" :key="editing ? 'edit' : 'view'" :style="gridStyle">
       <div
         v-for="(item, idx) in flat"
         :key="idx"
