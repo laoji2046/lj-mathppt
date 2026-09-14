@@ -20,16 +20,29 @@ const store = useDeckStore()
  */
 const boxEl = ref<HTMLElement | null>(null)
 const floatPos = ref({ x: 0, y: 0 })
+/** 浮窗高度上限（按内容自动算，见下） */
+const floatMaxH = ref<number | undefined>(undefined)
 watch(
   () => [layoutGalleryOpen.value, layoutGalleryAnchor.value] as const,
   async () => {
     const a = layoutGalleryAnchor.value
     if (!layoutGalleryOpen.value || !a) return
     floatPos.value = { x: a.x, y: a.y }
+    // 先把上限放开，才能量到"内容本来多高"
+    floatMaxH.value = undefined
     await nextTick()
-    // ⚠ 再等一帧：缩略图/CSS 布局要一帧才定型，太早量会量到偏小的高度 → 夹取失效
+    // ⚠ 再等一帧：缩略图/CSS 布局要一帧才定型，太早量会量到偏小的高度
     await new Promise((r) => requestAnimationFrame(() => r(null)))
-    if (boxEl.value) floatPos.value = placeInViewport(boxEl.value, a.x, a.y)
+    const el = boxEl.value
+    if (!el) return
+    // **自动算高度**：scrollHeight 是内容高（不受 max-height 影响），
+    // 取 min(内容高, 视口可用高) —— 内容装得下就一眼看完 ✓，装不下才滚动 ✓
+    const gap = 16
+    const natural = el.scrollHeight
+    const avail = (window.innerHeight || document.documentElement.clientHeight) - gap
+    floatMaxH.value = Math.max(160, Math.min(natural, avail))
+    await nextTick()
+    floatPos.value = placeInViewport(el, a.x, a.y)
   },
   { immediate: true },
 )
@@ -54,7 +67,7 @@ function slotStyle(s: LayoutSlot) {
     <div
       class="lg__box"
       ref="boxEl"
-      :style="layoutGalleryAnchor ? { position: 'fixed', left: floatPos.x + 'px', top: floatPos.y + 'px', width: 'min(680px, 92vw)', maxHeight: 'calc(100vh - ' + (layoutGalleryAnchor.y + 14) + 'px)' } : undefined"
+      :style="layoutGalleryAnchor ? { position: 'fixed', left: floatPos.x + 'px', top: floatPos.y + 'px', maxHeight: floatMaxH ? floatMaxH + 'px' : 'calc(100vh - 16px)', width: 'min(680px, 92vw)' } : undefined"
     >
       <header class="lg__head">
         <span>版式（套用会替换本页内容）</span>
@@ -92,9 +105,8 @@ function slotStyle(s: LayoutSlot) {
    内容把整窗顶高，锚点在下方时整块跑出屏幕，只能靠滚动条看（用户实测）。
    现在把盒高限制在视口内，滚动发生在**卡片区内部** ✓。 */
 .lg--float .lg__box { border-radius: var(--radius); width: min(680px, 92vw);
-  /* 平时不该有滚动条：9 个版式 3 行就该全显示完 ✓
-     所以上限取"屏幕一半左右"，而不是"整屏减一点"（那样还是会很高、要滚） */
-  max-height: min(58vh, 470px); display: flex; flex-direction: column; }
+  /* 高度**由脚本按内容自动算**（见 floatMaxH）✓；这里只留一个硬保险，防止脚本没跑到时顶出屏幕 */
+  display: flex; flex-direction: column; }
 .lg__head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; font-weight: 600; }
 .lg__x { border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--muted); }
 .lg__grid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 12px; overflow-y: auto; }
