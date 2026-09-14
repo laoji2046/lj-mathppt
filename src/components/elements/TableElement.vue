@@ -7,6 +7,7 @@ import type { TableElement } from '@/types'
 import type { SlideElement } from '@/types'
 import { useDeckStore } from '@/stores/deck'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
+import { tableCellSink } from '@/ui/tableCellSink'
 
 const props = defineProps<{ el: TableElement }>()
 const store = useDeckStore()
@@ -41,6 +42,9 @@ onMounted(() => {
   renderCells()
   document.addEventListener('selectionchange', rememberSelection)
 })
+// 编辑期间把自己的插入函数登记出去；退出编辑立刻撤销登记
+watch(editing, (on) => { tableCellSink.value = on ? insertFormulaAtCaret : null })
+onBeforeUnmount(() => { tableCellSink.value = null })
 onBeforeUnmount(() => document.removeEventListener('selectionchange', rememberSelection))
 
 /**
