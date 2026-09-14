@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /** 数学图形面板：分类页签 + 卡片缩略图（缩略图直接用元素组件渲染，所见即所得） */
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
-import type { MathFigureCat, MathFigureKind } from '@/types'
-import { MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS } from '@/types'
+import type { MathFigureCat, MathFigureElement, MathFigureKind, SlideElement } from '@/types'
+import { createElement, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS } from '@/types'
 import { figureBox, viewAspect } from '@/composables/mathPlot'
 import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
 import { openVectorize } from '@/ui/vectorize'
@@ -32,8 +32,6 @@ const current = computed(() => groups.value.find((g) => g.cat === cat.value) ?? 
  * - 有数学视图（函数 / 圆锥曲线）的，按视图宽高比给框，配合 fit="contain" 等比缩放起来不歪；
  * - 平面 / 立体 / 标注类本来就是按框自适应画的，直接用 140×80 + 默认拉伸。
  */
-/** 文档里插图的最大高度（与 PaperModal 的 .paper-img / .paper-img-inline 保持一致） */
-const PAPER_IMG_MAX_H = 180
 const PV_H = 80
 function previewEl(kind: MathFigureKind) {
   const a = viewAspect(kind)
@@ -56,39 +54,53 @@ function labelOf(kind: MathFigureKind): string {
  * 由调用方栅格化插进文档 —— 不用先放到画布上；否则按老规矩插到画布。
  */
 /**
- * 把卡片里那张"预览版"SVG 归一化：卡片的 viewBox 是预览小框（比如 71×80），
- * 而线宽是**绝对像素**（1.6）—— 直接拿去按文档尺寸渲染，线就会变得很粗 ✗。
- * 这里按"真正插到画布上时该有的宽度"把线宽同比缩小，几何形状一点不动。
+ * 交给 sink 之前，**用"真正插入时会创建的那个元素"在屏幕外渲染一份**，抓它的 SVG。
+ *
+ * 为什么不直接抓卡片那张 ✗：卡片是**预览版**——viewBox 只有几十宽、线宽也另设（2.6），
+ * 而真正插进画布的元素的 viewBox 是 520/824 这种真实尺寸、线宽 3.0。
+ * 两者不是一套参数，靠比例去"缩线宽"永远对不上（用户来回反馈了三次）。
+ * 直接按真元素渲染，就和"从页面插入"**完全同源**了 —— 那条路用户说很美观。
  */
-function normalizeStrokes(svg: SVGSVGElement, explicitW?: number): SVGSVGElement {
-  const clone = svg.cloneNode(true) as SVGSVGElement
-  const vb = svg.viewBox?.baseVal
-  if (!vb || !vb.width || !vb.height) return clone
-  // 目标宽度 = **画布上这个元素该有的宽度**（kind 用 figureBox(kind).w，复刻图用 p.w）——
-  // 这样文档里的图和画布上观感完全一致（图小的时候线也细）。
-  // ⚠ 别再拿"文档里的显示宽度"去封顶 ✗：函数图像的预览框很窄（viewBox 只有 71 宽），
-  //   封顶之后线宽几乎没缩，插进文档还是明显偏粗（用户实测反馈过两次）。
-  //   只有在拿不到目标宽度时才退回"按文档显示高度反推"。
-  const targetW = explicitW && explicitW > 0 ? explicitW : PAPER_IMG_MAX_H * (vb.width / vb.height)
-  const k = vb.width / targetW
-  if (k >= 0.999) return clone
-  clone.querySelectorAll('[stroke-width]').forEach((n) => {
-    const v = parseFloat(n.getAttribute('stroke-width') || '')
-    if (Number.isFinite(v)) n.setAttribute('stroke-width', String(+(v * k).toFixed(4)))
-  })
-  return clone
+const hiddenEl = ref<MathFigureElement | null>(null)
+const hiddenBox = ref({ w: 0, h: 0 })
+const hiddenRef = ref<HTMLElement | null>(null)
+
+async function grabByRealRender(e: SlideElement): Promise<SVGSVGElement | null> {
+  hiddenEl.value = e as MathFigureElement
+  hiddenBox.value = { w: e.w, h: e.h }
+  await nextTick()
+  // 再等一帧：图形组件里有 computed 尺寸，确保 svg 已就位
+  await new Promise((r) => requestAnimationFrame(() => r(null)))
+  const svg = hiddenRef.value?.querySelector('svg') as SVGSVGElement | null
+  const copy = svg ? (svg.cloneNode(true) as SVGSVGElement) : null
+  hiddenEl.value = null
+  return copy
 }
 
-function onPick(kind: MathFigureKind, e: MouseEvent) {
+/** 按"真正插入"的参数造元素（kind 与复刻图各一条） */
+function realElOfKind(kind: MathFigureKind): SlideElement {
+  const extra = kind === 'custom'
+    ? { custom: { expr: 'x^2-2x+1', x0: -2, x1: 4, y0: -2, y1: 6, grid: true, axes: true }, w: 420, h: 300 }
+    : {}
+  const el = createElement('mathfig', { x: 0, y: 0 })
+  Object.assign(el, { kind, ...(figureBox(kind) || {}), ...extra })
+  return el
+}
+function realElOfPreset(p: (typeof SOLID_FIGURE_PRESETS)[number]): SlideElement {
+  const el = createElement('mathfig', { x: 0, y: 0 })
+  Object.assign(el, { ...p.el, w: p.w, h: p.h, fill: 'transparent', stroke: '#1a1a1a', strokeWidth: 2.8 })
+  return el
+}
+
+async function onPick(kind: MathFigureKind) {
   const sink = figPaletteSink.value
-  const svg = (e.currentTarget as HTMLElement)?.querySelector('svg')
-  if (!sink || !svg) {
+  if (!sink) {
     insert(kind)
-    if (sink) { closeFigPalette(); emit('close') }
     return
   }
-  const box = figureBox(kind)
-  sink(normalizeStrokes(svg as SVGSVGElement, box?.w), labelOf(kind))
+  const svg = await grabByRealRender(realElOfKind(kind))
+  if (svg) sink(svg, labelOf(kind))
+  else insert(kind)
   closeFigPalette()
   emit('close')
 }
@@ -106,15 +118,15 @@ function insert(kind: MathFigureKind) {
 
 /** 复刻图：连同顶点 / 边拓扑 / 字母一起插入，并按原图宽高比给尺寸 */
 /** 复刻图形的卡片走同一条"交给 sink"的路（原来只会在画布上插入 ✗ —— 文档里点它没反应） */
-function onPickPreset(p: (typeof SOLID_FIGURE_PRESETS)[number], e: MouseEvent) {
+async function onPickPreset(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
   const sink = figPaletteSink.value
-  const svg = (e.currentTarget as HTMLElement)?.querySelector('svg')
-  if (!sink || !svg) {
+  if (!sink) {
     insertPreset(p)
-    if (sink) { closeFigPalette(); emit('close') }
     return
   }
-  sink(normalizeStrokes(svg as SVGSVGElement, p.w), p.name)
+  const svg = await grabByRealRender(realElOfPreset(p))
+  if (svg) sink(svg, p.name)
+  else insertPreset(p)
   closeFigPalette()
   emit('close')
 }
@@ -200,7 +212,7 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
             :key="p.id"
             class="card card--recast"
             :title="p.note ? p.name + ' ｜ ' + p.note : p.name"
-            @click="onPickPreset(p, $event)"
+            @click="onPickPreset(p)"
           >
             <span class="card__thumb">
               <span
@@ -218,7 +230,7 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
           :key="f.v"
           class="card"
           :title="f.label"
-          @click="onPick(f.v, $event)"
+          @click="onPick(f.v)"
         >
           <span class="card__thumb">
             <FigurePreview :el="previewEl(f.v)" :fit="previewFit(f.v)" />
@@ -232,6 +244,15 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
         <template v-else>点击插入；插入后可在画布拖动缩放到合适大小，属性面板可改颜色 / 线宽 / 填充</template>
       </div>
       <input ref="fileInput" type="file" accept="image/*" style="display:none" @change="onPicked">
+
+      <!-- 屏幕外渲染：插入 PDF 文档时，用"真正会插入的那个元素"在这里渲染一份再抓 SVG，
+           这样出图和"从页面插入"完全同源（卡片那张是预览版，参数不一样 ✗） -->
+      <div
+        ref="hiddenRef" class="palette__hidden" aria-hidden="true"
+        :style="{ width: hiddenBox.w + 'px', height: hiddenBox.h + 'px' }"
+      >
+        <FigurePreview v-if="hiddenEl" :el="hiddenEl" />
+      </div>
     </div>
   </div>
 </template>
@@ -317,5 +338,7 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
   pointer-events: none;
 }
 .card__name { font-size: 12px; color: var(--text); line-height: 1.35; }
+/* 屏幕外渲染容器：只为"抓一份真元素的 SVG"，不参与显示 */
+.palette__hidden { position: fixed; left: -99999px; top: 0; pointer-events: none; opacity: 0; }
 .palette__hint { margin-top: 12px; font-size: 12px; color: var(--muted); }
 </style>
