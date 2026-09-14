@@ -546,6 +546,15 @@ onBeforeUnmount(() => {
       <span class="brand__text">LJ-MathSlides</span>
     </span>
 
+    <!-- 撤销 / 重做 / 逐条：整条工具栏最显眼的位置（logo 之后、文件之前），自成一组 -->
+    <div class="group group--undo">
+      <button class="btn" :disabled="!store.canUndo" title="撤销 (Ctrl+Z)" @click="store.undo()"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.undo"></svg>撤销</button>
+      <button class="btn" :disabled="!store.canRedo" title="重做 (Ctrl+Y)" @click="store.redo()"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.redo"></svg>重做</button>
+      <button class="btn" :class="{ 'btn--open': allFragments }" title="本页所有元素逐条出现（演示时点击渐显）" @click="toggleAllFragments">
+        <svg viewBox="0 0 24 24" class="btn__svg" v-html="I.fragment"></svg>逐条
+      </button>
+    </div>
+
     <div class="group">
       <div ref="fileWrap" class="dropdown">
         <button class="btn" :class="{ 'btn--open': fileOpen }" title="文件" @click="toggleFileMenu">
@@ -717,14 +726,6 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <div class="group">
-      <button class="btn" :disabled="!store.canUndo" title="撤销 (Ctrl+Z)" @click="store.undo()"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.undo"></svg>撤销</button>
-      <button class="btn" :disabled="!store.canRedo" title="重做 (Ctrl+Y)" @click="store.redo()"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.redo"></svg>重做</button>
-      <button class="btn" :class="{ 'btn--open': allFragments }" title="本页所有元素逐条出现（演示时点击渐显）" @click="toggleAllFragments">
-        <svg viewBox="0 0 24 24" class="btn__svg" v-html="I.fragment"></svg>逐条
-      </button>
-    </div>
-
     <div class="group group--end">
       <button class="btn" title="切换整套配色主题" @click="openTheme">
         <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.theme"></svg></span>主题
@@ -827,6 +828,10 @@ onBeforeUnmount(() => {
   height: 20px;
   background: var(--border-strong);
 }
+/* 撤销 / 重做 / 逐条：放在最左边（logo 之后），用分隔线自成一组、图标略大，好找 */
+.group--undo { gap: 4px; margin-right: 10px; padding-right: 10px; border-right: 1px solid var(--border); }
+.group--undo .btn { padding: 5px 9px; }
+.group--undo .btn__svg { width: 17px; height: 17px; }
 .group--end { margin-left: auto; }
 .spacer { flex: 1; }
 
