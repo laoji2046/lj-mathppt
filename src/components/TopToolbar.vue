@@ -5,6 +5,7 @@ import { renderDeckToRevealHtml } from '@/reveal/renderer'
 import type { ElementType, EmbedKind, SlideElement } from '@/types'
 import SymbolPalette from './SymbolPalette.vue'
 import MathFigurePalette from './MathFigurePalette.vue'
+import { figPaletteOpen, openFigPalette } from '@/ui/figPalette'
 import IconPalette from './IconPalette.vue'
 import ImageLibrary from './ImageLibrary.vue'
 import ScreenshotCapture from './ScreenshotCapture.vue'
@@ -27,7 +28,7 @@ const store = useDeckStore()
 const emit = defineEmits<{ (e: 'present'): void; (e: 'open-templates'): void; (e: 'open-paper'): void; (e: 'open-ggb-suite'): void }>()
 
 const symbolOpen = ref(false)
-const figOpen = ref(false)
+// 图形面板的开关搬到 ui/figPalette 了 —— PDF 文档也要能打开它并接管"点卡片"的行为
 const iconOpen = ref(false)
 const imgLibOpen = ref(false)
 const screenshotOpen = ref(false)
@@ -130,7 +131,7 @@ function openSymbol() {
 }
 function openFig() {
   store.clearDrawTool()
-  figOpen.value = true
+  openFigPalette()
 }
 function toggleShapeMenu() { toggleShown(shapeMenuOpen) }
 function addRect() { shapeMenuOpen.value = false; store.clearDrawTool(); store.addElement('shape', { shape: 'rect' } as Partial<SlideElement>) }
@@ -748,7 +749,7 @@ onBeforeUnmount(() => {
 
   <PdfImportDialog v-if="pdfImportOpen && pdfImportFile" :file="pdfImportFile" @close="closePdfImport()" @done="onPdfDone" />
   <SymbolPalette v-if="symbolOpen" @close="symbolOpen = false" />
-  <MathFigurePalette v-if="figOpen" @close="figOpen = false" />
+  <MathFigurePalette v-if="figPaletteOpen" @close="figPaletteOpen = false" />
   <IconPalette v-if="iconOpen" @close="iconOpen = false" />
   <ImageLibrary v-if="imgLibOpen" @close="imgLibOpen = false" />
   <ScreenshotCapture v-if="screenshotOpen" @close="screenshotOpen = false" />

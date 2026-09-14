@@ -9,6 +9,7 @@ import { figureBox, viewAspect } from '@/composables/mathPlot'
 import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
 import { openVectorize } from '@/ui/vectorize'
 import { openGeom3D } from '@/ui/geom3d'
+import { closeFigPalette, figPaletteSink } from '@/ui/figPalette'
 import FigurePreview from './elements/MathFigureElement.vue'
 
 const store = useDeckStore()
@@ -42,6 +43,30 @@ function previewEl(kind: MathFigureKind) {
 }
 function previewFit(kind: MathFigureKind): 'stretch' | 'contain' {
   return viewAspect(kind) ? 'contain' : 'stretch'
+}
+
+/** 面板里每张卡片自己的图形名（给"插入到 PDF 文档"当图注用） */
+function labelOf(kind: MathFigureKind): string {
+  return MATH_FIGURE_OPTIONS.find((o) => o.v === kind)?.label || String(kind)
+}
+/**
+ * 点卡片：设了 sink（PDF 文档正开着）就把**卡片自己那张 SVG** 交出去，
+ * 由调用方栅格化插进文档 —— 不用先放到画布上；否则按老规矩插到画布。
+ */
+function onPick(kind: MathFigureKind, e: MouseEvent) {
+  const sink = figPaletteSink.value
+  if (!sink) {
+    insert(kind)
+    return
+  }
+  const svg = (e.currentTarget as HTMLElement)?.querySelector('svg')
+  if (!svg) {
+    insert(kind)
+    return
+  }
+  sink(svg as SVGSVGElement, labelOf(kind))
+  closeFigPalette()
+  emit('close')
 }
 
 /** 插入尺寸：函数 / 圆锥曲线按视图宽高比给（圆才会是圆），其余用元素默认值 */
@@ -155,7 +180,7 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
           :key="f.v"
           class="card"
           :title="f.label"
-          @click="insert(f.v)"
+          @click="onPick(f.v, $event)"
         >
           <span class="card__thumb">
             <FigurePreview :el="previewEl(f.v)" :fit="previewFit(f.v)" />
@@ -164,7 +189,10 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
         </button>
       </div>
 
-      <div class="palette__hint">点击插入；插入后可在画布拖动缩放到合适大小，属性面板可改颜色 / 线宽 / 填充</div>
+      <div class="palette__hint">
+        <template v-if="figPaletteSink">点哪张就把哪张插进 PDF 文档（不用先放到画布上，插入后仍可移走）</template>
+        <template v-else>点击插入；插入后可在画布拖动缩放到合适大小，属性面板可改颜色 / 线宽 / 填充</template>
+      </div>
       <input ref="fileInput" type="file" accept="image/*" style="display:none" @change="onPicked">
     </div>
   </div>

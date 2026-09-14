@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { loadMathJax } from '@/composables/useMathJax'
 import { imagesDir, isTauri, readLocalImage } from '@/composables/useTauri'
 import { useDeckStore } from '@/stores/deck'
 import { MATH_FIGURE_OPTIONS } from '@/types'
+import { closeFigPalette, openFigPalette } from '@/ui/figPalette'
 
 /**
  * PDF 生成（A4 分页 + 题号识别），移植自参考版 LJ-PPT 的 PaperMode。
@@ -639,6 +640,24 @@ async function openFigPicker() {
   }
 }
 
+/** 把一段 SVG 栅格化后插进文档（图形库直插与画布取图共用这一步） */
+async function insertSvgIntoDoc(svg: SVGSVGElement, label: string) {
+  try {
+    const png = await svgToPng(svg)
+    const n = ++imgSeq.value
+    images.value[n] = { src: png, address: label }
+    input.value += '[图' + n + ']'
+    render()
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : String(e))
+  }
+}
+
+/** 打开图形库，点哪张就把哪张插进文档（不用先放到画布上） */
+function pickFromLibrary() {
+  openFigPalette((svg, label) => { void insertSvgIntoDoc(svg, label) })
+}
+
 async function insertFigure(id: string, slideIndex: number, label: string) {
   figOpen.value = false
   try {
@@ -855,6 +874,10 @@ onMounted(() => {
   if (isTauri()) imagesDir().then((d) => { imgDirHint.value = d })
   render()
 })
+
+// 文档关掉时把图形库的"接收方"清掉 —— 否则下次从工具栏打开图形库，
+// 点卡片还会往已经关掉的文档里插（面板状态是跨组件共享的）
+onBeforeUnmount(() => closeFigPalette())
 /** 图片有更新（用户换了图）时清缓存重渲染 */
 function refreshImages() {
   imgCache.value = {}
@@ -948,7 +971,10 @@ watch([headerText, footerText], () => render())
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 19h16"/><path d="M9 9v6M15 9v6" stroke-dasharray="2 2"/></svg><span>空白</span>
                 </button>
                 <span class="pm__figwrap">
-    <button class="pm__btn" :title="'把文稿里的数学图形插到光标处（共 ' + figList.length + ' 个）'" @click="openFigPicker()">
+    <button class="pm__btn" title="打开数学图形库（74 种），点哪张就把哪张插进文档 —— 不用先放到画布上" @click="pickFromLibrary()">
+      <AppIcon name="graphic" :size="14" />图形库…
+    </button>
+    <button class="pm__btn" :title="'把文稿里已有的数学图形插到光标处（共 ' + figList.length + ' 个）'" @click="openFigPicker()">
       <AppIcon name="graphic" :size="14" />插入数学图形
     </button>
     <!-- 图形选择面板：带真实缩略图（选图形得看得见图形） -->
