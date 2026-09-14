@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { normalizeMixed } from '@/types'
 import { typesetMixed } from '@/composables/useMathJax'
 import type { CSSProperties } from 'vue'
 import type { TableElement } from '@/types'
 import type { SlideElement } from '@/types'
 import { useDeckStore } from '@/stores/deck'
+import { openFormulaLibrary } from '@/ui/formulaLibrary'
 
 const props = defineProps<{ el: TableElement }>()
 const store = useDeckStore()
@@ -37,7 +38,48 @@ async function renderCells() {
     if (my !== renderSeq) return
   }
 }
-onMounted(renderCells)
+onMounted(() => {
+  renderCells()
+  document.addEventListener('selectionchange', rememberSelection)
+})
+onBeforeUnmount(() => document.removeEventListener('selectionchange', rememberSelection))
+
+/**
+ * 记住"编辑中那个单元格里的光标位置"。
+ * ⚠ 点「插入公式」按钮会让单元格失焦、选区丢失 —— 所以必须**先把 Range 存下来**，
+ *   等公式库选好后再 restore 回去插到原来的位置。
+ */
+let savedRange: Range | null = null
+function rememberSelection() {
+  if (!editing.value) return
+  const sel = window.getSelection()
+  if (!sel || !sel.rangeCount) return
+  const r = sel.getRangeAt(0)
+  if (gridEl.value && gridEl.value.contains(r.commonAncestorContainer)) savedRange = r.cloneRange()
+}
+/** 从公式库选中的 LaTeX → 以行内公式的形式插到光标处 */
+function insertFormulaAtCaret(latex: string) {
+  const host = gridEl.value
+  if (!host) return
+  let range = savedRange
+  if (!range || !host.contains(range.commonAncestorContainer)) {
+    const first = host.querySelector<HTMLElement>('[data-cell]')
+    if (!first) return
+    range = document.createRange()
+    range.selectNodeContents(first)
+    range.collapse(false)
+  }
+  const text = document.createTextNode('\\(' + latex + '\\)')
+  range.deleteContents()
+  range.insertNode(text)
+  range.setStartAfter(text)
+  range.collapse(true)
+  savedRange = range.cloneRange()
+  const sel = window.getSelection()
+  sel?.removeAllRanges()
+  sel?.addRange(range)
+}
+function openLib() { openFormulaLibrary(insertFormulaAtCaret) }
 watch(() => [props.el.rows, editing.value], renderCells, { deep: true })
 
 const cols = computed(() => props.el.rows[0]?.length || 1)
@@ -109,6 +151,9 @@ function onEsc(e: KeyboardEvent) {
         @keydown.esc="onEsc"
       >{{ item.v }}</div>
     </div>
+    <div v-if="editing" class="table-el__tools">
+      <button class="table-el__btn" title="从预制公式库选一条，插到当前单元格的光标处（可连续选）" @click.stop="openLib">∑ 插入公式</button>
+    </div>
     <div v-if="!editing" class="table-el__hint">双击编辑数据 / 表头；单元格里写 \(x^2\) 就是公式</div>
   </div>
 </template>
@@ -117,6 +162,11 @@ function onEsc(e: KeyboardEvent) {
 .table-el { width: 100%; height: 100%; overflow: auto; box-sizing: border-box; position: relative; }
 .table-grid { width: 100%; }
 .table-el--edit .table-grid > div { border: 1px dashed var(--brand); min-height: 28px; }
+/* 编辑态的悬浮小工具条（插公式等） */
+.table-el__tools { position: absolute; top: -30px; left: 0; display: flex; gap: 6px; z-index: 5; }
+.table-el__btn { border: 1px solid var(--brand, #1668e0); background: #fff; color: var(--brand, #1668e0);
+  border-radius: 6px; padding: 3px 9px; font-size: 12px; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.table-el__btn:hover { background: var(--brand, #1668e0); color: #fff; }
 .table-el__hint { position: absolute; top: -1px; right: 2px; font-size: 11px; color: #fff; background: rgba(106,82,200,0.85); border-radius: 4px; padding: 1px 6px; pointer-events: none; opacity: 0; transition: opacity .12s; }
 .table-el:hover .table-el__hint { opacity: 1; }
 </style>
