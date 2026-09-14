@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { normalizeMixed } from '@/types'
+import { escapeHtml, normalizeMixed } from '@/types'
 import { typesetHosts } from '@/composables/useMathJax'
 import { inlineFiguresInText } from '@/composables/figureRender'
 import { layoutTable, type TableCell } from '@/composables/tableLayout'
@@ -19,7 +19,8 @@ const gridEl = ref<HTMLElement | null>(null)
 /** 排版：rows + merges → 要渲染的格子（跨行跨列算法与导出一份，见 tableLayout.ts） */
 /** 单元格/表标题的显示 HTML：图形替换 + $..$ 归一化。**纯函数**，由 Vue 用 v-html 渲染 */
 function cellHtml(t: string) {
-  return normalizeMixed(inlineFiguresInText(t || '', props.el.figHeight))
+  // 先转义用户文本（否则 $0<a<1$ 的 < 会被当标签），再插图形（SVG 必须保持原样）
+  return normalizeMixed(inlineFiguresInText(escapeHtml(t || ''), props.el.figHeight))
 }
 const layout = computed(() => layoutTable(props.el.rows, props.el.merges))
 
@@ -50,6 +51,17 @@ watch(
 )
 
 /** 表格整体样式：真 <table>，边框用 border-collapse 画（原来靠 grid gap 的假边框换掉了） */
+/**
+ * 整表的重建键。
+ * ⚠ 为什么必须这样：MathJax 排版会**改写 v-html 出来的子节点** ✗，之后 Vue 若按旧锚点去 patch
+ *   同一棵树，就会撞到"找不到节点"（insertBefore on null ✓ 踩过）。
+ *   所以：**内容一变就整表重建**，Vue 永远只往"全新的树"里 patch。
+ *   表格不大，这点重建开销换来的是"再也不会出诡异错位"。
+ */
+const contentKey = computed(() => JSON.stringify([
+  props.el.rows, props.el.merges, props.el.caption, props.el.figHeight, props.el.borderMode,
+]))
+
 const tableStyle = computed(() => ({
   width: '100%',
   borderCollapse: 'collapse' as const,
@@ -126,10 +138,12 @@ function onEsc(e: KeyboardEvent) {
 
 <template>
   <div class="table-el" :class="{ 'table-el--edit': editing }" @dblclick.stop.prevent="startEdit">
-    <table ref="gridEl" class="table-grid" :key="editing ? 'edit' : 'view'" :style="tableStyle">
+    <table ref="gridEl" class="table-grid" :key="editing ? 'edit' : 'view:' + contentKey" :style="tableStyle">
       <caption v-if="el.caption" class="table-cap" :data-raw="el.caption" :contenteditable="editing ? 'plaintext-only' : 'false'">
         <template v-if="editing">{{ el.caption }}</template>
-        <span v-else data-mixed :data-raw="el.caption" v-html="cellHtml(el.caption)"></span>
+        <!-- ⚠ key 用文本本身：MathJax 会把 v-html 的子节点换掉，Vue 若按旧锚点 patch 会报
+             insertBefore on null。key 一变就整体重建，patch 只发生在"新节点"上 ✓ -->
+        <span v-else :key="el.caption" data-mixed :data-raw="el.caption" v-html="cellHtml(el.caption)"></span>
       </caption>
       <tbody>
         <tr v-for="(line, ri) in layout.grid" :key="ri">
@@ -146,7 +160,7 @@ function onEsc(e: KeyboardEvent) {
             @keydown.esc="onEsc"
           >
             <template v-if="editing">{{ cell.text }}</template>
-            <span v-else data-mixed :data-raw="cell.text" v-html="cellHtml(cell.text)"></span>
+            <span v-else :key="cell.text" data-mixed :data-raw="cell.text" v-html="cellHtml(cell.text)"></span>
           </td>
         </tr>
       </tbody>

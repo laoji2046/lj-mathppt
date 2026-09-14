@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1251**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1252**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,36 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-14（v2026.09.1252）
+
+**1252 · 修"连续不等式 $0<a<1$ 不认" —— 两个 bug**
+
+**① 用户文本没转义就塞 innerHTML** ✗
+
+    $0<a<1$  →  normalizeMixed  →  \(0<a<1\)  →  host.innerHTML = "\(0<a<1\)"
+                                                  ↑ 浏览器把 <a<1\) 当成 HTML 标签开头，整段烂掉
+
+`normalizeMixed` 刻意**不转义**（要塞 SVG ✓），所以必须在"塞文本的调用点"先转义 ✓。
+新增共用 `escapeHtml()`（types 里，紧挨 normalizeMixed），三处都补上：
+表格单元格、表标题（画布 + 导出）、混排公式元素（它的 `mixed` 也是裸拼 ✓）。
+**顺序**：先转义 → 再插图形/SVG（反了会把 SVG 转义掉 ✓）。
+
+**② MathJax 改写 DOM 后 Vue 再 patch 会崩** ✗
+
+    TypeError: Cannot read properties of null (reading 'insertBefore')
+
+MathJax 排版会**替换 v-html 出来的子节点** ✗，之后 Vue 按旧锚点 patch 同一棵树就找不到节点 ✓
+（改格子文字时必现 ✓）。试过给内层 span 加 key ✗（不够：patch 发生在整棵子树上 ✓），
+最终方案：**整表的重建键 = 内容签名** ✓，内容一变整表重建，Vue 永远只往全新的树里 patch ✓。
+表格不大，这点开销换来"再也不会错位" ✓。
+
+**验证**：
+
+    表头三格 → y=a^x ｜ a>1 ｜ 0<a<1 ✓（3 个 MathJax ✓）
+    无误解析元素（< 没被当标签）✓    图形仍在（2 个）✓    公式 9 个 ✓
+    再把首格改成 "$0<a<1$ {{fig:cube}}" → 文本 "0 < a < 1" ✓ mjx 1 ✓ 图形 1 ✓
+    无异常 ✓
 
 ### 2026-09-14（v2026.09.1251）
 

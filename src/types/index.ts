@@ -292,6 +292,19 @@ export function estimateTextHeight(text: string, fontSize: number, width: number
  * 规避 MathJax 对「$ 与数字相邻」时的跳过规则（例如 \frac{\sqrt6}{2}$ 的结尾 $ 紧挨数字，
  * 会被当作普通字符，导致配对错乱、$ 原样显示）。
  */
+/**
+ * 转义 HTML —— 凡是把**用户文本**塞进 innerHTML / v-html 的地方，都必须先过这一道。
+ * 不转义的后果：`$0<a<1$` 里的 `<` 会被浏览器当成标签开头，整段烂掉
+ *（教材表里"连续不等式"就是这么坏的）。
+ * ⚠ 顺序：**先转义、再插入图形标记/SVG** —— 反了会把 SVG 也转义掉。
+ */
+export function escapeHtml(s: string): string {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 export function normalizeMixed(text: string): string {
   return String(text)
     .replace(/\$\$([\s\S]+?)\$\$/g, (_m, inner: string) => '\\[' + inner + '\\]')

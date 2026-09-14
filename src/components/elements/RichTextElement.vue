@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { typesetMixed } from '@/composables/useMathJax'
-import { fontStack, shadowCss } from '@/types'
+import { escapeHtml, fontStack, shadowCss } from '@/types'
 import type { RichTextElement } from '@/types'
 import { inlineEditReq } from '@/ui/inlineEdit'
 import InlineEditor from '../InlineEditor.vue'
@@ -31,7 +31,9 @@ const mixed = computed(() => {
       if (ls.fontFamily) st += 'font-family:' + fontStack(ls.fontFamily) + ';'
       st += '"'
     }
-    return ls ? '<span' + st + '>' + ln + '</span>' : ln
+    // ⚠ 必须转义：(0<a<1) 里的 < 否则会被当标签（教材表的连续不等式就是这么坏的）
+    const safe = escapeHtml(ln)
+    return ls ? '<span' + st + '>' + safe + '</span>' : safe
   }).join('\n')
 })
 
