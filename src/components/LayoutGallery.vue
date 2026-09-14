@@ -6,11 +6,31 @@
  * 所以套用版式会**替换该页内容**（弹窗里也写明了）。
  */
 import { useDeckStore } from '@/stores/deck'
+import { nextTick, ref, watch } from 'vue'
 import { closeLayoutGallery, layoutGalleryAnchor, layoutGalleryIndex, layoutGalleryOpen } from '@/ui/layoutGallery'
+import { placeInViewport } from '@/ui/popover'
 import { SLIDE_LAYOUTS, type LayoutSlot } from '@/templates/slideLayouts'
 import AppIcon from './AppIcon.vue'
 
 const store = useDeckStore()
+
+/**
+ * 浮动时的位置：同样要**夹进视口**（缩略图靠下时整块浮窗会跑出屏幕 —— 用户实测）。
+ * 锚点在"缩略图右侧"，所以先按锚点摆，再量尺寸回收。
+ */
+const boxEl = ref<HTMLElement | null>(null)
+const floatPos = ref({ x: 0, y: 0 })
+watch(
+  () => [layoutGalleryOpen.value, layoutGalleryAnchor.value] as const,
+  async () => {
+    const a = layoutGalleryAnchor.value
+    if (!layoutGalleryOpen.value || !a) return
+    floatPos.value = { x: a.x, y: a.y }
+    await nextTick()
+    if (boxEl.value) floatPos.value = placeInViewport(boxEl.value, a.x, a.y)
+  },
+  { immediate: true },
+)
 
 function apply(id: string) {
   store.applyLayoutToSlide(layoutGalleryIndex.value, id)
@@ -31,7 +51,8 @@ function slotStyle(s: LayoutSlot) {
   <div v-if="layoutGalleryOpen" class="lg" :class="{ 'lg--float': !!layoutGalleryAnchor }" @click.self="closeLayoutGallery()">
     <div
       class="lg__box"
-      :style="layoutGalleryAnchor ? { position: 'fixed', left: layoutGalleryAnchor.x + 'px', top: layoutGalleryAnchor.y + 'px', width: 'min(680px, 92vw)', maxHeight: 'calc(100vh - ' + (layoutGalleryAnchor.y + 14) + 'px)' } : undefined"
+      ref="boxEl"
+      :style="layoutGalleryAnchor ? { position: 'fixed', left: floatPos.x + 'px', top: floatPos.y + 'px', width: 'min(680px, 92vw)', maxHeight: 'calc(100vh - ' + (layoutGalleryAnchor.y + 14) + 'px)' } : undefined"
     >
       <header class="lg__head">
         <span>版式（套用会替换本页内容）</span>

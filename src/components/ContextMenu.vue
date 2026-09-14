@@ -1,8 +1,26 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { useContextMenu } from '@/composables/useContextMenu'
+import { placeInViewport } from '@/ui/popover'
 
 const { state, closeMenu } = useContextMenu()
+const menuEl = ref<HTMLElement | null>(null)
+/**
+ * ⚠ 菜单要**夹进视口**：原来直接 left/top = 鼠标坐标 ✗，靠下时下半截在屏幕外（用户实测）。
+ * 做法：先按鼠标位置渲染 → 量一次实际尺寸 → 越界就收回。
+ */
+const pos = ref({ x: 0, y: 0 })
+watch(
+  () => [state.open, state.x, state.y, state.items] as const,
+  async () => {
+    if (!state.open) return
+    pos.value = { x: state.x, y: state.y }
+    await nextTick()
+    if (menuEl.value) pos.value = placeInViewport(menuEl.value, state.x, state.y)
+  },
+  { immediate: true, deep: true },
+)
 
 function onDown(e: Event) {
   if (!(e.target as HTMLElement).closest('.ctx-menu')) closeMenu()
@@ -24,7 +42,8 @@ onBeforeUnmount(() => {
   <div
     v-if="state.open"
     class="ctx-menu"
-    :style="{ left: state.x + 'px', top: state.y + 'px' }"
+    ref="menuEl"
+  :style="{ left: pos.x + 'px', top: pos.y + 'px' }"
     @contextmenu.prevent
   >
     <template v-for="(it, i) in state.items" :key="i">
