@@ -518,10 +518,10 @@ export interface MathFigureElement extends ElementBase {
   depth?: number
   /** 每个顶点的字母标注（下标/上标用 _ 和 ^，如 "A_1" "B^2"、\' 加撇），长度与顶点数一致 */
   /**
-   * 是否显示"点"：顶点小圆点 + 字母标注。
-   * 不写 = 显示（默认）；关掉就是干净的线稿（只有线）。复刻图形 / 立体几何 / 可拖顶点图形都适用。
+   * 是否在顶点画**小圆点**。默认**不画** —— 也就是"只有字母、没有圆点"，跟原来的观感一致。
+   * 勾上才画圆点（教材风）。字母不受它影响。复刻图形 / 立体几何 / 可拖顶点图形都适用。
    */
-  showPoints?: boolean
+  showDots?: boolean
   vlabels?: (string | null)[]
   /** 每条边的样式覆盖（实线/虚线/点线、粗细、颜色），索引与立体边表一致 */
   edgeStyles?: ({ dash?: 'solid' | 'dash' | 'dot'; width?: number; color?: string; arrow?: boolean } | null)[]

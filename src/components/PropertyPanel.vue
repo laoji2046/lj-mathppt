@@ -924,14 +924,14 @@ function layerTypeLabel(type: string) {
             </optgroup>
           </select>
         </label>
-        <!-- 显示点：顶点小圆点 + 字母。关掉就是干净的线稿（只有线） -->
+        <!-- 顶点圆点：默认不画（只有字母，跟原来一致）；勾上才是教材风的小圆点 -->
         <label v-if="hasVertices" class="prop-check" style="margin-top:6px">
           <input
             type="checkbox"
-            :checked="mathfig?.showPoints !== false"
-            @change="patch({ showPoints: ($event.target as HTMLInputElement).checked } as Partial<SlideElement>)"
+            :checked="mathfig?.showDots === true"
+            @change="patch({ showDots: ($event.target as HTMLInputElement).checked } as Partial<SlideElement>)"
           />
-          <span>显示点（顶点圆点 + 字母）</span>
+          <span>显示顶点圆点（默认只有字母）</span>
         </label>
 
         <!-- 自定义函数（空白）：表达式 / 定义域 / 值域 / 网格 / 坐标轴 -->

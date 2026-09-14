@@ -75,11 +75,9 @@ const innerHtml = computed(() => {
 
   // 三维多面体统一走顶点模型渲染（支持拖拽顶点编辑）
   if (SOLID_VCOUNT[kind]) {
-    // 「显示点」开关：关掉时字母也不画，得到干净的线稿
-    const showPts = props.el.showPoints !== false
-    const labels = showPts ? props.el.vlabels : (props.el.vlabels || []).map(() => null)
-    const solid = renderSolid(kind, pts.value, w, h, stroke, s, fillColor, dashed, labels, props.el.edgeStyles, solidSel.elementId === props.el.id ? (solidSel.vertex ?? undefined) : undefined, solidSel.elementId === props.el.id ? (solidSel.edge ?? undefined) : undefined, props.el.labelOffsets, props.el.faceStyles, solidSel.elementId === props.el.id ? (solidSel.face ?? undefined) : undefined, props.el.mesh)
-    if (!showPts) return solid
+    // 字母始终画；顶点圆点默认**不画**（只有勾了 showDots 才画，保持原来的观感）
+    const solid = renderSolid(kind, pts.value, w, h, stroke, s, fillColor, dashed, props.el.vlabels, props.el.edgeStyles, solidSel.elementId === props.el.id ? (solidSel.vertex ?? undefined) : undefined, solidSel.elementId === props.el.id ? (solidSel.edge ?? undefined) : undefined, props.el.labelOffsets, props.el.faceStyles, solidSel.elementId === props.el.id ? (solidSel.face ?? undefined) : undefined, props.el.mesh)
+    if (props.el.showDots !== true) return solid
     // 顶点小圆点（画在图形之上；半径跟元素尺寸挂钩，缩放时比例不变）
     const r = Math.max(2, Math.min(w, h) * 0.013)
     const p = pts.value
