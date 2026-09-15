@@ -87,7 +87,9 @@ function cellStyle(cell: TableCell): CSSProperties {
   const bg = isH ? props.el.headerColor : (props.el.altRowColor && cell.r % 2 === 0 ? props.el.altRowColor : '#ffffff')
   return {
     background: bg,
-    color: isH ? (props.el.headerTextColor || '#ffffff') : (props.el.cellColor || '#1a1a1a'),
+    // ② 逐格文字色优先（PPT 导入 ✓），否则用表头/正文的全局色 ✓
+    color: (props.el.cellColors && props.el.cellColors[cell.r + '-' + cell.c])
+      || (isH ? (props.el.headerTextColor || '#ffffff') : (props.el.cellColor || '#1a1a1a')),
     fontWeight: isH ? 700 : 400,
     padding: pad + 'px ' + (pad + 2) + 'px',
     textAlign: props.el.cellAlign || 'center',

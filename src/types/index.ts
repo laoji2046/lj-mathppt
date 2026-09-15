@@ -623,6 +623,8 @@ export interface TableElement extends ElementBase {
   borderMode?: 'all' | 'three'
   /** 各列宽度（px）—— PPT 导入时来自表格的 gridCol ✓；不写=等分（老存档照旧 ✓） */
   colWidths?: number[]
+  /** 逐格文字色：键 "行-列"（如 "0-2"）→ 颜色 ✓。用键而不是数组，是为了**对合并单元格安全** ✓ */
+  cellColors?: Record<string, string>
   headerColor: string
   borderColor: string
   fontSize: number

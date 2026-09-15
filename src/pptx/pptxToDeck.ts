@@ -137,6 +137,37 @@ function naturalWidth(text: string, fontSize: number): number {
   return Math.ceil(widest * fontSize + fontSize * 0.6)
 }
 
+/**
+ * ① 表格的**内容高度**估算 —— 必须和应用的渲染参数对齐 ✓：
+ *   应用：fontSize ✓、line-height **1.4** ✓、单元格 padding **6px** ✓、边框 1px ✓。
+ * ⚠ 不要用 PPT 的 tr/@h 当元素高 ✗：PowerPoint 会把行**拉伸填满框** ✓，
+ *   而应用按内容紧凑渲染 ✓ → 用 435px 会让选框悬空 ✓（用户截图 ✓）。
+ *   tr/@h 只在"吸附几何"里用 ✓（判断浮层落在哪一格 ✓）。
+ */
+/**
+ * 估算用的"可见文本"：把 \(...\) 公式折算成 3 个字符 ✓
+ * ⚠ 不能按 LaTeX 源码长度算 ✗ —— 实测一条公式源码 40+ 字符 ✓，渲染后只有几字符宽 ✓，
+ *   按源码算会把表格估成两倍高 ✓（P7 曾算成 472px，实际内容约 164px ✓）。
+ */
+function visibleText(s: string): string {
+  return String(s).split(String.fromCharCode(92) + '(')
+    .map((part, i) => (i === 0 ? part : '◯◯◯' + part.slice(part.indexOf(String.fromCharCode(92) + ')') + 2)))
+    .join('')
+}
+function tableContentHeight(rows: string[][], colWidths: number[], fontSize: number): number {
+  const pad = 6
+  let total = 0
+  for (let r = 0; r < rows.length; r++) {
+    let lines = 1
+    for (let c = 0; c < rows[r].length; c++) {
+      const cw = colWidths[c] || Math.round(600 / (rows[r].length || 1))
+      lines = Math.max(lines, estimateLines(visibleText(rows[r][c]), fontSize, Math.max(24, cw - 2 * pad)))
+    }
+    total += lines * fontSize * 1.4 + pad * 2 + 1
+  }
+  return Math.round(total)
+}
+
 /** 主题色板（theme1.xml 的 clrScheme）—— schemeClr 要查这张表才能变成具体颜色 */
 type Theme = Record<string, string>
 async function loadTheme(buf: Uint8Array, byName: Map<string, any>): Promise<Theme> {
@@ -409,6 +440,7 @@ export async function pptxToDeck(
         }
         const rows: string[][] = []
         const merges: { r: number; c: number; rs: number; cs: number }[] = []
+        const cellColors: Record<string, string> = {}
         // ⚠ 列宽必须读：实测样张 4 列是 142/325/499/240px **极不均匀** ✗，
         //   丢掉就变成等宽 → 整张表压变形 ✓（这是"表格识别"最明显的短板 ✓）
         const colWidths = allDeep(tbl, 'gridCol').map((c) => emu2px(num(c.attrs['w'], 0))).filter((n) => n > 0)
@@ -423,6 +455,9 @@ export async function pptxToDeck(
             const gs = Math.max(1, num(tcPr?.attrs['gridSpan'], 1))
             const rs2 = Math.max(1, num(tcPr?.attrs['rowSpan'], 1))
             line.push(t || '')
+            // ② 逐格文字色（实测样张 6 个格子有 ✓，如 #1552d1 蓝 / #c00000 红 ✓）
+            const fg = colorOf(find(tc, 'rPr'), theme)
+            if (fg) cellColors[r + '-' + c] = fg
             if (gs > 1 || rs2 > 1) merges.push({ r, c, rs: rs2, cs: gs })
             for (let k = 1; k < gs; k++) line.push('')
             c += gs
@@ -445,6 +480,7 @@ export async function pptxToDeck(
           h: gridH || h || deckH * 0.4,
           rows, merges: merges.length ? merges : undefined,
           colWidths: colWidths.length === rows[0]?.length ? colWidths : undefined,
+          ...(Object.keys(cellColors).length ? { cellColors } : {}),
           fontSize: 20,
         })
         tableMeta.push({ el, cols: colWidths, rows: rowHeights })
@@ -572,6 +608,10 @@ export async function pptxToDeck(
         if (!done) kept.push(e)
       }
       elements = kept
+      // ① 吸附完成后，把表格元素高换成**内容估算** ✓（吸附用的是 tr/@h，两者用途不同 ✓）
+      for (const m of tableMeta) {
+        m.el.h = tableContentHeight(m.el.rows, m.cols, m.el.fontSize || 20)
+      }
     }
     slides.push({ id: 'pptx-' + (i + 1), bg: '#ffffff', elements })
     stats.slides++

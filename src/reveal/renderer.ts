@@ -543,7 +543,9 @@ function elementToHtmlInner(el: SlideElement): string {
     const rowsHtml = L.grid.map((line) => '<tr>' + line.map((cell) => {
       const isH = cell.r === 0
       const bg = isH ? el.headerColor : (el.altRowColor && cell.r % 2 === 0 ? el.altRowColor : '#ffffff')
-      const col = isH ? (el.headerTextColor || '#ffffff') : (el.cellColor || '#111111')
+      // ② 逐格文字色优先（PPT 导入 ✓，键 "行-列" ✓ 对合并单元格安全 ✓）
+      const custom = el.cellColors && el.cellColors[cell.r + '-' + cell.c]
+      const col = custom || (isH ? (el.headerTextColor || '#ffffff') : (el.cellColor || '#111111'))
       const span =
         (cell.rs > 1 ? ' rowspan="' + cell.rs + '"' : '') +
         (cell.cs > 1 ? ' colspan="' + cell.cs + '"' : '')
