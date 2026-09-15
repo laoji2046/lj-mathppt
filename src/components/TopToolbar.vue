@@ -662,23 +662,23 @@ onBeforeUnmount(() => {
           <button class="dropdown__item" title="当前页截图为 PNG（2 倍分辨率）" @click="exportPng"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.png"></svg></span>导出 PNG（当前页）</button>
           <button class="dropdown__item" title="Markdown 源码：导出或导入（--- 横向 / -- 垂直 / Note: 备注）" @click="setViewMode('split')"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>MD 源码（导出/导入 Markdown）</button>
           <button class="dropdown__item" title="导入之前导出的演示 JSON（.json）" @click="pickDeckJson"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>导入演示 JSON</button>
-        <button class="dropdown__item" title="导入 PPT（.pptx）：本地解析，文字 / 公式 / 图片 / 表格一并搬过来" @click="pickPptx">
+        <button v-if="addonOn('pptx-import')" class="dropdown__item" title="导入 PPT（.pptx）：本地解析，文字 / 公式 / 图片 / 表格一并搬过来" @click="pickPptx">
           <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.file"></svg></span>导入 PPT(.pptx)
         </button>
-        <button class="dropdown__item" title="导入 Word 文档（.docx）：本地解析、图片内嵌，一题一页" @click="pickDocx"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>导入 Word 文档（.docx）</button>
-          <button class="dropdown__item" title="轻度：字号吸附 TypeScale 档位、字体换主题字体、背景换主题底色、文字色只做可读性夹取（保留原课件配色语义）——只改样式，不碰内容，可 Ctrl+Z 撤销" @click="houseStyle('soft')">
+        <button v-if="addonOn('docx-import')" class="dropdown__item" title="导入 Word 文档（.docx）：本地解析、图片内嵌，一题一页" @click="pickDocx"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>导入 Word 文档（.docx）</button>
+          <button v-if="addonOn('house-style')" class="dropdown__item" title="轻度：字号吸附 TypeScale 档位、字体换主题字体、背景换主题底色、文字色只做可读性夹取（保留原课件配色语义）——只改样式，不碰内容，可 Ctrl+Z 撤销" @click="houseStyle('soft')">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.theme"></svg></span>统一风格（轻度）
           </button>
-          <button class="dropdown__item" title="彻底：在轻度基础上，把原课件的配色按 60-30-10 重映射到主题的 primary/accent（变化明显，但会丢掉原课件的配色语义）——可 Ctrl+Z 撤销" @click="houseStyle('strong')">
+          <button v-if="addonOn('house-style')" class="dropdown__item" title="彻底：在轻度基础上，把原课件的配色按 60-30-10 重映射到主题的 primary/accent（变化明显，但会丢掉原课件的配色语义）——可 Ctrl+Z 撤销" @click="houseStyle('strong')">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.theme"></svg></span>统一风格（彻底·明显）
           </button>
-          <button class="dropdown__item" title="按内容识别页面角色（例题/定理/定义/练习/小结/探究），套用对应版式；含表格/图片的页、内容装不下的页一律保留原样 —— 可 Ctrl+Z 撤销" @click="autoTemplate">
+          <button v-if="addonOn('auto-template')" class="dropdown__item" title="按内容识别页面角色（例题/定理/定义/练习/小结/探究），套用对应版式；含表格/图片的页、内容装不下的页一律保留原样 —— 可 Ctrl+Z 撤销" @click="autoTemplate">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.theme"></svg></span>按内容套用模板…
           </button>
           <button class='dropdown__item' title='功能管理：开关各个 addon（关掉后入口隐藏、代码不加载；体积提示来自实测）' @click='openAddonMgr'>
             <span class='dropdown__icon'><svg viewBox='0 0 24 24' class='dd__svg' v-html='I.theme'></svg></span>功能管理…
           </button>
-        <button class="dropdown__item" title="导入 PDF（.pdf）：自动判断有没有文本层 —— 有就抽成可编辑文字，没有就每页一张图" @click="pickPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导入 PDF（.pdf）</button>
+        <button v-if="addonOn('pdf-import')" class="dropdown__item" title="导入 PDF（.pdf）：自动判断有没有文本层 —— 有就抽成可编辑文字，没有就每页一张图" @click="pickPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导入 PDF（.pdf）</button>
         </div>
       </div>
     </div>
@@ -810,7 +810,7 @@ onBeforeUnmount(() => {
           <button class="dropdown__item" title="选择本地 .ggb 文件，一步创建并加载" @click="pickGgb">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>打开本地 .ggb
           </button>
-          <button class="dropdown__item" title="打开 GeoGebra 作图套件：现场作图，可保存 .ggb 或插入当前页" @click="openGgbSuite">
+          <button v-if="addonOn('geogebra')" class="dropdown__item" title="打开 GeoGebra 作图套件：现场作图，可保存 .ggb 或插入当前页" @click="openGgbSuite">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.fig"></svg></span>作图套件
           </button>
         </div>
@@ -837,7 +837,7 @@ onBeforeUnmount(() => {
           <button class="dropdown__item" @click="addBlankDsm">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.plus"></svg></span>空白计算器
           </button>
-          <button class="dropdown__item" title="导入之前导出的 Desmos 状态 JSON" @click="pickDsm">
+          <button v-if="addonOn('desmos')" class="dropdown__item" title="导入之前导出的 Desmos 状态 JSON" @click="pickDsm">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>导入状态 JSON
           </button>
         </div>
