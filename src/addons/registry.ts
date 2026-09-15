@@ -1,0 +1,65 @@
+/**
+ * Addon 注册表：只做「登记 + 开关 + 查询」，不碰功能实现。
+ *
+ * 设计要点：
+ * - 开关状态存 localStorage（app 级设置，不进文稿 JSON —— 换个电脑不该丢）；
+ * - 组件/入口一律按需加载（各 addon 自己用 defineAsyncComponent / await import()）；
+ * - 关掉一个 addon = 入口隐藏 + 代码不加载，不动任何已有实现（可随时开回来）。
+ */
+import { reactive } from 'vue'
+import type { AddonManifest } from './types'
+
+const KEY = 'lj-mathslides-vue:addons'
+
+/** 已注册的清单（内置；将来外置的也往这里加） */
+const manifests = new Map<string, AddonManifest>()
+
+/** 开关状态（响应式，界面直接用） */
+export const addonState = reactive<{ enabled: Record<string, boolean> }>({ enabled: {} })
+
+function persist() {
+  try {
+    const on: string[] = []
+    for (const [id, v] of Object.entries(addonState.enabled)) if (v) on.push(id)
+    localStorage.setItem(KEY, JSON.stringify(on))
+  } catch { /* 存不上也不影响使用 */ }
+}
+
+function restore() {
+  let on: string[] | null = null
+  try { on = JSON.parse(localStorage.getItem(KEY) || 'null') } catch { on = null }
+  for (const m of manifests.values()) {
+    // 没存过 → 用清单默认值；存过 → 以存档为准（用户关过的不被默认值顶回来）
+    addonState.enabled[m.id] = on ? on.includes(m.id) : m.defaultOn !== false
+  }
+}
+
+/** 注册一个 addon 清单（内置清单在 index.ts 里登记） */
+export function registerAddon(m: AddonManifest) {
+  manifests.set(m.id, { defaultOn: true, ...m })
+}
+
+/** 全部清单 */
+export function listAddons(): AddonManifest[] {
+  return [...manifests.values()]
+}
+
+export function isEnabled(id: string): boolean {
+  return addonState.enabled[id] !== false
+}
+
+export function setEnabled(id: string, on: boolean) {
+  addonState.enabled[id] = on
+  persist()
+}
+
+/** 启动时调一次（读存档） */
+export function initAddons() {
+  restore()
+}
+
+/** 按需加载某个 addon 的代码 —— addon 自己给出加载函数 */
+export async function loadAddon<T>(id: string, loader: () => Promise<T>): Promise<T | null> {
+  if (!isEnabled(id)) return null
+  return loader()
+}

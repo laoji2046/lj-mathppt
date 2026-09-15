@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1283**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1284**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,45 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-15（v2026.09.1284）
+
+**1284 · Addon 骨架 —— 并把「PDF 生成」做成第一个 addon**
+
+用户要求："把应用中的部分功能（比如 PDF 生成）做成 addon" ✓。
+
+**先量清"PDF 生成由什么组成"** ✓：主体是 `PaperModal.vue`（67 KB 源码）✓，
+而它**早就是懒加载 chunk** 了 ✓（v1277 做懒加载时一起拆的 ✓，独立 **38.7 KB** ✓）。
+→ 所以"做成 addon"真正**新增**的不是"按需加载"（已经有了 ✓），而是：
+**登记清单 + 可开关 + 将来的外置路径** ✓。
+
+**新增 `src/addons/`（三个文件，只登记不改行为 ✓）**：
+
+    types.ts     AddonManifest（id/name/desc/icon/category/sizeHint/runtime/defaultOn）
+    registry.ts  注册表：registerAddon / listAddons / isEnabled / setEnabled / initAddons / loadAddon
+                 开关状态存 localStorage（app 级设置 ✓，不进文稿 JSON ✗）
+    index.ts     内置清单 **11 项**，体积数据取自 docs/体积账本.md 的实测 ✓
+
+清单里同时区分了三种 addon 的成本（写在 types.ts 顶部 ✓）：
+
+    1. 内置 addon：随包发、按需加载 ✓（本次做的）
+    2. 外置 addon：不随包、首次下载 ✗（需下载/校验/缓存/回退四件套）
+    3. 元素类型插件：第三方加新元素类型 ✗（需先给内核加注册表；ElementFrame 与
+       renderer 现在是 if 链硬编码 ✓，属动核心的重构 ✓）
+
+**接线**：`main.ts` 里在 `app.mount` **之前**注册清单并读存档 ✓；
+工具栏「PDF生成」按钮加 `v-if="addonOn('pdf-gen')"` ✓。
+
+**端到端验证（用 getBoundingClientRect 验可见性 ✓ —— 上次菜单不可见的教训 ✓）**：
+
+    ① 默认启用       → PDF生成 可见=true ✓
+    ② 写入空开关存档 → 重载
+    ③ 重载后         → **找不到 PDF 按钮** ✓✓（入口真隐藏了）
+    ④ 同时            → 模板库等按钮 可见=true ✓（没有误伤）
+
+**⚠ 还差一件（下次第一件）**：**功能管理界面** ✗ —— 现在只能用 devtools 改 localStorage ✓，
+普通用户点不到 ✓。做法：文件 ▾ →「功能管理…」→ 一列复选框（按 category 分组 ✓，
+显示 sizeHint 与 runtime 体积 ✓ —— 数据已在清单里 ✓）。
 
 ### 2026-09-15（v2026.09.1283）
 

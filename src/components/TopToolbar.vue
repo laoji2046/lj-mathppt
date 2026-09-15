@@ -21,6 +21,7 @@ import { isTauri } from '@/composables/useTauri'
 import SettingsPanel from './SettingsPanel.vue'
 import { ICONS as I } from '@/ui/icons'
 import { pdfImportOpen, pdfImportFile, openPdfImport, closePdfImport } from '@/ui/pdfImport'
+import { addonState } from '@/addons/registry'
 // —— 懒加载：三个导入器 + PDF 对话框都只在**点菜单/选文件**时才用 ✓ ——
 //   静态导入会让 pptx(30KB)+docx(30KB)+pdf 全进启动包 ✗；改成动态导入后 Vite 各自分包 ✓
 //   （PdfImportDialog 在模板里是 v-if 门控 ✓，可以安全异步化 ✓）
@@ -392,6 +393,9 @@ function autoTemplate() {
   fileToast.value = '按内容套用模板：套用 ' + r.applied + ' 页 / 保留 ' + r.kept + ' 页' + (skip.length ? '（已跳过 ' + skip.join('、') + '）' : '') + ' —— 可 Ctrl+Z 撤销'
   flashToast()
 }
+
+/** addon 开关：关掉后入口隐藏、代码永不加载（先把「PDF 生成」接上做样板） */
+function addonOn(id: string) { return addonState.enabled[id] !== false }
 
 function houseStyle(mode: 'soft' | 'strong') {
   fileOpen.value = false
@@ -853,7 +857,7 @@ onBeforeUnmount(() => {
       <button class="btn" title="模板库：高中数学讲义模板 / 专业模板" @click="openTemplates">
         <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.templates"></svg></span>模板库
       </button>
-      <button class="btn" title="PDF 生成：把 Markdown / 试卷写成 A4 文档并导出 PDF" @click="openPaper">
+      <button v-if="addonOn('pdf-gen')" class="btn" title="PDF 生成：把 Markdown / 试卷写成 A4 文档并导出 PDF" @click="openPaper">
         <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.paper"></svg></span>PDF生成
       </button>
       <button class="btn btn--primary" @click="present">
