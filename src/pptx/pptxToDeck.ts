@@ -429,7 +429,10 @@ export async function pptxToDeck(
         //   行高不对，浮在表格上方的公式（PPT 里是独立对象 ✓）就会**对不齐格子** ✓。
         const gridH = allDeep(tbl, 'tr').reduce((a, r) => a + emu2px(num(r.attrs['h'], 0)), 0)
         Object.assign(el, {
-          x, y, w: gridW || w || deckW * 0.6, h: gridH || h || deckH * 0.4,
+          x, y, w: gridW || w || deckW * 0.6,
+          // ⚠ 元素高 = PPT 表框的高度（= 行高之和 ✓）。注意 PowerPoint 会把行**拉伸**填满框，
+          //   而本应用按**内容**紧凑渲染行 ✗ → 于是选框会比表格内容高出一截 ✓（已知 ✓，待定方案见 README）。
+          h: gridH || h || deckH * 0.4,
           rows, merges: merges.length ? merges : undefined,
           colWidths: colWidths.length === rows[0]?.length ? colWidths : undefined,
           fontSize: 20,
