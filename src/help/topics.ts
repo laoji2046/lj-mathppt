@@ -80,6 +80,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '文字与公式（$…$ 混排）',
     tags: ['文字', '公式', 'LaTeX', '$', '混排', '颜色'],
     body: [
+      img('dlg-formula', '「公式库」：按分类挑公式，插入后仍可改'),
       img('dlg-symbol', '「数学符号」库：按分类插入 √ ≤ ∈ 等'),
       img('formula-menu', '「公式 ▾」：常用公式与符号的快捷入口'),
       img('insert-text', '「文字」按钮与右侧属性面板：改字号 / 颜色 / 对齐 / 底块'),
