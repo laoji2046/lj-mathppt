@@ -297,8 +297,10 @@ export async function pptxToDeck(
 
     const tree = parseXml(xml)
     const spTree = find(tree, 'spTree')
-    const elements: any[] = []
+    let elements: any[] = []
     const counter = { n: 0 }
+    /** 表格几何（吸附用）：列宽 + **真实行高**（行高差别很大 ✗，均分会吸错格 ✓） */
+    const tableMeta: { el: any; cols: number[]; rows: number[] }[] = []
 
     /** 组合（grpSp）的坐标变换：子坐标 = (child - chOff) * (ext/chExt) + off ✓
      *  ⚠ 不能假设"组合偏移很小" ✗ —— 偏移非零时子元素会**整体错位**（实测两段文字叠在一起 ✓）。 */
@@ -418,6 +420,7 @@ export async function pptxToDeck(
           rows.push(line)
         }
         if (!rows.length) return
+        const rowHeights = allDeep(tbl, 'tr').map((r) => emu2px(num(r.attrs['h'], 0)))
         const el = createElement('table')
         // ⚠ 该用"列宽之和"当表宽：实测这张表的 ext=768px 是废数 ✗（列宽加起来 1207px ✓，
         //   与幻灯片 1280px 才对得上 ✓）。同 chExt 一个套路 ✓ —— 生成器写的几何值不可信 ✓。
@@ -431,6 +434,7 @@ export async function pptxToDeck(
           colWidths: colWidths.length === rows[0]?.length ? colWidths : undefined,
           fontSize: 20,
         })
+        tableMeta.push({ el, cols: colWidths, rows: rowHeights })
         elements.push(el)
         stats.tables++
         return
@@ -526,6 +530,36 @@ export async function pptxToDeck(
 
     for (const s of kidsOf(spTree)) await addShape(s)
     stats.formulas += counter.n
+
+    // —— 表格吸附：PPT 常把表格画成"空网格 + 浮在上面的文字/公式" ✗，
+    //    用户要的是**一张真正的表格** ✓（截图 ✓）。按单元格矩形判断落在哪一格 ✓，
+    //    并进格子后丢掉浮动元素 ✓。几何取自 tableMeta（含真实行高 ✓，均分会吸错格 ✗）。
+    if (tableMeta.length) {
+      const kept: any[] = []
+      for (const e of elements) {
+        if (e.type === 'table' || (e.type !== 'text' && e.type !== 'richtex')) { kept.push(e); continue }
+        const cx = e.x + e.w / 2
+        const cy = e.y + e.h / 2
+        let done = false
+        for (const m of tableMeta) {
+          const t = m.el
+          if (cx < t.x || cx > t.x + t.w || cy < t.y || cy > t.y + t.h) continue
+          let col = -1
+          let acc = t.x
+          for (let i = 0; i < m.cols.length; i++) { if (cx >= acc && cx < acc + m.cols[i]) { col = i; break } acc += m.cols[i] }
+          let row = -1
+          let accY = t.y
+          for (let i = 0; i < m.rows.length; i++) { if (cy >= accY && cy < accY + m.rows[i]) { row = i; break } accY += m.rows[i] }
+          if (col < 0 || row < 0 || row >= t.rows.length || col >= t.rows[row].length) continue
+          const cell = t.rows[row][col]
+          t.rows[row][col] = cell ? cell + ' ' + e.text : e.text
+          done = true
+          break
+        }
+        if (!done) kept.push(e)
+      }
+      elements = kept
+    }
     slides.push({ id: 'pptx-' + (i + 1), bg: '#ffffff', elements })
     stats.slides++
     opts.onProgress?.(i + 1, order.length)
