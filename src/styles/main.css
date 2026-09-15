@@ -187,3 +187,24 @@ body.is-panning {
   display: inline-flex !important;
   margin: 0 !important;
 }
+/*
+ * ⚠ 打印时必须解开「一屏高度」的锁 ✗。
+ *
+ * 本应用是全屏应用：html/body 都是 height:100% + overflow:hidden ✓ —— 屏幕上是对的 ✓，
+ * 但**打印时会只渲染一屏** ✗：多页内容被压进一张纸 ✓，
+ * 表现为「两页只打出一页 + 第一页底部被切」✓（实测：4 页内容 → /Count = 1 ✓）。
+ *
+ * PaperModal 自己的 @media print 里已经处理了 .app/.pm 的显隐 ✓，
+ * 但 html/body 是**组件 scoped 样式够不到**的 ✓，所以这条放在全局 ✓。
+ */
+@media print {
+  html, body { height: auto !important; overflow: visible !important; }
+  /* ⚠ 第二道锁：position: fixed 的元素在打印时**只渲染一次、不参与分页** ✗ ——
+     必须把整条祖先链都改回 static ✓（实测 .pm__box 仍是 fixed 时，打印依旧 /Count = 1 ✗）。 */
+  .pm, .pm__box, .pm__body, .pm__right, .pm__a4 {
+    position: static !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}

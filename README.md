@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1303**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1304**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,45 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-15（v2026.09.1304）
+
+**1304 · 修「两页只打出一页 + 第一页底部被切」——打印时有两道锁**
+
+**用户实测报告** ✗：打印出来的 PDF 只有 1 页、且第一页底部被裁 ✓。
+
+**排查（全部靠实测，不靠猜 ✓）**：
+
+    ① 布局自洽 ✓：页数 2 ✓ 每页布局高 1123px = 297mm ✓ 内容区 986px ✓（与代码里的 986 一致 ✓）
+    ② 真实打印 ✓：用 CDP 的 Page.printToPDF 直接出 PDF ✓ → /Count = **1** ✗（预览明明是 2 页 ✓）
+    ③ 换纸张 ✗：A4 与 Letter 结果一样 ✓ → **不是纸张尺寸问题** ✓
+    ④ 打印媒体模拟 ✓：CSS 确实生效（.app 隐藏 ✓ zoom=1 ✓ 页高正确 ✓）
+    ⑤ 逐层看高度 ✓ → 找到两道锁 ↓
+
+**根因（两道锁叠在一起）** ✗：
+
+    ① html, body { height:100%; overflow:hidden }   ← 全屏应用的标准写法 ✓
+       但打印时**只渲染一屏** ✗（实测 bodyScroll = 900 = 视口高 ✓，而内容是 4475 ✓）
+    ② .pm__box { position: fixed }                  ← **fixed 元素打印只渲染一次、不参与分页** ✗
+
+**修法**（放在 `src/styles/main.css` 的 `@media print` 里 ✓ —— 组件 scoped 样式够不到 html/body ✓）：
+
+    html, body { height: auto !important; overflow: visible !important; }
+    .pm, .pm__box, .pm__body, .pm__right, .pm__a4 {
+      position: static !important; height: auto !important;
+      max-height: none !important; overflow: visible !important;
+    }
+
+**验证（真实打印 ✓）**：
+
+    修前：bodyScroll 900  → /Count = **1** ✗
+    修后：bodyScroll 4475 → /Count = **4** ✓✓（4 页内容正好 4 页 ✓ 每页 1119px ✓）
+
+**顺带**：`@page` 补上 `size: A4` ✓（原先只写了 `margin: 0` ✗，若打印对话框默认 Letter 会更糟 ✗）。
+
+**教训**：全屏应用做打印导出时，**`height:100% + overflow:hidden` 与 `position:fixed` 都是坑** ✗，
+必须在 `@media print` 里显式解开 ✓。而且**验证要用真实打印**（`Page.printToPDF` + 数 `/Count` ✓），
+光看预览页面数是不够的 ✗。
 
 ### 2026-09-15（v2026.09.1303）
 

@@ -1252,7 +1252,7 @@ watch([headerText, footerText], () => render())
 </style>
 
 <style>
-@page { margin: 0; }
+@page { size: A4; margin: 0; }
 .paper-flow {
   width: 210mm; padding: 0 16mm; box-sizing: border-box;
   font-family: "Times New Roman", "SimSun", serif; font-size: 12pt;
@@ -1313,7 +1313,7 @@ watch([headerText, footerText], () => render())
   .pm__body { padding: 0 !important; }
   .pm__right, .pm__a4 { overflow: visible !important; background: #fff !important; padding: 0 !important; }
   .pm__a4 { display: block; zoom: 1 !important; }
-  .paper-page { width: 210mm; min-height: 297mm; box-shadow: none; margin: 0; page-break-after: always; background: #fff; }
-  .paper-page:last-child { page-break-after: auto !important; }
+  .paper-page { width: 210mm; min-height: 0; height: 296mm; box-sizing: border-box; break-after: page; box-shadow: none; margin: 0; page-break-after: always; background: #fff; }
+  .paper-page:last-child { page-break-after: auto !important; break-after: auto !important; }
 }
 </style>
