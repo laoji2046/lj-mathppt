@@ -62,6 +62,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '页面与幻灯片管理',
     tags: ['页面', '缩略图', '排序', '隐藏', '章节'],
     body: [
+      img('page-context-menu', '缩略图右键菜单：复制 / 删除 / 隐藏本页'),
       p('左侧缩略图栏是页面总览：点击切换、拖动排序、右键出菜单。'),
       ul(
         '「＋ 新页面」在末尾加一页；在缩略图上右键可插入到其后。',
@@ -119,6 +120,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '数学图形与图形库',
     tags: ['图形', '函数图像', '抛物线', '几何', '顶点', '贝塞尔'],
     body: [
+      img('draw-menu', '「绘制/形状 ▾」：矩形、椭圆、直线、箭头、笔、多边形'),
       img('figure-library', '「数学图形」库：平面图形 / 立体几何 / 函数图像 / 圆锥曲线 等 70 余种'),
       p('工具栏「数学图形」打开图形库（平面图形 / 立体几何 / 复制图形 / 函数图像 / 圆锥曲线 / 辅助标注 共 70 余种）。'),
       ul(
@@ -152,6 +154,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '三维立体图',
     tags: ['三维', '立体几何', '棱柱', '棱锥', '虚实线', '顶点'],
     body: [
+      img('figure-solid-tab', '图形库的「立体几何」标签页'),
       p('用「顶点坐标 + 面表」描述一个立体，程序自动算出**虚实线**（被遮挡的棱画虚线）。'),
       ul(
         '打开：图形库 → 立体几何 → 三维立体图；或属性面板上已有三维图形时点「编辑」。',
@@ -183,6 +186,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '动画与放映',
     tags: ['动画', '渐显', '演示', '放映', '分片'],
     body: [
+      img('md-source', '「MD 源码」分屏：左边 Markdown，右边实时预览'),
       p('讲解型内容建议**逐条出现**：演示时点一下出一条，节奏由你控制。'),
       ul(
         '单页整体分片：工具栏「组合 ▾」旁的「分片」按钮，或页面属性里的「本页所有元素逐条出现」。',
@@ -255,6 +259,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '导出 HTML / PDF / PNG / JSON / Markdown',
     tags: ['导出', 'pdf', 'html', 'png', 'json', 'markdown'],
     body: [
+      img('pdf-a4-editor', '「PDF生成」：先排 A4 文档，再导出 PDF（适合试卷与学案）'),
       ul(
         '保存 / 另存为…：JSON 文稿（可再次导入，也是备份手段）。',
         '导出 HTML：单文件网页放映，双击即可在任意浏览器演示，公式与图形都在里面。',
