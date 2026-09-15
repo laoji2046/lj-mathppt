@@ -27,7 +27,7 @@ const VectorizeDialog = defineAsyncComponent(() => import('@/components/Vectoriz
 const Geom3DDialog = defineAsyncComponent(() => import('@/components/Geom3DDialog.vue'))
 const AsyExportDialog = defineAsyncComponent(() => import('@/components/AsyExportDialog.vue'))
 import { asyExportEl, closeAsyExport } from '@/ui/asyExport'
-import { vectorizeOpen, vectorizeSrc, vectorizeReplaceId, vectorizeEditId, closeVectorize } from '@/ui/vectorize'
+import { vectorizeOpen, vectorizeSrc, vectorizeReplaceId, vectorizeEditId, closeVectorize, openVectorize } from '@/ui/vectorize'
 import { geom3dOpen, geom3dEditId } from '@/ui/geom3d'
 import { imageEditOpen, imageEditId, closeImageEditor, openImageEditor } from '@/ui/imageEditor'
 import MarkdownSourcePanel from '@/components/MarkdownSourcePanel.vue'
@@ -133,9 +133,15 @@ onMounted(() => {
   else if (want === 'ggbmenu') ggbMenuOpen.value = true
   else if (want === 'embed') embedMenuOpen.value = true
   else if (want === 'addon') addonPanelOpen.value = true
-  else if (want === 'imageedit') {
-    const im = store.deck.slides.flatMap((s) => s.elements || []).find((e) => e.type === 'image')
-    if (im) openImageEditor(im.id)
+  else if (want === 'imageedit' || want === 'vectorize' || want === 'select') {
+    // 找「真图」—— 样张里有几张是空占位（src 很短），取 src 最长的那张
+    const imgs = store.deck.slides.flatMap((s) => s.elements || []).filter((e) => e.type === 'image')
+    const best = imgs.slice().sort((x, y) => String((y as any).src || '').length - String((x as any).src || '').length)[0]
+    if (want === 'select') {
+      const first = store.currentSlide && store.currentSlide.elements && store.currentSlide.elements[0]
+      if (first) store.selectElement(first.id)
+    } else if (best && want === 'vectorize') openVectorize(String((best as any).src))
+    else if (best) openImageEditor(best.id)
   }
 })
 onBeforeUnmount(() => {
