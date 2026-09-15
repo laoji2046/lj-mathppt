@@ -62,6 +62,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '页面与幻灯片管理',
     tags: ['页面', '缩略图', '排序', '隐藏', '章节'],
     body: [
+      img('template-picker', '模板库：封面 / 目录 / 章节 / 定义 / 定理 / 例题 等成套版式'),
       img('page-context-menu', '缩略图右键菜单：复制 / 删除 / 隐藏本页'),
       p('左侧缩略图栏是页面总览：点击切换、拖动排序、右键出菜单。'),
       ul(
@@ -155,6 +156,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '三维立体图',
     tags: ['三维', '立体几何', '棱柱', '棱锥', '虚实线', '顶点'],
     body: [
+      img('geom3d-dialog', '三维立体图：左侧填顶点坐标与面表，右侧自动算出虚实线'),
       img('figure-solid-tab', '图形库的「立体几何」标签页'),
       p('用「顶点坐标 + 面表」描述一个立体，程序自动算出**虚实线**（被遮挡的棱画虚线）。'),
       ul(

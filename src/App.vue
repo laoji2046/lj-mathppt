@@ -32,6 +32,9 @@ import MarkdownSourcePanel from '@/components/MarkdownSourcePanel.vue'
 import { viewMode } from '@/ui/view'
 import { tplOpen, tplMode, openTemplateLibrary, closeTemplateLibrary } from '@/ui/templateLibrary'
 import { helpOpen, closeHelp } from '@/ui/help'
+import { openHelp } from '@/ui/help'
+import { openGeom3D } from '@/ui/geom3d'
+import { initShotMode, shotRequest } from '@/ui/shot'
 import ContextMenu from '@/components/ContextMenu.vue'
 import StatusBar from '@/components/StatusBar.vue'
 
@@ -101,6 +104,15 @@ function onContextMenu(e: MouseEvent) {
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   document.addEventListener('contextmenu', onContextMenu)
+})
+/* 开发用截图参数 ?shot=<面板>：启动即把对应面板打开（正常启动不带参 → 什么也不做 ✓） */
+onMounted(() => {
+  initShotMode()
+  const want = shotRequest.value
+  if (want === 'help') openHelp()
+  else if (want === 'geom3d') openGeom3D()
+  else if (want === 'ggb') openGgbSuite()
+  else if (want === 'template') openTemplateLibrary('replace')
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
