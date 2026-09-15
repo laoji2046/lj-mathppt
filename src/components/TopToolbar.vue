@@ -22,6 +22,7 @@ import SettingsPanel from './SettingsPanel.vue'
 import { ICONS as I } from '@/ui/icons'
 import { pdfImportOpen, pdfImportFile, openPdfImport, closePdfImport } from '@/ui/pdfImport'
 import { addonState } from '@/addons/registry'
+const AddonManager = defineAsyncComponent(() => import('./AddonManager.vue'))
 // —— 懒加载：三个导入器 + PDF 对话框都只在**点菜单/选文件**时才用 ✓ ——
 //   静态导入会让 pptx(30KB)+docx(30KB)+pdf 全进启动包 ✗；改成动态导入后 Vite 各自分包 ✓
 //   （PdfImportDialog 在模板里是 v-if 门控 ✓，可以安全异步化 ✓）
@@ -395,6 +396,8 @@ function autoTemplate() {
 }
 
 /** addon 开关：关掉后入口隐藏、代码永不加载（先把「PDF 生成」接上做样板） */
+function openAddonMgr() { fileOpen.value = false; addonMgrOpen.value = true }
+
 function addonOn(id: string) { return addonState.enabled[id] !== false }
 
 function houseStyle(mode: 'soft' | 'strong') {
@@ -594,6 +597,7 @@ async function onDsmPicked(e: Event) {
  * 原来是一个个手写 if ✗ —— 结果漏了「绘制/形状」「图片」「嵌入」三个，
  * 表现就是"点开菜单后不选项就没法关掉"。这类漏洞靠"记得补"是治不住的，改成表驱动。
  */
+const addonMgrOpen = ref(false)   // 功能管理面板（addon 开关）
 const DROPDOWNS: { open: Ref<boolean>; wrap: Ref<HTMLElement | null> }[] = [
   { open: fileOpen, wrap: fileWrap },
   { open: shapeMenuOpen, wrap: shapeWrap },
@@ -670,6 +674,9 @@ onBeforeUnmount(() => {
           </button>
           <button class="dropdown__item" title="按内容识别页面角色（例题/定理/定义/练习/小结/探究），套用对应版式；含表格/图片的页、内容装不下的页一律保留原样 —— 可 Ctrl+Z 撤销" @click="autoTemplate">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.theme"></svg></span>按内容套用模板…
+          </button>
+          <button class='dropdown__item' title='功能管理：开关各个 addon（关掉后入口隐藏、代码不加载；体积提示来自实测）' @click='openAddonMgr'>
+            <span class='dropdown__icon'><svg viewBox='0 0 24 24' class='dd__svg' v-html='I.theme'></svg></span>功能管理…
           </button>
         <button class="dropdown__item" title="导入 PDF（.pdf）：自动判断有没有文本层 —— 有就抽成可编辑文字，没有就每页一张图" @click="pickPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导入 PDF（.pdf）</button>
         </div>
@@ -879,6 +886,7 @@ onBeforeUnmount(() => {
   <FormulaInserter v-if="formulaModalOpen" @close="formulaModalOpen = false" />
   <FormulaLibrary v-if="formulaLib.open" @close="closeFormulaLibrary()" />
   <div v-if="fileToast" class="file-toast">{{ fileToast }}</div>
+  <AddonManager v-if='addonMgrOpen' @close='addonMgrOpen = false' />
 </template>
 
 <style scoped>
