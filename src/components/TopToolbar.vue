@@ -381,6 +381,18 @@ function disposePrintFrame(f: PrintFrame, delay = 8000) {
   setTimeout(() => { f.frame.remove(); URL.revokeObjectURL(f.url) }, delay)
 }
 /** 统一为本应用风格：只改样式、不碰内容 ✓（store 里已 pushHistory，可撤销 ✓）*/
+/** 按内容套用模板 ✓：先问「跳过哪些页」 ✓（留空=全部处理 ✓，取消=什么都不做 ✓） */
+function autoTemplate() {
+  fileOpen.value = false
+  const promptText = '按内容套用模板（能识别的页套用版式，其余保留原样，可 Ctrl+Z 撤销）' + String.fromCharCode(10, 10) + '要跳过哪些页？填页码、逗号分隔；留空 = 全部处理'
+  const ans = window.prompt(promptText, '')
+  if (ans === null) return
+  const skip = String(ans).split(/[,，、\s]+/).map((s) => parseInt(s, 10)).filter((n) => Number.isFinite(n) && n > 0)
+  const r = store.applyAutoTemplate({ skip })
+  fileToast.value = '按内容套用模板：套用 ' + r.applied + ' 页 / 保留 ' + r.kept + ' 页' + (skip.length ? '（已跳过 ' + skip.join('、') + '）' : '') + ' —— 可 Ctrl+Z 撤销'
+  flashToast()
+}
+
 function houseStyle(mode: 'soft' | 'strong') {
   fileOpen.value = false
   const r = store.applyHouseStyle(undefined, mode)
@@ -651,6 +663,9 @@ onBeforeUnmount(() => {
           </button>
           <button class="dropdown__item" title="彻底：在轻度基础上，把原课件的配色按 60-30-10 重映射到主题的 primary/accent（变化明显，但会丢掉原课件的配色语义）——可 Ctrl+Z 撤销" @click="houseStyle('strong')">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.theme"></svg></span>统一风格（彻底·明显）
+          <button class="dropdown__item" title="按内容识别页面角色（例题/定理/定义/练习/小结/探究），套用对应版式；含表格/图片的页、内容装不下的页一律保留原样 —— 可 Ctrl+Z 撤销" @click="autoTemplate">
+            <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.theme"></svg></span>按内容套用模板…
+          </button>
           </button>
         <button class="dropdown__item" title="导入 PDF（.pdf）：自动判断有没有文本层 —— 有就抽成可编辑文字，没有就每页一张图" @click="pickPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导入 PDF（.pdf）</button>
         </div>

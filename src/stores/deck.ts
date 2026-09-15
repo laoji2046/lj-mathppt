@@ -11,6 +11,7 @@ import { findBundle } from '@/templates/mathBundles'
 import { findProTemplate, findProBundle } from '@/templates/proTemplates'
 import { findMathAppletTemplate } from '@/templates/mathAppletTemplates'
 import { restyleDeck } from '@/templates/restyle'
+import { autoTemplateDeck, type AutoApplyResult } from '@/templates/autoTemplate'
 
 const STORAGE_KEY = 'lj-mathslides-vue:deck'
 const VERSIONS_KEY = 'lj-mathslides-vue:versions'
@@ -951,6 +952,15 @@ export const useDeckStore = defineStore('deck', () => {
    *   文字颜色**保色相**地夹到可读区间 ✓ —— 但**绝不碰内容** ✓。
    *   ⚠ pushHistory 必须在改动**之前** ✗（否则撤销不回来 ✓）。
    */
+  /**
+   * 按内容套用模板 ✓：**能识别的页套用版式 ✓，认不出/装不下的页保留原样 ✓**（用户口径 ✓）。
+   * 只换 elements ✓（背景/备注不动 ✓）；pushHistory 在改动**之前** ✗（否则撤销不回来 ✓）。
+   */
+  function applyAutoTemplate(opts: { skip?: number[] } = {}): AutoApplyResult {
+    pushHistory()
+    return autoTemplateDeck(deck.value, undefined, opts)
+  }
+
   function applyHouseStyle(themeId?: string, mode: 'soft' | 'strong' = 'soft') {
     pushHistory()
     return restyleDeck(deck.value, themeId, mode)
@@ -988,5 +998,6 @@ export const useDeckStore = defineStore('deck', () => {
     drawTool, setDrawTool, clearDrawTool, updateDeckMeta,
     applyTheme,
     applyHouseStyle,
+    applyAutoTemplate,
   }
 })
