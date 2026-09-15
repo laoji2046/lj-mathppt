@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1275**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1276**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,35 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-15（v2026.09.1276）
+
+**1276 · 减重第一步：移走没人用的 GeoGebra 两套（-55.2 MB）**
+
+起因：用户提出"能不能把某些功能做成插件、按需安装" ✓。先量再谈 ✓，量出的第一条最值钱：
+
+    dist 111.5 MB 里，GeoGebra 占 **97.3 MB**（85%）✓，而应用自身代码只有 **1.4 MB** ✓
+    public/geogebra/5.0/ 下有三套引擎：
+      web        40.4 MB  ✗ **全仓无任何引用**
+      web3d      41.3 MB  ✓ 唯一在用（GGB_CODEBASE = geogebra/5.0/web3d/ ✓）
+      webSimple  14.7 MB  ✗ **全仓无任何引用**
+
+**做法**：把这两套**移出仓库** ✓（移到 `D:\_unused-geogebra-20260915` ✓，**可逆** ✓），
+删除前用 `*.ts,*.vue,*.html,*.json,*.js,*.css,*.md` 全类型再搜一遍 ✓ 确认无引用 ✓。
+
+**踩坑** ✗：移走后 `npm run build` 体积**没变** ✓ —— Vite 只**新增** public 的文件 ✓，
+**不会删除**已经不在 public 里的旧产物 ✗（`clean-dist.cjs` 只管 assets/ ✓）。
+**必须 `Remove-Item dist` 后重建** ✓ 才看到真实体积 ✓。
+
+**结果**：
+
+    dist 111.5 MB → **56.3 MB** ✓（-55.2 MB）  geogebra 97.3 → 42.2 MB ✓
+    web3d.nocache.js 仍在 ✓  index.html 仍在 ✓
+
+**顺带收益**：这些是 git 跟踪文件 ✓，提交后仓库与**快照包**（含 public）同步变小 ✓。
+
+**下一步（第 1 层）**：懒加载 ✓ —— 实测 `defineAsyncComponent / await import(` 出现 **0 次** ✗，
+所有功能启动即加载 ✓（1299 KB 单文件 ✓）。
 
 ### 2026-09-15（v2026.09.1275）
 
