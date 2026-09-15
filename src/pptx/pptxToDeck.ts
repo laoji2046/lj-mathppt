@@ -103,8 +103,23 @@ const num = (v: string | null | undefined, d = 0): number => {
   const n = Number(v)
   return Number.isFinite(n) ? n : d
 }
-/** EMU → px（1 inch = 914400 EMU = 96 px） */
-const emu2px = (v: number): number => Math.round((v / 914400) * 96)
+/**
+ * ⚠ 目标画布固定 **1920×1080** ✓ —— 与应用的设计画布一致 ✓。
+ *
+ * 为什么这么做 ✗：应用的**版式函数 / 内容模板 / 主题 TypeScale / 统一风格**全都按 1920 设计 ✓。
+ *   若导入保持 PPT 原本的 1280×720 ✓，套用版式时字号与固定坐标都对不上 ✓
+ *   （实测：正文块算成 1014px 高、页脚跑到画布外 ✓，溢出 35 个元素 ✗）。
+ *   所以在这里**一次性等比放大** ✓，让导入结果直接落在应用的"母语"尺寸上 ✓。
+ *
+ * 做法：把系数折进**两个换算函数** ✓（emu2px 管几何 ✓、sz2px 管字号 ✓），
+ *   于是上百处调用不用改 ✗，位置/尺寸/列宽/行高/线宽/字号**全体等比** ✓。
+ */
+const TARGET_W = 1920
+const TARGET_H = 1080
+let PX_SCALE = 1
+
+/** EMU → px（1 inch = 914400 EMU = 96 px），再乘导入缩放 ✓ */
+const emu2px = (v: number): number => Math.round((v / 914400) * 96 * PX_SCALE)
 
 /**
  * 导入时的**字号系数** —— PPT 的 18pt 换算过来是 24px/1280 版面 ✓，
@@ -115,7 +130,7 @@ const emu2px = (v: number): number => Math.round((v / 914400) * 96)
 const FONT_SCALE = 0.9
 
 /** 元素基础矩形（pt→px：sz 是 1/100 磅） */
-const sz2px = (sz: number): number => Math.max(8, Math.round((sz / 100) * (96 / 72)))
+const sz2px = (sz: number): number => Math.max(8, Math.round((sz / 100) * (96 / 72) * PX_SCALE))
 
 /** 自然宽度（一行放完要多宽） */
 function naturalWidth(text: string, fontSize: number): number {
@@ -233,15 +248,21 @@ export async function pptxToDeck(
 
   // 1) 页面尺寸（EMU）
   const presXml = await text('ppt/presentation.xml')
-  let deckW = 1280, deckH = 720
+  // 读 PPT 原始尺寸 → 定缩放系数 ✓（用 width 定比例 ✓；本样张 12192000 EMU = 1280px → K = 1.5 ✓）
+  const deckW = TARGET_W
+  const deckH = TARGET_H
   if (presXml) {
     const pres = parseXml(presXml)
     const sz = find(pres, 'sldSz')
     const cx = num(sz?.attrs['cx'], 0)
     const cy = num(sz?.attrs['cy'], 0)
-    if (cx > 0 && cy > 0) {
-      deckW = emu2px(cx)
-      deckH = emu2px(cy)
+    if (cx > 0) {
+      const rawW = Math.round((cx / 914400) * 96)      // ⚠ 这里**不能**用 emu2px ✗（它已含 PX_SCALE ✓，会循环 ✓）
+      if (rawW > 0) PX_SCALE = TARGET_W / rawW
+    }
+    if (cy > 0 && PX_SCALE === 1) {
+      const rawH = Math.round((cy / 914400) * 96)
+      if (rawH > 0) PX_SCALE = TARGET_H / rawH
     }
   }
 
