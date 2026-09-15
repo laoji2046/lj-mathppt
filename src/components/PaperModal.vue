@@ -945,12 +945,6 @@ async function savePdf() {
   }
   if (!ok) window.print()
 }
-async function exportExam19Pdf() {
-  template.value = 'exam19'
-  input.value = EXAM19
-  await render()
-  await savePdf()
-}
 function insertBlank() {
   const v = Number(blankVal.value) || 4
   const u = blankUnit.value === 'mm' ? 'mm' : 'cm'
@@ -1215,9 +1209,6 @@ watch([headerText, footerText], () => render())
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10M7 9l5 4 5-4"/><path d="M5 19h14"/></svg><span>保存PDF</span>
                 </button>                <button class="pm__btn pm__btn--primary" title="打印 / 另存为 PDF（矢量文字，可搜索可选中；比图片版更清晰）" @click="printPdf">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></svg>
-                </button>
-                <button class="pm__btn" title="一键导出 19 题试卷为 PDF" @click="exportExam19Pdf">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 13l3 3 5-6"/></svg><span>19题PDF</span>
                 </button>
                 <button v-if="imgDirHint" class="pm__btn" :title="'重新读取本地图（根目录：' + imgDirHint + '）'" @click="refreshImages">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg><span>{{ imgLoading ? '读图中…' : '刷新图片' }}</span>
