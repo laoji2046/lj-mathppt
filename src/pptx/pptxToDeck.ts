@@ -338,9 +338,14 @@ export async function pptxToDeck(
         }
         return
       }
-      // 位置：spPr/a:xfrm 或 xfrm
+      // 位置：三种放法，一个都不能漏 ✗
+      //   p:sp / p:pic  → spPr/a:xfrm
+      //   p:graphicFrame → **p:xfrm**（直接子节点！不是 spPr 里 ✗）
+      //   p:grpSp        → grpSpPr/a:xfrm
+      // ⚠ 漏掉 graphicFrame 那条的后果：**表格/图表/OLE 全部落到 (0,0)** ✗ ——
+      //   实测就是表格压在标题上、公式叠在一起 ✓（用户两次反馈的其实是同一个根 ✓）。
       const spPr = kid(shape, 'spPr') ?? kid(shape, 'grpSpPr')
-      const xfrm = find(spPr, 'xfrm')
+      const xfrm = find(spPr, 'xfrm') ?? kid(shape, 'xfrm')
       const off = kid(xfrm, 'off')
       const ext = kid(xfrm, 'ext')
       const hasPos = !!(off && ext)
