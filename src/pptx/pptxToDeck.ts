@@ -24,6 +24,13 @@ export interface PptxStats {
   skippedNoPos: number
   /** 跳过的 WMF/EMF（OLE 预览，不是内容） */
   skippedVector: number
+  /**
+   * 跳过的 **0×0 退化对象** ✓ —— PPT 里这种东西本来就看不见 ✓（PowerPoint 也不渲染 ✓）。
+   * ⚠ 不跳过会出事：兜底逻辑 w||200 / h||150 会给它**凭空造出 200x150** ✗，
+   *   于是画布上多一个幽灵图片 ✓（实测：样张 P11、用户 P9 都是这个 ✓，
+   *   位置还在画布外 1312px ✓，把几何自检也带偏了 ✓）。
+   */
+  skippedZeroSize: number
   /** 只有 OLE 壳、读不到原生公式的个数（WMF 预览浏览器渲染不了 → 明确报数，别留暗洞 ✗） */
   oleFormulas: number
   /**
@@ -233,7 +240,7 @@ export async function pptxToDeck(
   buf: Uint8Array,
   opts: { onProgress?: (i: number, total: number) => void } = {},
 ): Promise<{ deck: any; stats: PptxStats }> {
-  const stats: PptxStats = { slides: 0, texts: 0, images: 0, tables: 0, formulas: 0, skippedNoPos: 0, skippedVector: 0, oleFormulas: 0, geomSuspect: 0, bytes: 0 }
+  const stats: PptxStats = { slides: 0, texts: 0, images: 0, tables: 0, formulas: 0, skippedNoPos: 0, skippedVector: 0, oleFormulas: 0, skippedZeroSize: 0, geomSuspect: 0, bytes: 0 }
   const entries = listEntries(buf)
   const byName = new Map(entries.map((e) => [e.name, e]))
   const text = async (name: string) => (byName.has(name) ? readText(buf, name) : null)
@@ -362,6 +369,9 @@ export async function pptxToDeck(
       const y = Math.round(emu2px(num(off?.attrs['y'], 0)) * scY + baseY)
       const w = Math.round(emu2px(num(ext?.attrs['cx'], 0)) * scX)
       const h = Math.round(emu2px(num(ext?.attrs['cy'], 0)) * scY)
+
+      // ⚠ 0×0 退化对象：跳过 ✓（**只按尺寸判，不按位置判** ✗ —— 元素放在画布外是合法的 ✓）
+      if (hasPos && w <= 0 && h <= 0) { stats.skippedZeroSize++; return }
 
       if (ln === 'pic') {
         const blip = find(shape, 'blip')
