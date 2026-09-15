@@ -11,7 +11,7 @@
  */
 import { listEntries, readEntry, readText } from '@/docx/zip'
 import { parseXml, type XmlNode } from '@/docx/xml'
-import { ommlToLatex } from './ommlToLatex'
+import { ommlToLatex, setOmmlTheme } from './ommlToLatex'
 import { createElement } from '@/types'
 
 export interface PptxStats {
@@ -235,8 +235,9 @@ export async function pptxToDeck(
     }
   }
 
-  // 1.5) 主题色板（schemeClr 要用它解析）
+  // 1.5) 主题色板（schemeClr 要用它解析；公式里的颜色也用它 ✓）
   const theme = await loadTheme(buf, byName)
+  setOmmlTheme(theme)
 
   // 2) 幻灯片顺序：presentation.xml 的 sldIdLst + rels 映射（不能只按 slideN 数字排 ✗）
   let order: string[] = []
@@ -396,8 +397,19 @@ export async function pptxToDeck(
           const nw = naturalWidth(txt, fpx)
           if (nw > fw) fw = Math.min(nw, deckW - x - 8)
         }
-        // 框随字长（spAutoFit）：高度至少放得下按折行估算出的行数 ✓
-        const need = estimateLines(txt, fpx, fw) * fpx * 1.28 + fpx * 0.35
+        // 行距 / 段间距（实测样张 lnSpc 从 50% 到 150% 都有 ✗，不还原会挤在一起或散开 ✓）
+        const pPr0 = paras[0] ? kid(paras[0], 'pPr') : null
+        const lnPct = pPr0 ? (find(pPr0, 'lnSpc') ? num(find(find(pPr0, 'lnSpc')!, 'spcPct')?.attrs['val'], 0) : 0) : 0
+        // val=0 在 PPT 里等于"单倍" ✗，不能当 0 用
+        const lineHeight = lnPct > 0 ? Math.min(3, Math.max(0.6, lnPct / 100000)) : 1
+        const pct = (node: XmlNode | null) => {
+          const v = node ? num(find(node, 'spcPct')?.attrs['val'], 0) : 0
+          return v > 0 ? (v / 100000) * fpx : 0
+        }
+        const paraBefore = Math.round(pct(pPr0 ? kid(pPr0, 'spcBef') : null))
+        const paraAfter = Math.round(pct(pPr0 ? kid(pPr0, 'spcAft') : null))
+        // 框随字长（spAutoFit）：高度至少放得下按折行估算出的行数（用真实行距 ✓）
+        const need = estimateLines(txt, fpx, fw) * fpx * lineHeight + fpx * 0.35 + paraBefore + paraAfter
         if (need > fh) fh = Math.ceil(need)
         let color: string | null = null
         for (const rPr of allDeep(txBody, 'rPr')) { const c = colorOf(rPr, theme); if (c) { color = c; break } }
@@ -412,6 +424,9 @@ export async function pptxToDeck(
           ...(color ? { color } : {}),
           ...(bold ? { fontWeight: 700 } : {}),
           ...(st.bullet !== 'none' ? { bullet: st.bullet, bulletIndent: st.bulletIndent ?? 24 } : {}),
+          ...(lineHeight !== 1 ? { lineHeight } : {}),
+          ...(paraBefore ? { paraBefore } : {}),
+          ...(paraAfter ? { paraAfter } : {}),
           // 垂直对齐跟 PPT 的 anchor：t=顶端 / ctr=居中 / b=底端
           valign: anchor === 'ctr' ? 'middle' : anchor === 'b' ? 'bottom' : 'top',
         })

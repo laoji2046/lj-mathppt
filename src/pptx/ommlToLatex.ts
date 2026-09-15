@@ -112,6 +112,56 @@ function wrap(s: string): string {
   return '{' + s + '}'
 }
 
+/**
+ * 公式里的颜色：OMML 的 `m:r` 里可以带 `a:rPr/a:solidFill` ✗ ——
+ * 实测样张公式内用了 **12 种颜色**（#1552D1 蓝×131、#FF0000 红×80 …），
+ * 不还原的话整段公式会变成一色，跟原课件差很远 ✓。
+ * 主题色板由调用方（pptxToDeck）在转换前塞进来（单线程，用模块级变量最省事 ✓）。
+ */
+let curTheme: Record<string, string> = {}
+export function setOmmlTheme(t: Record<string, string>) { curTheme = t || {} }
+/**
+ * ⚠ 公式内颜色**暂缓（v1263 起默认关）**：
+ * 实测样张公式内有 12 种颜色（#1552D1 蓝×131、#FF0000 红×80 …），本意是还原它们 ✓。
+ * 但发到 MathJax 上两种写法都失败 ✗：
+ *   \color{#ff0000}{…}      → "You can't use 'macro parameter character #' in math mode"
+ *   \color[RGB]{255,0,0}{…} → 公式不渲染，原样显示 LaTeX 源码
+ * 且给 tex 显式加 packages:[…,'color'] 也没解决 ✓。
+ * 结论：本应用的 MathJax 环境里 \color 不可用，**保持关闭**，别让公式变坏 ✓。
+ * 想再试的方向：(1) 查 useMathJax 的 MathJax 源是否裁剪过 color 扩展；
+ *              (2) 改用 \textcolor / 自建宏；(3) 用 MathJax 的 CSS 变量方案。
+ * 打开只需把 MATH_COLOR_ON 改成 true ✓（解析逻辑与主题色都已就绪 ✓）。
+ */
+const MATH_COLOR_ON = false
+function mathColorOf(node: XmlNode | null): string | null {
+  if (!node) return null
+  const fill = (function f(n: XmlNode | null): XmlNode | null {
+    if (!n) return null
+    for (const k of n.kids) {
+      if (typeof k === 'string') continue
+      if (local(k.name) === 'solidFill') return k
+      const d = f(k); if (d) return d
+    }
+    return null
+  })(node)
+  if (!fill) return null
+  const srgb = (function g(n: XmlNode | null, name: string): XmlNode | null {
+    if (!n) return null
+    for (const k of n.kids) { if (typeof k === 'string') continue
+      if (local(k.name) === name) return k; const d = g(k, name); if (d) return d }
+    return null
+  })
+  const s = srgb(fill, 'srgbClr')
+  if (s?.attrs['val']) return '#' + s.attrs['val'].toLowerCase()
+  const sc = srgb(fill, 'schemeClr')
+  if (sc?.attrs['val']) {
+    const key = sc.attrs['val']
+    const alias: Record<string, string> = { tx1: 'dk1', tx2: 'dk2', bg1: 'lt1', bg2: 'lt2' }
+    return curTheme[key] || curTheme[alias[key]] || (key === 'tx1' ? '#000000' : null)
+  }
+  return null
+}
+
 /** 取某个子节点的 LaTeX（没有就空串） */
 function sub(n: XmlNode | null): string {
   return n ? ommlNode(n) : ''
@@ -133,8 +183,21 @@ function ommlNode(n: XmlNode): string {
     case 'sPrePr': case 'boxPr': case 'borderBoxPr': case 'phantPr':
       return ''   // 属性节点不产出内容
 
-    // ---- 文字 ----
-    case 'r': return esc(textOf(n))
+    // ---- 文字（带颜色时包一层 `\color{}` ✓）----
+    case 'r': {
+      const txt = esc(textOf(n))
+      if (!txt) return ''
+      const col = MATH_COLOR_ON ? mathColorOf(n) : null
+      if (!col) return txt
+      // ⚠ MathJax 的 \color **不认 CSS 的 #rrggbb** ✗（数学模式里 # 是宏参数符，
+      //   会直接报 "macro parameter character #"。应用配置里还自定义了 \comb 这类带 #1 的宏 ✓）。
+      //   必须用 color 扩展的 [RGB]{r,g,b} 写法 ✓。
+      const m = /^#([0-9a-fA-F]{6})$/.exec(col)
+      const spec = m
+        ? '[RGB]{' + [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16)).join(',') + '}'
+        : '{' + col + '}'
+      return '\\color' + spec + '{' + txt + '}'
+    }
     case 't': return esc(textOf(n))
     case 'br': return '\\\\ '   // 手动换行
 
@@ -188,8 +251,15 @@ function ommlNode(n: XmlNode): string {
     }
 
     // ---- 上/下极限（lim 之类）----
-    case 'limLow': return wrap(sub(kid(n, 'e'))) + '_' + wrap(sub(kid(n, 'lim')))
-    case 'limUpp': return wrap(sub(kid(n, 'e'))) + '^' + wrap(sub(kid(n, 'lim')))
+    // 上下极限：lim/max/min 这类要写成 LaTeX 算符（lim 是正体，{lim} 会是斜体 ✗）
+    case 'limLow': case 'limUpp': {
+      const base = sub(kid(n, 'e')).trim()
+      const opName = base.replace(/^\\/, '')
+      const isOp = /^(lim|max|min|sup|inf|det|gcd|lg|ln|log)$/.test(opName)
+      const head = isOp ? '\\' + opName : wrap(base)
+      const mark = nm === 'limLow' ? '_' : '^'
+      return head + mark + wrap(sub(kid(n, 'lim')))
+    }
 
     // ---- 重音 / 上划线 ----
     case 'acc': {
