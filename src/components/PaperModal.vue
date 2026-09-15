@@ -248,6 +248,10 @@ function parse(src: string): string {
   const Q2 = String.fromCharCode(34)
 
   // 题目块缓冲：null = 不在题目块内 ✓（详见下面的 [题] 标记处说明 ✓）
+  /** 当前块对应的源码行号与行数 —— 供预览里拖动排序时反查源码 ✓（data-l / data-n ✓） */
+  let curL = 0
+  let curN = 1
+  let qStart = 0
   let qBuf: { stem: string[]; opts: string[]; sol: string[] | null; inOpts: boolean } | null = null
   /** 把缓冲的题目内容拼成**一个** .pp-block ✓（解析区默认收起，打印时强制展开 ✓） */
   const emitQ = () => {
@@ -264,9 +268,11 @@ function parse(src: string): string {
     return '<div class=' + Q2 + 'pp-block paper-q' + Q2 + '>' + seg(q.stem, 'stem') + seg(q.opts, 'opts') + sol + '</div>'
   }
 
-  const blk = (h: string, st = '') => '<div class="pp-block"' + (st ? ' style="' + st + '"' : '') + '>' + h + '</div>'
+  const blk = (h: string, st = '') => '<div class="pp-block" data-l="' + curL + '" data-n="' + curN + '"' + (st ? ' style="' + st + '"' : '') + '>' + h + '</div>'
   for (let i = 0; i < lines.length; i++) {
     let t = lines[i].trim()
+    curL = i + 1
+    curN = 1
     if (!t) continue
     const so = stripOpts(t)
     t = so.rest
@@ -276,8 +282,8 @@ function parse(src: string): string {
     //   结果只有 [4cm] 那种行才会走到 ✓，标记全被当普通文字打出来了 ✗（截图看得很清楚 ✓）。
     // 为什么要题目块 ✗：分页按 flow.children 逐个块搬 ✓（见 paginate）—— 题干/选项/解析散成
     //   多个块会被拆到两页中间 ✗；做成**一个块**就不会 ✓。
-    if (/^\[题\]$/.test(t)) { if (qBuf) out += emitQ(); qBuf = { stem: [], opts: [], sol: null, inOpts: false }; continue }
-    if (/^\[\/题\]$/.test(t)) { if (qBuf) { out += emitQ(); qBuf = null } continue }
+    if (/^\[题\]$/.test(t)) { if (qBuf) out += emitQ(); qBuf = { stem: [], opts: [], sol: null, inOpts: false }; qStart = curL; continue }
+    if (/^\[\/题\]$/.test(t)) { if (qBuf) { curL = qStart || curL; curN = i + 1 - curL + 1; out += emitQ(); qBuf = null } continue }
     if (/^\[选项\]$/.test(t)) { if (qBuf) { qBuf.inOpts = true; qBuf.sol = null } continue }
     if (/^\[解析\]$/.test(t)) { if (qBuf) { qBuf.sol = []; qBuf.inOpts = false } continue }
     if (qBuf) {
@@ -488,6 +494,55 @@ function applyLayout(el: HTMLElement | null = pageEl.value) {
   el.style.setProperty('--paper-footergap', String(footerGap.value || 0) + 'px')
   const h2 = el.querySelector('h2') as HTMLElement | null
   if (h2) h2.style.fontSize = h2size.value + 'pt'
+}
+/**
+ * 拖动排序（在预览里把块拖到别处）✓。
+ *
+ * 设计要点：**改的永远是源码文本** ✗，不去动渲染出来的 DOM ✓ ——
+ * textarea 始终是唯一事实源 ✓，所以预览、打印、草稿、导出**自动全部跟着变** ✓。
+ * （反过来「直接改 DOM」会被下一次 re-render 覆盖掉 ✗。）
+ */
+let dragFrom: { l: number; n: number } | null = null
+function blkOf(ev: DragEvent): HTMLElement | null {
+  return (ev.target as HTMLElement).closest('.pp-block') as HTMLElement | null
+}
+function onBlkDragStart(ev: DragEvent) {
+  const b = blkOf(ev)
+  if (!b) return
+  dragFrom = { l: Number(b.dataset.l) || 0, n: Number(b.dataset.n) || 1 }
+  if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'move'
+  b.classList.add('pp-block--drag')
+}
+function onBlkDragEnd() {
+  document.querySelectorAll('.pp-block--drag, .pp-block--over').forEach((x) => x.classList.remove('pp-block--drag', 'pp-block--over'))
+  dragFrom = null
+}
+function onBlkDragOver(ev: DragEvent) {
+  const b = blkOf(ev)
+  if (!b || !dragFrom) return
+  ev.preventDefault()
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'
+  document.querySelectorAll('.pp-block--over').forEach((x) => x.classList.remove('pp-block--over'))
+  b.classList.add('pp-block--over')
+}
+function onBlkDrop(ev: DragEvent) {
+  const b = blkOf(ev)
+  if (!b || !dragFrom) return
+  ev.preventDefault()
+  const to = Number(b.dataset.l) || 0
+  const from = Math.max(0, dragFrom.l - 1)
+  const n = Math.max(1, dragFrom.n)
+  const target = Math.max(0, to - 1)
+  const src = input.value.split('\n')
+  if (target >= from && target < from + n) { onBlkDragEnd(); return }
+  const moved = src.splice(from, n)
+  const insertAt = target > from ? target - n + 1 : target
+  src.splice(insertAt, 0, ...moved)
+  input.value = src.join('\n')
+  onBlkDragEnd()
+  render()
+  saveDraftSoon()
+  paperMsg.value = '已调整顺序（想还原再拖回去即可）'
 }
 function refreshLayout() {
   applyFont(); applyLayout()
@@ -1269,7 +1324,7 @@ watch([headerText, footerText], () => render())
                 <button @click="zoomReset">重置</button>
               </div>
               <div ref="a4El" class="pm__a4"></div>
-              <div ref="pageEl" class="paper-flow" style="position:absolute;left:-99999px;top:0;pointer-events:none;"></div>
+              <div ref="pageEl" @dragstart="onBlkDragStart($event)" @dragend="onBlkDragEnd()" @dragover="onBlkDragOver($event)" @drop="onBlkDrop($event)" class="paper-flow" style="position:absolute;left:-99999px;top:0;pointer-events:none;"></div>
             </div>
           </div>
         </div>
@@ -1426,6 +1481,11 @@ watch([headerText, footerText], () => render())
 .paper-opt-two .paper-opt { flex: 1 1 calc(50% - 12px); }
 .paper-opt-four .paper-opt { flex: 0 0 100%; }
 .pp-block { display: block; overflow: visible; }
+/* 拖动排序的视觉提示 ✓（块整体可拖 ✓） */
+.pp-block { cursor: grab; }
+.pp-block--drag { opacity: 0.35; }
+.pp-block--over { box-shadow: 0 -3px 0 0 #1668e0; }
+@media print { .pp-block { cursor: auto; } .pp-block--over { box-shadow: none; } }
 .paper-space { display: block; width: 100%; }
 /* ── 题目块（[题]…[选项]…[解析]…[/题]）─────────────────────────────
    解析区默认收起 ✓ 点一下展开 ✓；**打印时强制展开** ✓（否则答案不会印出来 ✗），
