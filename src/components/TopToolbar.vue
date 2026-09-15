@@ -825,7 +825,7 @@ onBeforeUnmount(() => {
 
       <!-- Desmos 下拉：空白计算器 / 导入状态 JSON -->
       <div ref="dsmWrap" class="dropdown">
-        <button
+        <button v-if="addonOn('desmos')"
           class="btn"
           :class="{ 'btn--open': dsmMenuOpen }"
           title="插入 Desmos 图形计算器"
@@ -837,7 +837,7 @@ onBeforeUnmount(() => {
           <button class="dropdown__item" @click="addBlankDsm">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.plus"></svg></span>空白计算器
           </button>
-          <button v-if="addonOn('desmos')" class="dropdown__item" title="导入之前导出的 Desmos 状态 JSON" @click="pickDsm">
+          <button class="dropdown__item" title="导入之前导出的 Desmos 状态 JSON" @click="pickDsm">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>导入状态 JSON
           </button>
         </div>
