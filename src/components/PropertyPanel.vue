@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
+import { addonState } from '@/addons/registry'
 import type {
   ArrowElement, ChartElement, ChartType, DesmosElement, EmbedElement, EmbedKind, GeoGebraElement,
   GgbApp, IconElement, ImageElement, LineElement, MathElement, MathFigureElement,
@@ -27,6 +28,8 @@ import ColorSwatches from './ColorSwatches.vue'
 import { saveTextFile } from '@/composables/useTauri'
 
 const store = useDeckStore()
+/** addon 开关（关掉后入口隐藏、代码不加载） */
+function addonOn(id: string) { return addonState.enabled[id] !== false }
 const activeTab = ref<'props' | 'layers'>('props')
 const el = computed(() => store.selectedElement)
 
@@ -1077,7 +1080,7 @@ function layerTypeLabel(type: string) {
         <button class="quick__btn" style="width:100%;margin-top:4px" @click="patch({ fill: 'transparent' } as Partial<SlideElement>)">无填充</button>
         <button v-if="isEditableFig" class="quick__btn" style="width:100%;margin-top:4px;background:#ede9fb;border-color:#c9b8f0;color:#5b43ad" @click="openShapeEdit(el.id)">✎ 编辑顶点（也可双击图形）</button>
         <button v-if="mathfig?.vectorizeCtx" class="quick__btn" style="width:100%;margin-top:4px;background:#e6f0fb;border-color:#b9d3f0;color:#2b5b9c" @click="reopenVectorize">✎ 回到识别弹窗继续编辑（顶点 / 边 / 字母）</button>
-        <button v-if="mathfig?.geom3d" class="quick__btn" style="width:100%;margin-top:4px;background:#e6f0fb;border-color:#b9d3f0;color:#2b5b9c" @click="reopenGeom3D">⬢ 编辑三维模型（视角 / 点 / 线 / 面）</button>
+        <button v-if="addonOn('geom3d') && mathfig?.geom3d" class="quick__btn" style="width:100%;margin-top:4px;background:#e6f0fb;border-color:#b9d3f0;color:#2b5b9c" @click="reopenGeom3D">⬢ 编辑三维模型（视角 / 点 / 线 / 面）</button>
         <button class="quick__btn" style="width:100%;margin-top:4px;background:#eef7ee;border-color:#bfe0bf;color:#2f6b34" @click="openAsy">⌘ 导出 Asymptote 代码</button>
         <p v-if="mathfig?.kind === 'polygon'" style="margin:6px 0 0;font-size:11px;color:#8a8aa0;line-height:1.55">顶点编辑：拖动顶点即可调整；<b>双击顶点删除</b>；<b>双击边线插入顶点</b>（最少保留 3 个顶点）</p>
         <template v-if="isSolid">
@@ -1364,7 +1367,7 @@ function layerTypeLabel(type: string) {
             <option value="fill">拉伸填满（可变形）</option>
           </select>
         </label>
-        <button class="quick__btn" style="width:100%;margin-top:4px;background:#ede9fb;border-color:#c9b8f0;color:#5b43ad" @click="openImageEditor(el.id)">✂ 图片编辑器（裁剪 / 旋转 / 翻转 / 滤镜）</button>
+        <button v-if="addonOn('image-editor')" class="quick__btn" style="width:100%;margin-top:4px;background:#ede9fb;border-color:#c9b8f0;color:#5b43ad" @click="openImageEditor(el.id)">✂ 图片编辑器（裁剪 / 旋转 / 翻转 / 滤镜）</button>
         <button class="quick__btn" style="width:100%;margin-top:4px;background:#e6f0fb;border-color:#b9d3f0;color:#2b5b9c" @click="openVectorize(image?.src || '', el.id)">✎ 转成矢量图形（几何插图 → 可拖顶点）</button>
         <p class="panel__hint">线稿类插图（几何图、函数图）可以识别成数学图形元素：顶点能拖、线能改虚实粗细、字母能改。</p>
         <h3 class="panel__title">裁剪</h3>
