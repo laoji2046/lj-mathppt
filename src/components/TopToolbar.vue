@@ -663,9 +663,9 @@ onBeforeUnmount(() => {
           </button>
           <button class="dropdown__item" title="彻底：在轻度基础上，把原课件的配色按 60-30-10 重映射到主题的 primary/accent（变化明显，但会丢掉原课件的配色语义）——可 Ctrl+Z 撤销" @click="houseStyle('strong')">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.theme"></svg></span>统一风格（彻底·明显）
+          </button>
           <button class="dropdown__item" title="按内容识别页面角色（例题/定理/定义/练习/小结/探究），套用对应版式；含表格/图片的页、内容装不下的页一律保留原样 —— 可 Ctrl+Z 撤销" @click="autoTemplate">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.theme"></svg></span>按内容套用模板…
-          </button>
           </button>
         <button class="dropdown__item" title="导入 PDF（.pdf）：自动判断有没有文本层 —— 有就抽成可编辑文字，没有就每页一张图" @click="pickPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导入 PDF（.pdf）</button>
         </div>
