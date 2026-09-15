@@ -848,6 +848,67 @@ let renderTimer: number | undefined
 function onInput() { clearTimeout(renderTimer); renderTimer = window.setTimeout(render, 300) }
 
 // ---- 草稿持久化：关闭后重开保留最后编辑内容 ----
+const DEFAULTS_KEY = 'lj-paper-defaults-v1'
+/** 设置快照 —— 草稿与「默认设置」共用一份实现 ✓（别各写各的 ✗） */
+function settingsSnapshot() {
+  return {
+    template: template.value, fontFamily: fontFamily.value, fontSize: fontSize.value,
+    fontColor: fontColor.value, lineHeight: lineHeight.value, para: para.value, indent: indent.value,
+    h2size: h2size.value, numStyle: numStyle.value, optLayout: optLayout.value,
+    headerText: headerText.value, footerText: footerText.value, gapQ: gapQ.value,
+    headerGap: headerGap.value, footerGap: footerGap.value, autoNum: autoNum.value,
+  }
+}
+function applySettings(s: any) {
+  if (!s) return
+  if (s.template !== undefined) template.value = s.template
+  if (s.fontFamily !== undefined) fontFamily.value = s.fontFamily
+  if (s.fontSize) fontSize.value = s.fontSize
+  if (s.fontColor) fontColor.value = s.fontColor
+  if (s.lineHeight) lineHeight.value = s.lineHeight
+  if (s.para !== undefined) para.value = s.para
+  if (s.indent !== undefined) indent.value = s.indent
+  if (s.h2size) h2size.value = s.h2size
+  if (s.numStyle) numStyle.value = s.numStyle
+  if (s.optLayout) optLayout.value = s.optLayout
+  if (s.headerText !== undefined) headerText.value = s.headerText
+  if (s.footerText !== undefined) footerText.value = s.footerText
+  if (s.gapQ !== undefined) gapQ.value = s.gapQ
+  if (s.headerGap !== undefined) headerGap.value = s.headerGap
+  if (s.footerGap !== undefined) footerGap.value = s.footerGap
+  if (s.autoNum !== undefined) autoNum.value = s.autoNum
+  render()
+}
+function saveAsDefaults() {
+  try { localStorage.setItem(DEFAULTS_KEY, JSON.stringify(settingsSnapshot())); paperMsg.value = '已存为默认设置，下次打开自动套用' } catch { paperMsg.value = '存不上（浏览器隐私模式？）' }
+}
+function applyDefaults() {
+  try { const s = localStorage.getItem(DEFAULTS_KEY); if (!s) { paperMsg.value = '还没有存过默认设置'; return } applySettings(JSON.parse(s)); paperMsg.value = '已套用默认设置' } catch { paperMsg.value = '默认设置读取失败' }
+}
+const paperMsg = ref('')
+const paperDocxInput = ref<HTMLInputElement | null>(null)
+function pickPaperDocx() { paperDocxInput.value && paperDocxInput.value.click() }
+/** 导入 Word 文档作为试卷内容 —— 复用已有的 docx 解析器 ✓（动态导入，保持懒加载 ✓） */
+async function onPaperDocx(e: Event) {
+  const el = e.target as HTMLInputElement
+  const file = el.files && el.files[0]
+  el.value = ''
+  if (!file) return
+  paperMsg.value = '正在解析 Word 文档…'
+  try {
+    const buf = new Uint8Array(await file.arrayBuffer())
+    const { docxToMarkdown } = await import('@/docx/docxToMarkdown')
+    const { markdown, stats } = await docxToMarkdown(buf)
+    input.value = markdown
+    render()
+    saveDraft()
+    const ole = stats.oleFormulas > 0 ? ' · 另有 ' + stats.oleFormulas + ' 个 MathType 公式未转换（请在 Word 里先转成 Office 公式）' : ''
+    paperMsg.value = 'Word 导入完成：公式 ' + stats.formulas + ole
+  } catch (err: any) {
+    paperMsg.value = '导入失败：' + (err && err.message ? err.message : String(err))
+  }
+}
+
 const DRAFT_KEY = 'lj-paper-draft-v1'
 function saveDraft() {
   try {
@@ -1019,9 +1080,9 @@ watch([headerText, footerText], () => render())
   <button class="pm__btn" title="在光标处插入本地图片" @click="insertImage">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg><span>图片</span>
                 </button>
-                <button class="pm__btn pm__btn--primary" title="直接生成多页 PDF" @click="savePdf">
+                <button class="pm__btn" title="直接生成多页 PDF" @click="savePdf">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10M7 9l5 4 5-4"/><path d="M5 19h14"/></svg><span>保存PDF</span>
-                </button>                <button class="pm__btn" title="打印 / 另存为 PDF（矢量文字，可搜索可选中；比图片版更清晰）" @click="printPdf">
+                </button>                <button class="pm__btn pm__btn--primary" title="打印 / 另存为 PDF（矢量文字，可搜索可选中；比图片版更清晰）" @click="printPdf">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></svg>
                 </button>
                 <button class="pm__btn" title="一键导出 19 题试卷为 PDF" @click="exportExam19Pdf">
@@ -1043,6 +1104,17 @@ watch([headerText, footerText], () => render())
                 <button class="pm__btn" title="导出当前试卷设置为 JSON" @click="exportJson">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10M7 9l5 4 5-4M5 19h14"/></svg><span>导出</span>
                 </button>
+                <button class="pm__btn" title="把当前排版参数存为默认（下次打开自动套用）" @click="saveAsDefaults">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>
+                </button>
+                <button class="pm__btn" title="套用之前存下的默认排版参数" @click="applyDefaults">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>
+                </button>
+                <button class="pm__btn" title="导入 Word 文档（.docx）作为试卷内容" @click="pickPaperDocx">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+                </button>
+                <input ref="paperDocxInput" type="file" accept=".docx" style="display:none" @change="onPaperDocx" />
+                <span v-if="paperMsg" class="pm__imghint">{{ paperMsg }}</span>
                 <button class="pm__btn" title="语法帮助（含详细示范）" @click="helpOpen = true">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 .3c0 1.8-2.5 1.7-2.5 3.2"/><path d="M12 16.5h.01"/></svg><span>帮助</span>
                 </button>
