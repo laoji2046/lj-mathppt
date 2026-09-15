@@ -87,6 +87,32 @@ const emu2px = (v: number): number => Math.round((v / 914400) * 96)
 /** 元素基础矩形（pt→px：sz 是 1/100 磅） */
 const sz2px = (sz: number): number => Math.max(8, Math.round((sz / 100) * (96 / 72)))
 
+/**
+ * 估算文字在给定字号下的"自然尺寸"。
+ *
+ * 为什么需要 ✗：PPT 里 112 个文本框是 **spAutoFit（框随字长）**、51 个是 **wrap="none"（不换行）**，
+ * 存的 cy 只是"设计高度" ✗；应用这边文本框是固定宽高 + overflow:hidden ✓，
+ * 直接照搬就会**折行并裁掉后半截**（用户实测：拉长一点就正常 ✓）。
+ * 这里按"中日韩 1 个字宽、西文 0.55"估算，宁可略大（用户可以往里收 ✓，裁掉就救不回来 ✗）。
+ */
+function textUnits(s: string): number {
+  let u = 0
+  for (const ch of s) u += ch.codePointAt(0)! > 0x2e80 ? 1 : 0.55
+  return u
+}
+/** 需要的行数（按框宽折行估算） */
+function estimateLines(text: string, fontSize: number, boxW: number): number {
+  const perLine = Math.max(1, boxW / Math.max(1, fontSize))
+  let lines = 0
+  for (const para of text.split('\n')) lines += Math.max(1, Math.ceil(textUnits(para) / perLine))
+  return Math.max(1, lines)
+}
+/** 自然宽度（一行放完要多宽） */
+function naturalWidth(text: string, fontSize: number): number {
+  const widest = text.split('\n').reduce((m, p) => Math.max(m, textUnits(p)), 0)
+  return Math.ceil(widest * fontSize + fontSize * 0.6)
+}
+
 /** 主题色板（theme1.xml 的 clrScheme）—— schemeClr 要查这张表才能变成具体颜色 */
 type Theme = Record<string, string>
 async function loadTheme(buf: Uint8Array, byName: Map<string, any>): Promise<Theme> {
@@ -358,6 +384,21 @@ export async function pptxToDeck(
         // 样式：段落对齐/项目符号 + 首个有颜色的运行 + 首个加粗运行（应用的元素是"整块一个样式"）
         const paras = allParagraphs(txBody)
         const st = paraStyle(paras[0] ?? null)
+        // —— 尺寸修正（见 estimateLines 的注释）——
+        const bodyPr = find(txBody, 'bodyPr')
+        const noWrap = bodyPr?.attrs['wrap'] === 'none'
+        const anchor = bodyPr?.attrs['anchor']
+        const fpx = sz2px(sz)
+        let fw = w || 400
+        let fh = h || 60
+        if (noWrap) {
+          // 不换行：把框加宽到能一行放完（恢复 PPT 的样子 ✓）
+          const nw = naturalWidth(txt, fpx)
+          if (nw > fw) fw = Math.min(nw, deckW - x - 8)
+        }
+        // 框随字长（spAutoFit）：高度至少放得下按折行估算出的行数 ✓
+        const need = estimateLines(txt, fpx, fw) * fpx * 1.28 + fpx * 0.35
+        if (need > fh) fh = Math.ceil(need)
         let color: string | null = null
         for (const rPr of allDeep(txBody, 'rPr')) { const c = colorOf(rPr, theme); if (c) { color = c; break } }
         if (!color) color = colorOf(find(txBody, 'defRPr'), theme)
@@ -365,13 +406,14 @@ export async function pptxToDeck(
         for (const rPr of allDeep(txBody, 'rPr')) if (rPr.attrs['b'] === '1') { bold = true; break }
         const el = hasMath ? createElement('richtex') : createElement('text')
         Object.assign(el, {
-          x, y, w: w || 400, h: h || 60,
-          text: txt, fontSize: sz2px(sz),
+          x, y, w: Math.round(fw), h: Math.round(fh),
+          text: txt, fontSize: fpx,
           align: st.align,
           ...(color ? { color } : {}),
           ...(bold ? { fontWeight: 700 } : {}),
           ...(st.bullet !== 'none' ? { bullet: st.bullet, bulletIndent: st.bulletIndent ?? 24 } : {}),
-          ...(hasMath ? {} : { valign: 'middle' }),
+          // 垂直对齐跟 PPT 的 anchor：t=顶端 / ctr=居中 / b=底端
+          valign: anchor === 'ctr' ? 'middle' : anchor === 'b' ? 'bottom' : 'top',
         })
         elements.push(el)
         stats.texts++
