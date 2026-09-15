@@ -113,8 +113,12 @@ async function onPptxPicked(e: Event) {
     const warn = stats.skippedVector > 0
       ? ' · 跳过 ' + stats.skippedVector + ' 个 WMF/EMF 矢量图（浏览器不能渲染）'
       : ''
+    // ⚠ 只有 OLE 壳的公式：读不到内容 ✗，必须**明说**（与 Word 导入对 MathType 的处理一致 ✓）
+    const oleWarn2 = stats.oleFormulas > 0
+      ? ' · 注意：另有 ' + stats.oleFormulas + ' 个公式是 OLE 对象（读不到内容）—— 请在 PowerPoint 里把它们改成「插入 → 公式」的原生公式，再导一次'
+      : ''
     fileToast.value = 'PPT 导入完成：' + deck.slides.length + ' 页 · 公式 ' + stats.formulas +
-      ' · 图片 ' + stats.images + ' · 表格 ' + stats.tables + warn
+      ' · 图片 ' + stats.images + ' · 表格 ' + stats.tables + warn + oleWarn2
   } catch (err) {
     fileToast.value = 'PPT 导入失败：' + (err instanceof Error ? err.message : String(err))
   }

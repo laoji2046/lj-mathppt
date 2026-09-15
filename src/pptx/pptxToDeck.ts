@@ -24,6 +24,8 @@ export interface PptxStats {
   skippedNoPos: number
   /** 跳过的 WMF/EMF（OLE 预览，不是内容） */
   skippedVector: number
+  /** 只有 OLE 壳、读不到原生公式的个数（WMF 预览浏览器渲染不了 → 明确报数，别留暗洞 ✗） */
+  oleFormulas: number
   bytes: number
 }
 
@@ -224,7 +226,7 @@ export async function pptxToDeck(
   buf: Uint8Array,
   opts: { onProgress?: (i: number, total: number) => void } = {},
 ): Promise<{ deck: any; stats: PptxStats }> {
-  const stats: PptxStats = { slides: 0, texts: 0, images: 0, tables: 0, formulas: 0, skippedNoPos: 0, skippedVector: 0, bytes: 0 }
+  const stats: PptxStats = { slides: 0, texts: 0, images: 0, tables: 0, formulas: 0, skippedNoPos: 0, skippedVector: 0, oleFormulas: 0, bytes: 0 }
   const entries = listEntries(buf)
   const byName = new Map(entries.map((e) => [e.name, e]))
   const text = async (name: string) => (byName.has(name) ? readText(buf, name) : null)
@@ -297,7 +299,14 @@ export async function pptxToDeck(
       const ln = local(shape.name)
       // 兼容包装：真内容在 mc:Choice 里，mc:Fallback 是老的 VML/WMF 版（跳过 ✗）
       if (ln === 'AlternateContent') {
-        for (const ch of kidsOf(shape, 'Choice')) for (const c of kidsOf(ch)) await addShape(c, baseX, baseY)
+        for (const ch of kidsOf(shape, 'Choice')) {
+          for (const c of kidsOf(ch)) {
+            // ⚠ 只有 OLE 壳、里面没有原生 OMML 的公式：**明确报数** ✗
+            //   （WMF 预览浏览器渲染不了 ✓，静默跳过会在课件里留个洞 ✓）
+            if (local(c.name) === 'oleObj' && !allDeep(c, 'oMath').length) stats.oleFormulas++
+            await addShape(c, baseX, baseY)
+          }
+        }
         return
       }
       if (ln === 'grpSp') {
