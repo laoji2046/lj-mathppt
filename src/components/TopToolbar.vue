@@ -724,9 +724,7 @@ onBeforeUnmount(() => {
           </button>
           <button class="dropdown__item" @click="openSymbol(); shapeMenuOpen = false"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.symbol"></svg></span>数学符号</button>
           <button class="dropdown__item" @click="openIcon(); shapeMenuOpen = false"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.icon"></svg></span>图标库</button>
-          <button class="dropdown__item" title="数学图形：抛物线 / 三角形 / 贝塞尔 / 自定义多边形等" @click="openFig(); shapeMenuOpen = false">
-            <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.fig"></svg></span>数学图形…
-          </button>
+
         </div>
       </div>
 
