@@ -376,7 +376,13 @@ export async function pptxToDeck(
 
       if (ln === 'graphicFrame') {
         const tbl = find(shape, 'tbl')
-        if (!tbl) return          // 图表/其他 graphicFrame：v1 跳过
+        if (!tbl) {
+          // ⚠ 图表/OLE 等非表格：**不能直接 return** ✗ ——
+          //   实测 OLE 公式藏在 graphicFrame > graphicData > mc:AlternateContent 里 ✓，
+          //   直接返回会"统计不到、也捞不到里面的原生公式" ✓（oleFormulas 一直是 0 ✗ 就是这么来的 ✓）
+          for (const ac of allDeep(shape, 'AlternateContent')) await addShape(ac, baseX, baseY, scX, scY)
+          return
+        }
         const rows: string[][] = []
         const merges: { r: number; c: number; rs: number; cs: number }[] = []
         const trs = kidsOf(tbl, 'tr')

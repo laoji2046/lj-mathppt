@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1267**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1268**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,25 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-15（v2026.09.1268）
+
+**1268 · 修 v1267 的统计不生效：graphicFrame 里也要往下走**
+
+v1267 加了 `oleFormulas` 统计 ✓，但跑出来是 **0** ✗。原因很有代表性 ✓：
+
+    那些 OLE 藏在  spTree/graphicFrame/graphic/data/mc:AlternateContent/Fallback/oleObj  ✗
+    而我的 graphicFrame 分支「发现不是表格就 return」✗ → **里面的内容根本没被访问** ✓
+    （计数器自然不会跑 ✓）
+
+**改法**：非表格的 `graphicFrame` 也要**往下走一层**（把里面的 AlternateContent 交给通用分支 ✓）。
+修完：`oleFormulas: 74` ✓✓ —— 与手工统计的 OLE 对象数**完全一致** ✓。
+
+**顺带确认**：那 74 个 OLE 里**确实没有**原生 OMML ✓（`formulas` 仍是 43 ✓），
+所以"救不回内容"是**事实** ✓，不是没读全 ✓ —— 这个数字以后能直接回答这类疑问 ✓。
+
+**教训（今天第 N 次同类）**：**早返回（early return）会吃掉整棵子树** ✗。
+凡是"这个节点我处理不了"的地方 ✓，都要问一句"**里面还有没有别人要的东西**" ✓。
 
 ### 2026-09-15（v2026.09.1267）
 
