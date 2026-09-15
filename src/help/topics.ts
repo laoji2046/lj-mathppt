@@ -183,6 +183,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'GeoGebra 与 Desmos',
     tags: ['geogebra', 'ggb', 'desmos', '计算器', '动态'],
     body: [
+      img('demo-chart-desmos', '插入到画布后的实际效果：左侧是「图表」柱状图，右侧是嵌入的 Desmos 计算器（本地运行时，可交互）'),
       img('desmos-menu', '「Desmos ▾」：空白计算器或导入状态 JSON'),
       img('geogebra-suite', 'GeoGebra 作图套件：现场作图，可保存 .ggb'),
       img('geogebra-menu', '「GeoGebra ▾」：打开作图套件或导入 .ggb'),
