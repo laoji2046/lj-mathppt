@@ -83,21 +83,48 @@ function readableOn(color: string, bg: string): string {
   return hslToHex(h, s, l)
 }
 
+/**
+ * 统计整份课件里"饱和色"的出现频次 ✓ —— 用来推断原课件的**主色/强调色** ✓。
+ * 只统计"看得出是彩色"的（饱和度够 & 不太亮不太暗 ✓），灰阶不算 ✓。
+ */
+function colorFrequency(deck: Deck): Map<string, number> {
+  const freq = new Map<string, number>()
+  for (const s of deck.slides || []) for (const el of s.elements || []) {
+    const e2 = el as any
+    const cands: (string | undefined | null)[] = [e2.color, e2.stroke, e2.fill]
+    for (const c of cands) {
+      const hsl = c ? toHsl(String(c)) : null
+      if (!hsl) continue
+      const [, sat, lum] = hsl
+      if (sat < 0.25 || lum < 0.12 || lum > 0.88) continue     // 灰阶/近黑/近白不算 ✓
+      const key = String(c).toLowerCase()
+      freq.set(key, (freq.get(key) || 0) + 1)
+    }
+  }
+  return freq
+}
+
 /** 大字号用标题字，正文用正文字 ✓（分界取 h2 档位 ✓） */
 function pickFont(size: number, theme: Theme): string {
   return size >= theme.type.h2 ? theme.fontTitle : theme.fontBody
 }
 
 /** 对齐单个元素；返回是否改动过 ✓ */
-export function restyleElement(el: SlideElement, theme: Theme, slideBg: string): boolean {
+export function restyleElement(el: SlideElement, theme: Theme, slideBg: string, strong = false, palette?: Map<string, string>): boolean {
   let changed = false
   const anyEl = el as any
+  /** 彻底模式：把原课件的彩色**按角色**换成主题色 ✓（主色→primary、次色→accent） */
+  const mapColor = (c: string | undefined | null): string | undefined => {
+    if (!strong || !c || !palette) return undefined
+    return palette.get(String(c).toLowerCase())
+  }
   if (el.type === 'text' || el.type === 'richtex') {
     const snapped = snapSize(Number(anyEl.fontSize) || theme.type.body, theme)
     if (anyEl.fontSize !== snapped) { anyEl.fontSize = snapped; changed = true }
     const font = pickFont(snapped, theme)
     if (anyEl.fontFamily !== font) { anyEl.fontFamily = font; changed = true }
-    const col = readableOn(String(anyEl.color || theme.text), slideBg)
+    let col = mapColor(anyEl.color) || String(anyEl.color || theme.text)
+    col = readableOn(col, slideBg)
     if (anyEl.color !== col) { anyEl.color = col; changed = true }
     // ⚠ 字号一改，框高必须跟着重算 ✗ —— 应用的文字是 overflow:hidden ✓，
     //   字变大就会**裁字** ✓（实测：表格最后一行被裁 ✓）。这是"只改样式"必须付的代价 ✓。
@@ -139,8 +166,21 @@ export function restyleElement(el: SlideElement, theme: Theme, slideBg: string):
 /**
  * 把整份课件的样式对齐到主题 ✓。返回"改动了多少个元素" ✓（好给用户一个交代 ✓）。
  */
-export function restyleDeck(deck: Deck, themeId?: string): { theme: Theme; changed: number; slides: number } {
+export function restyleDeck(
+  deck: Deck,
+  themeId?: string,
+  mode: 'soft' | 'strong' = 'soft',
+): { theme: Theme; changed: number; slides: number; mode: string } {
   const theme = getTheme(themeId || deck.theme || 'edumath')
+  const strong = mode === 'strong'
+  // 彻底模式：先统计原课件的饱和色 ✓，按频次把第 1/2 名映射到 primary/accent ✓
+  let palette: Map<string, string> | undefined
+  if (strong) {
+    const freq = [...colorFrequency(deck).entries()].sort((a, b) => b[1] - a[1])
+    palette = new Map()
+    if (freq[0]) palette.set(freq[0][0], theme.primary)
+    if (freq[1]) palette.set(freq[1][0], theme.accent)
+  }
   let changed = 0
   let slides = 0
   for (const s of deck.slides as Slide[]) {
@@ -149,9 +189,9 @@ export function restyleDeck(deck: Deck, themeId?: string): { theme: Theme; chang
     s.bg = theme.bg
     if (before !== theme.bg) slides++
     for (const el of s.elements || []) {
-      if (restyleElement(el, theme, theme.bg)) changed++
+      if (restyleElement(el, theme, theme.bg, strong, palette)) changed++
     }
   }
   ;(deck as any).theme = theme.id
-  return { theme, changed, slides }
+  return { theme, changed, slides, mode }
 }

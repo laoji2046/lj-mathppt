@@ -951,9 +951,9 @@ export const useDeckStore = defineStore('deck', () => {
    *   文字颜色**保色相**地夹到可读区间 ✓ —— 但**绝不碰内容** ✓。
    *   ⚠ pushHistory 必须在改动**之前** ✗（否则撤销不回来 ✓）。
    */
-  function applyHouseStyle(themeId?: string) {
+  function applyHouseStyle(themeId?: string, mode: 'soft' | 'strong' = 'soft') {
     pushHistory()
-    return restyleDeck(deck.value, themeId)
+    return restyleDeck(deck.value, themeId, mode)
   }
 
   /** 应用主题：切换整套配色（背景 / 强调 / 文字），应用于全部页面 */

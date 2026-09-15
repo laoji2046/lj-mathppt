@@ -381,10 +381,12 @@ function disposePrintFrame(f: PrintFrame, delay = 8000) {
   setTimeout(() => { f.frame.remove(); URL.revokeObjectURL(f.url) }, delay)
 }
 /** 统一为本应用风格：只改样式、不碰内容 ✓（store 里已 pushHistory，可撤销 ✓）*/
-function houseStyle() {
+function houseStyle(mode: 'soft' | 'strong') {
   fileOpen.value = false
-  const r = store.applyHouseStyle()
-  fileToast.value = '已统一为「' + r.theme.name + '」：' + r.slides + ' 页背景、' + r.changed + ' 个元素的样式已对齐（内容未改动，可 Ctrl+Z 撤销）'
+  const r = store.applyHouseStyle(undefined, mode)
+  const what = mode === 'strong' ? '字体 + 配色已按 60-30-10 重映射' : '字号/字体/背景已对齐'
+  fileToast.value = '已统一为「' + r.theme.name + '」（' + (mode === 'strong' ? '彻底' : '轻度') + '：' + what + '）：' +
+    r.slides + ' 页背景、' + r.changed + ' 个元素（内容未改动，可 Ctrl+Z 撤销）'
   flashToast()
 }
 
@@ -644,8 +646,11 @@ onBeforeUnmount(() => {
           <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.file"></svg></span>导入 PPT(.pptx)
         </button>
         <button class="dropdown__item" title="导入 Word 文档（.docx）：本地解析、图片内嵌，一题一页" @click="pickDocx"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>导入 Word 文档（.docx）</button>
-          <button class="dropdown__item" title="把整份课件的样式统一为本应用的设计主题（字号吸附档位 / 字体 / 配色可读性）——只改样式，不碰内容，可 Ctrl+Z 撤销" @click="houseStyle">
-            <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.theme"></svg></span>统一为本应用风格
+          <button class="dropdown__item" title="轻度：字号吸附 TypeScale 档位、字体换主题字体、背景换主题底色、文字色只做可读性夹取（保留原课件配色语义）——只改样式，不碰内容，可 Ctrl+Z 撤销" @click="houseStyle('soft')">
+            <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.theme"></svg></span>统一风格（轻度）
+          </button>
+          <button class="dropdown__item" title="彻底：在轻度基础上，把原课件的配色按 60-30-10 重映射到主题的 primary/accent（变化明显，但会丢掉原课件的配色语义）——可 Ctrl+Z 撤销" @click="houseStyle('strong')">
+            <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.theme"></svg></span>统一风格（彻底·明显）
           </button>
         <button class="dropdown__item" title="导入 PDF（.pdf）：自动判断有没有文本层 —— 有就抽成可编辑文字，没有就每页一张图" @click="pickPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导入 PDF（.pdf）</button>
         </div>
