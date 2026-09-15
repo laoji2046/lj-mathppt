@@ -120,6 +120,7 @@ export function detectRole(slide: Slide, index = -1, opts: DetectOpts = {}): Det
 import type { Deck } from '@/types'
 import { getTheme, type Theme } from './pptTheme'
 import { definition, practice, steps, summary, theorem, think } from './pptLayouts'
+import { textBlockHeight } from '@/composables/textMetrics'
 
 /** 每个角色配一句页眉 ✓（写进版式的 eyebrow 槽位 ✓） */
 const EYEBROW: Record<Role, string> = {
@@ -133,11 +134,32 @@ const EYEBROW: Record<Role, string> = {
   explore: '探究 · 发现',
 }
 
+/**
+ * ⚠ 公式定界符要换 ✗：PPT 导入的文本用反斜杠括号 ✓，而**版式的 para() 只认美元符** ✗
+ *   （它按美元符判断要不要生成混排元素 ✓）。不转就会把公式当普通文字 ✓，
+ *   页面上直接显示 LaTeX 源码 ✗（实测 P12 ✓）。
+ *   实现刻意**不用正则** ✓ —— 特殊字符一律 fromCharCode 拼 ✓（今天多次栽在字面量上 ✓）。
+ */
+function toDollarMath(s: string): string {
+  const BS = String.fromCharCode(92)
+  const D = String.fromCharCode(36)
+  const open = BS + '('
+  const close = BS + ')'
+  const str = String(s)
+  if (str.indexOf(open) < 0) return str
+  return str.split(open).map((part, i) => {
+    if (i === 0) return part
+    const j = part.indexOf(close)
+    if (j < 0) return D + part
+    return D + part.slice(0, j) + D + part.slice(j + close.length)
+  }).join('')
+}
+
 /** 用识别结果重建这一页的元素 ✓（失败则返回 null = 保留原样 ✓） */
 function buildForRole(role: Role, d: Detected, t: Theme, canvas: { width: number; height: number }): SlideElement[] | null {
   const eyebrow = EYEBROW[role]
-  const title = d.title || ''
-  const body = d.body.length ? d.body : ['']
+  const title = toDollarMath(d.title || '')
+  const body = (d.body.length ? d.body : ['']).map(toDollarMath)
   switch (role) {
     case 'definition':
       return definition(t, { canvas, eyebrow, title, term: title, body })
@@ -186,6 +208,17 @@ export function autoTemplateDeck(deck: Deck, themeId?: string, opts: DetectOpts 
     if (!d) {
       kept++
       report.push({ index: i + 1, role: null, evidence: '—', title: '', changed: false })
+      return
+    }
+    // ⚠ 容量保险：正文按版式正文字号估高 ✓，超过可用高度就**不套** ✗（保留原页 ✓）。
+    //   实测 P9「分析法」有 18 段正文 ✓ —— 坐标已修好 ✓ 但版式**根本装不下** ✓，
+    //   套上去会把页脚和结论挤到画布外 ✗。宁可少套 ✓，不能挤爆 ✓。
+    const bodyW = Math.max(200, canvas.width - t.grid.margin * 2 - 160)
+    const availH = canvas.height - t.grid.margin * 2 - Math.round(t.type.h1 * 2.2)
+    const estH = d.body.reduce((n, s) => n + textBlockHeight(s, t.type.body, bodyW), 0)
+    if (estH > availH) {
+      kept++
+      report.push({ index: i + 1, role: null, evidence: d.evidence + '（内容 ' + d.body.length + ' 段、估高 ' + estH + 'px 超出版式容量 ' + availH + 'px）', title: d.title, changed: false })
       return
     }
     const built = buildForRole(d.role, d, t, canvas)
