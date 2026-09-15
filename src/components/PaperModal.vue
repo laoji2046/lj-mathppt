@@ -64,6 +64,9 @@ function applyHeaderPreset(id: string) {
   saveDraftSoon()
 }
 
+/** 总页数 —— 供页眉页脚的 {total} 变量用 ✓（在 paginate 末尾更新 ✓） */
+const totalPages = ref(1)
+
 const headerText = ref('')
 const footerText = ref('')
 const gapQ = ref(6)
@@ -509,15 +512,16 @@ function paginate() {
   })
   if (cur.length) pages.push(cur)
   if (!pages.length) pages.push([])
+  if (totalPages.value !== pages.length) totalPages.value = pages.length
   const mkPage = (blks: HTMLElement[], pno: number) => {
     const pg = document.createElement('div')
     pg.className = 'paper-page'
     const pv = String(pno), total = String(pages.length)
     const head = headerText.value
-      ? '<div class="paper-header">' + imageHtml(esc(headerText.value.replace(/\{page\}/g, pv).replace(/\{total\}/g, total))) + '</div>'
+      ? '<div class="paper-header">' + imageHtml(esc(headerText.value.replace(/\{page\}/g, pv).replace(/\{total\}/g, String(totalPages.value)).replace(/\{total\}/g, total))) + '</div>'
       : ''
     const foot = footerText.value
-      ? '<div class="paper-footer">' + imageHtml(esc(footerText.value.replace(/\{page\}/g, pv).replace(/\{total\}/g, total))) + '</div>'
+      ? '<div class="paper-footer">' + imageHtml(esc(footerText.value.replace(/\{page\}/g, pv).replace(/\{total\}/g, String(totalPages.value)).replace(/\{total\}/g, total))) + '</div>'
       : ''
     pg.innerHTML = head + blks.map((b) => b.outerHTML).join('') + foot
     applyFont(pg); applyLayout(pg)
