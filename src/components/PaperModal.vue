@@ -1012,7 +1012,18 @@ function applyDefaults() {
 }
 const paperMsg = ref('')
 const paperDocxInput = ref<HTMLInputElement | null>(null)
-function pickPaperDocx() { paperDocxInput.value && paperDocxInput.value.click() }
+/**
+ * 选 .docx —— **运行时动态创建 input 再 click** ✓（与「插入图片」同一条已验证的路 ✓）。
+ * ⚠ 不再用模板里那个隐藏 input ✗：display:none 的 file input，
+ *   某些浏览器会**拦截它的 click** ✓，表现就是「点了没反应、也没提示」✓（用户实测 ✓）。
+ */
+function pickPaperDocx() {
+  const fi = document.createElement('input')
+  fi.type = 'file'
+  fi.accept = '.docx'
+  fi.onchange = (ev) => void onPaperDocx(ev)
+  fi.click()
+}
 /** 导入 Word 文档作为试卷内容 —— 复用已有的 docx 解析器 ✓（动态导入，保持懒加载 ✓） */
 async function onPaperDocx(e: Event) {
   const el = e.target as HTMLInputElement
