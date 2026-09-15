@@ -280,6 +280,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     tags: ['导出', 'pdf', 'html', 'png', 'json', 'markdown'],
     body: [
       img('pdf-a4-editor', '「PDF生成」：先排 A4 文档，再导出 PDF（适合试卷与学案）'),
+      img('pdf-toolbar', 'PDF 生成工具栏：新增了「打印 / 另存为 PDF（矢量·可搜索）」按钮'),
       ul(
         '保存 / 另存为…：JSON 文稿（可再次导入，也是备份手段）。',
         '导出 HTML：单文件网页放映，双击即可在任意浏览器演示，公式与图形都在里面。',

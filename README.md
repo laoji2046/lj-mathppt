@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1301**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1302**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,40 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-15（v2026.09.1302）
+
+**1302 · PDF 生成：把"矢量 PDF"做成按钮**
+
+用户说"接下来搞 PDF 生成" ✓。先量（PaperModal.vue 1233 行 ✓）：
+
+    输入 Markdown-ish 文本 → 识别题号 → A4 分页预览（MathJax 渲染公式）
+    可调：模板 / 字体字号 / 颜色 / 行距 / 段距 / 缩进 / 标题字号 / 栏数 / 页眉页脚 / 图注
+    导出：savePdf（**html2canvas + jsPDF**）· exportExam19Pdf · exportJson
+
+**要害** ✗：`savePdf()` 是
+
+    canvas = await h2c(page, { scale: 2 }); pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), …)
+
+——**整页画成 JPEG 再贴上去** ✓，所以导出的 PDF **文字不可选、不可搜、放大发虚** ✗。
+
+**而矢量那条路一直都有** ✓：组件里 `@media print` 样式**是完整的** ✓
+（`.app` 隐藏 ✓ `.paper-page` 210mm×297mm ✓ `page-break-after: always` ✓ `@page { margin: 0 }` ✓）
+—— `window.print()` 只在**出错时当兜底** ✗，**界面上没有入口** ✗。
+
+**改动（两处，都是纯增量）**：
+
+1. 加「**打印 / 另存为 PDF**（矢量文字，可搜索可选中）」按钮 ✓ → `printPdf()` → `window.print()`
+   —— 浏览器自带的"打印为 PDF"就是矢量输出 ✓；
+2. 位图那条顺手提质：`scale: 2 → 3` ✓。
+
+**验证**：构建 ✓；CDP 实测点开 PDF生成 后，**矢量按钮确实存在**（`矢量文字` 标题命中 = true ✓）；
+截图 `pdf-toolbar.png`（43 KB）✓。
+
+**两条路的取舍**（写在此便于以后判断）：
+
+    图片版（savePdf）：一键出文件 ✓ 不用过打印对话框 ✓ 但文字是位图 ✗
+    矢量版（printPdf）：文字可选可搜、放大不虚 ✓ 但要走浏览器打印对话框 ✓
 
 ### 2026-09-15（v2026.09.1301）
 

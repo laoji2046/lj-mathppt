@@ -765,6 +765,18 @@ async function ensurePdfLibs() {
   if (!w.jspdf || !w.jspdf.jsPDF) jobs.push(load(base + 'pdf/jspdf.umd.min.js'))
   await Promise.all(jobs)
 }
+/**
+ * 打印 / 另存为 PDF —— **矢量**那条路 ✓。
+ *
+ * 为什么不直接用 savePdf ✗：那条走 html2canvas + jsPDF ✓，是把整页画成 JPEG 再贴上去 ✓ ——
+ * 文字不可选、不可搜、放大发虚 ✗。而本组件**早就写好了 @media print 样式** ✓
+ *（隐藏界面、A4 尺寸、page-break-after 分页 ✓），所以浏览器自带的「打印为 PDF」就是矢量输出 ✓。
+ * 这里只是**把那个能力做成按钮** ✓。
+ */
+function printPdf() {
+  window.print()
+}
+
 async function savePdf() {
   try {
     await ensurePdfLibs()
@@ -788,7 +800,7 @@ async function savePdf() {
     const pdf = new JsPDF({ unit: 'mm', format: 'a4' })
     for (let i = 0; i < pages.length; i++) {
       if (i) pdf.addPage()
-      const canvas = await h2c(pages[i], { scale: 2, useCORS: true, backgroundColor: '#ffffff' })
+      const canvas = await h2c(pages[i], { scale: 3, useCORS: true, backgroundColor: '#ffffff' })
       const img = canvas.toDataURL('image/jpeg', 0.95)
       pdf.addImage(img, 'JPEG', 0, 0, 210, 297)
     }
@@ -1009,6 +1021,8 @@ watch([headerText, footerText], () => render())
                 </button>
                 <button class="pm__btn pm__btn--primary" title="直接生成多页 PDF" @click="savePdf">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10M7 9l5 4 5-4"/><path d="M5 19h14"/></svg><span>保存PDF</span>
+                </button>                <button class="pm__btn" title="打印 / 另存为 PDF（矢量文字，可搜索可选中；比图片版更清晰）" @click="printPdf">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></svg>
                 </button>
                 <button class="pm__btn" title="一键导出 19 题试卷为 PDF" @click="exportExam19Pdf">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 13l3 3 5-6"/></svg><span>19题PDF</span>
