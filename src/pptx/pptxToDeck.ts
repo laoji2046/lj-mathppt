@@ -410,8 +410,11 @@ export async function pptxToDeck(
         // ⚠ 该用"列宽之和"当表宽：实测这张表的 ext=768px 是废数 ✗（列宽加起来 1207px ✓，
         //   与幻灯片 1280px 才对得上 ✓）。同 chExt 一个套路 ✓ —— 生成器写的几何值不可信 ✓。
         const gridW = colWidths.length ? colWidths.reduce((a, b) => a + b, 0) : 0
+        // ⚠ 同理：高度要用**各行高之和** ✗ —— ext 里那个 cy 是废数 ✓。
+        //   行高不对，浮在表格上方的公式（PPT 里是独立对象 ✓）就会**对不齐格子** ✓。
+        const gridH = allDeep(tbl, 'tr').reduce((a, r) => a + emu2px(num(r.attrs['h'], 0)), 0)
         Object.assign(el, {
-          x, y, w: gridW || w || deckW * 0.6, h: h || deckH * 0.4,
+          x, y, w: gridW || w || deckW * 0.6, h: gridH || h || deckH * 0.4,
           rows, merges: merges.length ? merges : undefined,
           colWidths: colWidths.length === rows[0]?.length ? colWidths : undefined,
           fontSize: 20,
