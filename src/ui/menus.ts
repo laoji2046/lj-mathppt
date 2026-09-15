@@ -17,3 +17,19 @@ export const dsmMenuOpen = ref(false)
 export const ggbMenuOpen = ref(false)
 /** 「嵌入 ▾」菜单 */
 export const embedMenuOpen = ref(false)
+/** 「设置」对话框 */
+export const settingsOpen = ref(false)
+/** 「版本历史」对话框 */
+export const versionOpen = ref(false)
+/** 「主题」面板 */
+export const themeOpen = ref(false)
+/** 「数学符号」库 */
+export const symbolOpen = ref(false)
+/** 「图标」库 */
+export const iconOpen = ref(false)
+/** 「公式 ▾」菜单 */
+export const formulaMenuOpen = ref(false)
+/** 「绘制/形状 ▾」菜单 */
+export const drawOpen = ref(false)
+/** 「表格 ▾」菜单 */
+export const tableMenuOpen = ref(false)

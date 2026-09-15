@@ -24,7 +24,7 @@ import { pdfImportOpen, pdfImportFile, openPdfImport, closePdfImport } from '@/u
 import { addonState, requireAddon } from '@/addons/registry'
 import { openHelp as openHelpDialog } from '@/ui/help'
 import { addonPanelOpen } from '@/ui/addonPanel'
-import { imgMenuOpen, dsmMenuOpen, ggbMenuOpen, embedMenuOpen } from '@/ui/menus'
+import { imgMenuOpen, dsmMenuOpen, ggbMenuOpen, embedMenuOpen, settingsOpen, versionOpen, themeOpen, symbolOpen, iconOpen, formulaMenuOpen, drawOpen, tableMenuOpen } from '@/ui/menus'
 const AddonManager = defineAsyncComponent(() => import('./AddonManager.vue'))
 // —— 懒加载：三个导入器 + PDF 对话框都只在**点菜单/选文件**时才用 ✓ ——
 //   静态导入会让 pptx(30KB)+docx(30KB)+pdf 全进启动包 ✗；改成动态导入后 Vite 各自分包 ✓
@@ -34,9 +34,9 @@ const PdfImportDialog = defineAsyncComponent(() => import('./PdfImportDialog.vue
 const store = useDeckStore()
 const emit = defineEmits<{ (e: 'present'): void; (e: 'open-templates'): void; (e: 'open-paper'): void; (e: 'open-ggb-suite'): void }>()
 
-const symbolOpen = ref(false)
+// symbolOpen 已提到 @/ui/menus（?shot= 可直接打开）
 // 图形面板的开关搬到 ui/figPalette 了 —— PDF 文档也要能打开它并接管"点卡片"的行为
-const iconOpen = ref(false)
+// iconOpen 已提到 @/ui/menus（?shot= 可直接打开）
 const imgLibOpen = ref(false)
 const screenshotOpen = ref(false)
 // imgMenuOpen 已提到 @/ui/menus（?shot= 外部入口可直接打开）
@@ -47,12 +47,12 @@ const embedWrap = ref<HTMLElement | null>(null)
 const embedFileInput = ref<HTMLInputElement | null>(null)
 const imgWrap = ref<HTMLElement | null>(null)
 const imgFileInput = ref<HTMLInputElement | null>(null)
-const themeOpen = ref(false)
-const versionOpen = ref(false)
-const settingsOpen = ref(false)
+// themeOpen 已提到 @/ui/menus（?shot= 可直接打开）
+// versionOpen 已提到 @/ui/menus（?shot= 可直接打开）
+// settingsOpen 已提到 @/ui/menus（?shot= 可直接打开）
 const fileOpen = ref(false)
 const fileWrap = ref<HTMLElement | null>(null)
-const tableMenuOpen = ref(false)
+// tableMenuOpen 已提到 @/ui/menus（?shot= 可直接打开）
 /** ⚠ 这个 ref 用在 v-for 里 —— Vue 会把普通 ref 收集成**数组** ✗（外部点击检测会炸）。
  *  所以用**函数式 ref**：Vue 逐个元素调用它，我们只留最后一个。 */
 const tableWrap = shallowRef<HTMLElement | null>(null)
@@ -160,10 +160,10 @@ async function onDocxPicked(e: Event) {
   flashToast()
 }
 
-const drawOpen = ref(false)
+// drawOpen 已提到 @/ui/menus（?shot= 可直接打开）
 const drawWrap = ref<HTMLElement | null>(null)
 
-const formulaMenuOpen = ref(false)
+// formulaMenuOpen 已提到 @/ui/menus（?shot= 可直接打开）
 const formulaWrap = ref<HTMLElement | null>(null)
 const formulaModalOpen = ref(false)
 

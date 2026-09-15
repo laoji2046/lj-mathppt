@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { addonNotice } from '@/addons/registry'
 import { addonPanelOpen } from '@/ui/addonPanel'
-import { imgMenuOpen, dsmMenuOpen, ggbMenuOpen, embedMenuOpen } from '@/ui/menus'
+import { imgMenuOpen, dsmMenuOpen, ggbMenuOpen, embedMenuOpen, settingsOpen, versionOpen, themeOpen, symbolOpen, iconOpen, formulaMenuOpen, drawOpen, tableMenuOpen } from '@/ui/menus'
 import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDeckStore } from '@/stores/deck'
 import { captureDesmosState } from '@/composables/useDesmos'
@@ -117,6 +117,14 @@ onMounted(() => {
   else if (want === 'template') openTemplateLibrary('replace')
   else if (want === 'present') onPresent()
   else if (want === 'imagemenu') imgMenuOpen.value = true
+  else if (want === 'settings') settingsOpen.value = true
+  else if (want === 'version') versionOpen.value = true
+  else if (want === 'theme') themeOpen.value = true
+  else if (want === 'symbol') symbolOpen.value = true
+  else if (want === 'icon') iconOpen.value = true
+  else if (want === 'formulamenu') formulaMenuOpen.value = true
+  else if (want === 'draw') drawOpen.value = true
+  else if (want === 'table') tableMenuOpen.value = true
   else if (want === 'desmos') dsmMenuOpen.value = true
   else if (want === 'ggbmenu') ggbMenuOpen.value = true
   else if (want === 'embed') embedMenuOpen.value = true
