@@ -380,6 +380,14 @@ function openPrintFrame(): Promise<PrintFrame> {
 function disposePrintFrame(f: PrintFrame, delay = 8000) {
   setTimeout(() => { f.frame.remove(); URL.revokeObjectURL(f.url) }, delay)
 }
+/** 统一为本应用风格：只改样式、不碰内容 ✓（store 里已 pushHistory，可撤销 ✓）*/
+function houseStyle() {
+  fileOpen.value = false
+  const r = store.applyHouseStyle()
+  fileToast.value = '已统一为「' + r.theme.name + '」：' + r.slides + ' 页背景、' + r.changed + ' 个元素的样式已对齐（内容未改动，可 Ctrl+Z 撤销）'
+  flashToast()
+}
+
 async function exportPdf() {
   fileOpen.value = false
   fileToast.value = '正在渲染全部页面（公式 / 画布挂载中）…'
@@ -636,6 +644,9 @@ onBeforeUnmount(() => {
           <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.file"></svg></span>导入 PPT(.pptx)
         </button>
         <button class="dropdown__item" title="导入 Word 文档（.docx）：本地解析、图片内嵌，一题一页" @click="pickDocx"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>导入 Word 文档（.docx）</button>
+          <button class="dropdown__item" title="把整份课件的样式统一为本应用的设计主题（字号吸附档位 / 字体 / 配色可读性）——只改样式，不碰内容，可 Ctrl+Z 撤销" @click="houseStyle">
+            <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.theme"></svg></span>统一为本应用风格
+          </button>
         <button class="dropdown__item" title="导入 PDF（.pdf）：自动判断有没有文本层 —— 有就抽成可编辑文字，没有就每页一张图" @click="pickPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导入 PDF（.pdf）</button>
         </div>
       </div>

@@ -11,6 +11,8 @@
  */
 import { listEntries, readEntry, readText } from '@/docx/zip'
 import { parseXml, type XmlNode } from '@/docx/xml'
+// 文字度量（折行/高度估算）—— 与「统一风格」共用一份 ✓（见 textMetrics.ts 的说明 ✓）
+import { estimateLines, textUnits, tableContentHeight } from '@/composables/textMetrics'
 import { ommlToLatex, setOmmlTheme } from './ommlToLatex'
 import { createElement } from '@/types'
 
@@ -115,61 +117,10 @@ const FONT_SCALE = 0.9
 /** 元素基础矩形（pt→px：sz 是 1/100 磅） */
 const sz2px = (sz: number): number => Math.max(8, Math.round((sz / 100) * (96 / 72)))
 
-/**
- * 估算文字在给定字号下的"自然尺寸"。
- *
- * 为什么需要 ✗：PPT 里 112 个文本框是 **spAutoFit（框随字长）**、51 个是 **wrap="none"（不换行）**，
- * 存的 cy 只是"设计高度" ✗；应用这边文本框是固定宽高 + overflow:hidden ✓，
- * 直接照搬就会**折行并裁掉后半截**（用户实测：拉长一点就正常 ✓）。
- * 这里按"中日韩 1 个字宽、西文 0.55"估算，宁可略大（用户可以往里收 ✓，裁掉就救不回来 ✗）。
- */
-function textUnits(s: string): number {
-  let u = 0
-  for (const ch of s) u += ch.codePointAt(0)! > 0x2e80 ? 1 : 0.55
-  return u
-}
-/** 需要的行数（按框宽折行估算） */
-function estimateLines(text: string, fontSize: number, boxW: number): number {
-  const perLine = Math.max(1, boxW / Math.max(1, fontSize))
-  let lines = 0
-  for (const para of text.split('\n')) lines += Math.max(1, Math.ceil(textUnits(para) / perLine))
-  return Math.max(1, lines)
-}
 /** 自然宽度（一行放完要多宽） */
 function naturalWidth(text: string, fontSize: number): number {
   const widest = text.split('\n').reduce((m, p) => Math.max(m, textUnits(p)), 0)
   return Math.ceil(widest * fontSize + fontSize * 0.6)
-}
-
-/**
- * ① 表格的**内容高度**估算 —— 必须和应用的渲染参数对齐 ✓：
- *   应用：fontSize ✓、line-height **1.4** ✓、单元格 padding **6px** ✓、边框 1px ✓。
- * ⚠ 不要用 PPT 的 tr/@h 当元素高 ✗：PowerPoint 会把行**拉伸填满框** ✓，
- *   而应用按内容紧凑渲染 ✓ → 用 435px 会让选框悬空 ✓（用户截图 ✓）。
- *   tr/@h 只在"吸附几何"里用 ✓（判断浮层落在哪一格 ✓）。
- */
-/**
- * 估算用的"可见文本"：把 \(...\) 公式折算成 3 个字符 ✓
- * ⚠ 不能按 LaTeX 源码长度算 ✗ —— 实测一条公式源码 40+ 字符 ✓，渲染后只有几字符宽 ✓，
- *   按源码算会把表格估成两倍高 ✓（P7 曾算成 472px，实际内容约 164px ✓）。
- */
-function visibleText(s: string): string {
-  return String(s).split(String.fromCharCode(92) + '(')
-    .map((part, i) => (i === 0 ? part : '◯◯◯' + part.slice(part.indexOf(String.fromCharCode(92) + ')') + 2)))
-    .join('')
-}
-function tableContentHeight(rows: string[][], colWidths: number[], fontSize: number): number {
-  const pad = 6
-  let total = 0
-  for (let r = 0; r < rows.length; r++) {
-    let lines = 1
-    for (let c = 0; c < rows[r].length; c++) {
-      const cw = colWidths[c] || Math.round(600 / (rows[r].length || 1))
-      lines = Math.max(lines, estimateLines(visibleText(rows[r][c]), fontSize, Math.max(24, cw - 2 * pad)))
-    }
-    total += lines * fontSize * 1.4 + pad * 2 + 1
-  }
-  return Math.round(total)
 }
 
 /** 主题色板（theme1.xml 的 clrScheme）—— schemeClr 要查这张表才能变成具体颜色 */

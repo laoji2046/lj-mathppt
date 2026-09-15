@@ -175,7 +175,7 @@ function onEsc(e: KeyboardEvent) {
 </template>
 
 <style scoped>
-.table-el { width: 100%; height: 100%; overflow: auto; box-sizing: border-box; position: relative; }
+.table-el { width: 100%; height: 100%; overflow: visible; box-sizing: border-box; position: relative; }
 .table-grid { width: 100%; table-layout: fixed; }
 .table-cap { caption-side: top; text-align: center; font-weight: 700; padding: 0 0 4px; outline: none; }
 .table-el--edit .table-grid > tbody > tr > td { border: 1px dashed var(--brand) !important; min-height: 28px; }

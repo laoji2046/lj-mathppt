@@ -10,6 +10,7 @@ import { getTheme } from '@/templates/pptTheme'
 import { findBundle } from '@/templates/mathBundles'
 import { findProTemplate, findProBundle } from '@/templates/proTemplates'
 import { findMathAppletTemplate } from '@/templates/mathAppletTemplates'
+import { restyleDeck } from '@/templates/restyle'
 
 const STORAGE_KEY = 'lj-mathslides-vue:deck'
 const VERSIONS_KEY = 'lj-mathslides-vue:versions'
@@ -942,6 +943,19 @@ export const useDeckStore = defineStore('deck', () => {
     clearSelection()
   }
 
+  /**
+   * 把整份课件的**样式**对齐到设计主题（templates/pptTheme.ts 的 tokens）✓。
+   *
+   * ⚠ 与 applyTheme 的区别 ✗：applyTheme 只改页面背景 ✓；
+   *   本动作还会把字号吸附到 TypeScale 档位 ✓、字体换主题字体 ✓、
+   *   文字颜色**保色相**地夹到可读区间 ✓ —— 但**绝不碰内容** ✓。
+   *   ⚠ pushHistory 必须在改动**之前** ✗（否则撤销不回来 ✓）。
+   */
+  function applyHouseStyle(themeId?: string) {
+    pushHistory()
+    return restyleDeck(deck.value, themeId)
+  }
+
   /** 应用主题：切换整套配色（背景 / 强调 / 文字），应用于全部页面 */
   function applyTheme(id: string) {
     const th = findTheme(id)
@@ -973,5 +987,6 @@ export const useDeckStore = defineStore('deck', () => {
     resetDeck, undo, redo, pushHistory, saveNow,
     drawTool, setDrawTool, clearDrawTool, updateDeckMeta,
     applyTheme,
+    applyHouseStyle,
   }
 })
