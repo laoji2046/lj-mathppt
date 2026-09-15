@@ -84,6 +84,14 @@ const num = (v: string | null | undefined, d = 0): number => {
 /** EMU → px（1 inch = 914400 EMU = 96 px） */
 const emu2px = (v: number): number => Math.round((v / 914400) * 96)
 
+/**
+ * 导入时的**字号系数** —— PPT 的 18pt 换算过来是 24px/1280 版面 ✓，
+ * 但整体观感偏大 ✓（用户反馈"适当缩小"），这里统一缩一档。
+ * ⚠ 只缩字号不缩框：框高由 estimateLines 按字号重算 ✓，所以会**自动跟着变矮** ✓，
+ *   宽不变 → 一行能放更多字 → 反而更不容易被裁 ✓。
+ */
+const FONT_SCALE = 0.9
+
 /** 元素基础矩形（pt→px：sz 是 1/100 磅） */
 const sz2px = (sz: number): number => Math.max(8, Math.round((sz / 100) * (96 / 72)))
 
@@ -395,7 +403,7 @@ export async function pptxToDeck(
         const bodyPr = find(txBody, 'bodyPr')
         const noWrap = bodyPr?.attrs['wrap'] === 'none'
         const anchor = bodyPr?.attrs['anchor']
-        const fpx = sz2px(sz)
+        const fpx = Math.max(10, Math.round(sz2px(sz) * FONT_SCALE))
         let fw = w || 400
         let fh = h || 60
         if (noWrap) {
@@ -412,8 +420,8 @@ export async function pptxToDeck(
           const v = node ? num(find(node, 'spcPct')?.attrs['val'], 0) : 0
           return v > 0 ? (v / 100000) * fpx : 0
         }
-        const paraBefore = Math.round(pct(pPr0 ? kid(pPr0, 'spcBef') : null))
-        const paraAfter = Math.round(pct(pPr0 ? kid(pPr0, 'spcAft') : null))
+        const paraBefore = Math.round(pct(pPr0 ? kid(pPr0, 'spcBef') : null) * FONT_SCALE)
+        const paraAfter = Math.round(pct(pPr0 ? kid(pPr0, 'spcAft') : null) * FONT_SCALE)
         // 框随字长（spAutoFit）：高度至少放得下按折行估算出的行数（用真实行距 ✓）
         const need = estimateLines(txt, fpx, fw) * fpx * lineHeight + fpx * 0.35 + paraBefore + paraAfter
         if (need > fh) fh = Math.ceil(need)
@@ -429,7 +437,9 @@ export async function pptxToDeck(
           align: st.align,
           ...(color ? { color } : {}),
           ...(bold ? { fontWeight: 700 } : {}),
-          ...(st.bullet !== 'none' ? { bullet: st.bullet, bulletIndent: st.bulletIndent ?? 24 } : {}),
+          ...(st.bullet !== 'none'
+            ? { bullet: st.bullet, bulletIndent: Math.round((st.bulletIndent ?? 24) * FONT_SCALE) }
+            : {}),
           ...(bg ? { bgColor: bg } : {}),
           ...(lineHeight !== 1 ? { lineHeight } : {}),
           ...(paraBefore ? { paraBefore } : {}),
