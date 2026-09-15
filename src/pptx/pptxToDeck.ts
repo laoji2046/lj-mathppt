@@ -87,6 +87,82 @@ const emu2px = (v: number): number => Math.round((v / 914400) * 96)
 /** 元素基础矩形（pt→px：sz 是 1/100 磅） */
 const sz2px = (sz: number): number => Math.max(8, Math.round((sz / 100) * (96 / 72)))
 
+/** 主题色板（theme1.xml 的 clrScheme）—— schemeClr 要查这张表才能变成具体颜色 */
+type Theme = Record<string, string>
+async function loadTheme(buf: Uint8Array, byName: Map<string, any>): Promise<Theme> {
+  const theme: Theme = {}
+  const names = ['theme1.xml']
+  for (const e of byName.keys()) if (/^ppt\/theme\/theme\d+\.xml$/.test(e) && !names.includes(e.split('/').pop()!)) names.push(e.split('/').pop()!)
+  const xml = await readText(buf, 'ppt/theme/theme1.xml')
+  if (!xml) return theme
+  const t = parseXml(xml)
+  for (const c of allDeep(t, 'clrScheme')) {
+    for (const slot of kidsOf(c)) {
+      const nm = local(slot.name)
+      const v = kid(slot, 'srgbClr')?.attrs['val'] ?? kid(slot, 'sysClr')?.attrs['lastClr']
+        ?? kid(slot, 'sysClr')?.attrs['val']
+      if (v) theme[nm] = '#' + v.replace(/^#/, '').toLowerCase()
+    }
+  }
+  // sysClr 的 val 是 "windowText"/"window" 这类系统名，换成实际色
+  for (const [k, v] of Object.entries({ ...theme })) {
+    if (v === '#windowtext') theme[k] = theme['dk1'] && theme['dk1'].startsWith('#') ? theme['dk1'] : '#000000'
+    else if (v === '#window') theme[k] = '#ffffff'
+  }
+  if (theme['dk1'] && !theme['dk1'].startsWith('#')) theme['dk1'] = '#000000'
+  if (theme['lt1'] && !theme['lt1'].startsWith('#')) theme['lt1'] = '#ffffff'
+  return theme
+}
+/** 解析一个颜色容器（solidFill / rPr 等）里的颜色 → #rrggbb */
+function colorOf(node: XmlNode | null, theme: Theme): string | null {
+  if (!node) return null
+  const fill = find(node, 'solidFill') ?? (local(node.name) === 'solidFill' ? node : null)
+  if (!fill) return null
+  const srgb = find(fill, 'srgbClr')
+  if (srgb?.attrs['val']) return '#' + srgb.attrs['val'].toLowerCase()
+  const sch = find(fill, 'schemeClr')
+  if (sch?.attrs['val']) {
+    const key = sch.attrs['val']
+    const v = theme[key]
+    if (v) return v
+    // 常见别名
+    const alias: Record<string, string> = { tx1: 'dk1', tx2: 'dk2', bg1: 'lt1', bg2: 'lt2' }
+    const a = alias[key]
+    if (a && theme[a]) return theme[a]
+    return key === 'tx1' || key === 'dk1' ? '#000000' : key === 'lt1' || key === 'bg1' ? '#ffffff' : '#000000'
+  }
+  const sys = find(fill, 'sysClr')
+  if (sys) {
+    const lc = sys.attrs['lastClr']
+    if (lc) return '#' + lc.toLowerCase()
+    return sys.attrs['val'] === 'window' ? '#ffffff' : '#000000'
+  }
+  return null
+}
+/** 段落属性 → 我们的 align / bullet */
+function paraStyle(p: XmlNode | null): { align: 'left' | 'center' | 'right'; bullet: string; bulletIndent?: number } {
+  const pPr = p ? (kid(p, 'pPr') ?? null) : null
+  const algn = pPr?.attrs['algn']
+  const align = algn === 'ctr' ? 'center' : algn === 'r' ? 'right' : 'left'
+  let bullet = 'none'
+  let bulletIndent: number | undefined
+  if (pPr) {
+    if (kid(pPr, 'buNone')) bullet = 'none'
+    else if (kid(pPr, 'buAutoNum')) bullet = 'number'
+    else {
+      const bu = kid(pPr, 'buChar')
+      const ch = bu?.attrs['char'] ?? ''
+      if (ch === '•' || ch === '●' || ch === '·' || ch === 'o') bullet = 'dot'
+      else if (ch === '–' || ch === '-' || ch === '—') bullet = 'dash'
+      else if (ch === '▪' || ch === '■') bullet = 'square'
+      else if (ch === '○' || ch === '◦') bullet = 'circle'
+      else if (ch) bullet = 'dot'     // » n 之类：统一用小圆点（不丢"这是列表"这个信息 ✓）
+    }
+    if (bullet !== 'none' && pPr.attrs['marL']) bulletIndent = emu2px(num(pPr.attrs['marL'], 0))
+  }
+  return { align, bullet, bulletIndent }
+}
+
 /** 从一段 XML 里抽 OMML 公式 → LaTeX（按出现顺序，去重连续重复） */
 function collectLatex(node: XmlNode, count: { n: number }): string {
   // by = a:p 里的一个段落：可能混杂文字与公式
@@ -132,6 +208,9 @@ export async function pptxToDeck(
       deckH = emu2px(cy)
     }
   }
+
+  // 1.5) 主题色板（schemeClr 要用它解析）
+  const theme = await loadTheme(buf, byName)
 
   // 2) 幻灯片顺序：presentation.xml 的 sldIdLst + rels 映射（不能只按 slideN 数字排 ✗）
   let order: string[] = []
@@ -276,10 +355,22 @@ export async function pptxToDeck(
           stats.skippedNoPos++
           return
         }
+        // 样式：段落对齐/项目符号 + 首个有颜色的运行 + 首个加粗运行（应用的元素是"整块一个样式"）
+        const paras = allParagraphs(txBody)
+        const st = paraStyle(paras[0] ?? null)
+        let color: string | null = null
+        for (const rPr of allDeep(txBody, 'rPr')) { const c = colorOf(rPr, theme); if (c) { color = c; break } }
+        if (!color) color = colorOf(find(txBody, 'defRPr'), theme)
+        let bold = false
+        for (const rPr of allDeep(txBody, 'rPr')) if (rPr.attrs['b'] === '1') { bold = true; break }
         const el = hasMath ? createElement('richtex') : createElement('text')
         Object.assign(el, {
           x, y, w: w || 400, h: h || 60,
           text: txt, fontSize: sz2px(sz),
+          align: st.align,
+          ...(color ? { color } : {}),
+          ...(bold ? { fontWeight: 700 } : {}),
+          ...(st.bullet !== 'none' ? { bullet: st.bullet, bulletIndent: st.bulletIndent ?? 24 } : {}),
           ...(hasMath ? {} : { valign: 'middle' }),
         })
         elements.push(el)
