@@ -240,6 +240,27 @@ function parse(src: string): string {
   let qNo = 0
   let sec: 'single' | 'multi' | 'fill' | 'solve' = 'single'
   let pendingOpt = ''
+  // 引号常量：生成 HTML 时用 ✓ —— 若直接写引号会和模板/字符串语法打架 ✓（吃过亏 ✗）
+  const Q1 = String.fromCharCode(39)
+  const Q2 = String.fromCharCode(34)
+
+  // 题目块缓冲：null = 不在题目块内 ✓（详见下面的 [题] 标记处说明 ✓）
+  let qBuf: { stem: string[]; opts: string[]; sol: string[] | null; inOpts: boolean } | null = null
+  /** 把缓冲的题目内容拼成**一个** .pp-block ✓（解析区默认收起，打印时强制展开 ✓） */
+  const emitQ = () => {
+    if (!qBuf) return ''
+    const q = qBuf
+    qBuf = null
+    const seg = (lines: string[], cls: string) =>
+      lines.length ? '<div class=' + Q2 + 'paper-q__' + cls + Q2 + '>' + lines.map((s) => esc(s)).join('<br/>') + '</div>' : ''
+    const sol = q.sol && q.sol.length
+        ? '<div class=' + Q2 + 'paper-q__sol' + Q2 + ' onclick=' + Q2 + 'this.classList.toggle(' + Q1 + 'paper-q__sol--open' + Q1 + ')' + Q2 + '>'
+          + '<div class=' + Q2 + 'paper-q__solbar' + Q2 + '>解析（点这里展开 / 收起）</div>'
+          + '<div class=' + Q2 + 'paper-q__solbody' + Q2 + '>' + q.sol.map((s) => esc(s)).join('<br/>') + '</div></div>'
+        : ''
+    return '<div class=' + Q2 + 'pp-block paper-q' + Q2 + '>' + seg(q.stem, 'stem') + seg(q.opts, 'opts') + sol + '</div>'
+  }
+
   const blk = (h: string, st = '') => '<div class="pp-block"' + (st ? ' style="' + st + '"' : '') + '>' + h + '</div>'
   for (let i = 0; i < lines.length; i++) {
     let t = lines[i].trim()
@@ -253,6 +274,19 @@ function parse(src: string): string {
     const sp = t.match(/^\[\s*([\d.]+)\s*(cm|厘米|毫米|mm)\s*\]\s*$/)
     if (sp) {
       const unit = sp[2] === '厘米' ? 'cm' : sp[2] === '毫米' ? 'mm' : sp[2]
+    // ── 题目块：[题] … [选项] … [解析] … [/题] ──────────────────────
+    // 为什么要这个 ✗：分页是按 flow.children 逐个块搬的 ✓（见 paginate）——
+    // 题干/选项/解析散成多个块时会被拆到两页中间 ✗；做成**一个块**就不会 ✓。
+    if (/^\[题\]$/.test(t)) { if (qBuf) out += emitQ(); qBuf = { stem: [], opts: [], sol: null, inOpts: false }; continue }
+    if (/^\[\/题\]$/.test(t)) { if (qBuf) { out += emitQ(); qBuf = null } continue }
+    if (/^\[选项\]$/.test(t)) { if (qBuf) { qBuf.inOpts = true; qBuf.sol = null } continue }
+    if (/^\[解析\]$/.test(t)) { if (qBuf) { qBuf.sol = []; qBuf.inOpts = false } continue }
+    if (qBuf) {
+      if (qBuf.sol) qBuf.sol.push(t)
+      else if (qBuf.inOpts) qBuf.opts.push(t)
+      else qBuf.stem.push(t)
+      continue
+    }
       out += blk('<div class="paper-space" style="height:' + sp[1] + unit + '"></div>', st)
       continue
     }
@@ -1386,6 +1420,22 @@ watch([headerText, footerText], () => render())
 .paper-opt-four .paper-opt { flex: 0 0 100%; }
 .pp-block { display: block; overflow: visible; }
 .paper-space { display: block; width: 100%; }
+/* ── 题目块（[题]…[选项]…[解析]…[/题]）─────────────────────────────
+   解析区默认收起 ✓ 点一下展开 ✓；**打印时强制展开** ✓（否则答案不会印出来 ✗），
+   同时隐藏「点击展开」那行提示 ✓。 */
+.paper-q { border: 1px solid #e3e0d8; border-radius: 6px; padding: 8px 10px; margin: 4px 0; background: #fcfbf7; }
+.paper-q__opts { margin-top: 4px; }
+.paper-q__sol { margin-top: 6px; border-top: 1px dashed #ddd; padding-top: 4px; }
+.paper-q__solbar { font-size: 0.9em; color: #8a8a8a; cursor: pointer; user-select: none; }
+.paper-q__solbody { display: none; margin-top: 4px; }
+.paper-q__sol--open .paper-q__solbody { display: block; }
+.paper-q__sol--open .paper-q__solbar { color: #1668e0; }
+@media print {
+  .paper-q { background: none; border-color: #ddd; }
+  .paper-q__solbody { display: block !important; }
+  .paper-q__solbar { display: none !important; }
+}
+
 .paper-imgbox { display: block; margin: 8px 0; }
 .paper-img { max-width: 100%; max-height: 400px; height: auto !important; display: block; }
 .paper-fig { display: block; width: fit-content; max-width: 100%; text-align: center; }
