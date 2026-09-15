@@ -45,6 +45,25 @@ const para = ref(6)
 const indent = ref(0)
 const h2size = ref(18)
 const optLayout = ref<'auto' | 'one' | 'two' | 'four'>('auto')
+/** 位图 PDF 的图片格式 —— 文字页用 PNG 明显更清晰 ✓，代价是体积大些 ✓（默认 JPEG 省体积 ✓） */
+const pdfFmt = ref<'jpeg' | 'png'>('jpeg')
+/** 页眉页脚预设模板 —— 一键填好常用栏位 ✓（{page} 会被替换成页码 ✓） */
+const HF_PRESETS = [
+  { id: '', name: '不使用模板' },
+  { id: 'exam', name: '考试卷（学校·科目·分值·姓名学号）', header: 'XX中学 20XX学年 数学试题', footer: '姓名：________　学号：________　得分：______　第 {page} 页' },
+  { id: 'lecture', name: '讲义（章节·页码）', header: '第X章　XXXX（讲义）', footer: '第 {page} 页' },
+  { id: 'hw', name: '作业（班级·姓名）', header: 'XXXX 作业', footer: '班级：________　姓名：________　第 {page} 页' },
+]
+function applyHeaderPreset(id: string) {
+  const p = HF_PRESETS.find((x) => x.id === id)
+  if (!p) return
+  headerText.value = p.header || ''
+  footerText.value = p.footer || ''
+  paperMsg.value = p.id ? '已套用模板：' + p.name : '已清空页眉页脚'
+  render()
+  saveDraftSoon()
+}
+
 const headerText = ref('')
 const footerText = ref('')
 const gapQ = ref(6)
@@ -782,6 +801,7 @@ async function savePdf() {
     await ensurePdfLibs()
   } catch (e) {
     console.error('PDF 库加载失败，回退打印：', e)
+    paperMsg.value = 'PDF 库没能加载（可能是离线或网络受限）→ 已改用「打印」方式；请在打印对话框里选「另存为 PDF」'
     window.print()
     return
   }
@@ -801,14 +821,16 @@ async function savePdf() {
     for (let i = 0; i < pages.length; i++) {
       if (i) pdf.addPage()
       const canvas = await h2c(pages[i], { scale: 3, useCORS: true, backgroundColor: '#ffffff' })
-      const img = canvas.toDataURL('image/jpeg', 0.95)
-      pdf.addImage(img, 'JPEG', 0, 0, 210, 297)
+      const isPng = pdfFmt.value === 'png'
+      const img = isPng ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.95)
+      pdf.addImage(img, isPng ? 'PNG' : 'JPEG', 0, 0, 210, 297)
     }
     const name = (headerText.value || '试卷讲义').replace(/[\\/:*?"<>|]/g, '_')
     pdf.save(name + '.pdf')
     ok = true
   } catch (e) {
     console.error('PDF 生成失败，回退打印：', e)
+    paperMsg.value = 'PDF 生成失败 → 已改用打印方式：' + (e && (e as any).message ? (e as any).message : String(e))
   } finally {
     a4.style.zoom = prevZoom
   }
@@ -1104,6 +1126,14 @@ watch([headerText, footerText], () => render())
                 <button class="pm__btn" title="导出当前试卷设置为 JSON" @click="exportJson">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10M7 9l5 4 5-4M5 19h14"/></svg><span>导出</span>
                 </button>
+                <select class='pm__btn' style='padding:0 6px' title='页眉页脚模板：一键填好常用栏位' @change='applyHeaderPreset(($event.target as HTMLSelectElement).value)'>
+                  <option value=''>页眉页脚模板…</option>
+                  <option v-for='p in HF_PRESETS' v-show='p.id' :key='p.id' :value='p.id'>{{ p.name }}</option>
+                </select>
+                <select class='pm__btn' style='padding:0 6px' v-model='pdfFmt' title='位图 PDF 用哪种图片格式：PNG 文字更清晰，JPEG 体积更小'>
+                  <option value='jpeg'>位图 JPEG</option>
+                  <option value='png'>位图 PNG</option>
+                </select>
                 <button class="pm__btn" title="把当前排版参数存为默认（下次打开自动套用）" @click="saveAsDefaults">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>
                 </button>
