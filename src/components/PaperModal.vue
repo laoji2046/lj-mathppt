@@ -1011,42 +1011,7 @@ function applyDefaults() {
   try { const s = localStorage.getItem(DEFAULTS_KEY); if (!s) { paperMsg.value = '还没有存过默认设置'; return } applySettings(JSON.parse(s)); paperMsg.value = '已套用默认设置' } catch { paperMsg.value = '默认设置读取失败' }
 }
 const paperMsg = ref('')
-const paperDocxInput = ref<HTMLInputElement | null>(null)
-/**
- * 选 .docx —— **运行时动态创建 input 再 click** ✓（与「插入图片」同一条已验证的路 ✓）。
- * ⚠ 不再用模板里那个隐藏 input ✗：display:none 的 file input，
- *   某些浏览器会**拦截它的 click** ✓，表现就是「点了没反应、也没提示」✓（用户实测 ✓）。
- */
-function pickPaperDocx() {
-  const fi = document.createElement('input')
-  fi.type = 'file'
-  fi.accept = '.docx'
-  fi.onchange = (ev) => void onPaperDocx(ev)
-  fi.click()
-}
-/** 导入 Word 文档作为试卷内容 —— 复用已有的 docx 解析器 ✓（动态导入，保持懒加载 ✓） */
-async function onPaperDocx(e: Event) {
-  const el = e.target as HTMLInputElement
-  const file = el.files && el.files[0]
-  el.value = ''
-  if (!file) return
-  paperMsg.value = '正在解析 Word 文档…'
-  try {
-    const buf = new Uint8Array(await file.arrayBuffer())
-    const { docxToMarkdown } = await import('@/docx/docxToMarkdown')
-    const { markdown, stats } = await docxToMarkdown(buf)
-    input.value = markdown
-    render()
-    saveDraft()
-    const ole = stats.oleFormulas > 0
-      ? ' · ⚠ 另有 ' + stats.oleFormulas + ' 个公式是 MathType 对象，读不到内容 —— 请在 Word 里用「MathType → 转换 → 转换为 Office 公式」后再导一次'
-      : ''
-    paperMsg.value =
-      'Word 导入完成：公式 ' + stats.formulas + ' · 图片 ' + stats.images + ' · 表格 ' + stats.tables + ole
-  } catch (err: any) {
-    paperMsg.value = '导入失败：' + (err && err.message ? err.message : String(err))
-  }
-}
+
 
 const DRAFT_KEY = 'lj-paper-draft-v1'
 function saveDraft() {
@@ -1254,10 +1219,6 @@ watch([headerText, footerText], () => render())
                 <button class="pm__btn" title="套用之前存下的默认排版参数" @click="applyDefaults">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>
                 </button>
-                <button class="pm__btn" title="导入 Word 文档（.docx）作为试卷内容" @click="pickPaperDocx">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
-                </button>
-                <input ref="paperDocxInput" type="file" accept=".docx" style="display:none" @change="onPaperDocx" />
                 <span v-if="paperMsg" class="pm__imghint">{{ paperMsg }}</span>
                 <button class="pm__btn" title="语法帮助（含详细示范）" @click="helpOpen = true">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 .3c0 1.8-2.5 1.7-2.5 3.2"/><path d="M12 16.5h.01"/></svg><span>帮助</span>
