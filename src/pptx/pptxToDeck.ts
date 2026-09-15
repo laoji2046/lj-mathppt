@@ -382,6 +382,12 @@ export async function pptxToDeck(
           stats.skippedNoPos++
           return
         }
+        // 形状底色 → 文字元素的 bgColor（PPT 里"白字 + 彩色底"很常见 ✗，
+        // 只导文字不导底色 → 白字落在白底上就看不见了 ✓；应用的文字元素自带 bgColor ✓）
+        const spPr = kid(shape, 'spPr')
+        const fillNode = spPr ? kidsOf(spPr).find((k) => local(k.name) === 'solidFill') ?? null : null
+        const bg = fillNode ? colorOf(fillNode, theme) : null
+
         // 样式：段落对齐/项目符号 + 首个有颜色的运行 + 首个加粗运行（应用的元素是"整块一个样式"）
         const paras = allParagraphs(txBody)
         const st = paraStyle(paras[0] ?? null)
@@ -424,6 +430,7 @@ export async function pptxToDeck(
           ...(color ? { color } : {}),
           ...(bold ? { fontWeight: 700 } : {}),
           ...(st.bullet !== 'none' ? { bullet: st.bullet, bulletIndent: st.bulletIndent ?? 24 } : {}),
+          ...(bg ? { bgColor: bg } : {}),
           ...(lineHeight !== 1 ? { lineHeight } : {}),
           ...(paraBefore ? { paraBefore } : {}),
           ...(paraAfter ? { paraAfter } : {}),
