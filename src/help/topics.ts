@@ -120,6 +120,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '数学图形与图形库',
     tags: ['图形', '函数图像', '抛物线', '几何', '顶点', '贝塞尔'],
     body: [
+      img('prop-panel', '选中图形后，右侧属性面板可改颜色 / 线宽 / 虚线 / 填充 / 顶点圆点'),
       img('draw-menu', '「绘制/形状 ▾」：矩形、椭圆、直线、箭头、笔、多边形'),
       img('figure-library', '「数学图形」库：平面图形 / 立体几何 / 函数图像 / 圆锥曲线 等 70 余种'),
       p('工具栏「数学图形」打开图形库（平面图形 / 立体几何 / 复制图形 / 函数图像 / 圆锥曲线 / 辅助标注 共 70 余种）。'),
@@ -171,6 +172,8 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'GeoGebra 与 Desmos',
     tags: ['geogebra', 'ggb', 'desmos', '计算器', '动态'],
     body: [
+      img('geogebra-suite', 'GeoGebra 作图套件：现场作图，可保存 .ggb'),
+      img('geogebra-menu', '「GeoGebra ▾」：打开作图套件或导入 .ggb'),
       p('两个嵌入式数学工具，适合现场作图与动态演示。'),
       ul(
         'GeoGebra：工具栏「GeoGebra ▾」→ 打开作图套件，可保存 .ggb 文件；插入的元素在放映时可交互。',
