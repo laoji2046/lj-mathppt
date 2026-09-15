@@ -140,6 +140,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '图片：导入、编辑、描摹成图形',
     tags: ['图片', '裁剪', '蒙版', '描摹', 'svg', '矢量'],
     body: [
+      img('image-editor', '图片编辑器：旋转 / 翻转 / 裁剪 / 滤镜（非破坏性，随时可改）'),
       p('图片有三条常用路径：直接插入、在编辑器里修，或者把线稿**描摹成矢量图形**。'),
       ul(
         '插入：工具栏「图片 ▾」→ 从文件选图；也可直接把图片粘贴进画布。',
@@ -191,6 +192,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '动画与放映',
     tags: ['动画', '渐显', '演示', '放映', '分片'],
     body: [
+      img('present-mode', '放映模式：右下角箭头翻页，Esc 退出'),
       img('md-source', '「MD 源码」分屏：左边 Markdown，右边实时预览'),
       p('讲解型内容建议**逐条出现**：演示时点一下出一条，节奏由你控制。'),
       ul(

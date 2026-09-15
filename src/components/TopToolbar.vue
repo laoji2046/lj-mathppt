@@ -23,6 +23,7 @@ import { ICONS as I } from '@/ui/icons'
 import { pdfImportOpen, pdfImportFile, openPdfImport, closePdfImport } from '@/ui/pdfImport'
 import { addonState, requireAddon } from '@/addons/registry'
 import { openHelp as openHelpDialog } from '@/ui/help'
+import { addonPanelOpen } from '@/ui/addonPanel'
 const AddonManager = defineAsyncComponent(() => import('./AddonManager.vue'))
 // —— 懒加载：三个导入器 + PDF 对话框都只在**点菜单/选文件**时才用 ✓ ——
 //   静态导入会让 pptx(30KB)+docx(30KB)+pdf 全进启动包 ✗；改成动态导入后 Vite 各自分包 ✓
@@ -598,7 +599,7 @@ async function onDsmPicked(e: Event) {
  * 原来是一个个手写 if ✗ —— 结果漏了「绘制/形状」「图片」「嵌入」三个，
  * 表现就是"点开菜单后不选项就没法关掉"。这类漏洞靠"记得补"是治不住的，改成表驱动。
  */
-const addonMgrOpen = ref(false)   // 功能管理面板（addon 开关）
+const addonMgrOpen = addonPanelOpen   // 已提到 @/ui/addonPanel（?shot=addon 等外部入口可直接开）
 const helpMenuOpen = ref(false)   // 帮助菜单
 const helpWrap = ref<HTMLElement | null>(null)
 function toggleHelpMenu() { toggleShown(helpMenuOpen) }

@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1293**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1294**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,31 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-15（v2026.09.1294）
+
+**1294 · 扩 ?shot= 模式到 7 个 + 三张新配图（共 21 张）**
+
+**新增三个模式** ✓（都尽量做到"零风险"）：
+
+    ?shot=present    → 直接调 App.vue 里已有的 onPresent()（presenting 本来就在 App.vue ✓）
+    ?shot=imageedit  → 从 store 里找第一个 image 元素，调共享的 openImageEditor(id) ✓
+    ?shot=addon      → 把 addonMgrOpen 提到新模块 @/ui/addonPanel ✓
+                       **TopToolbar 只改 1 行**（用别名 import ✓ 其余代码一个字没动 ✓）
+
+现在共 **7 个模式**：help · geom3d · ggb · template · present · imageedit · addon
+
+**新配图**：
+
+    image-editor.png  图片编辑器（旋转/翻转/裁剪/滤镜）—— ⚠ 预览区显示「未找到图片地址」✗，
+                      因为样张里那张图没有 src（导入时的占位图）；**编辑器 UI 本身是完整的** ✓
+    present-mode.png  放映模式（第二章 / 2.2 基本不等式 第一课时）✓
+    addon-panel.png   **升级**：这次是 776x656 的精确裁剪 ✓（原来那张是整窗 ✗）
+
+合计 **21 张** ✓，全部已在正文引用 ✓。
+
+**这一批一次成功** ✓ —— 因为不再猜选择器：URL 参数直接决定开哪个面板 ✓。
+这正是加 ?shot= 想要的效果：**把"猜 DOM"换成"说清楚要开哪个面板"** ✓。
 
 ### 2026-09-15（v2026.09.1293）
 

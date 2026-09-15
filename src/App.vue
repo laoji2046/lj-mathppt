@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { addonNotice } from '@/addons/registry'
+import { addonPanelOpen } from '@/ui/addonPanel'
 import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDeckStore } from '@/stores/deck'
 import { captureDesmosState } from '@/composables/useDesmos'
@@ -27,7 +28,7 @@ const AsyExportDialog = defineAsyncComponent(() => import('@/components/AsyExpor
 import { asyExportEl, closeAsyExport } from '@/ui/asyExport'
 import { vectorizeOpen, vectorizeSrc, vectorizeReplaceId, vectorizeEditId, closeVectorize } from '@/ui/vectorize'
 import { geom3dOpen, geom3dEditId } from '@/ui/geom3d'
-import { imageEditOpen, imageEditId, closeImageEditor } from '@/ui/imageEditor'
+import { imageEditOpen, imageEditId, closeImageEditor, openImageEditor } from '@/ui/imageEditor'
 import MarkdownSourcePanel from '@/components/MarkdownSourcePanel.vue'
 import { viewMode } from '@/ui/view'
 import { tplOpen, tplMode, openTemplateLibrary, closeTemplateLibrary } from '@/ui/templateLibrary'
@@ -113,6 +114,12 @@ onMounted(() => {
   else if (want === 'geom3d') openGeom3D()
   else if (want === 'ggb') openGgbSuite()
   else if (want === 'template') openTemplateLibrary('replace')
+  else if (want === 'present') onPresent()
+  else if (want === 'addon') addonPanelOpen.value = true
+  else if (want === 'imageedit') {
+    const im = store.deck.slides.flatMap((s) => s.elements || []).find((e) => e.type === 'image')
+    if (im) openImageEditor(im.id)
+  }
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
