@@ -15,6 +15,7 @@ import PresentationOverlay from '@/components/PresentationOverlay.vue'
 //   启动包不再包含它们 ✓（实测本次改前：0 处懒加载 ✗、单文件 1299 KB ✓）。
 //   ⚠ 不要给"常驻挂载（没有 v-if）"的组件加这个 ✗ —— 它一渲染就会立刻拉 chunk ✓，等于白改 ✓。
 const PaperModal = defineAsyncComponent(() => import('@/components/PaperModal.vue'))
+const HelpDialog = defineAsyncComponent(() => import('@/components/HelpDialog.vue'))
 const GgbSuite = defineAsyncComponent(() => import('@/components/GgbSuite.vue'))
 const TemplatePicker = defineAsyncComponent(() => import('@/components/TemplatePicker.vue'))
 const LayoutGallery = defineAsyncComponent(() => import('@/components/LayoutGallery.vue'))
@@ -30,6 +31,7 @@ import { imageEditOpen, imageEditId, closeImageEditor } from '@/ui/imageEditor'
 import MarkdownSourcePanel from '@/components/MarkdownSourcePanel.vue'
 import { viewMode } from '@/ui/view'
 import { tplOpen, tplMode, openTemplateLibrary, closeTemplateLibrary } from '@/ui/templateLibrary'
+import { helpOpen, closeHelp } from '@/ui/help'
 import ContextMenu from '@/components/ContextMenu.vue'
 import StatusBar from '@/components/StatusBar.vue'
 
@@ -158,6 +160,7 @@ function onPresent() {
     <TemplatePicker v-if="tplOpen" :mode="tplMode" @close="closeTemplateLibrary()" />
     <LayoutGallery />
     <PaperModal v-if="paperOpen" @close="paperOpen = false" />
+  <HelpDialog v-if="helpOpen" @close="closeHelp()" />
     <GgbSuite v-if="ggbEdit.open" :edit-id="ggbEdit.editId" @close="closeGgbSuite()" />
     <ImageEditorModal v-if="imageEditOpen && imageEditId" :id="imageEditId" @close="closeImageEditor()" />
     <VectorizeDialog v-if="vectorizeOpen && vectorizeSrc" :src="vectorizeSrc" :replace-id="vectorizeReplaceId" :edit-id="vectorizeEditId" @close="closeVectorize()" />
