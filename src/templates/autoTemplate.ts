@@ -108,3 +108,95 @@ export function detectRole(slide: Slide, index = -1, opts: DetectOpts = {}): Det
 
   return { role: hit.role, evidence: hit.label + '：' + hit.word, title, body }
 }
+/**
+ * 按识别结果**套用版式**（第二步 ✓）。
+ *
+ * ⚠ 三条铁律：
+ *   1. **必须传 canvas** ✗ —— 版式函数默认按 1920×1080 排版 ✓，而 PPT 导入的文稿是 1280×720 ✓；
+ *      不传就会整体 1.5 倍错位 ✓（这条是实测文档里写着的 ✓）。
+ *   2. 只动**识别成功**的页 ✓；detectRole 返回 null 的页**原样保留** ✓（用户明确口径 ✓）。
+ *   3. 页面背景/备注等**页级属性不动** ✓，只换 elements ✓。
+ */
+import type { Deck } from '@/types'
+import { getTheme, type Theme } from './pptTheme'
+import { definition, practice, steps, summary, theorem, think } from './pptLayouts'
+
+/** 每个角色配一句页眉 ✓（写进版式的 eyebrow 槽位 ✓） */
+const EYEBROW: Record<Role, string> = {
+  cover: '封面',
+  theorem: '定理',
+  definition: '概念 · 定义',
+  example: '例题 · 解析',
+  practice: '练习 · 巩固',
+  summary: '小结 · 归纳',
+  think: '思考',
+  explore: '探究 · 发现',
+}
+
+/** 用识别结果重建这一页的元素 ✓（失败则返回 null = 保留原样 ✓） */
+function buildForRole(role: Role, d: Detected, t: Theme, canvas: { width: number; height: number }): SlideElement[] | null {
+  const eyebrow = EYEBROW[role]
+  const title = d.title || ''
+  const body = d.body.length ? d.body : ['']
+  switch (role) {
+    case 'definition':
+      return definition(t, { canvas, eyebrow, title, term: title, body })
+    case 'theorem':
+      return theorem(t, { canvas, eyebrow, title, name: title, statement: body })
+    case 'example':
+      return steps(t, { canvas, eyebrow, title, steps: body })
+    case 'practice':
+      return practice(t, { canvas, eyebrow, title: title || '巩固练习', items: body })
+    case 'summary':
+      return summary(t, { canvas, eyebrow, title: title || '课堂小结', points: body })
+    case 'think':
+    case 'explore':
+      return think(t, { canvas, eyebrow, title, question: body })
+    default:
+      return null
+  }
+}
+
+export interface AutoApplyReport { index: number; role: Role | null; evidence: string; title: string; changed: boolean }
+export interface AutoApplyResult { applied: number; kept: number; report: AutoApplyReport[] }
+
+/**
+ * 对整份文稿按内容套用版式 ✓。
+ * @param opts.skip 用户点名"先不管"的页号（**1 起** ✓）
+ */
+export function autoTemplateDeck(deck: Deck, themeId?: string, opts: DetectOpts = {}): AutoApplyResult {
+  const base = getTheme(themeId || deck.theme || 'edumath')
+  const canvas = { width: deck.width || 1920, height: deck.height || 1080 }
+  // ⚠ 关键：主题 TypeScale（54/36/28…）是按 1920 宽定的绝对值 ✗ ——
+  //   只传 canvas 只解决「坐标」 ✓；字号不缩的话正文块会算成 1014px 高（画布才 720）✗✗，整页溢出。
+  //   所以按比例深拷贝出一份缩小的主题 ✓（不污染 getTheme 的单例 ✗）。
+  const k = canvas.width / 1920
+  const t: Theme = Math.abs(k - 1) < 0.01 ? base : JSON.parse(JSON.stringify(base))
+  if (Math.abs(k - 1) >= 0.01) {
+    for (const key of Object.keys(t.type)) (t.type as any)[key] = Math.max(8, Math.round((base.type as any)[key] * k))
+    t.grid.margin = Math.round(base.grid.margin * k)
+    t.grid.gutter = Math.round(base.grid.gutter * k)
+    t.radius = Math.max(2, Math.round(base.radius * k))
+  }
+  const report: AutoApplyReport[] = []
+  let applied = 0
+  let kept = 0
+  deck.slides.forEach((s: Slide, i: number) => {
+    const d = detectRole(s, i, opts)
+    if (!d) {
+      kept++
+      report.push({ index: i + 1, role: null, evidence: '—', title: '', changed: false })
+      return
+    }
+    const built = buildForRole(d.role, d, t, canvas)
+    if (!built) {
+      kept++
+      report.push({ index: i + 1, role: null, evidence: d.evidence, title: d.title, changed: false })
+      return
+    }
+    s.elements = (built as unknown as SlideElement[][]).flat(2) as SlideElement[]
+    applied++
+    report.push({ index: i + 1, role: d.role, evidence: d.evidence, title: d.title, changed: true })
+  })
+  return { applied, kept, report }
+}
