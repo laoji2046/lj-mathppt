@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { addonNotice } from '@/addons/registry'
 import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDeckStore } from '@/stores/deck'
 import { captureDesmosState } from '@/composables/useDesmos'
@@ -163,6 +164,7 @@ function onPresent() {
     <AsyExportDialog v-if="asyExportEl" :el="asyExportEl" @close="closeAsyExport()" />
     <Geom3DDialog v-if="geom3dOpen" :edit-id="geom3dEditId" />
     <ContextMenu />
+  <div v-if='addonNotice' class='addon-toast'>{{ addonNotice }}</div>
   </div>
 </template>
 
@@ -195,4 +197,9 @@ function onPresent() {
   display: flex;
   min-height: 0;
 }
+/* addon 被关掉时的全局提示（固定悬浮，不参与排版 ✓） */
+.addon-toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 900;
+  background: rgba(28, 32, 42, 0.92); color: #fff; padding: 9px 16px; border-radius: 8px;
+  font-size: 13px; box-shadow: var(--shadow-lg); pointer-events: none; }
+
 </style>

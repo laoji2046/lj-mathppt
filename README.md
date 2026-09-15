@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1288**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1289**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,43 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-15（v2026.09.1289）
+
+**1289 · 修「addon 关掉了却还能用」—— 守卫移进动作本身**
+
+**用户实测报的 bug** ✗：把「三维立体图」的勾去掉后，功能**照样能用** ✓（截图：功能管理里没勾 ✓ 但
+三维弹窗正常打开并可用 ✓）。
+
+**根因**：v1287 我只给**入口**挂了 `v-if` ✗ —— 而每个功能**有多处入口** ✓，挂不全 ✓。
+漏掉的那处：`MathFigurePalette.vue:205` **直接调 `openGeom3D()`** ✓（数学图形库「立体几何」里的入口 ✓）。
+
+**修法（这才是可靠的写法）** ✗：**守卫加进"打开动作"本身** ✓ —— 一处挡住所有入口 ✓，
+以后新增入口也自动受控 ✓。
+
+    src/ui/geom3d.ts      openGeom3D()      → requireAddon(geom3d)
+    src/ui/vectorize.ts   openVectorize()   → requireAddon(vectorize)
+    src/ui/imageEditor.ts openImageEditor() → requireAddon(image-editor)
+    src/ui/ggbEditor.ts   openGgbSuite()    → requireAddon(geogebra)
+    TopToolbar            addBlankGgb / addBlankDsm / openPaper / pickPptx / pickDocx / pickPdf
+    stores/deck.ts        applyHouseStyle / applyAutoTemplate
+
+**同时加了全局提示** ✓：被挡下时底部弹一句「XXX 已在「功能管理」里关掉 —— 打开它才能用」✓
+（3.2 秒淡出 ✓，固定悬浮不参与排版 ✓）—— 否则点了没反应用户会以为坏了 ✓。
+
+**验证（直接测 registry ✓）**：
+
+    requireAddon 是 function ✓
+    关掉 geom3d 后：enabled=false ✓ required=**false** ✓ notice="geom3d 已在「功能管理」里关掉…" ✓
+
+**⚠ 诚实记录：UI 层端到端没验到** ✗。两次尝试都**卡在探针选择器上** ✓（`.dropdown__item` 抓不到 ✓
+图形库里的项 ✓），**不是功能问题** ✗。下次要补：打开图形库 → 切「立体几何」标签 → 点三维 →
+断言弹窗不出现 ✓。
+
+**⚠ 另一个值得记的坑**：我第一版探针报「守卫没生效」✗ —— 那是**测量工具骗人** ✓：
+探针 `import('/src/ui/geom3d.ts')` ✓，而模块内部 import 的是 `@/addons/registry` ✓，
+Vite 解析成**不同 URL** ✓ → **两个 registry 实例** ✗（探针关掉的是 A ✓，模块查的是 B ✓）。
+**教训**：跨模块测状态时，必须确认拿到的是**同一个模块实例** ✓（用应用自己的引用 ✓ 或走真实 UI ✓）。
 
 ### 2026-09-15（v2026.09.1288）
 

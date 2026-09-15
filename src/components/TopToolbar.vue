@@ -21,7 +21,7 @@ import { isTauri } from '@/composables/useTauri'
 import SettingsPanel from './SettingsPanel.vue'
 import { ICONS as I } from '@/ui/icons'
 import { pdfImportOpen, pdfImportFile, openPdfImport, closePdfImport } from '@/ui/pdfImport'
-import { addonState } from '@/addons/registry'
+import { addonState, requireAddon } from '@/addons/registry'
 const AddonManager = defineAsyncComponent(() => import('./AddonManager.vue'))
 // —— 懒加载：三个导入器 + PDF 对话框都只在**点菜单/选文件**时才用 ✓ ——
 //   静态导入会让 pptx(30KB)+docx(30KB)+pdf 全进启动包 ✗；改成动态导入后 Vite 各自分包 ✓
@@ -85,12 +85,12 @@ function onDeckJsonPicked(e: Event) {
 }
 /** 导入 Word（.docx）：本地解析 → Markdown → 走应用自己的 Markdown 导入管线（图片内嵌成 data URL） */
 const docxInput = ref<HTMLInputElement | null>(null)
-function pickDocx() { fileOpen.value = false; docxInput.value?.click() }
+function pickDocx() { if (!requireAddon('docx-import')) return fileOpen.value = false; docxInput.value?.click() }
 const pptxInput = ref<HTMLInputElement | null>(null)
-function pickPptx() { fileOpen.value = false; pptxInput.value?.click() }
+function pickPptx() { if (!requireAddon('pptx-import')) return fileOpen.value = false; pptxInput.value?.click() }
 /** 导入 PDF：先弹窗探测（有没有文本层）再决定怎么导 */
 const pdfInput = ref<HTMLInputElement | null>(null)
-function pickPdf() { fileOpen.value = false; pdfInput.value?.click() }
+function pickPdf() { if (!requireAddon('pdf-import')) return fileOpen.value = false; pdfInput.value?.click() }
 function onPdfPicked(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
@@ -492,7 +492,7 @@ function present() {
   store.clearDrawTool()
   emit('present')
 }
-function openPaper() {
+function openPaper() { if (!requireAddon('pdf-gen')) return
   store.clearDrawTool()
   emit('open-paper')
 }
@@ -551,7 +551,7 @@ const ggbWrap = ref<HTMLElement | null>(null)
 function toggleGgbMenu() {
   toggleShown(ggbMenuOpen)
 }
-function addBlankGgb() {
+function addBlankGgb() { if (!requireAddon('geogebra')) return
   ggbMenuOpen.value = false
   store.addElement('geogebra')
 }
@@ -567,7 +567,7 @@ const dsmFileInput = ref<HTMLInputElement | null>(null)
 function toggleDsmMenu() {
   toggleShown(dsmMenuOpen)
 }
-function addBlankDsm() {
+function addBlankDsm() { if (!requireAddon('desmos')) return
   dsmMenuOpen.value = false
   store.addElement('desmos')
 }

@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { requireAddon } from '@/addons/registry'
 
 /** 图片转图形弹窗：把图片里的线稿识别成可编辑的数学图形元素。
  *
@@ -14,6 +15,7 @@ export const vectorizeReplaceId = ref<string | null>(null)
 export const vectorizeEditId = ref<string | null>(null)
 
 export function openVectorize(src: string, replaceId: string | null = null, editId: string | null = null) {
+  if (!requireAddon('vectorize')) return
   vectorizeSrc.value = src
   vectorizeReplaceId.value = replaceId
   vectorizeEditId.value = editId

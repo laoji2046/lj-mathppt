@@ -1,10 +1,12 @@
 import { ref } from 'vue'
+import { requireAddon } from '@/addons/registry'
 
 /** 图片编辑器弹窗：编辑选中的图片元素（裁剪/旋转/翻转/滤镜），应用后写回 src */
 export const imageEditOpen = ref(false)
 export const imageEditId = ref<string | null>(null)
 
 export function openImageEditor(id: string) {
+  if (!requireAddon('image-editor')) return
   imageEditId.value = id
   imageEditOpen.value = true
 }

@@ -11,6 +11,7 @@ import { findBundle } from '@/templates/mathBundles'
 import { findProTemplate, findProBundle } from '@/templates/proTemplates'
 import { findMathAppletTemplate } from '@/templates/mathAppletTemplates'
 import { restyleDeck } from '@/templates/restyle'
+import { requireAddon } from '@/addons/registry'
 import { autoTemplateDeck, type AutoApplyResult } from '@/templates/autoTemplate'
 
 const STORAGE_KEY = 'lj-mathslides-vue:deck'
@@ -957,11 +958,13 @@ export const useDeckStore = defineStore('deck', () => {
    * 只换 elements ✓（背景/备注不动 ✓）；pushHistory 在改动**之前** ✗（否则撤销不回来 ✓）。
    */
   function applyAutoTemplate(opts: { skip?: number[] } = {}): AutoApplyResult {
+    if (!requireAddon('auto-template')) return { applied: 0, kept: deck.value.slides.length, report: [] }
     pushHistory()
     return autoTemplateDeck(deck.value, undefined, opts)
   }
 
   function applyHouseStyle(themeId?: string, mode: 'soft' | 'strong' = 'soft') {
+    if (!requireAddon('house-style')) return { theme: getTheme(deck.value.theme || 'edumath'), changed: 0, slides: 0, mode: 'soft' }
     pushHistory()
     return restyleDeck(deck.value, themeId, mode)
   }

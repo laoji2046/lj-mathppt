@@ -6,7 +6,7 @@
  * - 组件/入口一律按需加载（各 addon 自己用 defineAsyncComponent / await import()）；
  * - 关掉一个 addon = 入口隐藏 + 代码不加载，不动任何已有实现（可随时开回来）。
  */
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
 import type { AddonManifest } from './types'
 
 const KEY = 'lj-mathslides-vue:addons'
@@ -62,4 +62,21 @@ export function initAddons() {
 export async function loadAddon<T>(id: string, loader: () => Promise<T>): Promise<T | null> {
   if (!isEnabled(id)) return null
   return loader()
+}
+/**
+ * **动作级守卫** ✓ —— 关掉的功能即使还有别的入口（菜单、浮层、属性面板…）也进不去 ✗。
+ *
+ * 为什么必须放在这里 ✗：v1287 我只给入口挂了 `v-if` ✓，结果**挂不全** ✓ ——
+ * 用户实测：把「三维立体图」关掉后，**数学图形弹窗里那个入口照样能打开** ✗（漏了一处 ✓）。
+ * 入口有十几处 ✓ 且以后还会加 ✗；**守卫放进动作本身** ✓ 才是唯一可靠的写法 ✓。
+ */
+export const addonNotice = ref('')
+let noticeTimer: number | undefined
+export function requireAddon(id: string): boolean {
+  if (isEnabled(id)) return true
+  const m = manifests.get(id)
+  addonNotice.value = (m ? m.name : id) + ' 已在「功能管理」里关掉 —— 打开它才能用'
+  if (noticeTimer) clearTimeout(noticeTimer)
+  noticeTimer = window.setTimeout(() => { addonNotice.value = '' }, 3200)
+  return false
 }
