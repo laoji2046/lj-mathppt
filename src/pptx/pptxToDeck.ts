@@ -385,6 +385,9 @@ export async function pptxToDeck(
         }
         const rows: string[][] = []
         const merges: { r: number; c: number; rs: number; cs: number }[] = []
+        // ⚠ 列宽必须读：实测样张 4 列是 142/325/499/240px **极不均匀** ✗，
+        //   丢掉就变成等宽 → 整张表压变形 ✓（这是"表格识别"最明显的短板 ✓）
+        const colWidths = allDeep(tbl, 'gridCol').map((c) => emu2px(num(c.attrs['w'], 0))).filter((n) => n > 0)
         const trs = kidsOf(tbl, 'tr')
         for (let r = 0; r < trs.length; r++) {
           const cells = kidsOf(trs[r], 'tc')
@@ -404,9 +407,14 @@ export async function pptxToDeck(
         }
         if (!rows.length) return
         const el = createElement('table')
+        // ⚠ 该用"列宽之和"当表宽：实测这张表的 ext=768px 是废数 ✗（列宽加起来 1207px ✓，
+        //   与幻灯片 1280px 才对得上 ✓）。同 chExt 一个套路 ✓ —— 生成器写的几何值不可信 ✓。
+        const gridW = colWidths.length ? colWidths.reduce((a, b) => a + b, 0) : 0
         Object.assign(el, {
-          x, y, w: w || deckW * 0.6, h: h || deckH * 0.4,
-          rows, merges: merges.length ? merges : undefined, fontSize: 20,
+          x, y, w: gridW || w || deckW * 0.6, h: h || deckH * 0.4,
+          rows, merges: merges.length ? merges : undefined,
+          colWidths: colWidths.length === rows[0]?.length ? colWidths : undefined,
+          fontSize: 20,
         })
         elements.push(el)
         stats.tables++

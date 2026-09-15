@@ -556,7 +556,7 @@ function elementToHtmlInner(el: SlideElement): string {
       ? '<caption style="caption-side:top;text-align:center;font-weight:700;padding:0 0 4px">' +
         normalizeMixed(inlineFiguresInText(esc(el.caption), el.figHeight)) + '</caption>'
       : ''
-    return `<div style="${box}${rot}"${cls}${fragIdx}><table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:${el.fontSize}px">${cap}<tbody>${rowsHtml}</tbody></table></div>`
+    return `<div style="${box}${rot}"${cls}${fragIdx}><table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:${el.fontSize}px">${el.colWidths && el.colWidths.length ? '<colgroup>' + el.colWidths.map((w: number) => '<col style="width:' + w + 'px">').join('') + '</colgroup>' : ''}${cap}<tbody>${rowsHtml}</tbody></table></div>`
   }
   if (el.type === 'icon') {
     const size = Math.round(Math.min(el.w, el.h) * 0.72)

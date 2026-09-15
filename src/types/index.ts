@@ -621,6 +621,8 @@ export interface TableElement extends ElementBase {
   figHeight?: number
   /** 边框画法：all=全网格（默认）；three=**三线表**（只画顶/表头下/底三条，教材常用） */
   borderMode?: 'all' | 'three'
+  /** 各列宽度（px）—— PPT 导入时来自表格的 gridCol ✓；不写=等分（老存档照旧 ✓） */
+  colWidths?: number[]
   headerColor: string
   borderColor: string
   fontSize: number

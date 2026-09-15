@@ -139,6 +139,10 @@ function onEsc(e: KeyboardEvent) {
 <template>
   <div class="table-el" :class="{ 'table-el--edit': editing }" @dblclick.stop.prevent="startEdit">
     <table ref="gridEl" class="table-grid" :key="editing ? 'edit' : 'view:' + contentKey" :style="tableStyle">
+      <!-- 列宽（PPT 导入还原）：有 colWidths 就按它排，否则等分 ✓ -->
+      <colgroup v-if="el.colWidths && el.colWidths.length">
+        <col v-for="(cw, ci) in el.colWidths" :key="ci" :style="{ width: cw + 'px' }" />
+      </colgroup>
       <caption v-if="el.caption" class="table-cap" :data-raw="el.caption" :contenteditable="editing ? 'plaintext-only' : 'false'">
         <template v-if="editing">{{ el.caption }}</template>
         <!-- ⚠ key 用文本本身：MathJax 会把 v-html 的子节点换掉，Vue 若按旧锚点 patch 会报
@@ -170,7 +174,7 @@ function onEsc(e: KeyboardEvent) {
 
 <style scoped>
 .table-el { width: 100%; height: 100%; overflow: auto; box-sizing: border-box; position: relative; }
-.table-grid { width: 100%; }
+.table-grid { width: 100%; table-layout: fixed; }
 .table-cap { caption-side: top; text-align: center; font-weight: 700; padding: 0 0 4px; outline: none; }
 .table-el--edit .table-grid > tbody > tr > td { border: 1px dashed var(--brand) !important; min-height: 28px; }
 .table-el--edit .table-cap { border: 1px dashed var(--brand); }
