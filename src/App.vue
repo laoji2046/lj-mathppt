@@ -34,6 +34,7 @@ import MarkdownSourcePanel from '@/components/MarkdownSourcePanel.vue'
 import { viewMode } from '@/ui/view'
 import { tplOpen, tplMode, openTemplateLibrary, closeTemplateLibrary } from '@/ui/templateLibrary'
 import { helpOpen, closeHelp } from '@/ui/help'
+import { openLayoutGallery } from '@/ui/layoutGallery'
 import { openHelp } from '@/ui/help'
 import { openGeom3D } from '@/ui/geom3d'
 import { initShotMode, shotRequest } from '@/ui/shot'
@@ -125,6 +126,7 @@ onMounted(() => {
   else if (want === 'formulamenu') formulaMenuOpen.value = true
   else if (want === 'draw') drawOpen.value = true
   else if (want === 'table') tableMenuOpen.value = true
+  else if (want === 'layout') openLayoutGallery(0)
   else if (want === 'desmos') dsmMenuOpen.value = true
   else if (want === 'ggbmenu') ggbMenuOpen.value = true
   else if (want === 'embed') embedMenuOpen.value = true
