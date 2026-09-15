@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, type Ref , shallowRef, type ComponentPublicInstance } from 'vue'
+import { defineAsyncComponent, computed, onBeforeUnmount, onMounted, ref, type Ref , shallowRef, type ComponentPublicInstance } from 'vue'
 import { useDeckStore } from '@/stores/deck'
 import { TABLE_TEMPLATES } from '@/templates/tableTemplates'
 import { renderDeckToRevealHtml } from '@/reveal/renderer'
@@ -20,11 +20,11 @@ import SaveAsDialog from './SaveAsDialog.vue'
 import { isTauri } from '@/composables/useTauri'
 import SettingsPanel from './SettingsPanel.vue'
 import { ICONS as I } from '@/ui/icons'
-import { docxToMarkdown } from '@/docx/docxToMarkdown'
-import { pptxToDeck } from '@/pptx/pptxToDeck'
-import PdfImportDialog from './PdfImportDialog.vue'
 import { pdfImportOpen, pdfImportFile, openPdfImport, closePdfImport } from '@/ui/pdfImport'
-import { markdownToDeck } from '@/composables/mdDeck'
+// —— 懒加载：三个导入器 + PDF 对话框都只在**点菜单/选文件**时才用 ✓ ——
+//   静态导入会让 pptx(30KB)+docx(30KB)+pdf 全进启动包 ✗；改成动态导入后 Vite 各自分包 ✓
+//   （PdfImportDialog 在模板里是 v-if 门控 ✓，可以安全异步化 ✓）
+const PdfImportDialog = defineAsyncComponent(() => import('./PdfImportDialog.vue'))
 
 const store = useDeckStore()
 const emit = defineEmits<{ (e: 'present'): void; (e: 'open-templates'): void; (e: 'open-paper'): void; (e: 'open-ggb-suite'): void }>()
@@ -107,6 +107,7 @@ async function onPptxPicked(e: Event) {
   flashToast()
   try {
     const buf = new Uint8Array(await file.arrayBuffer())
+    const { pptxToDeck } = await import('@/pptx/pptxToDeck')
     const { deck, stats } = await pptxToDeck(buf)
     const ok2 = store.importDeck(deck)
     if (!ok2) throw new Error('生成的演示无效（已取消，未影响当前内容）')
@@ -138,7 +139,9 @@ async function onDocxPicked(e: Event) {
   flashToast()
   try {
     const buf = new Uint8Array(await file.arrayBuffer())
+    const { docxToMarkdown } = await import('@/docx/docxToMarkdown')
     const { markdown, stats } = await docxToMarkdown(buf)
+    const { markdownToDeck } = await import('@/composables/mdDeck')
     const deck = markdownToDeck(markdown)
     const ok2 = store.importDeck(deck)
     if (!ok2) throw new Error('生成的演示无效（已取消，未影响当前内容）')

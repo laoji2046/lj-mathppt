@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDeckStore } from '@/stores/deck'
 import { captureDesmosState } from '@/composables/useDesmos'
 import type { DesmosElement, SlideElement } from '@/types'
@@ -9,15 +9,19 @@ import SlideList from '@/components/SlideList.vue'
 import EditorCanvas from '@/components/EditorCanvas.vue'
 import PropertyPanel from '@/components/PropertyPanel.vue'
 import PresentationOverlay from '@/components/PresentationOverlay.vue'
-import PaperModal from '@/components/PaperModal.vue'
-import GgbSuite from '@/components/GgbSuite.vue'
-import TemplatePicker from '@/components/TemplatePicker.vue'
-import LayoutGallery from '@/components/LayoutGallery.vue'
+// —— 懒加载：下面这些对话框都只在**点开时**才用 ✓（模板里全是 v-if 门控 ✓）——
+//   改成 defineAsyncComponent 后，Vite 会把它们各自拆成独立 chunk ✓，
+//   启动包不再包含它们 ✓（实测本次改前：0 处懒加载 ✗、单文件 1299 KB ✓）。
+//   ⚠ 不要给"常驻挂载（没有 v-if）"的组件加这个 ✗ —— 它一渲染就会立刻拉 chunk ✓，等于白改 ✓。
+const PaperModal = defineAsyncComponent(() => import('@/components/PaperModal.vue'))
+const GgbSuite = defineAsyncComponent(() => import('@/components/GgbSuite.vue'))
+const TemplatePicker = defineAsyncComponent(() => import('@/components/TemplatePicker.vue'))
+const LayoutGallery = defineAsyncComponent(() => import('@/components/LayoutGallery.vue'))
 import { ggbEdit, openGgbSuite, closeGgbSuite } from '@/ui/ggbEditor'
-import ImageEditorModal from '@/components/ImageEditorModal.vue'
-import VectorizeDialog from '@/components/VectorizeDialog.vue'
-import Geom3DDialog from '@/components/Geom3DDialog.vue'
-import AsyExportDialog from '@/components/AsyExportDialog.vue'
+const ImageEditorModal = defineAsyncComponent(() => import('@/components/ImageEditorModal.vue'))
+const VectorizeDialog = defineAsyncComponent(() => import('@/components/VectorizeDialog.vue'))
+const Geom3DDialog = defineAsyncComponent(() => import('@/components/Geom3DDialog.vue'))
+const AsyExportDialog = defineAsyncComponent(() => import('@/components/AsyExportDialog.vue'))
 import { asyExportEl, closeAsyExport } from '@/ui/asyExport'
 import { vectorizeOpen, vectorizeSrc, vectorizeReplaceId, vectorizeEditId, closeVectorize } from '@/ui/vectorize'
 import { geom3dOpen, geom3dEditId } from '@/ui/geom3d'
