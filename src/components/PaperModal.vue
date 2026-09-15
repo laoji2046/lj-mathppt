@@ -564,22 +564,81 @@ function loadHelpDemo() {
 }
 function clear() { input.value = ''; localStorage.removeItem(DRAFT_KEY); render() }
 
+/** 版心宽度（像素）：A4 210mm − 2×16mm 页边距 = 178mm；按 2 倍留清晰度 ≈ 1345px ✓
+ *  —— 图片超过这个宽度就等比缩小 ✓，保证既填得满版心、又不让 PDF 白白变大 ✓。 */
+const A4_CONTENT_PX = Math.round(((210 - 2 * 16) / 25.4) * 96 * 2)
+
+/**
+ * 把一张图片文件读进来并按版心限宽压缩后落进 images ✓（插图与拖拽共用一份实现 ✓）。
+ *
+ * 为什么必须压缩 ✗：手机拍的题图常是 3000~4000px 宽 ✓，直接内嵌会让 dataURL 有数 MB ✓，
+ * 存进草稿会撑爆 localStorage、生成的 PDF 也白白巨大 ✓。
+ */
+async function addImageFromFile(file: File) {
+  if (!file || !file.type || file.type.indexOf('image/') !== 0) { paperMsg.value = '只能插入图片文件（PNG/JPG/WebP/GIF/SVG）'; return }
+  try {
+    const dataUrl = await new Promise<string>((res, rej) => {
+      const r = new FileReader()
+      r.onload = () => res(String(r.result))
+      r.onerror = () => rej(new Error('读取文件失败'))
+      r.readAsDataURL(file)
+    })
+    const img = await new Promise<HTMLImageElement>((res, rej) => {
+      const i = new Image()
+      i.onload = () => res(i)
+      i.onerror = () => rej(new Error('这不是浏览器能识别的图片'))
+      i.src = dataUrl
+    })
+    const w0 = img.naturalWidth || img.width
+    const h0 = img.naturalHeight || img.height
+    let w = w0
+    let h = h0
+    if (w > A4_CONTENT_PX) { h = Math.round((h0 * A4_CONTENT_PX) / w0); w = A4_CONTENT_PX }
+    let out = dataUrl
+    const isPng = file.type === 'image/png'
+    if (w !== w0 || !isPng) {
+      const c = document.createElement('canvas')
+      c.width = w
+      c.height = h
+      const cx = c.getContext('2d')
+      if (cx) {
+        cx.drawImage(img, 0, 0, w, h)
+        out = c.toDataURL(isPng ? 'image/png' : 'image/jpeg', 0.85)
+      }
+    }
+    const n = ++imgSeq.value
+    images.value[n] = { src: out, address: file.name || '本地图片' }
+    input.value += '[图' + n + ']'
+    render()
+    saveDraftSoon()
+    const kb0 = Math.round(file.size / 1024)
+    const kb1 = Math.round((out.length * 0.75) / 1024)
+    const size = kb1 < kb0 ? '（' + kb0 + ' KB → ' + kb1 + ' KB）' : ''
+    paperMsg.value = '已插入 ' + (file.name || '图片') + '：' + w0 + '×' + h0 + (w !== w0 ? ' → 缩到 ' + w + '×' + h : '') + size
+  } catch (err: any) {
+    paperMsg.value = '插入图片失败：' + (err && err.message ? err.message : String(err))
+  }
+}
+
+/** 拖拽进编辑区：一次可以拖多张 ✓ */
+function onDropImages(e: DragEvent) {
+  const fs = e.dataTransfer && e.dataTransfer.files
+  if (!fs || !fs.length) return
+  const list = Array.from(fs)
+  let i = 0
+  const next = () => { if (i >= list.length) return; const f = list[i++]; addImageFromFile(f).then(next) }
+  next()
+}
 function insertImage() {
   const fi = document.createElement('input')
   fi.type = 'file'
   fi.accept = 'image/*'
+  fi.multiple = true
   fi.onchange = () => {
-    const file = fi.files && fi.files[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      const n = ++imgSeq.value
-      images.value[n] = { src: String(reader.result), address: file.name || '本地图片' }
-      const tag = '[图' + n + ']'
-      input.value += tag
-      render()
-    }
-    reader.readAsDataURL(file)
+    const fs = fi.files ? Array.from(fi.files) : []
+    let i = 0
+    const next = () => { if (i >= fs.length) return; const file = fs[i++]; addImageFromFile(file).then(next) }
+    next()
   }
   fi.click()
 }
@@ -1003,7 +1062,7 @@ watch([headerText, footerText], () => render())
         </header>
         <div class="pm__body">
           <div class="pm__split">
-            <div class="pm__left">
+          <div class="pm__left" @dragover.prevent @drop.prevent="onDropImages($event)">
               <div class="pm__controls">
                 <div class="pm__ctlrow">
                   <label>模板</label>
