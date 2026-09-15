@@ -291,7 +291,9 @@ export async function pptxToDeck(
     const elements: any[] = []
     const counter = { n: 0 }
 
-    const addShape = async (shape: XmlNode, baseX = 0, baseY = 0) => {
+    /** 组合（grpSp）的坐标变换：子坐标 = (child - chOff) * (ext/chExt) + off ✓
+     *  ⚠ 不能假设"组合偏移很小" ✗ —— 偏移非零时子元素会**整体错位**（实测两段文字叠在一起 ✓）。 */
+    const addShape = async (shape: XmlNode, baseX = 0, baseY = 0, scX = 1, scY = 1) => {
       const ln = local(shape.name)
       // 兼容包装：真内容在 mc:Choice 里，mc:Fallback 是老的 VML/WMF 版（跳过 ✗）
       if (ln === 'AlternateContent') {
@@ -299,8 +301,32 @@ export async function pptxToDeck(
         return
       }
       if (ln === 'grpSp') {
-        // 组合：递归（v1 用子元素自己的坐标，组合自身的偏移一般很小）
-        for (const c of kidsOf(shape)) await addShape(c, baseX, baseY)
+        const gxf = find(kid(shape, 'grpSpPr') ?? shape, 'xfrm')
+        const goff = kid(gxf, 'off'), gext = kid(gxf, 'ext')
+        const gchOff = kid(gxf, 'chOff'), gchExt = kid(gxf, 'chExt')
+        const gx = emu2px(num(goff?.attrs['x'], 0))
+        const gy = emu2px(num(goff?.attrs['y'], 0))
+        const gw = num(gext?.attrs['cx'], 0), gh = num(gext?.attrs['cy'], 0)
+        const cw = num(gchExt?.attrs['cx'], 0), chh = num(gchExt?.attrs['cy'], 0)
+        // ⚠⚠ chExt 的"单位"不可信 ✗：实测样张里 off=429260(EMU) 而 chExt=4183，
+        //    直接相除得到 635 倍 ✗ —— 会把整个组合炸飞 ✓（这种生成器写出的 chExt 是废数 ✓）。
+        //    所以缩放**只接受合理范围**（0.2~5 倍 ✓），越界就当 1（只用 off 位移 ✓）。
+        let rx = cw > 0 && gw > 0 ? gw / cw : 1
+        let ry = chh > 0 && gh > 0 ? gh / chh : 1
+        if (!(rx > 0.2 && rx < 5)) rx = 1
+        if (!(ry > 0.2 && ry < 5)) ry = 1
+        // chOff 同理：越界就当 0（它只是"组合内原点" ✓，多为小值 ✓）
+        const cxRaw = emu2px(num(gchOff?.attrs['x'], 0))
+        const cyRaw = emu2px(num(gchOff?.attrs['y'], 0))
+        const cx = Math.abs(cxRaw) < 200 ? cxRaw : 0
+        const cy = Math.abs(cyRaw) < 200 ? cyRaw : 0
+        // 子坐标为"组合内坐标系"，先减 chOff、乘缩放、加 off（再叠加外层的 base/scale ✓）
+        const nx = baseX + (gx - cx * scX) * scX
+        const ny = baseY + (gy - cy * scY) * scY
+        for (const c of kidsOf(shape)) {
+          if (local(c.name) === 'grpSpPr' || local(c.name) === 'nvGrpSpPr') continue
+          await addShape(c, nx, ny, scX * rx, scY * ry)
+        }
         return
       }
       // 位置：spPr/a:xfrm 或 xfrm
@@ -309,10 +335,10 @@ export async function pptxToDeck(
       const off = kid(xfrm, 'off')
       const ext = kid(xfrm, 'ext')
       const hasPos = !!(off && ext)
-      const x = emu2px(num(off?.attrs['x'], 0)) + baseX
-      const y = emu2px(num(off?.attrs['y'], 0)) + baseY
-      const w = emu2px(num(ext?.attrs['cx'], 0))
-      const h = emu2px(num(ext?.attrs['cy'], 0))
+      const x = Math.round(emu2px(num(off?.attrs['x'], 0)) * scX + baseX)
+      const y = Math.round(emu2px(num(off?.attrs['y'], 0)) * scY + baseY)
+      const w = Math.round(emu2px(num(ext?.attrs['cx'], 0)) * scX)
+      const h = Math.round(emu2px(num(ext?.attrs['cy'], 0)) * scY)
 
       if (ln === 'pic') {
         const blip = find(shape, 'blip')
@@ -406,6 +432,7 @@ export async function pptxToDeck(
         const fpx = Math.max(10, Math.round(sz2px(sz) * FONT_SCALE))
         let fw = w || 400
         let fh = h || 60
+        let fy = y
         if (noWrap) {
           // 不换行：把框加宽到能一行放完（恢复 PPT 的样子 ✓）
           const nw = naturalWidth(txt, fpx)
@@ -424,7 +451,14 @@ export async function pptxToDeck(
         const paraAfter = Math.round(pct(pPr0 ? kid(pPr0, 'spcAft') : null) * FONT_SCALE)
         // 框随字长（spAutoFit）：高度至少放得下按折行估算出的行数（用真实行距 ✓）
         const need = estimateLines(txt, fpx, fw) * fpx * lineHeight + fpx * 0.35 + paraBefore + paraAfter
-        if (need > fh) fh = Math.ceil(need)
+        const grown = need > fh ? Math.ceil(need) - fh : 0
+        if (grown > 0) {
+          // ⚠ 撑高会把"框"变大：anchor=ctr 的文字会往下跑 half、anchor=b 会往下跑 whole ✗
+          //   所以按 anchor 反向补 y，让**文字**停在原来的位置 ✓（否则会和旁边的框错位 ✓）
+          fh = fh + grown
+          if (anchor === 'ctr') fy -= grown / 2
+          else if (anchor === 'b') fy -= grown
+        }
         let color: string | null = null
         for (const rPr of allDeep(txBody, 'rPr')) { const c = colorOf(rPr, theme); if (c) { color = c; break } }
         if (!color) color = colorOf(find(txBody, 'defRPr'), theme)
@@ -432,7 +466,7 @@ export async function pptxToDeck(
         for (const rPr of allDeep(txBody, 'rPr')) if (rPr.attrs['b'] === '1') { bold = true; break }
         const el = hasMath ? createElement('richtex') : createElement('text')
         Object.assign(el, {
-          x, y, w: Math.round(fw), h: Math.round(fh),
+          x, y: Math.round(fy), w: Math.round(fw), h: Math.round(fh),
           text: txt, fontSize: fpx,
           align: st.align,
           ...(color ? { color } : {}),
