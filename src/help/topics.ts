@@ -124,6 +124,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '数学图形与图形库',
     tags: ['图形', '函数图像', '抛物线', '几何', '顶点', '贝塞尔'],
     body: [
+      img('dlg-asy', '「Asymptote 导出」：把图形导成 .asy 代码，交给 Asymptote 排版'),
       img('edit-toolbar', '选中元素后出现的编辑工具栏：对齐 / 分布 / 组合 / 层级'),
       img('dlg-icon', '「图标」库：给要点配一个简单图标'),
       img('prop-panel', '选中图形后，右侧属性面板可改颜色 / 线宽 / 虚线 / 填充 / 顶点圆点'),
