@@ -1027,8 +1027,11 @@ async function onPaperDocx(e: Event) {
     input.value = markdown
     render()
     saveDraft()
-    const ole = stats.oleFormulas > 0 ? ' · 另有 ' + stats.oleFormulas + ' 个 MathType 公式未转换（请在 Word 里先转成 Office 公式）' : ''
-    paperMsg.value = 'Word 导入完成：公式 ' + stats.formulas + ole
+    const ole = stats.oleFormulas > 0
+      ? ' · ⚠ 另有 ' + stats.oleFormulas + ' 个公式是 MathType 对象，读不到内容 —— 请在 Word 里用「MathType → 转换 → 转换为 Office 公式」后再导一次'
+      : ''
+    paperMsg.value =
+      'Word 导入完成：公式 ' + stats.formulas + ' · 图片 ' + stats.images + ' · 表格 ' + stats.tables + ole
   } catch (err: any) {
     paperMsg.value = '导入失败：' + (err && err.message ? err.message : String(err))
   }
