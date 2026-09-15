@@ -117,8 +117,12 @@ async function onPptxPicked(e: Event) {
     const oleWarn2 = stats.oleFormulas > 0
       ? ' · 注意：另有 ' + stats.oleFormulas + ' 个公式是 OLE 对象（读不到内容）—— 请在 PowerPoint 里把它们改成「插入 → 公式」的原生公式，再导一次'
       : ''
+    // ⚠ 几何自检报数：位置/尺寸没取到、或跑到画布外 ✗（这类问题代码不报错 ✓，必须显式说出来 ✓）
+    const geoWarn = stats.geomSuspect > 0
+      ? ' · ⚠ ' + stats.geomSuspect + ' 个元素位置/尺寸异常（可能没取到写入位置）—— 请把出问题那一页截图给我'
+      : ''
     fileToast.value = 'PPT 导入完成：' + deck.slides.length + ' 页 · 公式 ' + stats.formulas +
-      ' · 图片 ' + stats.images + ' · 表格 ' + stats.tables + warn + oleWarn2
+      ' · 图片 ' + stats.images + ' · 表格 ' + stats.tables + warn + oleWarn2 + geoWarn
   } catch (err) {
     fileToast.value = 'PPT 导入失败：' + (err instanceof Error ? err.message : String(err))
   }

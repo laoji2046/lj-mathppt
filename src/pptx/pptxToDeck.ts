@@ -26,6 +26,13 @@ export interface PptxStats {
   skippedVector: number
   /** 只有 OLE 壳、读不到原生公式的个数（WMF 预览浏览器渲染不了 → 明确报数，别留暗洞 ✗） */
   oleFormulas: number
+  /**
+   * 几何可疑的元素数 ✗ —— 位置/尺寸没取到或跑到画布外的 ✓。
+   * 为什么需要：DrawingML 的位移有**三种放法** ✓，漏认一种就静默变成 (0,0) ✓，
+   * 页面看上去就是"全叠在左上角" ✓ —— 而**代码不报错** ✗。
+   * 有了这个数，导入完就能第一眼发现 ✓，不用等用户截图 ✓。
+   */
+  geomSuspect: number
   bytes: number
 }
 
@@ -226,7 +233,7 @@ export async function pptxToDeck(
   buf: Uint8Array,
   opts: { onProgress?: (i: number, total: number) => void } = {},
 ): Promise<{ deck: any; stats: PptxStats }> {
-  const stats: PptxStats = { slides: 0, texts: 0, images: 0, tables: 0, formulas: 0, skippedNoPos: 0, skippedVector: 0, oleFormulas: 0, bytes: 0 }
+  const stats: PptxStats = { slides: 0, texts: 0, images: 0, tables: 0, formulas: 0, skippedNoPos: 0, skippedVector: 0, oleFormulas: 0, geomSuspect: 0, bytes: 0 }
   const entries = listEntries(buf)
   const byName = new Map(entries.map((e) => [e.name, e]))
   const text = async (name: string) => (byName.has(name) ? readText(buf, name) : null)
@@ -522,6 +529,16 @@ export async function pptxToDeck(
     slides.push({ id: 'pptx-' + (i + 1), bg: '#ffffff', elements })
     stats.slides++
     opts.onProgress?.(i + 1, order.length)
+  }
+
+  // —— 几何自检：找"没取到位置"和"跑到画布外"的元素 ✗ ——
+  for (const s of slides) {
+    for (const e of s.elements) {
+      const noPos = e.x === 0 && e.y === 0 && e.type !== 'table'   // 表格合法落在原点的情况极少，仍按可疑计 ✓
+      const zero = !e.w || !e.h
+      const outside = e.x > deckW || e.y > deckH || e.x + e.w < 0 || e.y + e.h < 0
+      if (noPos || zero || outside) stats.geomSuspect++
+    }
   }
 
   return {
