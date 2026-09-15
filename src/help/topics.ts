@@ -14,6 +14,7 @@ export type HelpBlock =
   | { t: 'note'; v: string }      // 提示框（蓝）
   | { t: 'warn'; v: string }      // 注意框（橙）
   | { t: 'keys'; v: string[] }    // 快捷键行
+  | { t: 'img'; v: string; caption?: string }   // 截图（文件在 public/help/<v>.png ✓）
 
 export interface HelpTopic {
   id: string
@@ -32,6 +33,8 @@ const ol = (...v: string[]): HelpBlock => ({ t: 'ol', v })
 const note = (v: string): HelpBlock => ({ t: 'note', v })
 const warn = (v: string): HelpBlock => ({ t: 'warn', v })
 const keys = (...v: string[]): HelpBlock => ({ t: 'keys', v })
+/** 插图：v = public/help 下的文件名（不带扩展名 ✓），caption 是图注 ✓ */
+const img = (v: string, caption?: string): HelpBlock => ({ t: 'img', v, caption })
 
 export const HELP_TOPICS: HelpTopic[] = [
   {
@@ -40,6 +43,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '五分钟上手',
     tags: ['快速', '入门', '新建', '保存'],
     body: [
+      img('ui-overview', '整体界面：左侧缩略图 · 中间画布 · 上方工具栏 · 右侧属性'),
       p('LJ-MathSlides 是本地运行的高中数学幻灯片编辑器：写讲义、编习题、现场演示，数据不出你的电脑。'),
       h('最小流程'),
       ol(
@@ -74,6 +78,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '文字与公式（$…$ 混排）',
     tags: ['文字', '公式', 'LaTeX', '$', '混排', '颜色'],
     body: [
+      img('insert-text', '「文字」按钮与右侧属性面板：改字号 / 颜色 / 对齐 / 底块'),
       p('正文里**混着写公式**是本编辑器的核心能力：一段文字中用 $ 包住的部分会渲染成数学公式。'),
       h('写法'),
       ul(
@@ -98,6 +103,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '表格',
     tags: ['表格', '三线表', '单元格', '合并'],
     body: [
+      img('table-menu', '「表格 ▾」里的模板：教材三线表、对比表等'),
       p('工具栏「表格 ▾」提供教材三线表、对比表等模板，也可以插入空白表格再编辑。'),
       ul(
         '单元格里同样支持 $...$ 公式（表格常用于「适用范围 / 文字叙述 / 等号条件」这类对比 ✓）。',
@@ -113,6 +119,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '数学图形与图形库',
     tags: ['图形', '函数图像', '抛物线', '几何', '顶点', '贝塞尔'],
     body: [
+      img('figure-library', '「数学图形」库：平面图形 / 立体几何 / 函数图像 / 圆锥曲线 等 70 余种'),
       p('工具栏「数学图形」打开图形库（平面图形 / 立体几何 / 复制图形 / 函数图像 / 圆锥曲线 / 辅助标注 共 70 余种）。'),
       ul(
         '单击图形即插入到当前页，插好后可拖动缩放。',
@@ -192,6 +199,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '导入 PPT / Word / PDF',
     tags: ['导入', 'pptx', 'docx', 'pdf', '公式', 'MathType'],
     body: [
+      img('file-menu', '「文件 ▾」里的导入通道：PPT / Word / PDF 与演示 JSON'),
       p('三条导入通道都是**本地解析**（不联网、不上传），导入后可继续编辑。'),
       h('PPT(.pptx)'),
       ul(
@@ -263,6 +271,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '解锁功能（Addon 开关）',
     tags: ['addon', '解锁', '功能管理', '体积', '关闭'],
     body: [
+      img('addon-panel', '「解锁功能」面板：按分类列出全部功能与体积，可随时开关'),
       p('把不用的功能关掉：**入口隐藏、代码不再加载**（已安装的内容不会丢，随时可开回来）。'),
       ul(
         '入口：帮助 ▾ → 解锁功能…',
@@ -270,6 +279,21 @@ export const HELP_TOPICS: HelpTopic[] = [
         '体积大头是运行时：GeoGebra 约 42 MB、Desmos 约 4 MB —— 不用就直接关掉。',
         '关掉后若从别的入口点进来，会提示「已在解锁功能里关掉」。',
       ),
+    ],
+  },
+  {
+    id: 'help',
+    section: '设置与优化',
+    title: '使用帮助与解锁功能在哪',
+    tags: ['帮助', '手册', '解锁', 'addon', '入口'],
+    body: [
+      p('工具栏最右侧的「帮助 ▾」里有两件事：使用帮助与解锁功能。'),
+      img('help-menu', '「帮助 ▾」菜单'),
+      ul(
+        '使用帮助…：打开本手册（左侧目录 + 搜索，搜「公式」「导出」这类词最快）。',
+        '解锁功能…：开关各功能模块，并显示各自的体积。',
+      ),
+      img('help-dialog', '帮助弹窗：左栏章节，右栏正文，顶部可搜索'),
     ],
   },
   {

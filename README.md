@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1290**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1291**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,38 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-15（v2026.09.1291）
+
+**1291 · 帮助文档图文并茂（8 张真实界面截图，脚本自动生成）**
+
+**插图不是画的，是截的** ✓ —— 用 CDP 驱动应用本身，把每个界面状态截下来并按元素**裁剪** ✓：
+
+    public/help/ui-overview.png    整体界面（1600x900 · 0.5 倍）119 KB
+    public/help/insert-text.png    「文字」按钮 + 属性面板（288x751）83 KB
+    public/help/table-menu.png     「表格 ▾」模板菜单（208x208）29 KB
+    public/help/figure-library.png 数学图形库 515 KB
+    public/help/file-menu.png      「文件 ▾」导入通道（208x562）58 KB
+    public/help/help-menu.png      「帮助 ▾」菜单（208x92）11 KB
+    public/help/help-dialog.png    帮助弹窗（1036x776）202 KB
+    public/help/addon-panel.png    「解锁功能」面板（776x656）169 KB
+    合计 1.16 MB
+
+截图脚本 `.probe/helpshots.cjs` 已留在仓库 ✓：**界面改了以后重跑一次，手册配图自动更新** ✓。
+做法：`Emulation.setDeviceMetricsOverride` 固定 1600x900 @2x ✓ → 按中文标签点按钮 ✓ →
+取元素的 `getBoundingClientRect()` 作为 `Page.captureScreenshot` 的 clip ✓ → 按元素**精确裁剪** ✓。
+
+**渲染侧**：HelpBlock 新增 img 块 ✓（`{ t: img, v: 文件名, caption }`）✓，
+弹窗里用 `<figure><img loading=lazy><figcaption>` ✓，地址走 `import.meta.env.BASE_URL` ✓
+（dev 与打包后都能找到 ✓）。**依然不用 v-html** ✓。
+
+**内容侧**：6 节插入配图 ✓ + 新增一节「使用帮助与解锁功能在哪」✓（含帮助菜单与弹窗两张图 ✓）→ 共 **17 节** ✓。
+
+**验证**：
+
+    弹窗可见 true ✓   左侧 **17** 条 ✓
+    插图 src=/help/ui-overview.png   naturalWidth=**1600** ✓✓   complete=true ✓✓（真的加载了 ✓）
+    无控制台异常 ✓   截图确认「五分钟上手」图文并排正常 ✓
 
 ### 2026-09-15（v2026.09.1290）
 

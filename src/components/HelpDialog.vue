@@ -14,6 +14,7 @@ const q = ref('')
 const activeId = ref(HELP_TOPICS[0].id)
 
 function blockText(b: HelpBlock): string {
+  if (b.t === 'img') return b.caption || ''
   if (b.t === 'ul' || b.t === 'ol' || b.t === 'keys') return b.v.join(' ')
   return b.v
 }
@@ -41,6 +42,8 @@ const active = computed<HelpTopic>(() => {
   return filtered.value[0] || HELP_TOPICS[0]
 })
 function pick(id: string) { activeId.value = id }
+/** 截图地址：走 BASE_URL ✓（dev 与打包后都能找到 public/help 下的文件 ✓） */
+function imgUrl(name: string) { return import.meta.env.BASE_URL + 'help/' + name + '.png' }
 function close() { emit('close') }
 function onKey(e: KeyboardEvent) { if (e.key === 'Escape') close() }
 onMounted(() => document.addEventListener('keydown', onKey))
@@ -86,6 +89,10 @@ onMounted(() => document.addEventListener('keydown', onKey))
             </div>
             <div v-else-if="b.t === 'note'" class='hp__note'>{{ b.v }}</div>
             <div v-else-if="b.t === 'warn'" class='hp__warn'>{{ b.v }}</div>
+            <figure v-else-if="b.t === 'img'" class='hp__fig'>
+              <img :src='imgUrl(b.v)' :alt='b.caption || b.v' loading='lazy' />
+              <figcaption v-if='b.caption'>{{ b.caption }}</figcaption>
+            </figure>
           </template>
         </article>
       </div>
@@ -117,5 +124,8 @@ onMounted(() => document.addEventListener('keydown', onKey))
 .hp__keys { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 4px 0; color: var(--text-2); }
 .hp__kbd { font-family: var(--font-mono); font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px; padding: 2px 7px; white-space: nowrap; }
 .hp__note { font-size: 13px; line-height: 1.8; margin: 10px 0; padding: 9px 12px; border-radius: var(--radius); background: #eff5ff; border-left: 3px solid #1668e0; color: #1c3d6e; }
+.hp__fig { margin: 14px 0; }
+.hp__fig img { max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); display: block; }
+.hp__fig figcaption { font-size: 12px; color: var(--muted); margin-top: 6px; text-align: center; }
 .hp__warn { font-size: 13px; line-height: 1.8; margin: 10px 0; padding: 9px 12px; border-radius: var(--radius); background: #fff6ec; border-left: 3px solid #e8871e; color: #7a4a10; }
 </style>
