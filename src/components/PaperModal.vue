@@ -271,15 +271,11 @@ function parse(src: string): string {
     const so = stripOpts(t)
     t = so.rest
     const st = so.style
-    // 手动分页：[换页] 或 [分页]
-    if (/^\[(换页|分页)\]$/.test(t)) { out += '<div class="page-break"></div>'; continue }
-    // 指定高度空白：[4cm] / [4厘米] / [10mm] / [10毫米]
-    const sp = t.match(/^\[\s*([\d.]+)\s*(cm|厘米|毫米|mm)\s*\]\s*$/)
-    if (sp) {
-      const unit = sp[2] === '厘米' ? 'cm' : sp[2] === '毫米' ? 'mm' : sp[2]
     // ── 题目块：[题] … [选项] … [解析] … [/题] ──────────────────────
-    // 为什么要这个 ✗：分页是按 flow.children 逐个块搬的 ✓（见 paginate）——
-    // 题干/选项/解析散成多个块时会被拆到两页中间 ✗；做成**一个块**就不会 ✓。
+    // ⚠ 位置很关键 ✗：必须在这个循环体**最外层** ✓ —— 我第一次插进了 `if (sp) {…}` 花括号里 ✗，
+    //   结果只有 [4cm] 那种行才会走到 ✓，标记全被当普通文字打出来了 ✗（截图看得很清楚 ✓）。
+    // 为什么要题目块 ✗：分页按 flow.children 逐个块搬 ✓（见 paginate）—— 题干/选项/解析散成
+    //   多个块会被拆到两页中间 ✗；做成**一个块**就不会 ✓。
     if (/^\[题\]$/.test(t)) { if (qBuf) out += emitQ(); qBuf = { stem: [], opts: [], sol: null, inOpts: false }; continue }
     if (/^\[\/题\]$/.test(t)) { if (qBuf) { out += emitQ(); qBuf = null } continue }
     if (/^\[选项\]$/.test(t)) { if (qBuf) { qBuf.inOpts = true; qBuf.sol = null } continue }
@@ -290,6 +286,12 @@ function parse(src: string): string {
       else qBuf.stem.push(t)
       continue
     }
+    // 手动分页：[换页] 或 [分页]
+    if (/^\[(换页|分页)\]$/.test(t)) { out += '<div class="page-break"></div>'; continue }
+    // 指定高度空白：[4cm] / [4厘米] / [10mm] / [10毫米]
+    const sp = t.match(/^\[\s*([\d.]+)\s*(cm|厘米|毫米|mm)\s*\]\s*$/)
+    if (sp) {
+      const unit = sp[2] === '厘米' ? 'cm' : sp[2] === '毫米' ? 'mm' : sp[2]
       out += blk('<div class="paper-space" style="height:' + sp[1] + unit + '"></div>', st)
       continue
     }
@@ -1437,7 +1439,8 @@ watch([headerText, footerText], () => render())
 /* ── 题目块（[题]…[选项]…[解析]…[/题]）─────────────────────────────
    解析区默认收起 ✓ 点一下展开 ✓；**打印时强制展开** ✓（否则答案不会印出来 ✗），
    同时隐藏「点击展开」那行提示 ✓。 */
-.paper-q { border: 1px solid #e3e0d8; border-radius: 6px; padding: 8px 10px; margin: 4px 0; background: #fcfbf7; }
+.paper-q { /* 试卷是白纸 ✓ —— 题目块只提供**结构**（不跨页 + 解析折叠），不加背景和边框 ✗ */
+  background: none; border: none; padding: 0; margin: 4px 0; }
 .paper-q__opts { margin-top: 4px; }
 .paper-q__sol { margin-top: 6px; border-top: 1px dashed #ddd; padding-top: 4px; }
 .paper-q__solbar { font-size: 0.9em; color: #8a8a8a; cursor: pointer; user-select: none; }
@@ -1445,7 +1448,6 @@ watch([headerText, footerText], () => render())
 .paper-q__sol--open .paper-q__solbody { display: block; }
 .paper-q__sol--open .paper-q__solbar { color: #1668e0; }
 @media print {
-  .paper-q { background: none; border-color: #ddd; }
   .paper-q__solbody { display: block !important; }
   .paper-q__solbar { display: none !important; }
 }
