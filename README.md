@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1286**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1287**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,30 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-15（v2026.09.1287）
+
+**1287 · addon 开关覆盖全部 10 项（12 处入口）**
+
+补齐上一轮遗留 ✓：
+
+- **修正 Desmos 挂错**：v1286 我把开关挂在了「Desmos 状态 JSON 导入」上 ✗；
+  这次挪到**真正的 Desmos 工具按钮**（跨行 `<button` 标签 ✓，用多行上下文锚定 ✓）✓；
+- **三维立体图 / 图片编辑 / 矢量描摹**：入口不在工具栏 ✗，而在**属性面板**的快捷按钮里 ✓
+  （「三维」`mathfig?.geom3d` ✓、「矢量描摹」`vectorizeCtx` 与常驻按钮各一 ✓、「图片编辑」✓）；
+  PropertyPanel 里也加了一个 `addonOn` helper ✓。
+
+**现在 10 项全部有受控入口（12 处）**：
+
+    pptx-import ✓ docx-import ✓ pdf-import ✓ pdf-gen ✓ house-style×2 ✓
+    auto-template ✓ geogebra ✓ desmos ✓ vectorize×2 ✓ image-editor ✓
+
+**踩坑（又是行号）** ✗：插了 import 与 helper 后**行号偏移 3 行** ✓，我却按旧行号改 ✓ ——
+结果改到了一个不相干的按钮上 ✓（幸运的是它没有 `mathfig?.geom3d` ✓ 所以替换失败 ✓ 没造成破坏 ✓）。
+**教训**：改文件后**一律按内容重新定位** ✓，不要复用上一次的行号 ✓。
+
+**仍未接 ✗**：`MathFigurePalette` 的「从图片复刻」onload 里也调了 `openVectorize` ✓（浮层内 ✓），
+那里也需要一个开关 ✓（做法相同 ✓，只是要包住上传流程 ✓）。
 
 ### 2026-09-15（v2026.09.1286）
 
