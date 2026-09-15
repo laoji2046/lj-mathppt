@@ -124,7 +124,18 @@ async function paragraph(p: XmlNode, ctx: Ctx): Promise<string[] | null> {
       } else if (k.name === 'w:object') {
         // MathType / 老式公式编辑器：公式是嵌入的 OLE 对象（word/embeddings/*.bin），
         // 文本层读不到内容，预览图又是 wmf/emf（浏览器不认）——只能计数并提示用户先在 Word 里转换
-        ctx.stats.oleFormulas++
+        // ⚠ MathType / 老式公式编辑器 ✗ —— 但 Word 常把**原生公式**（线性格式的 oMath）
+        //   一起嵌在这个 w:object 里 ✓ —— 先找它 ✓：找到就是真公式（能转 LaTeX ✓），
+        //   找不到才退化成「读不到内容」✓（并提示用户先去 Word 转换 ✓）。
+        const om = deepFirst(k, (nm) => nm === 'oMath' || nm === 'oMathPara' || nm === 'm:oMath' || nm === 'm:oMathPara')
+        const latex = om ? ommlToLatex(om) : ''
+        if (latex) {
+          ctx.stats.formulas++
+          items.push({ t: 'math', v: latex })
+          sawText = true
+        } else {
+          ctx.stats.oleFormulas++
+        }
       } else if (k.name === 'w:drawing' || k.name === 'w:pict') {
         const blip = first(k, 'a:blip')
         const rid = blip && (blip.attrs['r:embed'] || blip.attrs['r:link'])
@@ -218,6 +229,16 @@ async function paragraph(p: XmlNode, ctx: Ctx): Promise<string[] | null> {
   }
   ctx.stats.paragraphs++
   return out.length ? out : null
+}
+
+/** 在子树里深度找第一个满足条件的节点 ✓（按局部名匹配前缀无关 ✓） */
+function deepFirst(n: XmlNode, match: (name: string) => boolean): XmlNode | null {
+  for (const k of kids(n)) {
+    if (match(k.name)) return k
+    const r = deepFirst(k, match)
+    if (r) return r
+  }
+  return null
 }
 
 function textOfNode(n: XmlNode): string {
