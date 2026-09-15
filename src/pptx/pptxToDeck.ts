@@ -24,6 +24,10 @@ export interface PptxStats {
   skippedNoPos: number
   /** 跳过的 WMF/EMF（OLE 预览，不是内容） */
   skippedVector: number
+  /** 导入的矢量形状与连接线（rect / roundRect / 直线 / 箭头 ✓） */
+  shapes: number
+  /** 跳过的"既无填充又无线条"的隐形形状（纯占位/布局用 ✗） */
+  skippedInvisible: number
   /**
    * 跳过的 **0×0 退化对象** ✓ —— PPT 里这种东西本来就看不见 ✓（PowerPoint 也不渲染 ✓）。
    * ⚠ 不跳过会出事：兜底逻辑 w||200 / h||150 会给它**凭空造出 200x150** ✗，
@@ -271,7 +275,7 @@ export async function pptxToDeck(
   buf: Uint8Array,
   opts: { onProgress?: (i: number, total: number) => void } = {},
 ): Promise<{ deck: any; stats: PptxStats }> {
-  const stats: PptxStats = { slides: 0, texts: 0, images: 0, tables: 0, formulas: 0, skippedNoPos: 0, skippedVector: 0, oleFormulas: 0, skippedZeroSize: 0, geomSuspect: 0, bytes: 0 }
+  const stats: PptxStats = { slides: 0, texts: 0, images: 0, tables: 0, formulas: 0, skippedNoPos: 0, skippedVector: 0, shapes: 0, skippedInvisible: 0, oleFormulas: 0, skippedZeroSize: 0, geomSuspect: 0, bytes: 0 }
   const entries = listEntries(buf)
   const byName = new Map(entries.map((e) => [e.name, e]))
   const text = async (name: string) => (byName.has(name) ? readText(buf, name) : null)
@@ -404,6 +408,20 @@ export async function pptxToDeck(
       // ⚠ 0×0 退化对象：跳过 ✓（**只按尺寸判，不按位置判** ✗ —— 元素放在画布外是合法的 ✓）
       if (hasPos && w <= 0 && h <= 0) { stats.skippedZeroSize++; return }
 
+      // 连接线（cxnSp）→ 直线/箭头 ✓（实测样张 4 条 ✓）
+      if (ln === 'cxnSp') {
+        const lnEl = find(shape, 'ln')
+        const stroke = colorOf(lnEl, theme) || '#1a1a1a'
+        const wpx = Math.max(1, Math.round(emu2px(num(lnEl?.attrs['w'], 12700))))
+        const hasHead = !!(lnEl && kidsOf(lnEl).some((k) => local(k.name) === 'headEnd'))
+        const hasTail = !!(lnEl && kidsOf(lnEl).some((k) => local(k.name) === 'tailEnd'))
+        const el = createElement(hasHead || hasTail ? 'arrow' : 'line')
+        Object.assign(el, { x, y, w: w || 200, h: h || 2, stroke, strokeWidth: wpx, ...(el.type === 'arrow' ? { arrowHead: 'triangle' } : {}) })
+        elements.push(el)
+        stats.shapes++
+        return
+      }
+
       if (ln === 'pic') {
         const blip = find(shape, 'blip')
         const rid = attrEndsWith(blip, 'embed')
@@ -491,9 +509,32 @@ export async function pptxToDeck(
 
       if (ln === 'sp') {
         const txBody = kid(shape, 'txBody')
-        if (!txBody) return
-        const txt = collectLatex(txBody, counter)
-        if (!txt.trim()) return
+        const txt = txBody ? collectLatex(txBody, counter) : ''
+        // 没文字的 sp → **矢量形状** ✓（实测 55 个：rect 42 / roundRect 6 / … ✓）
+        // ⚠ 只导"看得见"的：既没填充又没线条的（纯占位/布局用的 rect ✗）跳过 ✓
+        if (!txt.trim()) {
+          const sPr = kid(shape, 'spPr')
+          const fillNode2 = sPr ? kidsOf(sPr).find((k) => local(k.name) === 'solidFill') ?? null : null
+          const lnEl = sPr ? find(sPr, 'ln') : null
+          const fillC = fillNode2 ? colorOf(fillNode2, theme) : null
+          const strokeC = lnEl ? colorOf(lnEl, theme) : null
+          if (!fillC && !strokeC) { stats.skippedInvisible++; return }
+          const prst = find(sPr, 'prstGeom')?.attrs['prst'] || 'rect'
+          const isEllipse = prst === 'ellipse'
+          const el = createElement('shape')
+          Object.assign(el, {
+            x, y, w: w || 60, h: h || 60,
+            shape: isEllipse ? 'ellipse' : 'rect',
+            fill: fillC || 'transparent',
+            stroke: strokeC || 'transparent',
+            strokeWidth: Math.max(1, Math.round(emu2px(num(lnEl?.attrs['w'], 12700)))),
+            // 圆角矩形 → 用 cornerRadius 近似 ✓（prstGeom 的 adj 值懒得解析 ✓）
+            ...(prst === 'roundRect' ? { cornerRadius: Math.max(2, Math.round(Math.min(w || 60, h || 60) * 0.15)) } : {}),
+          })
+          elements.push(el)
+          stats.shapes++
+          return
+        }
         const hasMath = txt.indexOf('\\(') >= 0
         // 字号：段落默认 → 单次运行
         let sz = 1800

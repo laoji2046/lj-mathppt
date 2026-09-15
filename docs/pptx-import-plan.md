@@ -97,7 +97,18 @@ pdf/pdfImport.ts       已有：pdfToDeck 先例（"文档 → 课件 JSON"）�
    要做到"逐格设色"需要给单元格加样式字段 ✓（新字段可选 ✓ 老存档安全 ✓）。
    实测样张的深色表头来自**表格样式**（不是格子填充 ✓），应用默认表头色**视觉上已经对上** ✓ —— 所以此项目前**收益不大** ✓。
 
-3. **PPT 里的矢量图形/线条/箭头** ✗ —— 现在只导文字/图片/表格 ✓，纯矢量形状**全部跳过** ✓。
+3. ~~**PPT 里的矢量图形/线条/箭头**~~ ✓ **已完成（v2026.09.1278）**
+
+   实测样张：无文字的 `p:sp` **55 个** ✓（rect 42 / roundRect 6 / rightBrace 2 / … ✓）、
+   连接线 `p:cxnSp` **4 条** ✓；其中"既无填充又无线条"的隐形占位 **2 个** ✓（跳过 ✓）。
+
+   映射：`rect`→`shape:rect` ✓、`roundRect`→`rect`+`cornerRadius` ✓、`ellipse`→`ellipse` ✓、
+   其余（rightBrace/callout/rightArrow…）**退化为 rect** ✓；`cxnSp`→`line` ✓（带 `headEnd`/`tailEnd` 的→`arrow` ✓）；
+   填充/描边取 `solidFill` 与 `a:ln` ✓（线宽 `@w` EMU→px ✓）。
+
+   验收：`shapes: 32` ✓ `skippedInvisible: 2` ✓；截图确认**P4 标题下的绿色横线已出现** ✓（此前缺失 ✓）。
+
+   **未做**：非矩/椭圆的自定义几何（`custGeom` ✗）、渐变/图案填充 ✗、虚线样式 ✗、旋转 `rot` ✗。
 
 4. **图片裁剪 `a:srcRect` 与填充方式 `stretch/tile`** ✗ —— 未读 ✓。
 
