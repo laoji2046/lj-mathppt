@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1294**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1295**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
@@ -431,6 +431,34 @@ label("$A$", (2.399, 2.306));
 
 > 版本号形如 `YYYY.MM.DDNN`（NN = 当天第几次存档）。每个版本在 git 里都有同名标签，
 > 回退用 `git checkout v2026.09.1103`；`_backup/rollback-*` 是目录级源码快照（含 zip）。
+
+### 2026-09-15（v2026.09.1295）
+
+**1295 · ?shot= 扩到 11 个模式 + 四张菜单配图**
+
+**又提了 4 个 ref 到共享** ✓（`src/ui/menus.ts` ✓ 只放 ref，不放逻辑 ✓），
+TopToolbar 里每个都是**替换一行** ✓：
+
+    imgMenuOpen · dsmMenuOpen · ggbMenuOpen · embedMenuOpen
+
+新增模式：`imagemenu` · `desmos` · `ggbmenu` · `embed`，共 **11 个模式**。
+
+**新配图（四张全是精确的菜单尺寸 ✓）**：
+
+    image-menu.png     「图片 ▾」：本地图片 / 在线图片库 / 屏幕截图（832x504 @2x）
+    desmos-menu.png    「Desmos ▾」：空白计算器 / 导入状态 JSON
+    embed-menu.png     「嵌入 ▾」：PDF / 网页 / 音视频
+    geogebra-menu2.png 与已有 geogebra-menu 重复 ✗ → 已删 ✓
+
+合计 **23 张** ✓（删除重复后 22 张 ✓）。
+
+**⚠ 注意 image-menu.png 这张图的意义**：它就是之前**失败三次**的那张 ✗ ——
+根因分别是「按文字定位命中错元素」与「querySelector 只取第一个匹配」✓。
+改成 `?shot=imagemenu` 后，一次就得到 832x504 的干净截图 ✓。
+**这就是把"猜 DOM"换成"说清楚要开哪个面板"的价值** ✓。
+
+**仍缺**：缩略图右键菜单（`page-context-menu.png` 还是整窗的旧图 ✗）
+—— 入口在 SlideList 里，需要再提一个 ref（做法相同 ✓）。
 
 ### 2026-09-15（v2026.09.1294）
 

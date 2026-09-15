@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { addonNotice } from '@/addons/registry'
 import { addonPanelOpen } from '@/ui/addonPanel'
+import { imgMenuOpen, dsmMenuOpen, ggbMenuOpen, embedMenuOpen } from '@/ui/menus'
 import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDeckStore } from '@/stores/deck'
 import { captureDesmosState } from '@/composables/useDesmos'
@@ -115,6 +116,10 @@ onMounted(() => {
   else if (want === 'ggb') openGgbSuite()
   else if (want === 'template') openTemplateLibrary('replace')
   else if (want === 'present') onPresent()
+  else if (want === 'imagemenu') imgMenuOpen.value = true
+  else if (want === 'desmos') dsmMenuOpen.value = true
+  else if (want === 'ggbmenu') ggbMenuOpen.value = true
+  else if (want === 'embed') embedMenuOpen.value = true
   else if (want === 'addon') addonPanelOpen.value = true
   else if (want === 'imageedit') {
     const im = store.deck.slides.flatMap((s) => s.elements || []).find((e) => e.type === 'image')

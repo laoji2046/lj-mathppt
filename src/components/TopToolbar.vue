@@ -24,6 +24,7 @@ import { pdfImportOpen, pdfImportFile, openPdfImport, closePdfImport } from '@/u
 import { addonState, requireAddon } from '@/addons/registry'
 import { openHelp as openHelpDialog } from '@/ui/help'
 import { addonPanelOpen } from '@/ui/addonPanel'
+import { imgMenuOpen, dsmMenuOpen, ggbMenuOpen, embedMenuOpen } from '@/ui/menus'
 const AddonManager = defineAsyncComponent(() => import('./AddonManager.vue'))
 // —— 懒加载：三个导入器 + PDF 对话框都只在**点菜单/选文件**时才用 ✓ ——
 //   静态导入会让 pptx(30KB)+docx(30KB)+pdf 全进启动包 ✗；改成动态导入后 Vite 各自分包 ✓
@@ -38,10 +39,10 @@ const symbolOpen = ref(false)
 const iconOpen = ref(false)
 const imgLibOpen = ref(false)
 const screenshotOpen = ref(false)
-const imgMenuOpen = ref(false)
+// imgMenuOpen 已提到 @/ui/menus（?shot= 外部入口可直接打开）
 const shapeMenuOpen = ref(false)
 const shapeWrap = ref<HTMLElement | null>(null)
-const embedMenuOpen = ref(false)
+// embedMenuOpen 已提到 @/ui/menus（?shot= 外部入口可直接打开）
 const embedWrap = ref<HTMLElement | null>(null)
 const embedFileInput = ref<HTMLInputElement | null>(null)
 const imgWrap = ref<HTMLElement | null>(null)
@@ -548,7 +549,7 @@ async function onGgbPicked(e: Event) {
 }
 
 /** GeoGebra 下拉菜单 */
-const ggbMenuOpen = ref(false)
+// ggbMenuOpen 已提到 @/ui/menus（?shot= 外部入口可直接打开）
 const ggbWrap = ref<HTMLElement | null>(null)
 function toggleGgbMenu() {
   toggleShown(ggbMenuOpen)
@@ -563,7 +564,7 @@ function openGgbSuite() {
   emit('open-ggb-suite')
 }
 /** Desmos 下拉菜单：空白计算器 / 导入状态 JSON */
-const dsmMenuOpen = ref(false)
+// dsmMenuOpen 已提到 @/ui/menus（?shot= 外部入口可直接打开）
 const dsmWrap = ref<HTMLElement | null>(null)
 const dsmFileInput = ref<HTMLInputElement | null>(null)
 function toggleDsmMenu() {

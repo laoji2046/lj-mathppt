@@ -140,6 +140,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '图片：导入、编辑、描摹成图形',
     tags: ['图片', '裁剪', '蒙版', '描摹', 'svg', '矢量'],
     body: [
+      img('image-menu', '「图片 ▾」：本地图片 / 在线图片库 / 屏幕截图'),
       img('image-editor', '图片编辑器：旋转 / 翻转 / 裁剪 / 滤镜（非破坏性，随时可改）'),
       p('图片有三条常用路径：直接插入、在编辑器里修，或者把线稿**描摹成矢量图形**。'),
       ul(
@@ -175,6 +176,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'GeoGebra 与 Desmos',
     tags: ['geogebra', 'ggb', 'desmos', '计算器', '动态'],
     body: [
+      img('desmos-menu', '「Desmos ▾」：空白计算器或导入状态 JSON'),
       img('geogebra-suite', 'GeoGebra 作图套件：现场作图，可保存 .ggb'),
       img('geogebra-menu', '「GeoGebra ▾」：打开作图套件或导入 .ggb'),
       p('两个嵌入式数学工具，适合现场作图与动态演示。'),
@@ -210,6 +212,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: '导入 PPT / Word / PDF',
     tags: ['导入', 'pptx', 'docx', 'pdf', '公式', 'MathType'],
     body: [
+      img('embed-menu', '「嵌入 ▾」：把 PDF / 网页 / 音视频等嵌进页面'),
       img('file-menu', '「文件 ▾」里的导入通道：PPT / Word / PDF 与演示 JSON'),
       p('三条导入通道都是**本地解析**（不联网、不上传），导入后可继续编辑。'),
       h('PPT(.pptx)'),
