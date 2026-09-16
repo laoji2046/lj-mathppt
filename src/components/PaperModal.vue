@@ -576,8 +576,7 @@ function paginate() {
       : ''
     // ⚠ 栏数与每栏高度**直接写在容器上** ✗ —— 不走 --paper-cols 变量链 ✓。
     //   实测变量链有一环没生效 ✓（容器 columnCount 仍是 1 ✓），直写最稳 ✓。
-    const bh = Math.max(200, 986 - (headerText.value ? 42 + (headerGap.value || 0) : 0) - (footerText.value ? 34 + (footerGap.value || 0) : 0))
-    const colsStyle = 'column-count:' + bodyCols.value + ';column-fill:auto;height:' + bh + 'px;'
+    const colsStyle = 'column-count:' + bodyCols.value + ';column-fill:balance;'
     pg.innerHTML = head + '<div class="paper-cols" style="' + colsStyle + '">' + blks.map((b) => b.outerHTML).join('') + '</div>' + foot
     applyFont(pg); applyLayout(pg)
     return pg
@@ -1482,13 +1481,12 @@ watch([headerText, footerText], () => render())
 
 /* ── 正文分栏 ✓（整篇自动流成 N 栏 ✓ 由 --paper-cols 控制 ✓）
    页眉页脚在容器外 ✓ 保持通栏 ✓；块内部不拆栏 ✓（否则一段话会被栏缝劈开 ✗）。 */
-/* ⚠ height 不能省 ✗ —— column-fill:auto 只对「有确定高度」的容器生效 ✓；
+/* ⚠ 刻意**不给固定高度** ✗ —— 用户要「两栏等高均分」✓，即 column-fill:balance（CSS 默认 ✓）；
    没有高度时浏览器会均分各栏（balance ✓），就不是先左栏后右栏了 ✓。 */
 .paper-cols {
-  height: var(--paper-body-h, auto);
   column-count: var(--paper-cols, 1);
   column-gap: 8mm;
-  column-fill: auto;
+  column-fill: balance;
   column-rule: 1px solid #d8d5cc;
 }
 
@@ -1504,7 +1502,7 @@ watch([headerText, footerText], () => render())
 .paper-cols mjx-container mjx-math { white-space: normal !important; }
 .paper-cols > .pp-block { break-inside: avoid; page-break-inside: avoid; }
 .paper-cols > h2, .paper-cols > .paper-sec-title { column-span: all; }
-  @media print { .paper-cols { height: var(--paper-body-h, auto); column-count: var(--paper-cols, 1); column-gap: 8mm; column-fill: auto; } }
+  @media print { .paper-cols { column-count: var(--paper-cols, 1); column-gap: 8mm; column-fill: balance; column-rule: 1px solid #d8d5cc; } }
 
 .paper-imgbox { display: block; margin: 8px 0; }
 .paper-img { max-width: 100%; max-height: 400px; height: auto !important; display: block; }
