@@ -543,7 +543,16 @@ function paginate() {
   const headerH = headerText.value ? 42 + (headerGap.value || 0) : 0
   const footerH = footerText.value ? 34 + (footerGap.value || 0) : 0
   const capH = Math.round((986 - headerH - footerH) * bodyCols.value * 0.96)   // 分栏后每页能装 N 倍 ✓（0.96 是安全余量 ✓）
+  // ⚠ 量高度必须在「**栏宽**」下量 ✗ —— 分栏后每个块变窄 ✓ → 文字折行变多 ✓ →
+  //   高度比单栏宽度下量的更高 ✓。按单栏宽度量会**低估** ✓，内容装不下就溢出成第 3 栏 ✗
+  //   （用户实测截图为证 ✓）。这里把 flow 的宽度临时改成栏宽 ✓，量完再还原 ✓。
+  const prevFlowW = flow.style.width
+  if (bodyCols.value > 1) {
+    const fullW = flow.clientWidth || flow.getBoundingClientRect().width || 794
+    flow.style.width = Math.max(120, Math.floor(fullW / bodyCols.value)) + 'px'
+  }
   const heights = blocks.map((b) => b.offsetHeight)
+  if (bodyCols.value > 1) flow.style.width = prevFlowW
   const pages: HTMLElement[][] = []
   let cur: HTMLElement[] = [], curH = 0
   blocks.forEach((b, idx) => {
