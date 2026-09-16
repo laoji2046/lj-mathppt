@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1320**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
+> **当前版本：2026.09.1321**（源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
 > 本版要点：公式与混排「只缩小不放大」（大小由字号决定）· 高中数学例题 8 套模板全部改用混排公式 · 「另存为…」可自选目录 · Markdown 的 `$$` 少一个 `$` 不再丢公式、不再跳页。
 >
