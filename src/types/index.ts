@@ -1189,6 +1189,14 @@ export const REVEAL_TRANSITIONS = ['slide', 'none', 'fade', 'convex', 'concave',
 export const REVEAL_SPEEDS = ['default', 'fast', 'slow']
 
 /** 创建新元素时的默认属性 */
+/**
+ * 直线 / 箭头的**默认长度** ✓（用户要求 20mm ✓）。
+ *
+ * 换算 ✓：画布 1920×1080 = 10in × 5.625in（16:9）→ **192 px/英寸** ✓ → 1mm = 7.559px ✓
+ * → 20mm = **151px** ✓（原先写死 200px ≈ 26.5mm ✗，偏长 ✓）。
+ */
+const LINE_DEFAULT_W = Math.round((20 * 192) / 25.4)
+
 export function createElement(type: ElementType, rect: Partial<Rect> = {}): SlideElement {
   const base: Rect = {
     x: rect.x ?? 200,
@@ -1276,7 +1284,7 @@ export function createElement(type: ElementType, rect: Partial<Rect> = {}): Slid
     case 'line':
       return {
         ...base, id, rot, type: 'line',
-        w: rect.w ?? 200,
+        w: rect.w ?? LINE_DEFAULT_W,
         h: rect.h ?? 2,
         stroke: '#1a1a1a',
         strokeWidth: 3,
@@ -1284,7 +1292,7 @@ export function createElement(type: ElementType, rect: Partial<Rect> = {}): Slid
     case 'arrow':
       return {
         ...base, id, rot, type: 'arrow',
-        w: rect.w ?? 200,
+        w: rect.w ?? LINE_DEFAULT_W,
         h: rect.h ?? 2,
         stroke: '#1a1a1a',
         strokeWidth: 3,
