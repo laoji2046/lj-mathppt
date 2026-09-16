@@ -1452,7 +1452,7 @@ watch([headerText, footerText], () => render())
 .paper-page .paper-header { border-bottom: 1px solid #999; padding: 0 0 4px; margin: var(--paper-headergap, 0px) 0 8px; text-align: center; font-weight: 600; flex: 0 0 auto; }
 .paper-page .paper-footer { border-top: 1px solid #999; padding: 4px 0 0; margin: auto 0 var(--paper-footergap, 0px); text-align: center; flex: 0 0 auto; }
 .paper-page .paper-header .paper-img-inline, .paper-page .paper-footer .paper-img-inline { max-height: 26px; max-width: 120px; vertical-align: middle; margin: 0 4px; }
-  .paper-page .pp-block { flex: 0 0 auto; /* ⚠ 这里的 break-inside:avoid 已去掉 ✗ —— 它与 .paper-cols > .pp-block 同特异性 ✓，两条打架容易翻车 ✓；块能否拆分统一由分栏那条规则决定 ✓ */
+  .paper-page .pp-block { flex: 0 0 auto; }
 .paper-page h2 { font-size: var(--paper-h2, 18px); text-align: center; margin: 0 0 6px; font-weight: 700; letter-spacing: 2px; }
 .paper-page .paper-box-title { border: 1.5px solid #111; padding: 4px 8px; font-weight: 700; margin: 8px 0 4px; display: inline-block; }
 .paper-page .paper-sec-title { font-weight: 700; margin: 10px 0 4px; font-size: 15px; letter-spacing: 1px; }
