@@ -45,6 +45,17 @@ const para = ref(6)
 const indent = ref(0)
 const h2size = ref(18)
 const optLayout = ref<'auto' | 'one' | 'two' | 'four'>('auto')
+/**
+ * **正文分栏**（整篇自动流成 N 栏 ✓ 练习小页最常用 ✓）。
+ *
+ * ⚠ 与「选项排布 optLayout」不是一回事 ✗ —— 那个只管选择题的 ABCD 怎么摆 ✓，
+ *   这个管正文（题目、段落）在页面上分几栏 ✓。
+ *
+ * 实现要点 ✓：分栏后**每页能装 N 倍内容** ✓，所以分页预算直接乘 N 即可 ✓
+ * （不必重写分页逻辑 ✓）；乘 0.96 是留安全余量 —— 浏览器填栏时最后一块常常
+ * 塞不进剩余空间会推到下一栏 ✓，用满预算会溢出 ✓。
+ */
+const bodyCols = ref(1)
 /** 位图 PDF 的图片格式 —— 文字页用 PNG 明显更清晰 ✓，代价是体积大些 ✓（默认 JPEG 省体积 ✓） */
 const pdfFmt = ref<'jpeg' | 'png'>('jpeg')
 /** 页眉页脚预设模板 —— 一键填好常用栏位 ✓（{page} 会被替换成页码 ✓） */
@@ -481,6 +492,7 @@ function applyLayout(el: HTMLElement | null = pageEl.value) {
   if (!el) return
   el.style.lineHeight = String(lineHeight.value)
   el.style.setProperty('--paper-para', String(para.value))
+  el.style.setProperty('--paper-cols', String(bodyCols.value))
   el.style.setProperty('--paper-indent', String(indent.value))
   el.style.setProperty('--paper-h2', String(h2size.value) + 'pt')
   el.style.setProperty('--paper-qgap', String(gapQ.value || 6) + 'px')
@@ -502,7 +514,7 @@ function paginate() {
   const blocks = Array.from(flow.children) as HTMLElement[]
   const headerH = headerText.value ? 42 + (headerGap.value || 0) : 0
   const footerH = footerText.value ? 34 + (footerGap.value || 0) : 0
-  const capH = 986 - headerH - footerH   // A4 内容可用高（297mm~1122px - 2*18mm 边距）减去页眉页脚
+  const capH = Math.round((986 - headerH - footerH) * bodyCols.value * 0.96)   // 分栏后每页能装 N 倍 ✓（0.96 是安全余量 ✓）
   const heights = blocks.map((b) => b.offsetHeight)
   const pages: HTMLElement[][] = []
   let cur: HTMLElement[] = [], curH = 0
@@ -525,7 +537,7 @@ function paginate() {
     const foot = footerText.value
       ? '<div class="paper-footer">' + imageHtml(esc(footerText.value.replace(/\{page\}/g, pv).replace(/\{total\}/g, String(totalPages.value)).replace(/\{total\}/g, total))) + '</div>'
       : ''
-    pg.innerHTML = head + blks.map((b) => b.outerHTML).join('') + foot
+    pg.innerHTML = head + '<div class="paper-cols">' + blks.map((b) => b.outerHTML).join('') + '</div>' + foot
     applyFont(pg); applyLayout(pg)
     return pg
   }
@@ -865,6 +877,7 @@ function importJson() {
       if (d.indent != null) indent.value = Number(d.indent)
       if (d.h2size != null) h2size.value = Number(d.h2size)
       if (d.numStyle != null) numStyle.value = d.numStyle === 'cn' ? 'cn' : 'arabic'
+    if (d.bodyCols != null) bodyCols.value = Number(d.bodyCols) || 1
       if (d.optLayout != null) optLayout.value = (['auto', 'one', 'two', 'four'].includes(d.optLayout) ? d.optLayout : 'auto')
       render()
     } catch (e) { console.error('JSON 解析失败：', e) }
@@ -981,7 +994,7 @@ function settingsSnapshot() {
     fontColor: fontColor.value, lineHeight: lineHeight.value, para: para.value, indent: indent.value,
     h2size: h2size.value, numStyle: numStyle.value, optLayout: optLayout.value,
     headerText: headerText.value, footerText: footerText.value, gapQ: gapQ.value,
-    headerGap: headerGap.value, footerGap: footerGap.value, autoNum: autoNum.value,
+    headerGap: headerGap.value, footerGap: footerGap.value, autoNum: autoNum.value, bodyCols: bodyCols.value,
   }
 }
 function applySettings(s: any) {
@@ -1002,6 +1015,7 @@ function applySettings(s: any) {
   if (s.headerGap !== undefined) headerGap.value = s.headerGap
   if (s.footerGap !== undefined) footerGap.value = s.footerGap
   if (s.autoNum !== undefined) autoNum.value = s.autoNum
+  if (s.bodyCols) bodyCols.value = Number(s.bodyCols) || 1
   render()
 }
 function saveAsDefaults() {
@@ -1019,7 +1033,7 @@ function saveDraft() {
     const d: Record<string, unknown> = { images: images.value, input: input.value, template: template.value, fontFamily: fontFamily.value, fontSize: fontSize.value, fontColor: fontColor.value,
       lineHeight: lineHeight.value, para: para.value, indent: indent.value, numStyle: numStyle.value, headerText: headerText.value,
       footerText: footerText.value, autoNum: autoNum.value, h2size: h2size.value, gapQ: gapQ.value, headerGap: headerGap.value,
-      footerGap: footerGap.value, optLayout: optLayout.value }
+      footerGap: footerGap.value, optLayout: optLayout.value, bodyCols: bodyCols.value }
     localStorage.setItem(DRAFT_KEY, JSON.stringify(d))
   } catch { /* 忽略配额/隐私模式 */ }
 }
@@ -1070,6 +1084,7 @@ function refreshImages() {
 }
 watch(numStyle, () => render())
 watch(optLayout, () => render())
+watch(bodyCols, () => render())
 watch([fontFamily, fontSize, fontColor, lineHeight, para, indent, h2size, gapQ, headerGap, footerGap], () => refreshLayout())
 watch([headerText, footerText], () => render())
 </script>
@@ -1128,12 +1143,18 @@ watch([headerText, footerText], () => render())
                     <option value="arabic">1、2、3…</option>
                     <option value="cn">一、二、三…</option>
                   </select>
-                  <label>选项</label>
-                  <select v-model="optLayout">
+                  <label>选项排布</label>
+                  <select v-model="optLayout" title="选择题的 ABCD 怎么摆（与正文分栏无关）">
                     <option value="auto">自动</option>
-                    <option value="one">一行</option>
-                    <option value="two">两行</option>
-                    <option value="four">四行</option>
+                    <option value="one">一栏</option>
+                    <option value="two">两栏</option>
+                    <option value="four">四栏</option>
+                  </select>
+                  <label>正文分栏</label>
+                  <select v-model="bodyCols" title="整篇正文自动流成几栏（练习小页常用两栏）">
+                    <option :value="1">一栏</option>
+                    <option :value="2">两栏</option>
+                    <option :value="3">三栏</option>
                   </select>
                 </div>
                 <div class="pm__ctlrow">
@@ -1417,6 +1438,13 @@ watch([headerText, footerText], () => render())
   .paper-q__solbody { display: block !important; }
   .paper-q__solbar { display: none !important; }
 }
+
+/* ── 正文分栏 ✓（整篇自动流成 N 栏 ✓ 由 --paper-cols 控制 ✓）
+   页眉页脚在容器外 ✓ 保持通栏 ✓；块内部不拆栏 ✓（否则一段话会被栏缝劈开 ✗）。 */
+.paper-cols { column-count: var(--paper-cols, 1); column-gap: 8mm; column-fill: auto; }
+.paper-cols > .pp-block { break-inside: avoid; page-break-inside: avoid; }
+.paper-cols > h2, .paper-cols > .paper-sec-title { column-span: all; }
+@media print { .paper-cols { column-count: var(--paper-cols, 1); column-gap: 8mm; } }
 
 .paper-imgbox { display: block; margin: 8px 0; }
 .paper-img { max-width: 100%; max-height: 400px; height: auto !important; display: block; }
