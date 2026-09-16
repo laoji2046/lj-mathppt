@@ -892,7 +892,13 @@ function insert() {
   // ⭐ 试卷 / 讲义登记了接收口 → 把 SVG 交出去 ✓（用户要求：试卷也能插三维图 ✓）
   //   **没人登记时完全走原来的逻辑** ✓ —— 对话框原有行为一字未改 ✓。
   if (geom3dSink.value) {
-    geom3dSink.value(svg.value, '三维立体图')
+    // ⚠ 交出去时**必须自带外层 <svg> 和 viewBox** ✗ ——
+    //   片段本身没有尺寸信息 ✓，试卷只能按 480×320 兜底 ✓ → **图会被裁掉一部分** ✗
+    //   （用户实测：能插入但只显示一部分 ✓）。这里用对话框自己的 W/H ✓。
+    const frag =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + W.value + ' ' + H + '">' +
+      svg.value + '</svg>'
+    geom3dSink.value(frag, '三维立体图')
     closeGeom3D()
     return
   }
