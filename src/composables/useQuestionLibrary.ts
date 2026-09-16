@@ -1,12 +1,14 @@
 /**
- * 试题库 —— 第二期。
+ * 试题库 —— 第二期建立，第三期后扩充（日期/题型/板块/难度分级/答案自我完善）。
  *
- * 复用第一期的通用表（library_item，type='question'），结构化字段放 meta：
- *   { stem, options[], answer, solution, knowledge[], difficulty, year, region }
+ * 复用通用表（library_item，type='question'），结构化字段放 meta：
+ *   { stem, options[], answer, solution, knowledge[],
+ *     qtype, section, date, difficulty, year, region, answerFrom }
  *
- * 设计取舍（按方案）：
- *  - **检索先用 LIKE + 标签过滤**，够用；FTS5 留到需要时再评估（中文分词效果一般）。
- *  - **题目文本不拆分**：题干/答案/解析各存一段纯文本，里面可以写 LaTeX（$...$）与 [图N]。
+ * 设计取舍：
+ *  - 检索先用 LIKE + 分类过滤，够用；FTS5 留到需要时再评估（中文分词效果一般）。
+ *  - 题目文本不拆分：题干/答案/解析各存一段纯文本，可写 LaTeX（$...$）与 [图N]。
+ *  - **难度内部仍存 1-5**（兼容旧数据），界面按 易/中/难 三档呈现与筛选。
  */
 import { libQuery, libSave, libRemove, libBump, libTags, libSaveMany } from './useLibrary'
 import type { ParsedQuestion } from './parseQuestions'
@@ -14,15 +16,115 @@ import type { LibDraft, LibItem } from './useLibrary'
 
 export type Difficulty = 1 | 2 | 3 | 4 | 5
 
+/* ---------------- 题型 ---------------- */
+
+export type QType = 'choice' | 'multi' | 'blank' | 'answer'
+export const QTYPES: { v: QType; label: string }[] = [
+  { v: 'choice', label: '单选' },
+  { v: 'multi', label: '多选' },
+  { v: 'blank', label: '填空' },
+  { v: 'answer', label: '解答' },
+]
+export function qtypeLabel(t: QType | string): string {
+  return QTYPES.find((x) => x.v === t)?.label || '未分'
+}
+
+/* ---------------- 板块 ---------------- */
+
+export const SECTIONS = [
+  '集合与逻辑',
+  '函数与导数',
+  '三角函数与向量',
+  '解析几何',
+  '立体几何',
+  '概率与统计',
+]
+
+/** 板块关键词 → 板块（用于解析器/自动归类；命中多个取第一个） */
+export const SECTION_HINTS: { section: string; words: string[] }[] = [
+  { section: '集合与逻辑', words: ['集合', '子集', '交集', '并集', '补集', '充分', '必要', '充要', '命题', '量词', '逻辑'] },
+  { section: '函数与导数', words: ['函数', '定义域', '值域', '单调', '奇偶', '周期', '指数', '对数', '幂函数', '导数', '切线', '极值', '最值', '零点'] },
+  { section: '三角函数与向量', words: ['三角', '正弦', '余弦', '正切', '弧度', '解三角形', '向量', '数量积', '共线', '夹角'] },
+  { section: '解析几何', words: ['直线', '圆', '椭圆', '双曲线', '抛物线', '焦点', '离心率', '准线', '渐近线', '斜率'] },
+  { section: '立体几何', words: ['空间', '立体', '棱柱', '棱锥', '棱台', '圆柱', '圆锥', '球', '异面', '二面角', '体积', '表面积', '三视图'] },
+  { section: '概率与统计', words: ['概率', '随机', '分布', '期望', '方差', '统计', '抽样', '回归', '独立性', '排列', '组合', '二项式'] },
+]
+
+/** 按关键词猜板块（题干 + 知识点一起看） */
+export function guessSection(text: string, knowledge: string[] = []): string {
+  const hay = (text + ' ' + knowledge.join(' ')).toLowerCase()
+  for (const h of SECTION_HINTS) {
+    for (const w of h.words) {
+      if (hay.includes(w.toLowerCase())) return h.section
+    }
+  }
+  return ''
+}
+
+/* ---------------- 难度分级（易 / 中 / 难） ---------------- */
+
+export type Level = 'easy' | 'mid' | 'hard'
+export const LEVELS: { v: Level; label: string; d: number }[] = [
+  { v: 'easy', label: '易', d: 2 },
+  { v: 'mid', label: '中', d: 3 },
+  { v: 'hard', label: '难', d: 5 },
+]
+/** 1-5 → 易/中/难（1-2 易、3 中、4-5 难） */
+export function levelOf(d: number): Level {
+  const n = Number(d) || 3
+  if (n <= 2) return 'easy'
+  if (n === 3) return 'mid'
+  return 'hard'
+}
+export function levelLabel(d: number): string {
+  const v = levelOf(d)
+  return LEVELS.find((x) => x.v === v)?.label || '中'
+}
+export function levelToDifficulty(v: Level): number {
+  return LEVELS.find((x) => x.v === v)?.d ?? 3
+}
+/** 把 易/中/难 文字（含旧写法）统一成 1-5 */
+export function parseDifficulty(raw: string): number {
+  const s = (raw || '').trim()
+  if (!s) return 3
+  if (s.includes('易') || s.includes('简单') || s.includes('基础')) return 2
+  if (s.includes('难') || s.includes('较难') || s.includes('压轴')) return 5
+  if (s.includes('中') || s.includes('中等')) return 3
+  const n = Number(s.match(/[1-5]/)?.[0])
+  return n || 3
+}
+
+/* ---------------- 题型推断 ---------------- */
+
+/** 有选项 + 答案多字母 → 多选；有选项 → 单选；无选项且题干有下划线 → 填空；否则解答 */
+export function inferQType(m: { options?: string[]; answer?: string; stem?: string }): QType {
+  const opts = m.options || []
+  const ans = (m.answer || '').toUpperCase().replace(/[^A-H]/g, '')
+  if (opts.length >= 2) return ans.length > 1 ? 'multi' : 'choice'
+  if (/_{2,}|＿{2,}|（\s*）|\(\s*\)|____/.test(m.stem || '')) return 'blank'
+  return 'answer'
+}
+
+/* ---------------- 数据结构 ---------------- */
+
 export interface QuestionMeta {
   stem: string
   options: string[]
   answer: string
   solution: string
   knowledge: string[]
+  /** 1-5；界面按 易/中/难 呈现 */
   difficulty: number
+  /** 题型 */
+  qtype: QType
+  /** 板块（见 SECTIONS）；空串表示未分类 */
+  section: string
+  /** 录入/来源日期 YYYY-MM-DD */
+  date: string
   year: string
   region: string
+  /** 答案来源：manual 人工 / auto 从解析自动提取 / 空 未填 */
+  answerFrom: '' | 'manual' | 'auto'
 }
 
 export interface QuestionEntry extends LibItem {
@@ -31,21 +133,30 @@ export interface QuestionEntry extends LibItem {
 
 const EMPTY_META: QuestionMeta = {
   stem: '', options: [], answer: '', solution: '',
-  knowledge: [], difficulty: 3, year: '', region: '',
+  knowledge: [], difficulty: 3, qtype: 'choice', section: '', date: '',
+  year: '', region: '', answerFrom: '',
 }
 
 function readMeta(raw: Record<string, unknown>): QuestionMeta {
   const m = (raw || {}) as Record<string, unknown>
   const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => String(x)) : [])
+  const stem = String(m.stem || '')
+  const options = arr(m.options)
+  const answer = String(m.answer || '')
+  const qtype = (m.qtype ? String(m.qtype) : inferQType({ options, answer, stem })) as QType
   return {
-    stem: String(m.stem || ''),
-    options: arr(m.options),
-    answer: String(m.answer || ''),
+    stem,
+    options,
+    answer,
     solution: String(m.solution || ''),
     knowledge: arr(m.knowledge),
     difficulty: Number(m.difficulty) || 3,
+    qtype,
+    section: String(m.section || ''),
+    date: String(m.date || ''),
     year: String(m.year || ''),
     region: String(m.region || ''),
+    answerFrom: (String(m.answerFrom || '') as QuestionMeta['answerFrom']) || (answer ? 'manual' : ''),
   }
 }
 
@@ -53,87 +164,141 @@ function toEntry(it: LibItem): QuestionEntry {
   return { ...it, q: readMeta(it.meta as Record<string, unknown>) }
 }
 
-/** 列出试题库全部条目 */
+/* ---------------- 答案自我完善 ---------------- */
+
+/**
+ * 从解析里反推答案。**只在明确表述上认**，不做模糊猜测 ——
+ * 猜错比留空更糟（老师会直接信它）。
+ *
+ * 认这些写法：故选B / 应选B / 答案为B / 正确答案是B / 选：B / 故选：B、C
+ * 选择题只认 A-H 字母；填空题不猜（无法可靠从文字反推）。
+ */
+export function extractAnswerFromSolution(solution: string, options: string[] = []): string {
+  const s = (solution || '').replace(/\s+/g, ' ')
+  if (!s) return ''
+  const pats = [
+    /故\s*选\s*[:：]?\s*([A-H](?:\s*[,、，]?\s*[A-H]){0,3})/,
+    /应\s*选\s*[:：]?\s*([A-H](?:\s*[,、，]?\s*[A-H]){0,3})/,
+    /正确答案\s*(?:是|为)?\s*[:：]?\s*([A-H](?:\s*[,、，]?\s*[A-H]){0,3})/,
+    /答案\s*(?:是|为)?\s*[:：]?\s*([A-H](?:\s*[,、，]?\s*[A-H]){0,3})/,
+    /选\s*[:：]\s*([A-H](?:\s*[,、，]?\s*[A-H]){0,3})/,
+  ]
+  for (const p of pats) {
+    const m = s.match(p)
+    if (m) {
+      const letters = (m[1].match(/[A-H]/g) || []).join('')
+      // 有选项时，字母不能超出选项数（防止把「x=3 … 故选A」里的别的字母算进来）
+      if (options.length && letters.split('').some((c) => c.charCodeAt(0) - 65 >= options.length)) continue
+      if (letters) return letters
+    }
+  }
+  return ''
+}
+
+/** 扫一遍库里缺答案但解析里能反推出的题，返回建议（不直接写库，先给用户过目） */
+export function proposeAnswers(list: QuestionEntry[]): { id: number; title: string; proposed: string }[] {
+  const out: { id: number; title: string; proposed: string }[] = []
+  for (const x of list) {
+    if (x.q.answer) continue
+    const p = extractAnswerFromSolution(x.q.solution, x.q.options)
+    if (p) out.push({ id: x.id, title: x.title, proposed: p })
+  }
+  return out
+}
+
+/** 列出缺答案的题 */
+export function missingAnswer(list: QuestionEntry[]): QuestionEntry[] {
+  return list.filter((x) => !x.q.answer.trim())
+}
+
+/* ---------------- 增删改查 ---------------- */
+
 export async function listQuestions(): Promise<QuestionEntry[]> {
   return (await libQuery('question')).map(toEntry)
 }
 
-/** 新增一条试题，返回 id（失败 0） */
-export async function addQuestion(meta: Partial<QuestionMeta>, title?: string): Promise<number> {
+function today(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+}
+
+/** 补默认值（新增时自动填日期、题型、板块） */
+export function withDefaults(meta: Partial<QuestionMeta>): QuestionMeta {
   const q: QuestionMeta = { ...EMPTY_META, ...meta }
-  const t = (title || '').trim() || autoTitle(q)
-  const draft: LibDraft = {
+  if (!q.date) q.date = today()
+  if (!q.qtype) q.qtype = inferQType(q)
+  if (!q.section) q.section = guessSection(q.stem, q.knowledge)
+  if (q.answer && !q.answerFrom) q.answerFrom = 'manual'
+  return q
+}
+
+function draftOf(q: QuestionMeta, title: string, id = 0): LibDraft {
+  return {
+    id: id > 0 ? id : undefined,
     type: 'question',
-    title: t,
+    title: title.trim() || autoTitle(q),
     body: q.stem,
     meta: q as unknown as Record<string, unknown>,
-    tags: q.knowledge.join(','),
-    source: q.region || q.year || '自建',
+    tags: [q.section, ...q.knowledge].filter(Boolean).join(','),
+    source: q.region || q.year || q.date || '自建',
     builtin: 0,
   }
-  return libSave(draft)
 }
 
-/** 更新一条试题 */
+export async function addQuestion(meta: Partial<QuestionMeta>, title?: string): Promise<number> {
+  return libSave(draftOf(withDefaults(meta), title || ''))
+}
+
 export async function updateQuestion(id: number, meta: Partial<QuestionMeta>, title?: string): Promise<number> {
-  const q: QuestionMeta = { ...EMPTY_META, ...meta }
-  const t = (title || '').trim() || autoTitle(q)
-  return libSave({
-    id,
-    type: 'question',
-    title: t,
-    body: q.stem,
-    meta: q as unknown as Record<string, unknown>,
-    tags: q.knowledge.join(','),
-    source: q.region || q.year || '自建',
-    builtin: 0,
-  })
+  return libSave(draftOf(withDefaults(meta), title || '', id))
 }
 
-/** 删除一条试题 */
 export async function removeQuestion(id: number): Promise<boolean> {
   return libRemove(id)
 }
 
-/** 记一次使用 */
 export async function touchQuestion(id: number): Promise<void> {
   await libBump(id)
 }
 
-/** 标签汇总（供筛选界面） */
 export async function listQuestionTags(): Promise<{ name: string; count: number }[]> {
   return libTags('question')
 }
 
-/**
- * 批量导入（第二期补充）：把解析出来的题目一次性写进库。
- * Rust 侧走事务 + 按 body 去重，所以同一份文档重复导入不会灌出两份。
- */
+/** 批量导入：Rust 侧走事务 + 按 body 去重 */
 export async function importParsedQuestions(list: ParsedQuestion[]): Promise<{ added: number; skipped: number }> {
   if (!list.length) return { added: 0, skipped: 0 }
-  const drafts: LibDraft[] = list.map((p) => ({
-    type: 'question',
-    title: p.title,
-    body: p.stem,
-    meta: {
-      stem: p.stem, options: p.options, answer: p.answer, solution: p.solution,
+  const drafts: LibDraft[] = list.map((p) => {
+    // ⭐ 答案自我完善：没写答案但解析里说了「故选B」这类，就从解析里提出来 ✓
+    let answer = p.answer
+    let answerFrom: QuestionMeta['answerFrom'] = answer ? 'manual' : ''
+    if (!answer && p.solution) {
+      const auto = extractAnswerFromSolution(p.solution, p.options)
+      if (auto) { answer = auto; answerFrom = 'auto' }
+    }
+    const q = withDefaults({
+      stem: p.stem, options: p.options, answer, solution: p.solution,
       knowledge: p.knowledge, difficulty: p.difficulty, year: p.year, region: p.region,
-    } as unknown as Record<string, unknown>,
-    tags: p.knowledge.join(','),
-    source: p.region || p.year || '批量导入',
-    builtin: 0,
-  }))
+      qtype: (p as { qtype?: QType }).qtype,
+      section: (p as { section?: string }).section,
+      date: (p as { date?: string }).date,
+      answerFrom,
+    })
+    return draftOf(q, p.title)
+  })
   return libSaveMany(drafts)
 }
 
-/** 自动起名：题干首行前 16 字 */
+/* ---------------- 展示与筛选 ---------------- */
+
 export function autoTitle(q: QuestionMeta): string {
   const first = (q.stem || '').split('\n').map((s) => s.trim()).filter(Boolean)[0] || '未命名试题'
   const t = first.replace(/\s+/g, ' ')
   return t.length > 16 ? t.slice(0, 16) + '…' : t
 }
 
-/** 组卷用文本：题干（+ 可选的答案与解析） */
+/** 组卷用文本（答案与解析可选）。选择题单独编号，解答题留作答空间 */
 export function questionToText(q: QuestionEntry, withSolution = false): string {
   const lines: string[] = []
   let stem = q.q.stem || q.body
@@ -148,15 +313,25 @@ export function questionToText(q: QuestionEntry, withSolution = false): string {
   return lines.join('\n')
 }
 
-/** 按条件筛选：关键词（题干/答案/解析/标签）+ 标签 + 难度 */
-export function filterQuestions(
-  list: QuestionEntry[],
-  opt: { q?: string; tags?: string[]; difficulty?: number | null }
-): QuestionEntry[] {
+export interface FilterOpt {
+  q?: string
+  tags?: string[]
+  difficulty?: number | null
+  qtype?: QType | ''
+  section?: string | ''
+  level?: Level | ''
+  onlyMissingAnswer?: boolean
+}
+
+export function filterQuestions(list: QuestionEntry[], opt: FilterOpt): QuestionEntry[] {
   const k = (opt.q || '').trim().toLowerCase()
   const tags = opt.tags || []
   return list.filter((x) => {
     if (opt.difficulty && x.q.difficulty !== opt.difficulty) return false
+    if (opt.qtype && x.q.qtype !== opt.qtype) return false
+    if (opt.section && x.q.section !== opt.section) return false
+    if (opt.level && levelOf(x.q.difficulty) !== opt.level) return false
+    if (opt.onlyMissingAnswer && x.q.answer.trim()) return false
     if (tags.length && !tags.every((t) => x.q.knowledge.indexOf(t) >= 0 || x.tags.indexOf(t) >= 0)) return false
     if (!k) return true
     return (
@@ -164,7 +339,8 @@ export function filterQuestions(
       x.q.stem.toLowerCase().includes(k) ||
       x.q.answer.toLowerCase().includes(k) ||
       x.q.solution.toLowerCase().includes(k) ||
-      x.tags.toLowerCase().includes(k)
+      x.tags.toLowerCase().includes(k) ||
+      x.q.section.toLowerCase().includes(k)
     )
   })
 }

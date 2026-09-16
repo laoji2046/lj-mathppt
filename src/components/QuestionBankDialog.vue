@@ -4,9 +4,10 @@ import AppIcon from './AppIcon.vue'
 import {
   listQuestions, addQuestion, updateQuestion, removeQuestion, touchQuestion,
   listQuestionTags, autoTitle, questionToText, filterQuestions,
+  importParsedQuestions, proposeAnswers,
+  QTYPES, SECTIONS, LEVELS, levelOf, levelLabel, levelToDifficulty, qtypeLabel, withDefaults,
 } from '@/composables/useQuestionLibrary'
-import { importParsedQuestions } from '@/composables/useQuestionLibrary'
-import type { QuestionEntry, QuestionMeta } from '@/composables/useQuestionLibrary'
+import type { QuestionEntry, QuestionMeta, QType, Level } from '@/composables/useQuestionLibrary'
 import { parseQuestions, PARSE_HELP } from '@/composables/parseQuestions'
 
 const emit = defineEmits<{ (e: 'close'): void; (e: 'insert', text: string, id: number): void }>()
@@ -32,10 +33,53 @@ async function doBatch() {
 const pickedTags = ref<string[]>([])
 const diff = ref<number | null>(null)
 const selectedId = ref(0)
+/* ---- 新增筛选维度（题型 / 板块 / 难度分级 / 只看缺答案） ---- */
+const pickedType = ref<QType | ''>('')
+const pickedSection = ref('')
+const pickedLevel = ref<Level | ''>('')
+const onlyMissing = ref(false)
+/* ---- 多选出卷 ---- */
+const pickedIds = ref<number[]>([])
+function togglePick(id: number) {
+  const i = pickedIds.value.indexOf(id)
+  if (i >= 0) pickedIds.value = pickedIds.value.filter((x) => x !== id)
+  else pickedIds.value = [...pickedIds.value, id]
+}
+const pickedEntries = computed(() => list.value.filter((x) => pickedIds.value.indexOf(x.id) >= 0))
+/** 把已选的题按 选择→填空→解答 排序，合成一份试卷文本交给 PDF 生成 */
+function insertPicked(withSolution: boolean) {
+  const arr = pickedEntries.value
+  if (!arr.length) { flash('先在左边勾选要出卷的题'); return }
+  const order: Record<string, number> = { choice: 0, multi: 1, blank: 2, answer: 3 }
+  const sorted = [...arr].sort((a, b) => (order[a.q.qtype] ?? 9) - (order[b.q.qtype] ?? 9))
+  const parts = sorted.map((x, i) => {
+    const body = questionToText(x, withSolution).replace(/^\s*\d{1,3}\s*[.、．)）]\s*/, '')
+    return (i + 1) + '. ' + body
+  })
+  emit('insert', parts.join('\n\n'), 0)
+  sorted.forEach((x) => void touchQuestion(x.id))
+  flash('已把 ' + sorted.length + ' 道题送进 PDF 生成（可继续改正文）')
+}
+/* ---- 答案自我完善：扫出「缺答案但解析里能反推」的题 ---- */
+const proposals = computed(() => proposeAnswers(list.value))
+async function doComplete() {
+  const ps = proposals.value
+  if (!ps.length) { flash('没有可自动补全的（需要解析里写了「故选B」这类明确表述）'); return }
+  let n = 0
+  for (const p of ps) {
+    const x = list.value.find((e) => e.id === p.id)
+    if (!x) continue
+    const ok = await updateQuestion(x.id, { ...x.q, answer: p.proposed, answerFrom: 'auto' }, x.title)
+    if (ok) n++
+  }
+  await load()
+  flash('已自动补全 ' + n + ' 道题的答案（标记为「自动提取」，建议抽查）')
+}
 
 const emptyMeta = (): QuestionMeta => ({
   stem: '', options: [], answer: '', solution: '',
-  knowledge: [], difficulty: 3, year: '', region: '',
+  knowledge: [], difficulty: 3, qtype: 'choice', section: '', date: '',
+  year: '', region: '', answerFrom: '',
 })
 const editing = ref(false)
 const editingId = ref(0)
@@ -60,7 +104,15 @@ async function load() {
 }
 onMounted(load)
 
-const shown = computed(() => filterQuestions(list.value, { q: q.value, tags: pickedTags.value, difficulty: diff.value }))
+const shown = computed(() => filterQuestions(list.value, {
+  q: q.value,
+  tags: pickedTags.value,
+  difficulty: diff.value,
+  qtype: pickedType.value,
+  section: pickedSection.value,
+  level: pickedLevel.value,
+  onlyMissingAnswer: onlyMissing.value,
+}))
 const selected = computed(() => list.value.find((x) => x.id === selectedId.value) || null)
 
 function toggleTag(t: string) {
@@ -93,13 +145,15 @@ function cancelEdit() {
 async function save() {
   const stem = form.value.stem.trim()
   if (!stem) { flash('题干不能为空'); return }
-  const meta: QuestionMeta = {
+  const meta: QuestionMeta = withDefaults({
     ...form.value,
     stem,
     options: formOptions.value.split('\n').map((s) => s.trim()).filter(Boolean),
     knowledge: formKnowledge.value.split(/[，,、\s]+/).map((s) => s.trim()).filter(Boolean),
     difficulty: Number(form.value.difficulty) || 3,
-  }
+    answer: form.value.answer.trim(),
+    answerFrom: form.value.answer.trim() ? (form.value.answerFrom || 'manual') : '',
+  })
   const id = editingId.value > 0
     ? await updateQuestion(editingId.value, meta, formTitle.value)
     : await addQuestion(meta, formTitle.value)
@@ -136,7 +190,9 @@ function close() { emit('close') }
           <div class="qb__title">试题库<em>（供 PDF 生成组卷：选定后插入题干，可带答案解析）</em></div>
           <div class="qb__tools">
             <button class="qb__btn" title="把整份试题粘贴进来，一次性识别并入库" @click="batchOpen = true; editing = false">批量导入</button>
+            <button class="qb__btn" :title="'从解析里反推答案（认「故选B」这类明确写法），可补 ' + proposals.length + ' 道'" @click="doComplete">完善答案<template v-if="proposals.length">（{{ proposals.length }}）</template></button>
             <button class="qb__btn qb__btn--pri" title="新建一道试题" @click="startNew">＋ 新建试题</button>
+            <button class="qb__btn qb__btn--pdf" :disabled="!pickedIds.length" title="把左边勾选的题按 选择→填空→解答 排序，一起送进 PDF 生成" @click="insertPicked(false)">生成 PDF（已选 {{ pickedIds.length }}）</button>
             <button class="qb__close" title="关闭" @click="close"><AppIcon name="close" :size="14" /></button>
           </div>
         </div>
@@ -146,18 +202,33 @@ function close() { emit('close') }
           <span class="qb__count">{{ shown.length }} / {{ list.length }}</span>
         </div>
 
+        <!-- 筛选：题型 / 难度分级 / 板块 / 只看缺答案 -->
+        <div class="qb__filters">
+          <span class="qb__fg">题型
+            <button v-for="t in QTYPES" :key="t.v" class="qb__f" :class="{ 'qb__f--on': pickedType === t.v }"
+              @click="pickedType = (pickedType === t.v ? '' : t.v)">{{ t.label }}</button>
+          </span>
+          <span class="qb__fg">难度
+            <button v-for="l in LEVELS" :key="l.v" class="qb__f" :class="{ 'qb__f--on': pickedLevel === l.v }"
+              @click="pickedLevel = (pickedLevel === l.v ? '' : l.v)">{{ l.label }}</button>
+          </span>
+          <span class="qb__fg">板块
+            <button class="qb__f" :class="{ 'qb__f--on': pickedSection === '' }" @click="pickedSection = ''">全部</button>
+            <button v-for="s in SECTIONS" :key="s" class="qb__f" :class="{ 'qb__f--on': pickedSection === s }"
+              @click="pickedSection = (pickedSection === s ? '' : s)">{{ s }}</button>
+          </span>
+          <span class="qb__fg">
+            <button class="qb__f" :class="{ 'qb__f--on': onlyMissing }" title="只显示还没填答案的题"
+              @click="onlyMissing = !onlyMissing">只看缺答案</button>
+          </span>
+        </div>
+
         <div class="qb__tags" v-if="tags.length">
           <button
             v-for="t in tags" :key="t.name"
             class="qb__tag" :class="{ 'qb__tag--on': pickedTags.indexOf(t.name) >= 0 }"
             :title="'该标签下有 ' + t.count + ' 道题'"
             @click="toggleTag(t.name)">{{ t.name }}</button>
-          <span class="qb__diff">
-            难度
-            <button v-for="d in [1,2,3,4,5]" :key="d"
-              class="qb__d" :class="{ 'qb__d--on': diff === d }"
-              @click="diff = (diff === d ? null : d)">{{ d }}</button>
-          </span>
         </div>
 
         <div class="qb__body">
@@ -166,13 +237,21 @@ function close() { emit('close') }
             <div v-else-if="!shown.length" class="qb__empty">
               还没有试题。点右上角「＋ 新建试题」录入第一道。
             </div>
-            <button
+            <div
               v-for="x in shown" :key="x.id"
               class="qb__item" :class="{ 'qb__item--on': x.id === selectedId }"
               @click="selectedId = x.id">
+              <span class="qb__pick" title="勾选后可批量生成 PDF" @click.stop="togglePick(x.id)">
+                <input type="checkbox" :checked="pickedIds.indexOf(x.id) >= 0" />
+              </span>
               <span class="qb__it">{{ x.title }}</span>
-              <span class="qb__im">难度 {{ x.q.difficulty }}<template v-if="x.q.knowledge.length"> · {{ x.q.knowledge.join('、') }}</template></span>
-            </button>
+              <span class="qb__im">
+                {{ qtypeLabel(x.q.qtype) }} · {{ levelLabel(x.q.difficulty) }}
+                <template v-if="x.q.section"> · {{ x.q.section }}</template>
+                <template v-if="!x.q.answer.trim()"> · <b class="qb__noans">缺答案</b></template>
+                <template v-else-if="x.q.answerFrom === 'auto'"> · <b class="qb__auto">自动</b></template>
+              </span>
+            </div>
           </div>
 
           <div class="qb__detail">
@@ -222,8 +301,13 @@ B. 2
                 <label>答案<input v-model="form.answer" type="text" placeholder="如 D" /></label>
                 <label>解析<textarea v-model="form.solution" rows="4" placeholder="支持 LaTeX 与多行"></textarea></label>
                 <div class="qb__row">
+                  <label>题型<select v-model="form.qtype"><option v-for="t in QTYPES" :key="t.v" :value="t.v">{{ t.label }}</option></select></label>
+                  <label>板块<select v-model="form.section"><option value="">（按关键词自动归类）</option><option v-for="s in SECTIONS" :key="s" :value="s">{{ s }}</option></select></label>
+                  <label>难度<select :value="levelOf(form.difficulty)" @change="form.difficulty = levelToDifficulty(($event.target as HTMLSelectElement).value as Level)"><option v-for="l in LEVELS" :key="l.v" :value="l.v">{{ l.label }}</option></select></label>
+                </div>
+                <div class="qb__row">
                   <label>知识点（逗号分隔）<input v-model="formKnowledge" type="text" placeholder="基本不等式, 最值" /></label>
-                  <label>难度<input v-model.number="form.difficulty" type="number" min="1" max="5" /></label>
+                  <label>日期<input v-model="form.date" type="date" /></label>
                 </div>
                 <div class="qb__row">
                   <label>年份<input v-model="form.year" type="text" placeholder="2024" /></label>
@@ -244,10 +328,14 @@ B. 2
                 <div v-if="selected.q.answer" class="qb__vsec"><b>答案</b><pre>{{ selected.q.answer }}</pre></div>
                 <div v-if="selected.q.solution" class="qb__vsec"><b>解析</b><pre>{{ selected.q.solution }}</pre></div>
                 <div class="qb__vmeta">
-                  难度 {{ selected.q.difficulty }}
+                  {{ qtypeLabel(selected.q.qtype) }} · 难度 {{ levelLabel(selected.q.difficulty) }}
+                  <template v-if="selected.q.section"> · 板块 {{ selected.q.section }}</template>
+                  <template v-if="selected.q.date"> · 录入 {{ selected.q.date }}</template>
                   <template v-if="selected.q.knowledge.length"> · 知识点 {{ selected.q.knowledge.join('、') }}</template>
                   <template v-if="selected.q.year"> · {{ selected.q.year }}</template>
                   <template v-if="selected.q.region"> · {{ selected.q.region }}</template>
+                  <template v-if="selected.q.answerFrom === 'auto'"> · <b class="qb__auto">答案由解析自动提取，请核对</b></template>
+                  <template v-if="!selected.q.answer.trim()"> · <b class="qb__noans">缺答案</b></template>
                 </div>
                 <div class="qb__actions">
                   <button class="qb__btn qb__btn--pri" @click="insertOne(false)">插入题干</button>
@@ -283,7 +371,18 @@ B. 2
 .qb__bar { display: flex; align-items: center; gap: 10px; padding: 10px 16px 6px; }
 .qb__search { flex: 1; padding: 7px 10px; border: 1px solid #dcdce6; border-radius: 8px; font-size: 13px; }
 .qb__count { font-size: 12px; color: var(--muted, #888); }
-.qb__tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 4px 16px 10px; }
+.qb__filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 6px 16px 2px; }
+.qb__fg { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted, #888); }
+.qb__f { border: 1px solid #e0e0ea; background: #fafafd; border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+.qb__f:hover { background: #f1eeff; border-color: #b9a9f0; }
+.qb__f--on { background: #efeaff; border-color: #b9a9f0; color: #4b3fa8; font-weight: 600; }
+.qb__pdf { background: #0f766e; border-color: #0f766e; color: #fff; }
+.qb__pdf:disabled { opacity: .45; cursor: not-allowed; }
+.qb__pick { grid-row: span 2; align-self: start; padding-top: 2px; }
+.qb__pick input { cursor: pointer; }
+.qb__noans { color: #b25f00; }
+.qb__auto { color: #0f766e; }
+.qb__tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 16px 10px; }
 .qb__tag { border: 1px solid #e0e0ea; background: #fafafd; border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
 .qb__tag--on { background: #efeaff; border-color: #b9a9f0; color: #4b3fa8; }
 .qb__diff { margin-left: auto; font-size: 12px; color: var(--muted, #888); display: flex; align-items: center; gap: 4px; }
@@ -291,7 +390,7 @@ B. 2
 .qb__d--on { background: #efeaff; border-color: #b9a9f0; color: #4b3fa8; }
 .qb__body { flex: 1; display: flex; min-height: 0; border-top: 1px solid var(--border, #e8e8f0); }
 .qb__list { width: 340px; flex: none; overflow: auto; border-right: 1px solid var(--border, #e8e8f0); padding: 8px; }
-.qb__item { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; border: 1px solid transparent; background: none; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.qb__item { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; text-align: left; border: 1px solid transparent; background: none; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
 .qb__item:hover { background: #f6f6fb; }
 .qb__item--on { background: #efeaff; border-color: #b9a9f0; }
 .qb__it { font-size: 13px; font-weight: 600; }
