@@ -7,6 +7,7 @@ import { useDeckStore } from '@/stores/deck'
 import { captureDesmosState } from '@/composables/useDesmos'
 import type { DesmosElement, SlideElement } from '@/types'
 import TopToolbar from '@/components/TopToolbar.vue'
+import NewDeckWizard from '@/components/NewDeckWizard.vue'
 import EditToolbar from '@/components/EditToolbar.vue'
 import SlideList from '@/components/SlideList.vue'
 import EditorCanvas from '@/components/EditorCanvas.vue'
@@ -45,6 +46,12 @@ import StatusBar from '@/components/StatusBar.vue'
 const store = useDeckStore()
 const presenting = ref(false)
 const paperOpen = ref(false)
+
+/** 向导的「从 PPT 导入」✓：不重造入口 ✓，直接打开工具栏的「文件」菜单让用户走现成路径 ✓ */
+function openPptImportMenu() {
+  const btn = document.querySelector('[title*="文件"]') as HTMLElement | null
+  if (btn) btn.click()
+}
 
 function onKeydown(e: KeyboardEvent) {
   const target = e.target as HTMLElement | null
@@ -203,6 +210,13 @@ function onPresent() {
     />
     <TemplatePicker v-if="tplOpen" :mode="tplMode" @close="closeTemplateLibrary()" />
     <LayoutGallery />
+    <!-- 启动向导 ✓（用户方案 A：把能力摆到眼前，不替用户写内容 ✓） -->
+    <NewDeckWizard
+      @blank="() => {}"
+      @templates="openTemplateLibrary('replace')"
+      @paper="paperOpen = true"
+      @pptx="openPptImportMenu()"
+    />
     <PaperModal v-if="paperOpen" @close="paperOpen = false" />
   <HelpDialog v-if="helpOpen" @close="closeHelp()" />
     <GgbSuite v-if="ggbEdit.open" :edit-id="ggbEdit.editId" @close="closeGgbSuite()" />
