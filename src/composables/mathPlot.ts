@@ -329,17 +329,14 @@ export const FUNCTIONS: Record<string, FunctionDef> = {
     params: [
       { key: 'mu', label: '均值 μ', def: 0, step: 0.1, min: -5, max: 5 },
       { key: 'sigma', label: '标准差 σ', def: 1, step: 0.1, min: 0.2, max: 3 },
+      { key: 'a', label: '左界 a', def: -1, step: 0.1, min: -5, max: 5 },
+      { key: 'b', label: '右界 b', def: 1, step: 0.1, min: -5, max: 5 },
     ],
     f: (x, p) => {
       const s = Math.max(0.2, p.sigma)
       return Math.exp(-((x - p.mu) ** 2) / (2 * s * s)) / (s * Math.sqrt(2 * Math.PI))
     },
     view: { xmin: -2.5, xmax: 2.5, ymin: -0.06, ymax: 0.46 },
-    // ⚠ x 窗口**固定 ±2.5，不随 σ 缩放** ✗ —— 用户第 1、2 条的要求 ✓
-    //   原来写 ±4σ ✓ → 视图跟着 σ 一起缩 ✓ → **无论 σ 多大曲线都长一个样** ✗（看不出陡峭程度 ✓）
-    //   且 ±4 对峰值仅 0.4 的曲线太宽 ✗ → 显得**扁平** ✓。
-    //   固定窗口后：σ 小 → 又高又窄 ✓；σ 大 → 又矮又宽 ✓ —— **陡峭程度一眼可见** ✓。
-    //   y 仍随 peak 自适应 ✓（否则小 σ 的高峰会顶出画框 ✗）。
     viewOf: (p) => {
       const s = Math.max(0.2, p.sigma)
       const peak = 1 / (s * Math.sqrt(2 * Math.PI))
@@ -351,15 +348,38 @@ export const FUNCTIONS: Record<string, FunctionDef> = {
       const px = c.m.X(p.mu)
       const py = c.m.Y(peak)
       const y0 = c.m.Y(0)
+      const sw = Math.max(1, c.sw * 0.55)
+      // 曲线本体（与本图形 f 同一式子 ✓ 参数一致 ✓）
+      const fn = (x: number) => Math.exp(-((x - p.mu) ** 2) / (2 * s * s)) / (s * Math.sqrt(2 * Math.PI))
+      // ⭐ 区间 [a,b] 的阴影 ✓（用户要求 ✓ 对应示意图里的面积 B ✓）
+      //   采样后沿 x 轴闭合 ✓ 半透明填充 ✓ —— 透明度低 ✓ 曲线仍清晰可见 ✓。
+      const a = Math.min(p.a ?? -1, p.b ?? 1)
+      const b = Math.max(p.a ?? -1, p.b ?? 1)
+      const steps = 60
+      let d = 'M ' + n1(c.m.X(a)) + ' ' + n1(y0)
+      for (let i = 0; i <= steps; i++) {
+        const x = a + ((b - a) * i) / steps
+        d += ' L ' + n1(c.m.X(x)) + ' ' + n1(c.m.Y(fn(x)))
+      }
+      d += ' L ' + n1(c.m.X(b)) + ' ' + n1(y0) + ' Z'
+      const shade = '<path d="' + d + '" fill="' + c.stroke + '" opacity="0.18" stroke="none"/>'
+      // a、b 处两条竖直细线 + 轴下标注 ✓
+      const fs = Math.max(9, c.h * 0.072)
+      const vline = (xv: number) =>
+        '<line x1="' + n1(c.m.X(xv)) + '" y1="' + n1(y0) + '" x2="' + n1(c.m.X(xv)) + '" y2="' +
+        n1(c.m.Y(fn(xv))) + '" stroke="' + c.stroke + '" stroke-width="' + n1(Math.max(0.8, c.sw * 0.4)) + '"/>'
+      const vlabel = (xv: number, t: string) =>
+        '<text x="' + n1(c.m.X(xv)) + '" y="' + n1(y0 + fs + 3) + '" font-size="' + n1(fs) +
+        '" text-anchor="middle" fill="' + c.stroke + '">' + t + '</text>'
+      const marks = vline(a) + vline(b) + vlabel(a, 'a') + vlabel(b, 'b')
       const dash =
         '<line x1="' + n1(px) + '" y1="' + n1(py) + '" x2="' + n1(px) + '" y2="' + n1(y0) +
-        '" stroke="' + c.stroke + '" stroke-width="' + n1(Math.max(1, c.sw * 0.55)) +
+        '" stroke="' + c.stroke + '" stroke-width="' + n1(sw) +
         '" stroke-dasharray="5 4" opacity="0.75"/>'
-      const fs = Math.max(9, c.h * 0.072)
       const label =
         '<text x="' + n1(px + 5) + '" y="' + n1(Math.max(fs + 2, py - 5)) + '" font-size="' + n1(fs) +
         '" fill="' + c.stroke + '">1/(σ√2π)</text>'
-      return dash + label
+      return shade + marks + dash + label
     },
   },
 }
