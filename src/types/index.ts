@@ -353,7 +353,7 @@ export type MathFigureKind =
   // ---- 函数图像（含新增：一次 / 三次 / 绝对值 / 根式 / 反比例 / 双钩 / 正切 / 正弦型 / 指数递减） ----
   | 'custom'
   | 'linear' | 'parabola' | 'cubic' | 'absolute' | 'sqrt' | 'reciprocal' | 'hook'
-  | 'tangent' | 'sine' | 'cosine' | 'sinusoid' | 'exponential' | 'expDecay' | 'logarithm'
+  | 'tangent' | 'sine' | 'cosine' | 'sinusoid' | 'exponential' | 'expDecay' | 'logarithm' | 'normal'
   | 'piecewise' | 'paramQuadratic' | 'paramAbs'
   // ---- 圆锥曲线 ----
   | 'conicCircle' | 'ellipse' | 'hyperbola' | 'conicParabola' | 'conicFocusDir'
@@ -394,6 +394,7 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   { v: 'tangent', label: '正切 y=tan x', cat: '函数图像' },
   { v: 'exponential', label: '指数 y=2ˣ', cat: '函数图像' },
   { v: 'expDecay', label: '指数 y=(1/2)ˣ', cat: '函数图像' },
+  { v: 'normal', label: '正态密度曲线', cat: '函数图像' },
   { v: 'logarithm', label: '对数 y=log₂x', cat: '函数图像' },
   // ---- 圆锥曲线 ----
   { v: 'conicCircle', label: '圆 x²+y²=r²', cat: '圆锥曲线' },

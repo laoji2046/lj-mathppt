@@ -316,9 +316,48 @@ export const FUNCTIONS: Record<string, FunctionDef> = {
     label: '对数 y=log₂x', f: (x) => Math.log2(x), view: { xmin: -1.2, xmax: 8.5, ymin: -3.2, ymax: 3.4 },
     extra: (c) => keyPointSvg(c, 1, 0, '(1,0)'),
   },
+
+  /**
+   * **正态密度曲线**（可调 μ / σ ✓）——用户要求 ✓。
+   *
+   * f(x) = 1/(σ√2π) · e^(−(x−μ)²/(2σ²)) ✓（用户给的原式 ✓）
+   * 峰值处画虚线并标出 1/(σ√2π) ✓（与用户给的示意图一致 ✓）。
+   * ⚠ σ 必须 > 0 ✗ —— 这里统一用 max(0.2, σ) 兜底 ✓，避免除零把曲线拉飞 ✓。
+   */
+  normal: {
+    label: '正态密度曲线（可调参数）',
+    params: [
+      { key: 'mu', label: '均值 μ', def: 0, step: 0.1, min: -5, max: 5 },
+      { key: 'sigma', label: '标准差 σ', def: 1, step: 0.1, min: 0.2, max: 3 },
+    ],
+    f: (x, p) => {
+      const s = Math.max(0.2, p.sigma)
+      return Math.exp(-((x - p.mu) ** 2) / (2 * s * s)) / (s * Math.sqrt(2 * Math.PI))
+    },
+    view: { xmin: -4, xmax: 4, ymin: -0.06, ymax: 0.46 },
+    viewOf: (p) => {
+      const s = Math.max(0.2, p.sigma)
+      const peak = 1 / (s * Math.sqrt(2 * Math.PI))
+      return { xmin: p.mu - 4 * s, xmax: p.mu + 4 * s, ymin: -peak * 0.16, ymax: peak * 1.3 }
+    },
+    extra: (c, p) => {
+      const s = Math.max(0.2, p.sigma)
+      const peak = 1 / (s * Math.sqrt(2 * Math.PI))
+      const px = c.m.X(p.mu)
+      const py = c.m.Y(peak)
+      const y0 = c.m.Y(0)
+      const dash =
+        '<line x1="' + n1(px) + '" y1="' + n1(py) + '" x2="' + n1(px) + '" y2="' + n1(y0) +
+        '" stroke="' + c.stroke + '" stroke-width="' + n1(Math.max(1, c.sw * 0.55)) +
+        '" stroke-dasharray="5 4" opacity="0.75"/>'
+      const fs = Math.max(9, c.h * 0.072)
+      const label =
+        '<text x="' + n1(px + 5) + '" y="' + n1(Math.max(fs + 2, py - 5)) + '" font-size="' + n1(fs) +
+        '" fill="' + c.stroke + '">1/(σ√2π)</text>'
+      return dash + label
+    },
+  },
 }
-
-
 // ---------------------------------------------------------------------------
 // 自定义函数（空白）：自己解析表达式，不 eval —— 安全、离线、无 CSP 问题
 // ---------------------------------------------------------------------------
