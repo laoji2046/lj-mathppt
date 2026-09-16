@@ -8,7 +8,8 @@
  *  - **检索先用 LIKE + 标签过滤**，够用；FTS5 留到需要时再评估（中文分词效果一般）。
  *  - **题目文本不拆分**：题干/答案/解析各存一段纯文本，里面可以写 LaTeX（$...$）与 [图N]。
  */
-import { libQuery, libSave, libRemove, libBump, libTags } from './useLibrary'
+import { libQuery, libSave, libRemove, libBump, libTags, libSaveMany } from './useLibrary'
+import type { ParsedQuestion } from './parseQuestions'
 import type { LibDraft, LibItem } from './useLibrary'
 
 export type Difficulty = 1 | 2 | 3 | 4 | 5
@@ -102,6 +103,27 @@ export async function touchQuestion(id: number): Promise<void> {
 /** 标签汇总（供筛选界面） */
 export async function listQuestionTags(): Promise<{ name: string; count: number }[]> {
   return libTags('question')
+}
+
+/**
+ * 批量导入（第二期补充）：把解析出来的题目一次性写进库。
+ * Rust 侧走事务 + 按 body 去重，所以同一份文档重复导入不会灌出两份。
+ */
+export async function importParsedQuestions(list: ParsedQuestion[]): Promise<{ added: number; skipped: number }> {
+  if (!list.length) return { added: 0, skipped: 0 }
+  const drafts: LibDraft[] = list.map((p) => ({
+    type: 'question',
+    title: p.title,
+    body: p.stem,
+    meta: {
+      stem: p.stem, options: p.options, answer: p.answer, solution: p.solution,
+      knowledge: p.knowledge, difficulty: p.difficulty, year: p.year, region: p.region,
+    } as unknown as Record<string, unknown>,
+    tags: p.knowledge.join(','),
+    source: p.region || p.year || '批量导入',
+    builtin: 0,
+  }))
+  return libSaveMany(drafts)
 }
 
 /** 自动起名：题干首行前 16 字 */

@@ -802,6 +802,73 @@ fn lib_tags(kind: String) -> serde_json::Value {
         .collect();
     serde_json::json!({ "ok": true, "tags": out })
 }
+
+/// 批量写入条目（用户批量导入用）。与 lib_seed 的区别：
+///  - 不动 builtin（固定 0，导入的都是用户自己的题）；
+///  - 按 type + body 去重，重复导入同一份文档不会灌出两份；
+///  - 走事务，中途失败不会留下半份数据。
+/// 返回 { ok, added, skipped }。
+#[tauri::command]
+fn lib_save_many(items: Vec<serde_json::Value>) -> serde_json::Value {
+    let mut conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let tx = match conn.transaction() {
+        Ok(t) => t,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("事务失败: {}", e) }),
+    };
+    let now = now_stamp();
+    let mut added: i64 = 0;
+    let mut skipped: i64 = 0;
+    for item in items.iter() {
+        let gs = |k: &str| {
+            item.get(k)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
+        let kind = gs("type");
+        let title = gs("title");
+        if kind.is_empty() || title.is_empty() {
+            skipped += 1;
+            continue;
+        }
+        let body = gs("body");
+        let dup: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM library_item WHERE type=?1 AND body=?2",
+                rusqlite::params![kind, body],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if dup > 0 && !body.is_empty() {
+            skipped += 1;
+            continue;
+        }
+        let meta = {
+            let m = gs("meta");
+            if m.is_empty() { "{}".to_string() } else { m }
+        };
+        let r = tx.execute(
+            concat!(
+                "INSERT INTO library_item ",
+                "(type,title,body,meta,tags,source,builtin,created_at,updated_at,used_count) ",
+                "VALUES (?1,?2,?3,?4,?5,?6,0,?7,?8,0)"
+            ),
+            rusqlite::params![kind, title, body, meta, gs("tags"), gs("source"), now, now],
+        );
+        if r.is_ok() {
+            added += 1;
+        } else {
+            skipped += 1;
+        }
+    }
+    if let Err(e) = tx.commit() {
+        return serde_json::json!({ "ok": false, "error": format!("提交失败: {}", e) });
+    }
+    serde_json::json!({ "ok": true, "added": added, "skipped": skipped })
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -824,7 +891,8 @@ pub fn run() {
             lib_seed,
             lib_meta_get,
             lib_meta_set,
-            lib_tags
+            lib_tags,
+            lib_save_many
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

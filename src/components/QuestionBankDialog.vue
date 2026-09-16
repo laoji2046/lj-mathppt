@@ -5,7 +5,9 @@ import {
   listQuestions, addQuestion, updateQuestion, removeQuestion, touchQuestion,
   listQuestionTags, autoTitle, questionToText, filterQuestions,
 } from '@/composables/useQuestionLibrary'
+import { importParsedQuestions } from '@/composables/useQuestionLibrary'
 import type { QuestionEntry, QuestionMeta } from '@/composables/useQuestionLibrary'
+import { parseQuestions, PARSE_HELP } from '@/composables/parseQuestions'
 
 const emit = defineEmits<{ (e: 'close'): void; (e: 'insert', text: string, id: number): void }>()
 
@@ -14,6 +16,19 @@ const tags = ref<{ name: string; count: number }[]>([])
 const loading = ref(true)
 const msg = ref('')
 const q = ref('')
+
+/* ---- 批量导入（粘一整个文档，解析后一次性入库） ---- */
+const batchOpen = ref(false)
+const batchText = ref('')
+const parsed = computed(() => parseQuestions(batchText.value))
+async function doBatch() {
+  if (!parsed.value.length) return
+  const r = await importParsedQuestions(parsed.value)
+  await load()
+  batchOpen.value = false
+  batchText.value = ''
+  flash('已导入 ' + r.added + ' 道题' + (r.skipped ? '，跳过 ' + r.skipped + ' 道（与库里已有的题干重复）' : ''))
+}
 const pickedTags = ref<string[]>([])
 const diff = ref<number | null>(null)
 const selectedId = ref(0)
@@ -120,6 +135,7 @@ function close() { emit('close') }
         <div class="qb__head">
           <div class="qb__title">试题库<em>（供 PDF 生成组卷：选定后插入题干，可带答案解析）</em></div>
           <div class="qb__tools">
+            <button class="qb__btn" title="把整份试题粘贴进来，一次性识别并入库" @click="batchOpen = true; editing = false">批量导入</button>
             <button class="qb__btn qb__btn--pri" title="新建一道试题" @click="startNew">＋ 新建试题</button>
             <button class="qb__close" title="关闭" @click="close"><AppIcon name="close" :size="14" /></button>
           </div>
@@ -160,7 +176,45 @@ function close() { emit('close') }
           </div>
 
           <div class="qb__detail">
-            <template v-if="editing">
+            <template v-if="batchOpen">
+              <div class="qb__batch">
+                <div class="qb__bhead">把整份试题粘贴到下面，点「识别并导入」</div>
+                <textarea v-model="batchText" class="qb__btext" rows="15" placeholder="示例：
+1. 已知 x&gt;0，求 x+1/x 的最小值。
+A. 1
+B. 2
+【答案】B
+【解析】由基本不等式 x+1/x ≥ 2√(x·1/x) = 2。
+【知识点】基本不等式, 最值
+【难度】2
+---
+2. 下一道题……"></textarea>
+                <div class="qb__binfo">
+                  <b>识别到 {{ parsed.length }} 道题</b>
+                  <span v-if="parsed.length" class="qb__bwarn">
+                    <template v-if="parsed.filter((p) => p.warn).length">其中 {{ parsed.filter((p) => p.warn).length }} 道没识别到答案</template>
+                  </span>
+                </div>
+                <details class="qb__bhelp">
+                  <summary>格式说明（点开）</summary>
+                  <ul><li v-for="(h, i) in PARSE_HELP" :key="i">{{ h }}</li></ul>
+                </details>
+                <div class="qb__actions">
+                  <button class="qb__btn qb__btn--pri" :disabled="!parsed.length" @click="doBatch">识别并导入</button>
+                  <button class="qb__btn" @click="batchOpen = false">返回列表</button>
+                  <button class="qb__btn" @click="batchText = ''">清空</button>
+                </div>
+                <div v-if="parsed.length" class="qb__bprev">
+                  <div class="qb__bptitle">预览（前 5 道）</div>
+                  <div v-for="(p, i) in parsed.slice(0, 5)" :key="i" class="qb__bpitem">
+                    <b>{{ p.title }}</b>
+                    <span>选项 {{ p.options.length }} · 答案 {{ p.answer || '—' }} · 难度 {{ p.difficulty }}<template v-if="p.knowledge.length"> · {{ p.knowledge.join('、') }}</template></span>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <template v-if="!batchOpen && editing">
               <div class="qb__form">
                 <label>标题<input v-model="formTitle" type="text" :placeholder="autoTitle(form)" /></label>
                 <label>题干<textarea v-model="form.stem" rows="4" placeholder="支持 LaTeX：$x^2+y^2=1$；也可写 [图N] 引用试卷里的图"></textarea></label>
@@ -249,6 +303,20 @@ function close() { emit('close') }
 .qb__vsec b { font-size: 12px; color: var(--brand-700, #4b3fa8); }
 .qb__vsec pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 13px; line-height: 1.7; background: #fafafd; border: 1px solid #eeeef6; border-radius: 8px; padding: 8px 10px; }
 .qb__vmeta { font-size: 12px; color: var(--muted, #888); margin: 6px 0 10px; }
+.qb__batch { display: flex; flex-direction: column; gap: 10px; }
+.qb__bhead { font-size: 13px; color: var(--muted, #777); }
+.qb__btext { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #dcdce6; border-radius: 8px; font-size: 13px; font-family: inherit; line-height: 1.7; resize: vertical; }
+.qb__binfo { font-size: 13px; }
+.qb__bwarn { color: #b25f00; margin-left: 8px; font-size: 12px; }
+.qb__bhelp { font-size: 12px; color: var(--muted, #777); }
+.qb__bhelp summary { cursor: pointer; }
+.qb__bhelp ul { margin: 6px 0 0 18px; padding: 0; line-height: 1.9; }
+.qb__bprev { border-top: 1px dashed #e4e4ee; padding-top: 8px; }
+.qb__bptitle { font-size: 12px; color: var(--muted, #888); margin-bottom: 6px; }
+.qb__bpitem { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 6px; background: #fafafd; margin-bottom: 4px; }
+.qb__bpitem b { font-size: 12.5px; }
+.qb__bpitem span { font-size: 11.5px; color: var(--muted, #888); }
+.qb__btn:disabled { opacity: .5; cursor: not-allowed; }
 .qb__form { display: flex; flex-direction: column; gap: 9px; }
 .qb__form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted, #777); }
 .qb__form input, .qb__form textarea { padding: 6px 9px; border: 1px solid #dcdce6; border-radius: 8px; font-size: 13px; font-family: inherit; }

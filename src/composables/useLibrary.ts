@@ -199,6 +199,32 @@ export async function libSeed(items: LibDraft[]): Promise<number> {
   }
 }
 
+/** 批量导入：返回 { added, skipped }（Rust 侧走事务并按 body 去重） */
+export async function libSaveMany(items: LibDraft[]): Promise<{ added: number; skipped: number }> {
+  if (!items.length) return { added: 0, skipped: 0 }
+  if (!isTauri()) {
+    let added = 0
+    let skipped = 0
+    for (const it of items) {
+      const d = fbLoad()
+      if (it.body && d.items.some((x) => x.body === it.body)) { skipped++; continue }
+      const id = await libSave(it)
+      if (id) added++; else skipped++
+    }
+    return { added, skipped }
+  }
+  try {
+    const payload = items.map((it) => ({
+      type: it.type, title: it.title, body: it.body || '',
+      meta: JSON.stringify(it.meta || {}), tags: it.tags || '', source: it.source || '',
+    }))
+    const r = await invoke<{ ok?: boolean; added?: number; skipped?: number }>('lib_save_many', { items: payload })
+    return r?.ok ? { added: r.added ?? 0, skipped: r.skipped ?? 0 } : { added: 0, skipped: items.length }
+  } catch {
+    return { added: 0, skipped: items.length }
+  }
+}
+
 /** 列出某一类下的标签及条数（筛选界面用） */
 export async function libTags(kind: LibKind): Promise<{ name: string; count: number }[]> {
   if (!isTauri()) {
