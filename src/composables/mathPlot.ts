@@ -334,11 +334,16 @@ export const FUNCTIONS: Record<string, FunctionDef> = {
       const s = Math.max(0.2, p.sigma)
       return Math.exp(-((x - p.mu) ** 2) / (2 * s * s)) / (s * Math.sqrt(2 * Math.PI))
     },
-    view: { xmin: -4, xmax: 4, ymin: -0.06, ymax: 0.46 },
+    view: { xmin: -2.5, xmax: 2.5, ymin: -0.06, ymax: 0.46 },
+    // ⚠ x 窗口**固定 ±2.5，不随 σ 缩放** ✗ —— 用户第 1、2 条的要求 ✓
+    //   原来写 ±4σ ✓ → 视图跟着 σ 一起缩 ✓ → **无论 σ 多大曲线都长一个样** ✗（看不出陡峭程度 ✓）
+    //   且 ±4 对峰值仅 0.4 的曲线太宽 ✗ → 显得**扁平** ✓。
+    //   固定窗口后：σ 小 → 又高又窄 ✓；σ 大 → 又矮又宽 ✓ —— **陡峭程度一眼可见** ✓。
+    //   y 仍随 peak 自适应 ✓（否则小 σ 的高峰会顶出画框 ✗）。
     viewOf: (p) => {
       const s = Math.max(0.2, p.sigma)
       const peak = 1 / (s * Math.sqrt(2 * Math.PI))
-      return { xmin: p.mu - 4 * s, xmax: p.mu + 4 * s, ymin: -peak * 0.16, ymax: peak * 1.3 }
+      return { xmin: p.mu - 2.5, xmax: p.mu + 2.5, ymin: -peak * 0.12, ymax: peak * 1.18 }
     },
     extra: (c, p) => {
       const s = Math.max(0.2, p.sigma)
