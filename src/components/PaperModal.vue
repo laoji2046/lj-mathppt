@@ -593,9 +593,11 @@ function paginate() {
     // ⚠ 一栏时**绝不能**用 column-fill:auto + 固定高度 ✗ ——
     //   多栏容器在内容超过高度时会**继续开新栏** ✓ → 选了一栏却挤出第二栏/被截断 ✓
     //   （用户实测：**双栏正常、一栏不正常** ✗）。一栏就走普通流动 ✓。
+    const bh = Math.max(200, 970 - (headerText.value ? 42 + (headerGap.value || 0) : 0) - (footerText.value ? 34 + (footerGap.value || 0) : 0))
     const colsStyle = bodyCols.value > 1 && colFill.value === 'fill'
       ? 'column-count:' + bodyCols.value + ';column-fill:auto;height:' + bh + 'px;'
       : 'column-count:' + bodyCols.value + ';column-fill:balance;'
+    pg.innerHTML = head + '<div class="paper-cols" style="' + colsStyle + '">' + blks.map((b) => b.outerHTML).join('') + '</div>' + foot
     applyFont(pg); applyLayout(pg)
     return pg
   }
