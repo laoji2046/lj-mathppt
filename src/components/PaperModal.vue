@@ -1016,10 +1016,16 @@ async function savePdf() {
     const pdf = new JsPDF({ unit: 'mm', format: 'a4' })
     for (let i = 0; i < pages.length; i++) {
       if (i) pdf.addPage()
-      const canvas = await h2c(pages[i], { scale: 3, useCORS: true, backgroundColor: '#ffffff' })
+      // ⚠ 必须给反馈 ✗ —— 原来整个循环没有任何提示 ✓，看起来就是「点了没反应」✓（用户实测 ✓）
+      paperMsg.value = '正在生成 PDF…第 ' + (i + 1) + ' / ' + pages.length + ' 页（页数多时较慢，请稍候）'
+      await new Promise((r) => setTimeout(r, 30))   // 让提示先渲染出来 ✓ 并给主线程喘口气 ✓
+      // ⚠ scale 3 → 2 ✗：A4 按 3 倍是 2382×3367 px ✓ 单页 canvas 约 32 MB ✓ 多页必然卡死 ✓
+      const canvas = await h2c(pages[i], { scale: 2, useCORS: true, backgroundColor: '#ffffff' })
       const isPng = pdfFmt.value === 'png'
-      const img = isPng ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.95)
+      // ⚠ JPEG 质量 0.95 → 0.85 ✗：体积与耗时都明显下降 ✓ 印刷质量足够 ✓
+      const img = isPng ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.85)
       pdf.addImage(img, isPng ? 'PNG' : 'JPEG', 0, 0, 210, 297)
+      await new Promise((r) => setTimeout(r, 0))   // 每页之间让出主线程 ✓
     }
     const name = (headerText.value || '试卷讲义').replace(/[\\/:*?"<>|]/g, '_')
     pdf.save(name + '.pdf')
