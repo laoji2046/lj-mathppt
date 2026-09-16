@@ -7,6 +7,7 @@ import { useDeckStore } from '@/stores/deck'
 import { MATH_FIGURE_OPTIONS } from '@/types'
 import { closeFigPalette, openFigPalette } from '@/ui/figPalette'
 import { geom3dSink, openGeom3D } from '@/ui/geom3d'
+import { vectorizeSink, openVectorize } from '@/ui/vectorize'
 
 /**
  * PDF 生成（A4 分页 + 题号识别），移植自参考版 LJ-PPT 的 PaperMode。
@@ -948,6 +949,44 @@ function insertGeom3D() {
   openGeom3D()
 }
 
+/**
+ * **插入矢量描摹图** ✓（用户要求 ✓）。
+ *
+ * 描摹要先有一张线稿图 ✓ —— 所以先让用户选图 ✓，
+ * 再把结果（SVG ✓）栅格化成 [图N] 插进试卷 ✓。
+ * 与三维那套完全同构 ✓（登记接收口 → 开对话框 → 交产物 → 清接收口 ✓）。
+ */
+function insertVectorize() {
+  const fi = document.createElement('input')
+  fi.type = 'file'
+  fi.accept = 'image/*'
+  fi.onchange = () => {
+    const file = fi.files && fi.files[0]
+    if (!file) return
+    const rd = new FileReader()
+    rd.onload = () => {
+      paperMsg.value = '请在描摹窗口里调好，点「插入」即插入到试卷 ✓'
+      vectorizeSink.value = async (svgText: string) => {
+        vectorizeSink.value = null
+        try {
+          const png = await svgStringToPng(svgText)
+          const n = ++imgSeq.value
+          images.value[n] = { src: png, address: '矢量描摹图' }
+          input.value += '[图' + n + ']'
+          render()
+          saveDraftSoon()
+          paperMsg.value = '已插入矢量描摹图 [图' + n + '] ✓'
+        } catch (err) {
+          paperMsg.value = '矢量描摹图插入失败：' + (err instanceof Error ? err.message : String(err))
+        }
+      }
+      openVectorize(String(rd.result))
+    }
+    rd.readAsDataURL(file)
+  }
+  fi.click()
+}
+
 async function insertFigure(id: string, slideIndex: number, label: string) {
   figOpen.value = false
 
@@ -1265,6 +1304,7 @@ onBeforeUnmount(() => {
   //   之后在**画布**上插三维 ✓ 也会走这个（已经死掉的）试卷接收口 ✗
   //   → **两边都插不进去** ✓（用户实测：三维插不进试卷、也插不进页面 ✓）。
   geom3dSink.value = null
+  vectorizeSink.value = null   // 描摹的接收口同样要清 ✓
 })
 /** 图片有更新（用户换了图）时清缓存重渲染 */
 function refreshImages() {
@@ -1380,6 +1420,9 @@ watch([headerText, footerText], () => render())
     </button>
       <button class="pm__btn" title="插入三维立体图（在三维窗口里调好后点「插入到当前页」）" @click="insertGeom3D">
         <AppIcon name="graphic" :size="14" />三维立体图
+      </button>
+      <button class="pm__btn" title="插入矢量描摹图（先选一张线稿图，在描摹窗口里调好后点插入）" @click="insertVectorize">
+        <AppIcon name="graphic" :size="14" />矢量描摹图
       </button>
     <!-- 图形选择面板：带真实缩略图（选图形得看得见图形） -->
     <div v-if="figOpen" class="pm__figpanel">

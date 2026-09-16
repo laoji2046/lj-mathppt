@@ -10,6 +10,7 @@
  *  重识别会换掉坐标系（box 变了），所以它是**历史清空点**，且动手前会先问一句。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { vectorizeSink } from '@/ui/vectorize'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type { MathFigureElement, SlideElement, FigureArc } from '@/types'
@@ -1356,13 +1357,45 @@ function buildPatch(): Partial<SlideElement> | null {
 
 const findEl = (id: string) => store.currentSlide?.elements.find((e) => e.id === id)
 
+/**
+ * 给**试卷 / 讲义**用的 SVG ✓（纯新增 ✓ 不影响原路径 ✓）。
+ *
+ * 试卷只认图片 ✗，所以这里从顶点/边**直接拼一段 SVG** ✓，
+ * 再交给试卷栅格化成 [图N] ✓（试卷已有 svgStringToPng ✓）。
+ * 只画边（虚实用 stroke-dasharray ✓）—— 顶点圆点和字母标注暂不带 ✓，
+ * 但线稿的几何信息是完整的 ✓。
+ */
+function buildSinkSvg(): string {
+  const w = 800
+  const h = 600
+  const px = (i: number) => ((pts.value[i * 2] ?? 0) * w).toFixed(1)
+  const py = (i: number) => ((pts.value[i * 2 + 1] ?? 0) * h).toFixed(1)
+  let out = ''
+  for (const e of edges.value) {
+    out +=
+      '<line x1="' + px(e[0]) + '" y1="' + py(e[0]) + '" x2="' + px(e[1]) + '" y2="' + py(e[1]) +
+      '" stroke="#1a1a1a" stroke-width="2.6"' + (e[2] ? ' stroke-dasharray="7 5"' : '') + '/>'
+  }
+  // ⚠ 必须返回**完整 SVG（带 viewBox）** ✗ —— 只给片段的话，试卷侧读不到尺寸 ✓
+  //   会按 480×320 兜底 ✓ 而这里是 800×600 ✓ → **图被裁** ✗（三维那边刚踩过同一个坑 ✓）。
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '">' + out + '</svg>'
+}
+
 /** 插入一个新图形（不动原图） */
 function insertNew() {
+  // ⭐ 试卷登记了接收口 → 把描摹结果当图片交给它 ✓（用户要求 ✓）
+  if (vectorizeSink.value) {
+    vectorizeSink.value(buildSinkSvg(), '矢量描摹图')
+    vectorizeSink.value = null
+    emit('close')
+    return
+  }
   const patch = buildPatch()
   if (!patch) return
   store.addElement('mathfig', patch)
   emit('close')
 }
+
 /** 替换掉那张图片：位置原地不动，尺寸沿用原元素的（保持用户当时缩放的大小） */
 function insertReplace() {
   const patch = buildPatch()

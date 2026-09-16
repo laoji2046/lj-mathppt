@@ -28,3 +28,12 @@ export function closeVectorize() {
   vectorizeReplaceId.value = null
   vectorizeEditId.value = null
 }
+/**
+ * **矢量描摹接收口** —— 让「试卷 / 讲义」也能用描摹结果。
+ *
+ * 与 geom3dSink 同一套模式：谁要接收就先登记一个回调，
+ * 对话框插入时**优先走接收口**，没人登记才走原来的「插入当前页 / 替换图片」。
+ *
+ * ⚠ 传的是 **PNG 的 dataURL** ✗（不是 mathfig 元素 ✓）—— 因为试卷只认 [图N] 图片 ✓。
+ */
+export const vectorizeSink = ref<null | ((png: string, label: string) => void)>(null)
