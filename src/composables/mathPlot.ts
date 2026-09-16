@@ -336,11 +336,12 @@ export const FUNCTIONS: Record<string, FunctionDef> = {
       const s = Math.max(0.2, p.sigma)
       return Math.exp(-((x - p.mu) ** 2) / (2 * s * s)) / (s * Math.sqrt(2 * Math.PI))
     },
-    view: { xmin: -2.5, xmax: 2.5, ymin: -0.06, ymax: 0.46 },
+    view: { xmin: -1.6, xmax: 1.6, ymin: -0.14, ymax: 0.45 },
     viewOf: (p) => {
       const s = Math.max(0.2, p.sigma)
       const peak = 1 / (s * Math.sqrt(2 * Math.PI))
-      return { xmin: p.mu - 2.5, xmax: p.mu + 2.5, ymin: -peak * 0.12, ymax: peak * 1.18 }
+      // ⭐ C 方案：x 收窄到 ±1.6 ✓ y 收紧到 peak×[−0.35, 1.12] ✓
+      return { xmin: p.mu - 1.6, xmax: p.mu + 1.6, ymin: -peak * 0.35, ymax: peak * 1.12 }
     },
     extra: (c, p) => {
       const s = Math.max(0.2, p.sigma)

@@ -108,10 +108,14 @@ async function onPick(kind: MathFigureKind) {
 /** 插入尺寸：函数 / 圆锥曲线按视图宽高比给（圆才会是圆），其余用元素默认值 */
 function insert(kind: MathFigureKind) {
   const box = figureBox(kind)
-  // 自定义函数（空白）：给一份能直接改的默认配置，别让元素缺字段
+  // C 方案：正态密度曲线给固定框 460x300 ✓（照 custom 的先例 ✓）
+  //   它的视图宽高比约 5:0.5 ✓ → figureBox 被 minH 顶成极宽极矮的元素 ✗
+  //   曲线忠实画进去就显扁 ✓。固定后竖直方向略作夸张 ✓ 接近教科书示意 ✓。
   const extra = kind === 'custom'
     ? { custom: { expr: 'x^2-2x+1', x0: -2, x1: 4, y0: -2, y1: 6, grid: true, axes: true }, w: 420, h: 300 }
-    : {}
+    : kind === 'normal'
+      ? { w: 460, h: 300 }
+      : {}
   store.addElement('mathfig', { kind, ...(box || {}), ...extra } as any)
   emit('close')
 }
