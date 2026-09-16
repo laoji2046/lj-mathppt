@@ -290,6 +290,74 @@ export async function importParsedQuestions(list: ParsedQuestion[]): Promise<{ a
   return libSaveMany(drafts)
 }
 
+/* ---------------- 整库导入导出（JSON） ---------------- */
+
+/** 导出文件的格式标记（导入时用它判断是不是我们的题库文件） */
+export const QBANK_FORMAT = 'lj-mathslides-question-bank'
+
+/** 把题库导出成 JSON 文本（含全部结构化字段，可在别的机器导入） */
+export function exportQuestionsJson(list: QuestionEntry[]): string {
+  return JSON.stringify({
+    type: QBANK_FORMAT,
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    count: list.length,
+    questions: list.map((x) => ({ title: x.title, ...x.q })),
+  }, null, 2)
+}
+
+/**
+ * 解析题库 JSON。**容忍三种写法**：
+ *   ① { questions: [...] }（我们自己导出的）
+ *   ② { items: [...] }（别的工具常见写法）
+ *   ③ 直接一个数组 [...]
+ * 每条只需有题干（stem / body / text 任一）即可，其余缺了就补默认。
+ */
+export function parseQuestionsJson(text: string): { list: ParsedQuestion[]; error?: string } {
+  let raw: unknown
+  try {
+    raw = JSON.parse(text)
+  } catch {
+    return { list: [], error: '不是合法的 JSON（可能选错了文件）' }
+  }
+  let arr: unknown[] = []
+  if (Array.isArray(raw)) {
+    arr = raw
+  } else if (raw && typeof raw === 'object') {
+    const o = raw as Record<string, unknown>
+    if (Array.isArray(o.questions)) arr = o.questions
+    else if (Array.isArray(o.items)) arr = o.items
+    else return { list: [], error: 'JSON 里找不到 questions 或 items 数组' }
+  } else {
+    return { list: [], error: 'JSON 结构不认识（既不是数组也不是对象）' }
+  }
+  const arrOf = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => String(x)) : [])
+  const list: ParsedQuestion[] = []
+  for (const it of arr) {
+    if (!it || typeof it !== 'object') continue
+    const o = it as Record<string, unknown>
+    const stem = String(o.stem || o.body || o.text || '').trim()
+    if (!stem) continue
+    const title = String(o.title || '').trim()
+    list.push({
+      title: title || (stem.length > 20 ? stem.slice(0, 20) + '…' : stem),
+      stem,
+      options: arrOf(o.options),
+      answer: String(o.answer || '').trim(),
+      solution: String(o.solution || o.analysis || '').trim(),
+      knowledge: arrOf(o.knowledge || o.tags),
+      difficulty: Number(o.difficulty) || 3,
+      qtype: o.qtype ? String(o.qtype) : undefined,
+      section: o.section ? String(o.section) : undefined,
+      date: o.date ? String(o.date) : undefined,
+      year: String(o.year || ''),
+      region: String(o.region || o.source || ''),
+    })
+  }
+  if (!list.length) return { list: [], error: '没有解析出任何试题（每条至少要有题干）' }
+  return { list }
+}
+
 /* ---------------- 展示与筛选 ---------------- */
 
 export function autoTitle(q: QuestionMeta): string {

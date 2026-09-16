@@ -4,11 +4,12 @@ import AppIcon from './AppIcon.vue'
 import {
   listQuestions, addQuestion, updateQuestion, removeQuestion, touchQuestion,
   listQuestionTags, autoTitle, questionToText, filterQuestions,
-  importParsedQuestions, proposeAnswers,
+  importParsedQuestions, proposeAnswers, parseQuestionsJson, exportQuestionsJson,
   QTYPES, SECTIONS, LEVELS, levelOf, levelLabel, levelToDifficulty, qtypeLabel, withDefaults,
 } from '@/composables/useQuestionLibrary'
 import type { QuestionEntry, QuestionMeta, QType, Level } from '@/composables/useQuestionLibrary'
 import { parseQuestions, PARSE_HELP } from '@/composables/parseQuestions'
+import { saveTextFile } from '@/composables/useTauri'
 
 const emit = defineEmits<{ (e: 'close'): void; (e: 'insert', text: string, id: number): void }>()
 
@@ -30,6 +31,50 @@ async function doBatch() {
   batchText.value = ''
   flash('已导入 ' + r.added + ' 道题' + (r.skipped ? '，跳过 ' + r.skipped + ' 道（与库里已有的题干重复）' : ''))
 }
+/* ---- 整库导入导出：导入 MD / 导入 JSON / 导出 JSON ---- */
+const fileInput = ref<HTMLInputElement | null>(null)
+const fileMode = ref<'md' | 'json'>('md')
+function pickFile(mode: 'md' | 'json') {
+  fileMode.value = mode
+  const el = fileInput.value
+  if (!el) return
+  el.accept = mode === 'json' ? '.json,application/json' : '.md,.markdown,.txt,text/plain'
+  el.value = ''
+  el.click()
+}
+async function onFilePicked(e: Event) {
+  const input = e.target as HTMLInputElement
+  const f = input.files && input.files[0]
+  if (!f) return
+  let text = ''
+  try {
+    text = await f.text()
+  } catch {
+    flash('读文件失败')
+    return
+  }
+  if (fileMode.value === 'json') {
+    const r = parseQuestionsJson(text)
+    if (r.error) { flash('导入 JSON 失败：' + r.error); return }
+    const res = await importParsedQuestions(r.list)
+    await load()
+    flash('已从 JSON 导入 ' + res.added + ' 道' + (res.skipped ? '，跳过重复 ' + res.skipped + ' 道' : ''))
+  } else {
+    // MD / 纯文本：填进批量面板，让你先核对识别结果再导入
+    batchText.value = text
+    batchOpen.value = true
+    editing.value = false
+    flash('已读入 ' + f.name + '（' + text.length + ' 字），请核对识别结果后再点导入')
+  }
+}
+async function exportJson() {
+  const arr = shown.value.length ? shown.value : list.value
+  if (!arr.length) { flash('题库是空的，没有可导出的题'); return }
+  const name = '题库导出-' + new Date().toISOString().slice(0, 10) + '.json'
+  const path = await saveTextFile(name, exportQuestionsJson(arr))
+  flash(path ? '已导出 ' + arr.length + ' 道题到：' + path : '已导出 ' + arr.length + ' 道题')
+}
+
 const pickedTags = ref<string[]>([])
 const diff = ref<number | null>(null)
 const selectedId = ref(0)
@@ -184,12 +229,17 @@ function close() { emit('close') }
 
 <template>
   <Teleport to="body">
+    <!-- 整库导入用的隐藏文件选择器（accept 在 pickFile 里按模式设置） -->
+    <input ref="fileInput" type="file" style="display:none" @change="onFilePicked" />
     <div class="qb" @mousedown.self="close">
       <div class="qb__box">
         <div class="qb__head">
           <div class="qb__title">试题库<em>（供 PDF 生成组卷：选定后插入题干，可带答案解析）</em></div>
           <div class="qb__tools">
             <button class="qb__btn" title="把整份试题粘贴进来，一次性识别并入库" @click="batchOpen = true; editing = false">批量导入</button>
+            <button class="qb__btn" title="导入 Markdown / 纯文本：读进来后先给你看识别结果，确认再入库" @click="pickFile('md')">导入 MD</button>
+            <button class="qb__btn" title="导入题库 JSON（我们自己导出的、或 {questions:[…]} / 数组 都认）" @click="pickFile('json')">导入 JSON</button>
+            <button class="qb__btn" title="把当前筛选出的题导出成 JSON（题库为空时导出全部）" @click="exportJson">导出 JSON</button>
             <button class="qb__btn" :title="'从解析里反推答案（认「故选B」这类明确写法），可补 ' + proposals.length + ' 道'" @click="doComplete">完善答案<template v-if="proposals.length">（{{ proposals.length }}）</template></button>
             <button class="qb__btn qb__btn--pri" title="新建一道试题" @click="startNew">＋ 新建试题</button>
             <button class="qb__btn qb__btn--pdf" :disabled="!pickedIds.length" title="把左边勾选的题按 选择→填空→解答 排序，一起送进 PDF 生成" @click="insertPicked(false)">生成 PDF（已选 {{ pickedIds.length }}）</button>
