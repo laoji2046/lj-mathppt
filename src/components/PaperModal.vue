@@ -1452,7 +1452,7 @@ watch([headerText, footerText], () => render())
 .paper-page .paper-header { border-bottom: 1px solid #999; padding: 0 0 4px; margin: var(--paper-headergap, 0px) 0 8px; text-align: center; font-weight: 600; flex: 0 0 auto; }
 .paper-page .paper-footer { border-top: 1px solid #999; padding: 4px 0 0; margin: auto 0 var(--paper-footergap, 0px); text-align: center; flex: 0 0 auto; }
 .paper-page .paper-header .paper-img-inline, .paper-page .paper-footer .paper-img-inline { max-height: 26px; max-width: 120px; vertical-align: middle; margin: 0 4px; }
-.paper-page .pp-block { flex: 0 0 auto; break-inside: avoid; }
+  .paper-page .pp-block { flex: 0 0 auto; /* ⚠ 这里的 break-inside:avoid 已去掉 ✗ —— 它与 .paper-cols > .pp-block 同特异性 ✓，两条打架容易翻车 ✓；块能否拆分统一由分栏那条规则决定 ✓ */
 .paper-page h2 { font-size: var(--paper-h2, 18px); text-align: center; margin: 0 0 6px; font-weight: 700; letter-spacing: 2px; }
 .paper-page .paper-box-title { border: 1.5px solid #111; padding: 4px 8px; font-weight: 700; margin: 8px 0 4px; display: inline-block; }
 .paper-page .paper-sec-title { font-weight: 700; margin: 10px 0 4px; font-size: 15px; letter-spacing: 1px; }
@@ -1513,7 +1513,10 @@ watch([headerText, footerText], () => render())
   overflow-x: auto;
   overflow-y: hidden;
 }
-.paper-cols > .pp-block { break-inside: avoid; page-break-inside: avoid; }
+/* ⚠ 允许块拆栏/拆页 ✓（用户明确：长题截断即可 ✓ 不必整块原子搬运 ✗）。
+   原来 break-inside:avoid 会让放不进剩余空间的长题**整块推到下一栏** ✓ →
+   上一栏下方留出大空档 ✗（实测填充率仅 88% ✗）。放开后页面能填满 ✓。 */
+.paper-cols > .pp-block { break-inside: auto; page-break-inside: auto; }
 .paper-cols > h2, .paper-cols > .paper-sec-title { column-span: all; }
   @media print { .paper-cols { column-count: var(--paper-cols, 1); column-gap: 8mm; column-fill: balance; column-rule: 1px solid #d8d5cc; } }
 
