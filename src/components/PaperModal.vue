@@ -1499,7 +1499,6 @@ watch([headerText, footerText], () => render())
   overflow-x: auto;
   overflow-y: hidden;
 }
-.paper-cols mjx-container mjx-math { white-space: normal !important; }
 .paper-cols > .pp-block { break-inside: avoid; page-break-inside: avoid; }
 .paper-cols > h2, .paper-cols > .paper-sec-title { column-span: all; }
   @media print { .paper-cols { column-count: var(--paper-cols, 1); column-gap: 8mm; column-fill: balance; column-rule: 1px solid #d8d5cc; } }
