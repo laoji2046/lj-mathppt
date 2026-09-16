@@ -56,7 +56,7 @@ function go(kind: 'blank' | 'templates' | 'paper' | 'pptx') {
       </div>
       <label class="ndw__chk">
         <input v-model="dontAsk" type="checkbox" />
-        下次直接进入空白
+        启动时不再显示此向导（永久，清空浏览器数据可恢复）
       </label>
     </div>
   </div>

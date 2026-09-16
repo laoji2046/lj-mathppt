@@ -53,6 +53,13 @@ function openPptImportMenu() {
   if (btn) btn.click()
 }
 
+/**
+ * 向导选「空白」✓：**真的把演示重置成一张空白页** ✗
+ * ⚠ 我原来写成 `() => {}` ✗ —— 只关掉遮罩 ✓ 幻灯片保持原样 ✓（用户实测：点空白后不是一张空白 ✓）。
+ */
+function onWizardBlank() {
+  useDeckStore().resetDeck()
+}
 function onKeydown(e: KeyboardEvent) {
   const target = e.target as HTMLElement | null
   const typing = target?.isContentEditable ||
@@ -212,7 +219,7 @@ function onPresent() {
     <LayoutGallery />
     <!-- 启动向导 ✓（用户方案 A：把能力摆到眼前，不替用户写内容 ✓） -->
     <NewDeckWizard
-      @blank="() => {}"
+      @blank="onWizardBlank"
       @templates="openTemplateLibrary('replace')"
       @paper="paperOpen = true"
       @pptx="openPptImportMenu()"
