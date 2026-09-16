@@ -79,6 +79,20 @@ function commitDraw() {
   const y = Math.min(start.y, cur.y)
   const w = Math.max(16, Math.abs(cur.x - start.x))
   const h = Math.max(16, Math.abs(cur.y - start.y))
+
+  // ⚠ 直线 / 箭头：**只在画布上点一下**（没拖动）时，给一段默认长度的线段 ✓
+  //   （用户要求：选中直线后点一下 → 自动画出一条 **20mm** 的线段 ✓ 并默认选中 ✓）
+  //   原来点击只会得到 w=16 h=16 的一小点 ✗（commitDraw 用拖拽矩形算尺寸 ✓）。
+  //   20mm 的换算见 src/types/index.ts 的 LINE_DEFAULT_W（151px，按 192px/英寸 ✓）。
+  //   ⚠ 位置以**点击点为中心** ✓ —— 水平向右展开，视觉上就在你点的地方 ✓。
+  const isClick = Math.abs(cur.x - start.x) < 8 && Math.abs(cur.y - start.y) < 8
+  if (isClick && (tool === 'line' || tool === 'arrow')) {
+    const L = 151
+    store.addElement(tool, { x: Math.round(start.x - L / 2), y: Math.round(start.y), w: L, h: 2 } as Partial<SlideElement>)
+    store.clearDrawTool()
+    return
+  }
+
   if (tool === 'pen') {
     const norm = points.map((p) => ({ x: p.x - x, y: p.y - y }))
     store.addElement('pen', { x, y, w, h, points: norm, strokeWidth: 4 } as Partial<SlideElement>)
