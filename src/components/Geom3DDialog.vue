@@ -1296,7 +1296,7 @@ function insert() {
 </template>
 
 <style scoped>
-.g3 { position: fixed; /* z-index 必须高于试卷弹层(.pm 是 2000)，否则三维窗口开在试卷下面 —— 用户实测只看到「闪了一下」 */ z-index: 3200; inset: 0; background: rgba(20, 20, 28, .42); display: flex; align-items: center; justify-content: center; z-index: 60; }
+.g3 { position: fixed; /* z-index 必须高于试卷弹层(.pm 是 2000)，否则三维窗口开在试卷下面 —— 用户实测只看到「闪了一下」 */ z-index: 3200; inset: 0; background: rgba(20, 20, 28, .42); display: flex; align-items: center; justify-content: center; z-index: 3200; }
 .g3__box { width: 1000px; max-width: 94vw; height: 88vh; background: var(--surface, #fff); border-radius: 8px; box-shadow: 0 18px 48px rgba(0,0,0,.28); display: flex; flex-direction: column; overflow: hidden; }
 .g3__head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border, #e6e6ea); font-size: 13px; }
 .g3__title { font-weight: 700; }
