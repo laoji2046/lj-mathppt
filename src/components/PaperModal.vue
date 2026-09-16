@@ -1491,6 +1491,17 @@ watch([headerText, footerText], () => render())
   column-fill: auto;
   column-rule: 1px solid #d8d5cc;
 }
+
+/* ⚠ 长公式是「两栏不等宽 + 顶出页面」的元凶 ✗ ——
+   MathJax 渲染出的容器默认 white-space:nowrap ✗，一整条长公式无法断行 ✓，
+   于是把它所在那一栏**撑宽** ✗（实测两栏起点相距 273px，而按容器宽应只有 165px ✓），
+   甚至顶出页面右边界 ✓（用户截图 ✓）。这里允许公式在必要时收缩/换行 ✓。 */
+.paper-cols mjx-container, .paper-cols .MathJax {
+  max-width: 100% !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.paper-cols mjx-container mjx-math { white-space: normal !important; }
 .paper-cols > .pp-block { break-inside: avoid; page-break-inside: avoid; }
 .paper-cols > h2, .paper-cols > .paper-sec-title { column-span: all; }
   @media print { .paper-cols { height: var(--paper-body-h, auto); column-count: var(--paper-cols, 1); column-gap: 8mm; column-fill: auto; } }
