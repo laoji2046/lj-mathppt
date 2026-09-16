@@ -230,7 +230,13 @@ function onPresent() {
     <ImageEditorModal v-if="imageEditOpen && imageEditId" :id="imageEditId" @close="closeImageEditor()" />
     <VectorizeDialog v-if="vectorizeOpen && vectorizeSrc" :src="vectorizeSrc" :replace-id="vectorizeReplaceId" :edit-id="vectorizeEditId" @close="closeVectorize()" />
     <AsyExportDialog v-if="asyExportEl" :el="asyExportEl" @close="closeAsyExport()" />
-    <Geom3DDialog v-if="geom3dOpen" :edit-id="geom3dEditId" />
+    <!-- ⚠ 必须 Teleport 到 body ✗ —— 试卷(PaperModal)是 teleport 到 body 的 ✓，
+         而本组件留在 .app 内部 ✗ → .app 自己形成层叠上下文 ✓ →
+         **z-index 比多少都压不过试卷** ✗（用户实测：三维窗口出现在试卷下方 ✓）。
+         GgbSuite 早就用了同样的处理 ✓。 -->
+    <Teleport to="body">
+      <Geom3DDialog v-if="geom3dOpen" :edit-id="geom3dEditId" />
+    </Teleport>
     <ContextMenu />
   <div v-if='addonNotice' class='addon-toast'>{{ addonNotice }}</div>
   </div>
