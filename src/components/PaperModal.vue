@@ -1480,6 +1480,7 @@ watch([headerText, footerText], () => render())
   column-count: var(--paper-cols, 1);
   column-gap: 8mm;
   column-fill: auto;
+  column-rule: 1px solid #d8d5cc;
 }
 .paper-cols > .pp-block { break-inside: avoid; page-break-inside: avoid; }
 .paper-cols > h2, .paper-cols > .paper-sec-title { column-span: all; }
