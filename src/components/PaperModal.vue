@@ -840,16 +840,20 @@ async function svgStringToPng(text: string, scale?: number): Promise<string> {
   const w = nums.length === 4 && nums[2] > 0 ? nums[2] : 480
   const h = nums.length === 4 && nums[3] > 0 ? nums[3] : 320
   const k = scale ?? Math.max(2, EXPORT_PX_W / w)
-  // ⚠ 必须给 svg 元素写上 width/height ✗ —— 否则浏览器按默认 300x150 栅格化 ✓ 图会被裁 ✓
-  // ⚠ data-URL 的 SVG 图片**必须带 xmlns** ✗ —— 三维对话框给的字符串**没有** ✓
-  //   （对话框里 xmlns 出现 0 次 ✓）；原有的 svgToPng 是显式补上的 ✓（第 804 行）我漏了 ✗。
-  //   不补 → 图片加载失败 ✓ → 抛错 ✓ → 插入静默失败 ✓（用户实测：点了插入没反应 ✓）。
-  let sized = text
-  if (sized.indexOf('xmlns') < 0) {
-    sized = sized.replace(/<svg\b/, '<svg xmlns="http://www.w3.org/2000/svg"')
+  // ⚠ 三维对话框给的是一段**片段** ✗（renderSolid + arcsSvg + 顶点圆点 ✓），
+  //   **没有外层 <svg> 标签** ✓ —— 所以 `replace(/<svg\b/, …)` 一次都匹配不上 ✓。
+  //   实测：点「插入到当前页」后试卷提示「图形转图片失败」✓ —— 片段不是合法 SVG 文档 ✓。
+  //   修法：**没有 <svg> 就自己包一层** ✓，顺带补 xmlns ✓ 并按目标分辨率设 width/height ✓。
+  let doc = text
+  if (!/<svg[\s>]/.test(doc)) {
+    doc =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h +
+      '" width="' + Math.round(w * k) + '" height="' + Math.round(h * k) + '">' + doc + '</svg>'
+  } else {
+    if (doc.indexOf('xmlns') < 0) doc = doc.replace(/<svg\b/, '<svg xmlns="http://www.w3.org/2000/svg"')
+    doc = doc.replace(/<svg\b/, '<svg width="' + Math.round(w * k) + '" height="' + Math.round(h * k) + '"')
   }
-  sized = sized.replace(/<svg\b/, '<svg width="' + Math.round(w * k) + '" height="' + Math.round(h * k) + '"')
-  const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(sized)
+  const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(doc)
   const img = await new Promise<HTMLImageElement>((res, rej) => {
     const im = new Image()
     im.onload = () => res(im)
