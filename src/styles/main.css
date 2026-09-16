@@ -208,3 +208,31 @@ body.is-panning {
     overflow: visible !important;
   }
 }
+/*
+ * ⚠ 打印时**必须把水平方向也归零** ✗。
+ *
+ * 现象（用户实测截图 ✓）：打印预览里**每行左边的字被切掉** ✓（选项 A/B 消失、页眉左半消失 ✓），
+ * 整页**向右偏移** ✓ —— 因为屏幕上那套「居中 + 内边距 + zoom + transform」被带进了打印 ✗。
+ * 光重置 position/height/overflow 不够 ✓，还要把 width / margin / padding / transform / left / top 一起归零 ✓。
+ */
+@media print {
+  html, body {
+    width: auto !important; min-width: 0 !important; max-width: none !important;
+    height: auto !important; margin: 0 !important; padding: 0 !important;
+    overflow: visible !important; transform: none !important; zoom: 1 !important;
+  }
+  #app, .app, .pm, .pm__box, .pm__body, .pm__right, .pm__left, .pm__a4 {
+    display: block !important; position: static !important;
+    width: auto !important; min-width: 0 !important; max-width: none !important;
+    height: auto !important; max-height: none !important;
+    margin: 0 !important; padding: 0 !important;
+    transform: none !important; zoom: 1 !important;
+    left: auto !important; right: auto !important; top: auto !important; bottom: auto !important;
+    overflow: visible !important;
+  }
+  /* ⚠ 绝不要用 margin:auto 居中 ✗ —— 打印时 body 宽仍按屏幕视口算 ✓，
+     一旦与纸张宽度不等，整页就会偏移、左边被切 ✓（实测 left=398 = (1590−794)/2 ✓）。
+     页面必须 margin:0 贴左 ✓。 */
+  .pm__a4, .paper-page { margin-left: 0 !important; margin-right: 0 !important; }
+  .paper-page { width: 210mm !important; }
+}
