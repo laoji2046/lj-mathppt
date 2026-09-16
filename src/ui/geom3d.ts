@@ -17,3 +17,14 @@ export function closeGeom3D() {
   geom3dOpen.value = false
   geom3dEditId.value = null
 }
+/**
+ * **三维图接收口** —— 让「试卷 / 讲义」也能插入三维立体图。
+ *
+ * 背景：Geom3DDialog.insert() 默认是**直接写进当前幻灯片**；
+ * 它挂在 App.vue，试卷也在 App.vue，两边拿不到彼此的产物。
+ *
+ * 做法照 MathFigurePalette 的 figPaletteSink：谁要接收就先登记一个回调，
+ * 对话框插入时**优先走接收口**，没人登记才走原来的「插到当前页」。
+ * 这样**对话框的原有行为一字未改**。
+ */
+export const geom3dSink = ref<null | ((svg: string, label: string) => void)>(null)

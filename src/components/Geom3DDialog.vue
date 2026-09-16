@@ -16,7 +16,7 @@ import { useDeckStore } from '@/stores/deck'
 import { buildSolid, labelOffsetsFrom, LABEL_DIR_VEC, projectGeom, resolveVertices, solveView, type Geom3D, type LabelDir } from '@/composables/geom3d'
 import { GEOM3D_PRESETS, GEOM3D_PROMPT } from '@/composables/geom3dPrompt'
 import { renderSolid, arcsSvg, vertexDotsSvg } from '@/composables/solid3d'
-import { closeGeom3D } from '@/ui/geom3d'
+import { closeGeom3D, geom3dSink } from '@/ui/geom3d'
 import type { MathFigureElement } from '@/types'
 
 const props = defineProps<{ editId?: string | null }>()
@@ -889,6 +889,13 @@ function addMidpoints() {
 }
 
 function insert() {
+  // ⭐ 试卷 / 讲义登记了接收口 → 把 SVG 交出去 ✓（用户要求：试卷也能插三维图 ✓）
+  //   **没人登记时完全走原来的逻辑** ✓ —— 对话框原有行为一字未改 ✓。
+  if (geom3dSink.value) {
+    geom3dSink.value(svg.value, '三维立体图')
+    closeGeom3D()
+    return
+  }
   const m = model.value
   if (!m) return
   const p = projectGeom(m, { azim: azim.value, elev: elev.value })
