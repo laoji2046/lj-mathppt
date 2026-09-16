@@ -487,6 +487,288 @@ fn capture_window(id: u32) -> Result<serde_json::Value, String> {
     }))
 }
 
+
+// ////////////////////////////////////////////////////////////////////////////
+// 内容库（SQLite）—— 第一期：公式库；后续：图形库 / 试题库 / 课件库
+//
+// 库文件放在**用户目录**下，不是 exe 同目录：
+//   %APPDATA%\lj-mathslides\library.db
+// 这样换 exe 不会丢库，也方便用户自己备份。
+//
+// 设计要点：**库是空的也能跑**（表用 IF NOT EXISTS 建）；所有命令都返回
+// json!({ ok, ... }) 的扁平结构，与文件里既有的 10 个命令保持同一风格。
+// ////////////////////////////////////////////////////////////////////////////
+
+/// 内容库文件路径（顺带确保目录存在）
+fn library_path() -> PathBuf {
+    let base = std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("USERPROFILE")
+                .map(|h| PathBuf::from(h).join("AppData").join("Roaming"))
+        })
+        .unwrap_or_else(program_dir);
+    let dir = base.join("lj-mathslides");
+    let _ = fs::create_dir_all(&dir);
+    dir.join("library.db")
+}
+
+/// 简单时间戳（秒）。不引 chrono —— 只为排序与显示新旧。
+fn now_stamp() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format!("{}", secs)
+}
+
+/// 打开库并保证表结构存在。
+fn lib_open() -> Result<rusqlite::Connection, String> {
+    let conn = rusqlite::Connection::open(library_path())
+        .map_err(|e| format!("打开内容库失败: {}", e))?;
+    let sql = concat!(
+        "CREATE TABLE IF NOT EXISTS library_item (",
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,",
+        "type TEXT NOT NULL,",
+        "title TEXT NOT NULL,",
+        "body TEXT DEFAULT ", "''", ",",
+        "meta TEXT DEFAULT ", "''", ",",
+        "tags TEXT DEFAULT ", "''", ",",
+        "source TEXT DEFAULT ", "''", ",",
+        "builtin INTEGER DEFAULT 0,",
+        "created_at TEXT DEFAULT ", "''", ",",
+        "updated_at TEXT DEFAULT ", "''", ",",
+        "used_count INTEGER DEFAULT 0",
+        ");",
+        "CREATE INDEX IF NOT EXISTS idx_lib_type ON library_item(type);",
+        "CREATE TABLE IF NOT EXISTS library_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);"
+    );
+    conn.execute_batch(sql).map_err(|e| format!("建表失败: {}", e))?;
+    Ok(conn)
+}
+
+/// 库信息：路径 + 条目数（前端显示与诊断用）。
+#[tauri::command]
+fn lib_info() -> serde_json::Value {
+    let p = library_path();
+    match lib_open() {
+        Ok(conn) => {
+            let n: i64 = conn
+                .query_row("SELECT COUNT(*) FROM library_item", [], |r| r.get(0))
+                .unwrap_or(0);
+            serde_json::json!({ "ok": true, "path": p.to_string_lossy(), "count": n })
+        }
+        Err(e) => serde_json::json!({ "ok": false, "path": p.to_string_lossy(), "error": e }),
+    }
+}
+
+/// 取某一类条目（按使用次数降序，其次按 id）。
+#[tauri::command]
+fn lib_query(kind: String) -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let mut stmt = match conn.prepare(concat!(
+        "SELECT id, title, body, meta, tags, source, builtin, updated_at, used_count ",
+        "FROM library_item WHERE type = ?1 ",
+        "ORDER BY used_count DESC, id ASC"
+    )) {
+        Ok(s) => s,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("查询失败: {}", e) }),
+    };
+    let rows = stmt.query_map([&kind], |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_, i64>(0)?,
+            "title": r.get::<_, String>(1)?,
+            "body": r.get::<_, String>(2)?,
+            "meta": r.get::<_, String>(3)?,
+            "tags": r.get::<_, String>(4)?,
+            "source": r.get::<_, String>(5)?,
+            "builtin": r.get::<_, i64>(6)?,
+            "updatedAt": r.get::<_, String>(7)?,
+            "usedCount": r.get::<_, i64>(8)?
+        }))
+    });
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    match rows {
+        Ok(it) => {
+            for x in it.flatten() {
+                out.push(x);
+            }
+        }
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("读取失败: {}", e) }),
+    }
+    serde_json::json!({ "ok": true, "items": out })
+}
+
+/// 保存条目：id 为空或 0 时插入，否则更新（内置条目也可更新标题/正文）。
+#[tauri::command]
+fn lib_save(item: serde_json::Value) -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let gs = |k: &str| {
+        item.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let kind = gs("type");
+    let title = gs("title");
+    if kind.is_empty() || title.is_empty() {
+        return serde_json::json!({ "ok": false, "error": "type 与 title 不能为空" });
+    }
+    let body = gs("body");
+    let tags = gs("tags");
+    let source = gs("source");
+    let meta = {
+        let m = gs("meta");
+        if m.is_empty() { "{}".to_string() } else { m }
+    };
+    let builtin = item.get("builtin").and_then(|v| v.as_i64()).unwrap_or(0);
+    let id = item.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+    let now = now_stamp();
+    if id > 0 {
+        let r = conn.execute(
+            concat!(
+                "UPDATE library_item SET title=?1, body=?2, meta=?3, tags=?4, ",
+                "source=?5, updated_at=?6 WHERE id=?7"
+            ),
+            rusqlite::params![title, body, meta, tags, source, now, id],
+        );
+        match r {
+            Ok(_) => serde_json::json!({ "ok": true, "id": id }),
+            Err(e) => serde_json::json!({ "ok": false, "error": format!("更新失败: {}", e) }),
+        }
+    } else {
+        let r = conn.execute(
+            concat!(
+                "INSERT INTO library_item ",
+                "(type,title,body,meta,tags,source,builtin,created_at,updated_at,used_count) ",
+                "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0)"
+            ),
+            rusqlite::params![kind, title, body, meta, tags, source, builtin, now, now],
+        );
+        match r {
+            Ok(_) => serde_json::json!({ "ok": true, "id": conn.last_insert_rowid() }),
+            Err(e) => serde_json::json!({ "ok": false, "error": format!("写入失败: {}", e) }),
+        }
+    }
+}
+
+/// 删除条目。**内置条目不允许删**（builtin=0 才删）—— 避免用户误删预制公式。
+#[tauri::command]
+fn lib_remove(id: i64) -> serde_json::Value {
+    match lib_open() {
+        Ok(conn) => match conn.execute("DELETE FROM library_item WHERE id = ?1 AND builtin = 0", [id]) {
+            Ok(n) => serde_json::json!({ "ok": true, "removed": n }),
+            Err(e) => serde_json::json!({ "ok": false, "error": format!("删除失败: {}", e) }),
+        },
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
+/// 记一次使用（用于排序：常用的排前面）。
+#[tauri::command]
+fn lib_bump(id: i64) -> serde_json::Value {
+    match lib_open() {
+        Ok(conn) => {
+            let _ = conn.execute("UPDATE library_item SET used_count = used_count + 1 WHERE id = ?1", [id]);
+            serde_json::json!({ "ok": true })
+        }
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
+/// 批量灌入内置条目（同一 type+title 且 builtin=1 的已存在则跳过）。
+/// 走事务 —— 两百多条一次性写入，避免逐条 IPC。
+#[tauri::command]
+fn lib_seed(items: Vec<serde_json::Value>) -> serde_json::Value {
+    let mut conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let tx = match conn.transaction() {
+        Ok(t) => t,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("事务失败: {}", e) }),
+    };
+    let now = now_stamp();
+    let mut added: i64 = 0;
+    for item in items.iter() {
+        let gs = |k: &str| {
+            item.get(k)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
+        let kind = gs("type");
+        let title = gs("title");
+        if kind.is_empty() || title.is_empty() {
+            continue;
+        }
+        let exists: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM library_item WHERE type=?1 AND title=?2 AND builtin=1",
+                rusqlite::params![kind, title],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if exists > 0 {
+            continue;
+        }
+        let meta = {
+            let m = gs("meta");
+            if m.is_empty() { "{}".to_string() } else { m }
+        };
+        let r = tx.execute(
+            concat!(
+                "INSERT INTO library_item ",
+                "(type,title,body,meta,tags,source,builtin,created_at,updated_at,used_count) ",
+                "VALUES (?1,?2,?3,?4,?5,?6,1,?7,?8,0)"
+            ),
+            rusqlite::params![kind, title, gs("body"), meta, gs("tags"), gs("source"), now, now],
+        );
+        if r.is_ok() {
+            added += 1;
+        }
+    }
+    if let Err(e) = tx.commit() {
+        return serde_json::json!({ "ok": false, "error": format!("提交失败: {}", e) });
+    }
+    serde_json::json!({ "ok": true, "added": added })
+}
+
+/// 读迁移标记等（键值对）。
+#[tauri::command]
+fn lib_meta_get(k: String) -> serde_json::Value {
+    match lib_open() {
+        Ok(conn) => {
+            let v: Option<String> = conn
+                .query_row("SELECT v FROM library_meta WHERE k = ?1", [&k], |r| r.get(0))
+                .ok();
+            serde_json::json!({ "ok": true, "value": v })
+        }
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
+/// 写迁移标记等。
+#[tauri::command]
+fn lib_meta_set(k: String, v: String) -> serde_json::Value {
+    match lib_open() {
+        Ok(conn) => match conn.execute(
+            "INSERT INTO library_meta (k, v) VALUES (?1, ?2) ON CONFLICT(k) DO UPDATE SET v = ?2",
+            [&k, &v],
+        ) {
+            Ok(_) => serde_json::json!({ "ok": true }),
+            Err(e) => serde_json::json!({ "ok": false, "error": format!("写入失败: {}", e) }),
+        },
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -500,7 +782,15 @@ pub fn run() {
             capture_screens,
             set_capture_mode,
             list_windows,
-            capture_window
+            capture_window,
+            lib_info,
+            lib_query,
+            lib_save,
+            lib_remove,
+            lib_bump,
+            lib_seed,
+            lib_meta_get,
+            lib_meta_set
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

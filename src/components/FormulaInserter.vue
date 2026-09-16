@@ -8,6 +8,9 @@ import type { SlideElement } from '@/types'
 import ColorSwatches from './ColorSwatches.vue'
 import { FORMULA_LIBRARY, FORMULA_TAGS, formulaTags } from '@/templates/formulaLibrary'
 import type { FormulaItem } from '@/templates/formulaLibrary'
+import {
+  ensureFormulaLibrary, listFormulaLibrary, addFormulaEntry, removeFormulaEntry,
+} from '@/composables/useFormulaLibrary'
 
 const store = useDeckStore()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -46,7 +49,7 @@ const PRESETS: { label: string; latex: string }[] = [
 
 /* ---------- 预设组合：内置 + 用户自定义（localStorage 持久化） ---------- */
 const PRESET_KEY = 'lj-mathslides-vue:formula-presets'
-interface Preset { label: string; latex: string }
+interface Preset { label: string; latex: string; id?: number }
 
 /** 自动起名：取首行前 14 个字符 */
 function presetName(raw: string) {
@@ -85,11 +88,23 @@ function addToPresets() {
   }
   userPresets.value = [...userPresets.value, { label: presetName(raw), latex: raw }]
   persistUserPresets()
+  // 第一期公式库：同步写进本地库（失败也不影响界面；下次挂载会从库刷新）
+  void addFormulaEntry(presetName(raw), raw).then(() => refreshPresetsFromLibrary())
   flashPresetTip('已加入预设组合')
 }
 function removePreset(i: number) {
+  const p = userPresets.value[i]
   userPresets.value = userPresets.value.filter((_, k) => k !== i)
   persistUserPresets()
+  // 第一期公式库：同步从库里删（内置条目 Rust 侧会拒绝；失败不影响界面）
+  if (p?.id) void removeFormulaEntry(p.id)
+}
+/** 从内容库刷新「我的预设」（第一期：公式库）；库里没有就不动，保持原有 localStorage 内容 */
+async function refreshPresetsFromLibrary() {
+  const list = await listFormulaLibrary()
+  const mine = list.filter((x) => !x.builtin)
+  if (!mine.length) return
+  userPresets.value = mine.map((x) => ({ label: x.title, latex: x.body, id: x.id }))
 }
 
 function fontStackLabel(k: string) {
@@ -179,7 +194,18 @@ async function renderLib() {
   await Promise.all(jobs)
 }
 watch([libKey, libQuery, libTag], renderLib)
-onMounted(() => { nextTick(updatePreview); renderLib() })
+onMounted(async () => {
+  nextTick(updatePreview)
+  renderLib()
+  // 第一期公式库：首次运行把内置公式灌库、把本地预设迁进库；随后刷新预设列表
+  try {
+    const r = await ensureFormulaLibrary()
+    if (!r.skipped && (r.seeded || r.migrated)) {
+      flashPresetTip('公式库就绪：内置 ' + r.seeded + ' 条，迁入预设 ' + r.migrated + ' 条')
+    }
+    await refreshPresetsFromLibrary()
+  } catch { /* 库不可用时保持原有 localStorage 行为 */ }
+})
 
 let clickTimer: number | undefined
 let pendingKey = ''
