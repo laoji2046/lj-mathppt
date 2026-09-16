@@ -6,6 +6,7 @@ import { imagesDir, isTauri, readLocalImage } from '@/composables/useTauri'
 import { useDeckStore } from '@/stores/deck'
 import { MATH_FIGURE_OPTIONS } from '@/types'
 import { closeFigPalette, openFigPalette } from '@/ui/figPalette'
+import { geom3dSink, openGeom3D } from '@/ui/geom3d'
 
 /**
  * PDF 生成（A4 分页 + 题号识别），移植自参考版 LJ-PPT 的 PaperMode。
@@ -828,6 +829,36 @@ async function svgToPng(svg: SVGSVGElement, scale?: number): Promise<string> {
   return cv.toDataURL('image/png')
 }
 
+/**
+ * 同上，但收的是 **SVG 字符串** ✓
+ * ⚠ 三维立体图交出的是字符串 ✓ 不是 DOM 节点 ✗ —— 所以原来的 svgToPng 用不了 ✓。
+ * 宽高从字符串自己的 viewBox 里读 ✓（对话框的 SVG 带 viewBox ✓）。
+ */
+async function svgStringToPng(text: string, scale?: number): Promise<string> {
+  const vb = text.match(/viewBox="([\d.\-\s]+)"/)
+  const nums = vb ? vb[1].trim().split(/\s+/).map(Number) : []
+  const w = nums.length === 4 && nums[2] > 0 ? nums[2] : 480
+  const h = nums.length === 4 && nums[3] > 0 ? nums[3] : 320
+  const k = scale ?? Math.max(2, EXPORT_PX_W / w)
+  // ⚠ 必须给 svg 元素写上 width/height ✗ —— 否则浏览器按默认 300x150 栅格化 ✓ 图会被裁 ✓
+  const sized = text.replace(/<svg\b/, '<svg width="' + Math.round(w * k) + '" height="' + Math.round(h * k) + '"')
+  const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(sized)
+  const img = await new Promise<HTMLImageElement>((res, rej) => {
+    const im = new Image()
+    im.onload = () => res(im)
+    im.onerror = () => rej(new Error('图形转图片失败'))
+    im.src = url
+  })
+  const cv = document.createElement('canvas')
+  cv.width = Math.max(1, Math.round(w * k))
+  cv.height = Math.max(1, Math.round(h * k))
+  const ctx = cv.getContext('2d')!
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, cv.width, cv.height)
+  ctx.drawImage(img, 0, 0, cv.width, cv.height)
+  return cv.toDataURL('image/png')
+}
+
 /** 取某图形元素当前的 SVG：不在当前页时临时切过去取一下再切回来 */
 async function grabFigureSvg(elId: string, slideIndex: number): Promise<SVGSVGElement | null> {
   const back = store.currentIndex
@@ -880,8 +911,35 @@ function pickFromLibrary() {
   openFigPalette((svg, label) => { void insertSvgIntoDoc(svg, label) })
 }
 
+/**
+ * **插入三维立体图** ✓（用户要求 ✓）
+ *
+ * 做法：给 Geom3DDialog 登记一个接收口 ✓（它 insert() 时优先走接收口 ✓），
+ * 然后打开三维窗口 ✓ —— 你在里面调好点「插入到当前页」✓，图形就落到试卷的光标处 ✓。
+ * 用完立刻清掉接收口 ✓（否则会影响画布的插入 ✓）。
+ */
+function insertGeom3D() {
+  paperMsg.value = '请在三维窗口里调好，点「插入到当前页」即插入到试卷 ✓'
+  geom3dSink.value = async (svgText: string) => {
+    geom3dSink.value = null
+    try {
+      const png = await svgStringToPng(svgText)
+      const n = ++imgSeq.value
+      images.value[n] = { src: png, address: '三维立体图' }
+      input.value += '[图' + n + ']'
+      render()
+      saveDraftSoon()
+      paperMsg.value = '已插入三维立体图 [图' + n + '] ✓'
+    } catch (err) {
+      paperMsg.value = '三维图插入失败：' + (err instanceof Error ? err.message : String(err))
+    }
+  }
+  openGeom3D()
+}
+
 async function insertFigure(id: string, slideIndex: number, label: string) {
   figOpen.value = false
+
   try {
     const svg = await grabFigureSvg(id, slideIndex)
     if (!svg) {
@@ -1303,6 +1361,9 @@ watch([headerText, footerText], () => render())
     <button class="pm__btn" :title="'把文稿里已有的数学图形插到光标处（共 ' + figList.length + ' 个）'" @click="openFigPicker()">
       <AppIcon name="graphic" :size="14" />插入数学图形
     </button>
+      <button class="pm__btn" title="插入三维立体图（在三维窗口里调好后点「插入到当前页」）" @click="insertGeom3D">
+        <AppIcon name="graphic" :size="14" />三维立体图
+      </button>
     <!-- 图形选择面板：带真实缩略图（选图形得看得见图形） -->
     <div v-if="figOpen" class="pm__figpanel">
       <div class="pm__fighead">文稿里的数学图形（{{ figList.length }} 个）</div>
