@@ -590,11 +590,12 @@ function paginate() {
     // ⚠ 栏数与每栏高度**直接写在容器上** ✗ —— 不走 --paper-cols 变量链 ✓。
     //   实测变量链有一环没生效 ✓（容器 columnCount 仍是 1 ✓），直写最稳 ✓。
     // ⚠ 970 而不是 986 ✓ —— 实测 986 会让栏高比页面可用高多约 3% ✓ 容易顶出页面 ✓
-    const bh = Math.max(200, 970 - (headerText.value ? 42 + (headerGap.value || 0) : 0) - (footerText.value ? 34 + (footerGap.value || 0) : 0))
-    const colsStyle = colFill.value === 'fill'
+    // ⚠ 一栏时**绝不能**用 column-fill:auto + 固定高度 ✗ ——
+    //   多栏容器在内容超过高度时会**继续开新栏** ✓ → 选了一栏却挤出第二栏/被截断 ✓
+    //   （用户实测：**双栏正常、一栏不正常** ✗）。一栏就走普通流动 ✓。
+    const colsStyle = bodyCols.value > 1 && colFill.value === 'fill'
       ? 'column-count:' + bodyCols.value + ';column-fill:auto;height:' + bh + 'px;'
       : 'column-count:' + bodyCols.value + ';column-fill:balance;'
-    pg.innerHTML = head + '<div class="paper-cols" style="' + colsStyle + '">' + blks.map((b) => b.outerHTML).join('') + '</div>' + foot
     applyFont(pg); applyLayout(pg)
     return pg
   }
