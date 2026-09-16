@@ -54,7 +54,7 @@ export const TABLE_TEMPLATES: TableTemplate[] = [
     figHeight: 120,
     rows: [
       ['$y=a^x$', '$a>1$', '$0<a<1$'],
-      ['图像', '{{fig:exponential}}', '{{fig:exponential}}'],
+      ['图像', '{{fig:exponential}}', '{{fig:expDecay}}'],   // ⚠ 右列必须是**递减**的 expDecay ✓（原先两列都写 exponential ✗，于是 0<a<1 那张也画成递增 ✗）
       ['图像特征', '图像都在 $x$ 轴上方，无限趋近于 $x$ 轴', '过点 $(0,1)$'],
       ['函数性质', '定义域为 $\\mathbf{R}$，值域 $(0,+\\infty)$', '在 $\\mathbf{R}$ 上是减函数'],
     ],
