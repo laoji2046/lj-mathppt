@@ -138,6 +138,12 @@ const innerHtml = computed(() => {
       return `<polygon points="${reg(6, m * 0.46, m * 0.46)}" ${strokeAttrs} fill="${fillColor}"/>`
     case 'rhombus':
       return `<polygon points="${cx},0 ${w}, ${cy} ${cx},${h} 0,${cy}" ${strokeAttrs} fill="${fillColor}"/>`
+    // ⭐ 风筝形：上顶点 / 左右同高 / 下顶点 ✓（参考图里我们缺的那一个 ✓）
+    case 'kite':
+      return `<polygon points="${cx},0 ${w},${h * 0.38} ${cx},${h} 0,${h * 0.38}" ${strokeAttrs} fill="${fillColor}"/>`
+    // ⭐ 斜矩形：把矩形整体斜一点 ✓（参考图里的 Angled Rectangle ✓）
+    case 'angledrect':
+      return `<polygon points="${w * 0.22},0 ${w * 0.98},${h * 0.14} ${w * 0.78},${h} ${w * 0.02},${h * 0.86}" ${strokeAttrs} fill="${fillColor}"/>`
     case 'parallelogram':
       return `<polygon points="${w * 0.22},0 ${w},0 ${w * 0.78},${h} 0,${h}" ${strokeAttrs} fill="${fillColor}"/>`
     case 'trapezoid':

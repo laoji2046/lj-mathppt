@@ -653,7 +653,12 @@ export const useDeckStore = defineStore('deck', () => {
     const a = el as any
     const patch: any = { type: cat, shape: undefined, kind: undefined, points: undefined }
     if (cat === 'shape') {
-      patch.shape = target; patch.fill = a.fill ?? '#534AB7'; patch.stroke = 'transparent'; patch.strokeWidth = 0
+      // ⭐ 圆角矩形：形状还是 rect ✓ 只把 cornerRadius 调大 ✓
+      //   ShapeElement 只认 rect/ellipse ✗，所以**不能在 shape 里塞新名字** ✓。
+      const isRound = target === 'roundrect'
+      patch.shape = isRound ? 'rect' : target
+      patch.cornerRadius = isRound ? 18 : 4
+      patch.fill = a.fill ?? '#534AB7'; patch.stroke = 'transparent'; patch.strokeWidth = a.strokeWidth || 0
     } else if (cat === 'line' || cat === 'arrow') {
       patch.stroke = a.stroke || '#1a1a1a'; patch.strokeWidth = a.strokeWidth || 3; patch.rot = 0
     } else {

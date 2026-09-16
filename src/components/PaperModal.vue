@@ -1259,7 +1259,13 @@ onMounted(() => {
 
 // 文档关掉时把图形库的"接收方"清掉 —— 否则下次从工具栏打开图形库，
 // 点卡片还会往已经关掉的文档里插（面板状态是跨组件共享的）
-onBeforeUnmount(() => closeFigPalette())
+onBeforeUnmount(() => {
+  closeFigPalette()
+  // ⚠ 关掉试卷时**必须清掉三维接收口** ✗ —— 否则 sink 一直挂着 ✓
+  //   之后在**画布**上插三维 ✓ 也会走这个（已经死掉的）试卷接收口 ✗
+  //   → **两边都插不进去** ✓（用户实测：三维插不进试卷、也插不进页面 ✓）。
+  geom3dSink.value = null
+})
 /** 图片有更新（用户换了图）时清缓存重渲染 */
 function refreshImages() {
   imgCache.value = {}

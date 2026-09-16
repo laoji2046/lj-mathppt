@@ -362,7 +362,7 @@ export type MathFigureKind =
   | 'conicCustomEllipse' | 'conicCustomHyperbola' | 'conicCustomParabola'
   // ---- 平面图形 ----
   | 'coordinate' | 'numberline' | 'venn' | 'righttriangle' | 'angle' | 'semicircle'
-  | 'triangle' | 'rectangle' | 'circle' | 'pentagon' | 'hexagon' | 'rhombus'
+  | 'triangle' | 'rectangle' | 'circle' | 'pentagon' | 'hexagon' | 'rhombus' | 'kite' | 'angledrect'
   | 'parallelogram' | 'trapezoid' | 'star' | 'bezier' | 'polygon'
   // ---- 3D 立体几何 ----
   | 'cube' | 'cuboid' | 'cylinder' | 'cone' | 'sphere' | 'pyramid' | 'prism' | 'tetrahedron'
@@ -469,6 +469,8 @@ export const MATH_SYMBOLS: string[] = [
 /** 可统一切换的「图形」类型：rect/ellipse 为形状，line/arrow 为线条，其余为数学图形 */
 export const GRAPHIC_TYPES: { v: string; label: string; cat: 'shape' | 'line' | 'arrow' | 'mathfig' }[] = [
   { v: 'rect', label: '矩形', cat: 'shape' },
+  // ⭐ 圆角矩形：**形状仍是 rect** ✓ 只是带一个大的 cornerRadius ✓ —— 这样渲染器不用改 ✓
+  { v: 'roundrect', label: '圆角矩形', cat: 'shape' },
   { v: 'ellipse', label: '椭圆', cat: 'shape' },
   { v: 'line', label: '直线', cat: 'line' },
   { v: 'arrow', label: '箭头', cat: 'arrow' },
@@ -478,6 +480,8 @@ export const GRAPHIC_TYPES: { v: string; label: string; cat: 'shape' | 'line' | 
   { v: 'pentagon', label: '五边形', cat: 'mathfig' },
   { v: 'hexagon', label: '六边形', cat: 'mathfig' },
   { v: 'rhombus', label: '菱形', cat: 'mathfig' },
+  { v: 'kite', label: '风筝形', cat: 'mathfig' },
+  { v: 'angledrect', label: '斜矩形', cat: 'mathfig' },
   { v: 'parallelogram', label: '平行四边形', cat: 'mathfig' },
   { v: 'trapezoid', label: '梯形', cat: 'mathfig' },
   { v: 'star', label: '五角星', cat: 'mathfig' },
