@@ -563,6 +563,12 @@ function paginate() {
   })
   if (cur.length) pages.push(cur)
   if (!pages.length) pages.push([])
+  // ⚠ 关键一步 ✗：页面是**用 outerHTML 复制**过去的 ✓，而 MathJax 的渲染是异步的 ✓ ——
+  //   一旦时序没对上 ✓，页面里就会留下未渲染的原始 $…$ ✗
+  //   （用户实测：一栏很美 ✓、两栏出现字面 SC_{1} ✗）。
+  //   所以在**组装完成后的页面上**再渲染一次 ✓，与复制时序无关 ✓。
+  //   MathJax 对已渲染的节点会跳过 ✓，重复调用无害 ✓。
+  void typesetPages()
   if (totalPages.value !== pages.length) totalPages.value = pages.length
   const mkPage = (blks: HTMLElement[], pno: number) => {
     const pg = document.createElement('div')
@@ -584,6 +590,14 @@ function paginate() {
   a4.innerHTML = ''
   pages.forEach((pb, i) => a4.appendChild(mkPage(pb, i + 1)))
 }
+/** 在**组装好的页面**上渲染公式 ✓ —— 补上 outerHTML 复制与异步渲染之间的时序缝隙 ✓ */
+async function typesetPages() {
+  const a4 = a4El.value
+  const mj = (window as unknown as { MathJax?: { typesetPromise?: (n: HTMLElement[]) => Promise<void> } }).MathJax
+  if (!a4 || !mj || typeof mj.typesetPromise !== 'function') return
+  try { await mj.typesetPromise([a4]) } catch { /* 不能让公式渲染失败影响排版 ✓ */ }
+}
+
 function fitZoom() {
   const a4 = a4El.value
   const page = a4?.querySelector('.paper-page') as HTMLElement | null
