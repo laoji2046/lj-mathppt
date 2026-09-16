@@ -56,6 +56,13 @@ const optLayout = ref<'auto' | 'one' | 'two' | 'four'>('auto')
  * 塞不进剩余空间会推到下一栏 ✓，用满预算会溢出 ✓。
  */
 const bodyCols = ref(1)
+/**
+ * 分栏填充方式 ✓（两者互斥 ✓ 用户可按场景切 ✓）：
+ *   'fill'    = 先填满左栏 ✓ **页面铺满** ✓（右栏可能短 ✓）
+ *   'balance' = 两栏等高 ✓ 齐平好看 ✓ 但**内容不满时下方留白** ✗
+ * ⚠ 'fill' 必须配合**确定高度** ✗（column-fill:auto 只对定高容器生效 ✓）。
+ */
+const colFill = ref<'fill' | 'balance'>('fill')
 /** 位图 PDF 的图片格式 —— 文字页用 PNG 明显更清晰 ✓，代价是体积大些 ✓（默认 JPEG 省体积 ✓） */
 const pdfFmt = ref<'jpeg' | 'png'>('jpeg')
 /** 页眉页脚预设模板 —— 一键填好常用栏位 ✓（{page} 会被替换成页码 ✓） */
@@ -582,7 +589,11 @@ function paginate() {
       : ''
     // ⚠ 栏数与每栏高度**直接写在容器上** ✗ —— 不走 --paper-cols 变量链 ✓。
     //   实测变量链有一环没生效 ✓（容器 columnCount 仍是 1 ✓），直写最稳 ✓。
-    const colsStyle = 'column-count:' + bodyCols.value + ';column-fill:balance;'
+    // ⚠ 970 而不是 986 ✓ —— 实测 986 会让栏高比页面可用高多约 3% ✓ 容易顶出页面 ✓
+    const bh = Math.max(200, 970 - (headerText.value ? 42 + (headerGap.value || 0) : 0) - (footerText.value ? 34 + (footerGap.value || 0) : 0))
+    const colsStyle = colFill.value === 'fill'
+      ? 'column-count:' + bodyCols.value + ';column-fill:auto;height:' + bh + 'px;'
+      : 'column-count:' + bodyCols.value + ';column-fill:balance;'
     pg.innerHTML = head + '<div class="paper-cols" style="' + colsStyle + '">' + blks.map((b) => b.outerHTML).join('') + '</div>' + foot
     applyFont(pg); applyLayout(pg)
     return pg
@@ -1139,6 +1150,7 @@ function refreshImages() {
 watch(numStyle, () => render())
 watch(optLayout, () => render())
 watch(bodyCols, () => render())
+watch(colFill, () => render())
 watch([fontFamily, fontSize, fontColor, lineHeight, para, indent, h2size, gapQ, headerGap, footerGap], () => refreshLayout())
 watch([headerText, footerText], () => render())
 </script>
@@ -1209,6 +1221,11 @@ watch([headerText, footerText], () => render())
                     <option :value="1">一栏</option>
                     <option :value="2">两栏</option>
                     <option :value="3">三栏</option>
+                  </select>
+                  <label>填充</label>
+                  <select v-model="colFill" title="页面铺满(先填满左栏) 还是 两栏等高(可能下方留白)">
+                    <option value="fill">铺满</option>
+                    <option value="balance">等高</option>
                   </select>
                 </div>
                 <div class="pm__ctlrow">
