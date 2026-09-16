@@ -194,13 +194,37 @@ function autoLayoutOptions() {
     if (b.classList.contains('paper-opt-one') || b.classList.contains('paper-opt-two') || b.classList.contains('paper-opt-four')) return
     const opts = Array.from(b.querySelectorAll('.paper-opt')) as HTMLElement[]
     if (!opts.length) return
-    const widths = opts.map((o) => o.offsetWidth)
+    // ⚠ 量「内容真实宽度」要用 scrollWidth ✗ 而不是 offsetWidth —— 默认 flex 布局会把选项
+    //   **挤扁** ✓（实测 14 字选项被压到 112px ✓），用它判断会以为两栏放得下 ✓ → 选成 two
+    //   → 选项在窄栏里折成两行 ✗（用户截图实测 ✓）。scrollWidth 不受挤压影响 ✓。
+    const widths = opts.map((o) => Math.max(o.offsetWidth, o.scrollWidth))
     const total = widths.reduce((s, x) => s + x, 0)
-    const cw = (b.parentElement as HTMLElement | null)?.clientWidth || b.clientWidth || 300
+    // ⚠ 必须优先用**元素自身**的宽度 ✗ —— 分栏时 .paper-options 处在某一栏内 ✓，
+    //   它的 clientWidth 就是**栏宽** ✓；而 parentElement(.paper-cols) 的宽度是**整页宽** ✗，
+    //   拿后者判断就会以为位置很宽 ✓ → 选成四列 → 选项挤爆折行 ✓（用户截图实测 ✓）。
+    const cw = b.clientWidth || (b.parentElement as HTMLElement | null)?.clientWidth || 300
     const gap = 16
     if (total + gap * (widths.length - 1) <= cw) b.classList.add('paper-opt-one')
     else if (Math.max(...widths) <= cw / 2) b.classList.add('paper-opt-two')
     else b.classList.add('paper-opt-four')
+    // ⚠ 自纠 ✗：上面的宽度判断并不可靠 ✓（默认 flex 会把选项挤扁 ✓，量到的是被压后的宽度 ✓，
+    //   而文字其实是在选项**内部**折行的 ✓ —— scrollWidth 也量不出来 ✓）。
+    //   所以套上排布后**直接量高度** ✓：只要有一个选项被折成两行 ✓ 就说明这个排布放不下 ✓，
+    //   退回一栏 ✓。这条不依赖任何宽度估算 ✓，最稳 ✓。
+    requestAnimationFrame(() => {
+      // ⚠ 基准不能取 opts[0] 的高度 ✗ —— 若四个选项都被折行 ✓，它本身就是 42 ✓，
+      //   那么 42 > 42*1.6 永远为假 ✓，自纠永远不触发 ✓（我第一版就是这么错的 ✓）。
+      //   改为**从字号算单行高度** ✓，与折没折行无关 ✓。
+      const cs = getComputedStyle(opts[0])
+      const fsz = parseFloat(cs.fontSize) || 16
+      const lh = parseFloat(cs.lineHeight)
+      const single = (isNaN(lh) ? fsz * 1.4 : lh) + 8   // 8 = 上下内边距/边框余量
+      const wrapped = opts.some((o) => o.offsetHeight > single * 1.45)
+      if (wrapped && !b.classList.contains('paper-opt-one')) {
+        b.classList.remove('paper-opt-two', 'paper-opt-four')
+        b.classList.add('paper-opt-one')
+      }
+    })
   })
 }
 
