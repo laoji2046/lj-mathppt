@@ -1028,7 +1028,35 @@ async function savePdf() {
       await new Promise((r) => setTimeout(r, 0))   // 每页之间让出主线程 ✓
     }
     const name = (headerText.value || '试卷讲义').replace(/[\\/:*?"<>|]/g, '_')
-    pdf.save(name + '.pdf')
+    const fname = name + '.pdf'
+    // ⭐「另存为」：exe 里是 WebView2(Edg ✓) → 支持 showSaveFilePicker ✓
+    //    它会弹出**真正的另存为对话框，可选目录** ✓ —— 这是浏览器/WebView 里唯一能指定目录的接口 ✓
+    //    （普通 pdf.save() 只能落到默认下载目录 ✗）。不支持时回退到下载 ✓。
+    const outBlob = pdf.output('blob')
+    const picker = (window as unknown as { showSaveFilePicker?: (o: unknown) => Promise<any> }).showSaveFilePicker
+    if (typeof picker === 'function') {
+      try {
+        const handle = await picker({
+          suggestedName: fname,
+          types: [{ description: 'PDF 文件', accept: { 'application/pdf': ['.pdf'] } }],
+        })
+        const writable = await handle.createWritable()
+        await writable.write(outBlob)
+        await writable.close()
+        paperMsg.value = '已保存：' + fname
+      } catch (err: any) {
+        // ⚠ 用户点「取消」不是失败 ✗ —— 若当成失败会去回退 window.print() ✓ 那就莫名其妙弹打印了 ✓
+        if (err && (err.name === 'AbortError' || err.name === 'NotAllowedError')) {
+          paperMsg.value = '已取消保存'
+        } else {
+          pdf.save(fname)   // 其它异常才回退到普通下载 ✓
+          paperMsg.value = '已用浏览器下载方式保存：' + fname
+        }
+      }
+    } else {
+      pdf.save(fname)
+      paperMsg.value = '已保存（此环境不支持选择目录，已下载到默认位置）：' + fname
+    }
     ok = true
   } catch (e) {
     console.error('PDF 生成失败，回退打印：', e)
