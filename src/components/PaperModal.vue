@@ -597,7 +597,13 @@ function paginate() {
     const colsStyle = bodyCols.value > 1 && colFill.value === 'fill'
       ? 'column-count:' + bodyCols.value + ';column-fill:auto;height:' + bh + 'px;'
       : 'column-count:' + bodyCols.value + ';column-fill:balance;'
-    pg.innerHTML = head + '<div class="paper-cols" style="' + colsStyle + '">' + blks.map((b) => b.outerHTML).join('') + '</div>' + foot
+    // ⚠ 一栏时**根本不套多栏容器** ✗ —— 这样一栏就与「分栏功能出现之前」完全一致 ✓，
+    //   那些 column-* 规则一条都不生效 ✓（用户要求：把一栏的正常状态恢复过来 ✓）。
+    //   ⭐ 双栏的可用配置（用户确认正常 ✓）记录在 docs/分栏配置-基准.md ✓。
+    const inner = blks.map((b) => b.outerHTML).join('')
+    pg.innerHTML = head + (bodyCols.value > 1
+      ? '<div class="paper-cols" style="' + colsStyle + '">' + inner + '</div>'
+      : inner) + foot
     applyFont(pg); applyLayout(pg)
     return pg
   }
