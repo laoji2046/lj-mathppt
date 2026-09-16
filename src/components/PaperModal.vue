@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+
+/** 试题库弹窗：按需加载（只有点「试题库」才下载这段代码） */
+const QuestionBankDialog = defineAsyncComponent(() => import('@/components/QuestionBankDialog.vue'))
 import AppIcon from './AppIcon.vue'
 import { loadMathJax } from '@/composables/useMathJax'
 import { imagesDir, isTauri, readLocalImage } from '@/composables/useTauri'
@@ -987,6 +990,20 @@ function insertVectorize() {
   fi.click()
 }
 
+/** 试题库弹窗开关 */
+const qbOpen = ref(false)
+/**
+ * 试题库 → 组卷：把选题文本插到试卷正文末尾。
+ * 插完**不关窗** —— 组卷通常是连续选好几道题。
+ */
+function onQuestionInsert(text: string, id: number) {
+  const sep = input.value && !input.value.endsWith('\n') ? '\n\n' : ''
+  input.value += sep + text + '\n'
+  render()
+  saveDraftSoon()
+  paperMsg.value = '已插入试题 #' + id + ' ✓（可继续选下一道）'
+}
+
 async function insertFigure(id: string, slideIndex: number, label: string) {
   figOpen.value = false
 
@@ -1424,6 +1441,9 @@ watch([headerText, footerText], () => render())
       <button class="pm__btn" title="插入矢量描摹图（先选一张线稿图，在描摹窗口里调好后点插入）" @click="insertVectorize">
         <AppIcon name="graphic" :size="14" />矢量描摹图
       </button>
+      <button class="pm__btn" title="试题库：按标签筛选、组卷插入题干（可带答案与解析）" @click="qbOpen = true">
+        <AppIcon name="graphic" :size="14" />试题库
+      </button>
     <!-- 图形选择面板：带真实缩略图（选图形得看得见图形） -->
     <div v-if="figOpen" class="pm__figpanel">
       <div class="pm__fighead">文稿里的数学图形（{{ figList.length }} 个）</div>
@@ -1531,6 +1551,7 @@ watch([headerText, footerText], () => render())
     </div>
     </div>
   </Teleport>
+  <QuestionBankDialog v-if="qbOpen" @close="qbOpen = false" @insert="onQuestionInsert" />
 </template>
 
 <style scoped>

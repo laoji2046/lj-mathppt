@@ -769,6 +769,39 @@ fn lib_meta_set(k: String, v: String) -> serde_json::Value {
     }
 }
 
+
+/// 列出某一类下出现过的标签及条数（供筛选界面用）。
+/// 注意：SQL 里用 `length(tags) > 0` 而不是 `tags <> ''` —— 避免在 Rust 字符串里出现单引号。
+#[tauri::command]
+fn lib_tags(kind: String) -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let mut stmt = match conn.prepare(
+        "SELECT tags FROM library_item WHERE type = ?1 AND length(tags) > 0",
+    ) {
+        Ok(s) => s,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("查询失败: {}", e) }),
+    };
+    let rows = stmt.query_map([&kind], |r| r.get::<_, String>(0));
+    let mut map: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    if let Ok(it) = rows {
+        for t in it.flatten() {
+            for part in t.split(',') {
+                let k = part.trim();
+                if !k.is_empty() {
+                    *map.entry(k.to_string()).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    let out: Vec<serde_json::Value> = map
+        .iter()
+        .map(|(k, v)| serde_json::json!({ "name": k, "count": v }))
+        .collect();
+    serde_json::json!({ "ok": true, "tags": out })
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -790,7 +823,8 @@ pub fn run() {
             lib_bump,
             lib_seed,
             lib_meta_get,
-            lib_meta_set
+            lib_meta_set,
+            lib_tags
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

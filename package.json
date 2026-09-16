@@ -1,6 +1,6 @@
 {
   "name": "lj-mathslides-vue",
-  "version": "2026.09.1344",
+  "version": "2026.09.1345",
   "private": true,
   "description": "LJ-MathSlides Vue 版 — 场景图驱动的幻灯片编辑器骨架",
   "type": "module",

@@ -199,6 +199,27 @@ export async function libSeed(items: LibDraft[]): Promise<number> {
   }
 }
 
+/** 列出某一类下的标签及条数（筛选界面用） */
+export async function libTags(kind: LibKind): Promise<{ name: string; count: number }[]> {
+  if (!isTauri()) {
+    const map = new Map<string, number>()
+    for (const it of fbLoad().items) {
+      if ((it as { type?: string }).type !== kind) continue
+      for (const t of String(it.tags || '').split(',')) {
+        const k = t.trim()
+        if (k) map.set(k, (map.get(k) || 0) + 1)
+      }
+    }
+    return Array.from(map.entries()).map(([name, count]) => ({ name, count }))
+  }
+  try {
+    const r = await invoke<{ ok?: boolean; tags?: { name: string; count: number }[] }>('lib_tags', { kind })
+    return r?.ok && Array.isArray(r.tags) ? r.tags : []
+  } catch {
+    return []
+  }
+}
+
 /** 读迁移标记等键值 */
 export async function libMetaGet(k: string): Promise<string | null> {
   if (!isTauri()) {
