@@ -30,6 +30,8 @@ const AddonManager = defineAsyncComponent(() => import('./AddonManager.vue'))
 //   静态导入会让 pptx(30KB)+docx(30KB)+pdf 全进启动包 ✗；改成动态导入后 Vite 各自分包 ✓
 //   （PdfImportDialog 在模板里是 v-if 门控 ✓，可以安全异步化 ✓）
 const PdfImportDialog = defineAsyncComponent(() => import('./PdfImportDialog.vue'))
+/** 课件库（第三期）：从文件菜单打开 */
+const DeckLibraryDialog = defineAsyncComponent(() => import('./DeckLibraryDialog.vue'))
 
 const store = useDeckStore()
 const emit = defineEmits<{ (e: 'present'): void; (e: 'open-templates'): void; (e: 'open-paper'): void; (e: 'open-ggb-suite'): void }>()
@@ -60,6 +62,8 @@ function setTableWrap(el: Element | ComponentPublicInstance | null) {
   if (el instanceof HTMLElement) tableWrap.value = el
 }
 const fileToast = ref('')
+/** 课件库弹窗开关（第三期）：从文件菜单打开 */
+const deckLibOpen = ref(false)
 const deckJsonInput = ref<HTMLInputElement | null>(null)
 const saveAsOpen = ref(false)
 const saveAsName = ref('演示.json')
@@ -670,6 +674,7 @@ onBeforeUnmount(() => {
           <button class="dropdown__item" title="当前页截图为 PNG（2 倍分辨率）" @click="exportPng"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.png"></svg></span>导出 PNG（当前页）</button>
           <button class="dropdown__item" title="Markdown 源码：导出或导入（--- 横向 / -- 垂直 / Note: 备注）" @click="setViewMode('split')"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>MD 源码（导出/导入 Markdown）</button>
           <button class="dropdown__item" title="导入之前导出的演示 JSON（.json）" @click="pickDeckJson"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>导入演示 JSON</button>
+          <button class="dropdown__item" title="课件库：管理存过的整份课件（打开会替换当前内容，可用 Ctrl+Z 撤销）" @click="deckLibOpen = true"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>课件库</button>
         <button v-if="addonOn('pptx-import')" class="dropdown__item" title="导入 PPT（.pptx）：本地解析，文字 / 公式 / 图片 / 表格一并搬过来" @click="pickPptx">
           <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.file"></svg></span>导入 PPT(.pptx)
         </button>
@@ -899,6 +904,7 @@ onBeforeUnmount(() => {
   <ThemePalette v-if="themeOpen" @close="themeOpen = false" />
   <VersionHistory v-if="versionOpen" @close="versionOpen = false" />
     <SaveAsDialog v-if="saveAsOpen" :name="saveAsName" :text="saveAsText" @close="saveAsOpen = false" @saved="onDeckSaved" />
+  <DeckLibraryDialog v-if="deckLibOpen" @close="deckLibOpen = false" />
   <SettingsPanel v-if="settingsOpen" @close="settingsOpen = false" />
   <FormulaInserter v-if="formulaModalOpen" @close="formulaModalOpen = false" />
   <FormulaLibrary v-if="formulaLib.open" @close="closeFormulaLibrary()" />

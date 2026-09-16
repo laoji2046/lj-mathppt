@@ -1,6 +1,8 @@
 <script setup lang="ts">
 /** 数学图形面板：分类页签 + 卡片缩略图（缩略图直接用元素组件渲染，所见即所得） */
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
+import { listFigures, removeFigure, touchFigure } from '@/composables/useFigureLibrary'
+import type { FigureEntry } from '@/composables/useFigureLibrary'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type { MathFigureCat, MathFigureElement, MathFigureKind, SlideElement } from '@/types'
@@ -156,6 +158,23 @@ function presetPreview(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
     fill: 'transparent', stroke: '#3b3b46', strokeWidth: 2.6,
   } as any
 }
+/** ---- 我的图形（第三期图形库）：存下的「种类 + 参数」，一键插回；插进去仍然可调参数 ---- */
+const myFigures = ref<FigureEntry[]>([])
+async function loadMyFigures() {
+  try { myFigures.value = await listFigures() } catch { myFigures.value = [] }
+}
+onMounted(loadMyFigures)
+/** 用存下来的配置重建一个 mathfig 元素 */
+function insertSaved(f: FigureEntry) {
+  store.addElement('mathfig', { kind: f.kind, ...f.cfg } as any)
+  void touchFigure(f.id)
+  emit('close')
+}
+async function delSaved(f: FigureEntry) {
+  await removeFigure(f.id)
+  await loadMyFigures()
+}
+
 const THUMB_W = 108
 const THUMB_H = 108
 
@@ -194,6 +213,13 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
           @click="cat = g.cat"
         >
           {{ g.cat }}<em>{{ g.cat === RECAST ? SOLID_FIGURE_PRESETS.length : g.list.length }}</em>
+        </button>
+      </div>
+
+      <div v-if="myFigures.length" class="palette__mine">
+        <span class="palette__minet">我的图形</span>
+        <button v-for="f in myFigures" :key="f.id" class="mine" :title="'插入：' + f.title" @click="insertSaved(f)">
+          {{ f.title }}<em class="mine__x" title="从图形库删除" @click.stop="delSaved(f)">×</em>
         </button>
       </div>
 
@@ -262,6 +288,12 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
 </template>
 
 <style scoped>
+.palette__mine { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 14px 2px; }
+.palette__minet { font-size: 12px; color: var(--muted, #888); margin-right: 2px; }
+.mine { display: inline-flex; align-items: center; gap: 4px; border: 1px solid #e0e0ea; background: #fafafd; border-radius: 999px; padding: 3px 8px 3px 10px; font-size: 12px; cursor: pointer; }
+.mine:hover { background: #efeaff; border-color: #b9a9f0; }
+.mine__x { font-style: normal; color: #a99ecb; }
+.mine__x:hover { color: #d92d20; }
 .palette {
   position: fixed;
   inset: 0;

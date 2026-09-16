@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import { saveFigureToLibrary } from '@/composables/useFigureLibrary'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import { addonState } from '@/addons/registry'
@@ -77,6 +78,17 @@ const isArrow = computed(() => el.value?.type === 'arrow')
 const arrowEl = computed(() => el.value as ArrowElement | undefined)
 const isPen = computed(() => el.value?.type === 'pen')
 const isMathFig = computed(() => el.value?.type === 'mathfig')
+
+/** 把当前图形（种类 + 参数 + 样式 + 尺寸）存进图形库 */
+async function saveFigToLibrary() {
+  const m = mathfig.value as unknown as Record<string, unknown> | undefined
+  if (!m) return
+  const kind = String(m.kind || '')
+  const id = await saveFigureToLibrary(m, kind)
+  figLibMsg.value = id ? '已存入图形库：' + kind : '存入失败 —— 内容库不可用？'
+  window.setTimeout(() => { figLibMsg.value = '' }, 2400)
+}
+const figLibMsg = ref('')
 
 /** 当前数学图形的可调参数（正弦型的 A/ω/φ、含参二次的 a…），无参数则为空 */
 const figParams = computed(() => (mathfig.value ? figureParams(mathfig.value.kind) : []))
@@ -1052,6 +1064,8 @@ function layerTypeLabel(type: string) {
           <p class="cfn__hint">值域就是显示窗口的 y 范围；改完在画布上直接拖缩放即可调整大小。</p>
         </template>
         <!-- 可调参数（正弦型 A/ω/φ、含参二次的 a…） -->
+        <button class="figlib__btn" title="把这个图形的种类与参数存进图形库，之后在「数学图形」面板里一键插回" @click="saveFigToLibrary">存入图形库</button>
+        <p v-if="figLibMsg" class="panel__hint">{{ figLibMsg }}</p>
         <label v-for="pr in figParams" :key="pr.key" class="field">
           <span>{{ pr.label }}</span>
           <input
@@ -1645,6 +1659,8 @@ function layerTypeLabel(type: string) {
 </template>
 
 <style scoped>
+.figlib__btn { margin: 2px 0 6px; border: 1px solid #dcdce6; background: #fff; border-radius: 8px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; }
+.figlib__btn:hover { background: #efeaff; border-color: #b9a9f0; }
 .panel {
   width: 276px;
   flex: none;
