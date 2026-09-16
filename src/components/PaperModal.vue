@@ -1053,13 +1053,16 @@ async function savePdf() {
         await writable.write(outBlob)
         await writable.close()
         paperMsg.value = '已保存：' + fname
+        ok = true
       } catch (err: any) {
         pdf.save(fname)
         paperMsg.value = '写入所选位置失败（' + (err && err.name ? err.name : String(err)) + '）→ 已下载到默认位置：' + fname
+        ok = true
       }
     } else {
       pdf.save(fname)
       paperMsg.value = '已保存到默认下载位置：' + fname
+        ok = true
     }
   } catch (e) {
     console.error('PDF 生成失败，回退打印：', e)
