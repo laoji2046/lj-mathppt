@@ -841,7 +841,14 @@ async function svgStringToPng(text: string, scale?: number): Promise<string> {
   const h = nums.length === 4 && nums[3] > 0 ? nums[3] : 320
   const k = scale ?? Math.max(2, EXPORT_PX_W / w)
   // ⚠ 必须给 svg 元素写上 width/height ✗ —— 否则浏览器按默认 300x150 栅格化 ✓ 图会被裁 ✓
-  const sized = text.replace(/<svg\b/, '<svg width="' + Math.round(w * k) + '" height="' + Math.round(h * k) + '"')
+  // ⚠ data-URL 的 SVG 图片**必须带 xmlns** ✗ —— 三维对话框给的字符串**没有** ✓
+  //   （对话框里 xmlns 出现 0 次 ✓）；原有的 svgToPng 是显式补上的 ✓（第 804 行）我漏了 ✗。
+  //   不补 → 图片加载失败 ✓ → 抛错 ✓ → 插入静默失败 ✓（用户实测：点了插入没反应 ✓）。
+  let sized = text
+  if (sized.indexOf('xmlns') < 0) {
+    sized = sized.replace(/<svg\b/, '<svg xmlns="http://www.w3.org/2000/svg"')
+  }
+  sized = sized.replace(/<svg\b/, '<svg width="' + Math.round(w * k) + '" height="' + Math.round(h * k) + '"')
   const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(sized)
   const img = await new Promise<HTMLImageElement>((res, rej) => {
     const im = new Image()
