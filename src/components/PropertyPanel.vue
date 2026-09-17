@@ -18,7 +18,7 @@ import { layoutTable, mergeAt, unmergeAt } from '@/composables/tableLayout'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
 import { openShapeEdit } from '@/ui/shapeEditor'
-import { compileExpr, conicLineIntersections, conicPointPos, figureParams, withParams } from '@/composables/mathPlot'
+import { compileExpr, conicLineIntersections, conicPointPos, figureParams, withParams, type PointLink } from '@/composables/mathPlot'
 import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type EdgeStyle, type FaceStyle } from '@/composables/solid3d'
 import { solidSel } from '@/composables/solidSel'
 import { openImageEditor } from '@/ui/imageEditor'
@@ -105,7 +105,7 @@ function figParamVal(key: string, def: number) {
   return typeof v === 'number' ? v : def
 }
 function setFigParam(key: string, v: number) {
-  const p: Partial<SlideElement> & { pointLinks?: ({ line: number; which: 0 | 1 } | null)[] } = {
+  const p: Partial<SlideElement> & { pointLinks?: (PointLink | null)[] } = {
     params: { ...(mathfig.value?.params || {}), [key]: v },
   }
   // 手动改标注点的 x/y = 想让它当**普通点** → 顺手解除"钉在交点上"的绑定
@@ -145,16 +145,57 @@ function setConicColor(v: string) { patch({ conicStroke: v } as Partial<SlideEle
 /** **一键求交点**：算出每条直线/线段与圆锥曲线的交点，直接生成标注点（可用橙色手柄继续拖）。
  *  已有点不动，从 pn 之后接着加；最多 6 个。 */
 const ixMsg = ref('')
+const flash = (t: string) => { ixMsg.value = t; window.setTimeout(() => { ixMsg.value = '' }, 4500) }
+
+/** **在曲线上加一个动点**：拖动它只会沿曲线滑动（不会跑出曲线）。
+ *  实现上它就是"绑在曲线上的标注点"（pointLinks 的 on:'curve' 形式），不新增任何参数 ✓。 */
+function addMovingPoint() {
+  const m = mathfig.value
+  if (!m) return
+  const params = { ...(m.params || {}) }
+  const base = Math.max(0, Math.min(6, Math.round(Number(params.pn) || 0)))
+  if (base >= 6) { flash('标注点最多 6 个，先删掉几个'); return }
+  params.pn = base + 1
+  const labels: (string | null)[] = [...(m.pointLabels || [])]
+  const links: (PointLink | null)[] = [...(m.pointLinks || [])]
+  while (labels.length <= base) labels.push(null)
+  while (links.length <= base) links.push(null)
+  labels[base] = 'M_' + (base + 1)
+  links[base] = { on: 'curve', t: 0 }        // t=0 一般落在曲线的"顶点"上，方便一眼看到
+  patch({ params, pointLabels: labels, pointLinks: links } as Partial<SlideElement>)
+  flash('已加动点 M_' + (base + 1) + ' —— 拖它只会**沿曲线滑动**；也可以给它作切线')
+}
+
+/** **给某个标注点作切线**：新增一条线，并把它**绑**成"该点处的切线"。
+ *  k/m 每次现算 → 那个点一动（动点滑动 / 交点移动），切线自动跟着转 ✓。 */
+function addTangent() {
+  const m = mathfig.value
+  if (!m) return
+  const links = m.pointLinks || []
+  const pn = Math.max(0, Math.min(6, Math.round(Number(m.params?.pn) || 0)))
+  let base = -1
+  for (let i = pn; i >= 1; i--) if (links[i - 1]) { base = i; break }     // 取最后一个"落在曲线上"的点
+  if (base < 0) { flash('先加一个落在曲线上的点（「＋ 在曲线上加动点」或「求交点」），再给它作切线'); return }
+  const params = { ...(m.params || {}) }
+  const n = Math.max(0, Math.min(4, Math.round(Number(params.n) || 0)))
+  if (n >= 4) { flash('直线最多 4 条'); return }
+  const ll: ({ tangentAt: number } | null)[] = [...(m.lineLinks || [])]
+  while (ll.length < n) ll.push(null)
+  ll[n] = { tangentAt: base }
+  params.n = n + 1
+  patch({ params, lineLinks: ll } as Partial<SlideElement>)
+  flash('已加第 ' + (n + 1) + ' 条线 = **第 ' + base + ' 个点处的切线**（那个点一动，切线就跟着转）')
+}
+
 function calcIntersections() {
   const m = mathfig.value
   if (!m) return
-  const pts = conicLineIntersections(String(m.kind || ''), m.params)
-  const flash = (t: string) => { ixMsg.value = t; window.setTimeout(() => { ixMsg.value = '' }, 4000) }
-  if (!pts.length) { flash('没算到交点 —— 检查直线的 k、m，以及线段起终点是否把交点排除在外了'); return }
   const kind = String(m.kind || '')
+  const pts = conicLineIntersections(kind, m.params, m.pointLinks, m.lineLinks)
+  if (!pts.length) { flash('没算到交点 —— 检查直线的 k、m，以及线段起终点是否把交点排除在外了'); return }
   const params = { ...(m.params || {}) }
   const labels: (string | null)[] = [...(m.pointLabels || [])]
-  const links: ({ line: number; which: 0 | 1 } | null)[] = [...(m.pointLinks || [])]
+  const links: (PointLink | null)[] = [...(m.pointLinks || [])]
   const base = Math.max(0, Math.min(6, Math.round(Number(params.pn) || 0)))
   // 已有点的位置（含已经钉住的），用来去重 —— 再点一次不会又加一批重复的点
   const existing: { x: number; y: number }[] = []
@@ -1163,6 +1204,8 @@ function layerTypeLabel(type: string) {
           <p class="cfn__hint">值域就是显示窗口的 y 范围；改完在画布上直接拖缩放即可调整大小。</p>
         </template>
         <!-- 可调参数（正弦型 A/ω/φ、含参二次的 a…） -->
+        <button v-if="hasLineParams" class="figlib__btn" title="在曲线上加一个动点：拖动它只会沿曲线滑动（不会跑出曲线）" @click="addMovingPoint">＋ 在曲线上加动点</button>
+        <button v-if="hasLineParams" class="figlib__btn" title="给最近的标注点作切线：切线会随该点自动转动（动点一滑、切线跟着转）" @click="addTangent">＋ 过标注点作切线</button>
         <button v-if="hasLineParams" class="figlib__btn" title="算出每条直线/线段与这条圆锥曲线的交点，直接生成标注点（之后可用橙色手柄拖动微调）" @click="calcIntersections">求交点 → 生成标注点</button>
         <p v-if="ixMsg" class="panel__hint">{{ ixMsg }}</p>
         <p v-if="linkedN" class="panel__hint">其中 <b>{{ linkedN }}</b> 个点钉在「直线与曲线的交点」上：<b>直线一改它们就跟着动</b>；拖它 = 平移那条线；手动改它的 x/y 则解除绑定。</p>

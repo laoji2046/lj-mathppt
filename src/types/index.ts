@@ -559,7 +559,9 @@ export interface MathFigureElement extends ElementBase {
   pointLabels?: (string | null)[]
   /** 把某个标注点**钉在"直线与曲线的交点"上**（line = 第几条线，which = 两个交点里的哪一个）。
    *  绑上之后该点的位置每次**现算**，所以直线一动它就跟着动 ✓；null = 普通点（用 px/py）。 */
-  pointLinks?: ({ line: number; which: 0 | 1 } | null)[]
+  pointLinks?: ({ line: number; which: 0 | 1 } | { on: 'curve'; t: number; br?: 0 | 1 } | null)[]
+  /** 把某条线**绑成"某个标注点处的切线"**（tangentAt = 点序号）。k/m 每次现算，动点一滑切线就转 ✓ */
+  lineLinks?: ({ tangentAt: number } | null)[]
   /** 每个顶点字母相对默认位置(顶点上方)的拖拽偏移(归一化)，用于避免遮挡 */
   labelOffsets?: { dx: number; dy: number }[]
   /** 每个面的样式覆盖（填充色/透明度/隐藏该面），索引与面表一致 */

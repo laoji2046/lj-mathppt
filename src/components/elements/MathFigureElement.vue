@@ -73,7 +73,7 @@ const innerHtml = computed(() => {
   if (FUNCTION_KINDS.includes(kind)) return functionFigure(kind, w, h, stroke, s, props.el.params)
   if (CONIC_KINDS.includes(kind)) {
     return conicFigure(kind, w, h, stroke, s, fillColor, props.el.params,
-      { conicStroke: props.el.conicStroke, lineColors: props.el.lineColors, pointLabels: props.el.pointLabels, pointLinks: props.el.pointLinks })
+      { conicStroke: props.el.conicStroke, lineColors: props.el.lineColors, pointLabels: props.el.pointLabels, pointLinks: props.el.pointLinks, lineLinks: props.el.lineLinks })
   }
 
   // 三维多面体统一走顶点模型渲染（支持拖拽顶点编辑）
@@ -366,7 +366,7 @@ function onHandleUp() {
 // 手柄就是每条线在当前窗口里的两个可见端点（公式见 mathPlot 的 conicLineHandles）；
 // 拖一个端点 = 另一端固定、反算 k/m（直线 2 个自由度，两点正好定死）。线段还要跟着改起终点 x。
 const lineHandles = computed(() =>
-  CONIC_KINDS.includes(props.el.kind) ? conicLineHandles(props.el.kind, props.el.w, props.el.h, props.el.params) : [])
+  CONIC_KINDS.includes(props.el.kind) ? conicLineHandles(props.el.kind, props.el.w, props.el.h, props.el.params, props.el.pointLinks, props.el.lineLinks) : [])
 const showLineHandles = computed(() => !!props.selected && lineHandles.value.length > 0)
 let dragLine: { i: number; which: 0 | 1 } | null = null
 /** 拖动过程中把被抓手柄钉在手指下面。
@@ -403,12 +403,13 @@ function onLineHandleUp() { dragLine = null; dragPt.value = null; dragging.value
 
 // ---- 圆锥曲线「标注点」的拖拽（与直线端点同一套做法） ----
 const pointHandles = computed(() =>
-  CONIC_KINDS.includes(props.el.kind) ? conicPointHandles(props.el.kind, props.el.w, props.el.h, props.el.params, props.el.pointLinks) : [])
+  CONIC_KINDS.includes(props.el.kind) ? conicPointHandles(props.el.kind, props.el.w, props.el.h, props.el.params, props.el.pointLinks, props.el.lineLinks) : [])
 const showPointHandles = computed(() => !!props.selected && pointHandles.value.length > 0)
 let dragPointIdx = -1
 const dragPointPos = ref<{ x: number; y: number } | null>(null)
 function pointHandlePos(h: { i: number; x: number; y: number }) {
-  if (dragPointPos.value && dragPointIdx === h.i) return dragPointPos.value
+  // ⚠ 不把标注点手柄钉在指针上：它的位置本来就是**现算的真实位置**（动点在曲线上、交点在锥线上），
+  //   钉住反而会让手柄离开曲线 ✗（直线端点那次需要钉住，是因为裁剪端点会"跑掉"，情况不同）
   return { x: h.x, y: h.y }
 }
 function onPointHandleDown(e: PointerEvent, i: number) {
@@ -426,10 +427,12 @@ function onPointHandleMove(e: PointerEvent) {
   const px = ((e.clientX - r.left) / r.width) * props.el.w
   const py = ((e.clientY - r.top) / r.height) * props.el.h
   dragPointPos.value = { x: px, y: py }
-  const patch = conicPointDrag(props.el.kind, props.el.w, props.el.h, props.el.params || {}, dragPointIdx, px, py, props.el.pointLinks)
-  if (Object.keys(patch).length) {
-    emit('update', { params: { ...(props.el.params || {}), ...patch } } as Partial<SlideElement>)
-  }
+  // 返回的是**元素补丁**：普通点写 params，动点改 pointLinks（曲线参数 t）
+  const patch = conicPointDrag(props.el.kind, props.el.w, props.el.h, props.el.params || {}, dragPointIdx, px, py, props.el.pointLinks, props.el.lineLinks)
+  const out: Record<string, unknown> = {}
+  if (patch.params) out.params = { ...(props.el.params || {}), ...patch.params }
+  if (patch.pointLinks) out.pointLinks = patch.pointLinks
+  if (out.params || out.pointLinks) emit('update', out as Partial<SlideElement>)
 }
 function onPointHandleUp() { dragPointIdx = -1; dragPointPos.value = null; dragging.value = false }
 

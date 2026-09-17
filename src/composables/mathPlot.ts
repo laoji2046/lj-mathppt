@@ -724,6 +724,7 @@ export const LINE_PARAMS: ParamSpec[] = [
   // 线段两端的圆点本来是"一眼区分线段 / 整条直线"用的；但教材图里常常不要，所以做成可选项。
   // 默认 1（显示）→ **老图元外观完全不变**。
   { key: 'ldot', label: '线段端点圆点', def: 1, bool: true, showIf: (p) => (p.n || 0) >= 1 },
+  { key: 'chord', label: '显示弦长', def: 0, bool: true, showIf: (p) => (p.n || 0) >= 1 },
 ]
 for (let i = 1; i <= 4; i++) {
   const on = (p: Record<string, number>) => (p.n || 0) >= i
@@ -775,7 +776,7 @@ function clipLine(k: number, b2: number, view: View): [[number, number], [number
 
 /** 画「多条直线 / 线段」（参数见 LINE_PARAMS）。返回空串 = 没开。
  *  线段按起终点 x 截断，直线铺满窗口；两者都先裁到窗口内，不会溢到元素框外面。 */
-function drawExtraLines(pv: Record<string, number>, view: View, w: number, h: number, stroke: string, sw: number, colors?: (string | null)[]): string {
+function drawExtraLines(kind: string, pv: Record<string, number>, view: View, w: number, h: number, stroke: string, sw: number, colors?: (string | null)[]): string {
   const n = Math.max(0, Math.min(4, Math.round(pv.n || 0)))
   if (!n) return ''
   const dots = Math.round(pv.ldot ?? 1) !== 0        // 线段端点圆点，可选
@@ -797,16 +798,26 @@ function drawExtraLines(pv: Record<string, number>, view: View, w: number, h: nu
     const col = colors && colors[i - 1] ? colors[i - 1]! : stroke     // 每条线可以有自己的颜色
     out += lineSvg(mm.X(lo), mm.Y(k * lo + b2), mm.X(hi), mm.Y(k * hi + b2), col, sw)
     if (seg && dots) out += dotSvg(mm.X(lo), mm.Y(k * lo + b2), r, col) + dotSvg(mm.X(hi), mm.Y(k * hi + b2), r, col)
+    // 弦长：这条线与曲线的两个交点之间的距离，标在弦中点（默认关）
+    if (Math.round(pv.chord ?? 0)) {
+      const rs = conicLineRoots(kind, pv, i)
+      if (rs.length >= 2) {
+        const dd = Math.hypot(rs[0].x - rs[1].x, rs[0].y - rs[1].y)
+        const fs2 = Math.max(11, Math.min(w, h) * 0.05)
+        const mx = (rs[0].x + rs[1].x) / 2, my = (rs[0].y + rs[1].y) / 2
+        out += textSvg(mm.X(mx) + fs2 * 0.35, mm.Y(my) - fs2 * 0.45, dd.toFixed(2), fs2, stroke)
+      }
+    }
   }
   return out
 }
 
 /** 圆锥曲线 + 直线：把每条线在当前窗口里的**两个可见端点**算成元素像素坐标，给拖拽手柄用。
  *  （手柄的 left/top 就是这个坐标系，见 MathFigureElement 的 .mf-handle） */
-export function conicLineHandles(kind: string, w: number, h: number, params?: Record<string, number>): { i: number; which: 0 | 1; x: number; y: number }[] {
+export function conicLineHandles(kind: string, w: number, h: number, params?: Record<string, number>, pointLinks?: (PointLink | null)[], lineLinks?: (LineLink | null)[]): { i: number; which: 0 | 1; x: number; y: number }[] {
   const def = CONICS[kind]
   if (!def) return []
-  const pv = withParams(kind, params)
+  const pv = conicEffectiveParams(kind, params, pointLinks, lineLinks)
   const n = Math.max(0, Math.min(4, Math.round(pv.n || 0)))
   if (!n) return []
   const view = def.viewOf ? def.viewOf(pv) : def.view
@@ -865,16 +876,77 @@ export function conicLineDrag(
   return patch
 }
 
-/** 标注点与直线交点的**绑定**：line = 第几条线（从 1 起），which = 两个交点里的哪一个（按 x 升序）。
- *  绑上之后这一点**不再用 px/py** ✓ —— 位置每次现算 ✓，所以直线一动它就跟着动 ✓。 */
-export interface PointLink { line: number; which: 0 | 1 }
+/** 标注点的绑定：
+ *  ① { line, which } —— **直线与曲线的交点**（随直线动）
+ *  ② { on:'curve', t, br } —— **在曲线上滑动的动点**（t 是参数，br 用来区分双曲线的两支）
+ *  绑上之后位置一律**现算** ✓，不再用 px/py。 */
+export type PointLink =
+  | { line: number; which: 0 | 1 }
+  | { on: 'curve'; t: number; br?: 0 | 1 }
+
+/** 参数 t（+分支）在圆锥曲线上的位置 —— 与 conicFigure 里各分支的画法**严格一致**。 */
+export function conicPointAtT(kind: string, params: Record<string, number> | undefined, t: number, br: 0 | 1 = 0): { x: number; y: number } | null {
+  const pv = withParams(kind, params)
+  if (kind === 'conicCustomCircle') {
+    const cx = pv.cx || 0, cy = pv.cy || 0, r = Math.max(0.2, pv.cr || 3)
+    return { x: cx + r * Math.cos(t), y: cy + r * Math.sin(t) }
+  }
+  if (kind === 'conicCustomEllipse') {
+    const a = Math.max(0.2, pv.a || 4), b = Math.max(0.2, pv.b || 3)
+    return { x: a * Math.cos(t), y: b * Math.sin(t) }
+  }
+  if (kind === 'conicCustomEllipseV') {
+    const a = Math.max(0.2, pv.a || 4), b = Math.max(0.2, pv.b || 3)
+    return { x: b * Math.cos(t), y: a * Math.sin(t) }
+  }
+  if (kind === 'conicCustomHyperbola') {
+    const a = Math.max(0.1, pv.a || 3), b = Math.max(0.1, pv.b || 2)
+    const s = br === 1 ? -1 : 1
+    return { x: s * a * Math.cosh(t), y: b * Math.sinh(t) }
+  }
+  if (kind === 'conicCustomParabola') {
+    const p = Math.max(0.05, pv.p || 4), dir = Math.round(pv.dir || 1)
+    const x0 = (t * t) / (2 * p), y0 = t
+    if (dir === 2) return { x: y0, y: x0 }
+    if (dir === 3) return { x: -x0, y: y0 }
+    if (dir === 4) return { x: y0, y: -x0 }
+    return { x: x0, y: y0 }
+  }
+  return null
+}
+
+/** 把平面上的点**投影到曲线上**（粗扫 + 三分细化）→ 返回最接近的 (t, br)。
+ *  拖动动点时走这里：它于是"沿曲线滑到离手指最近的位置" ✓，而不会跑出曲线 ✓。 */
+export function conicTAt(kind: string, params: Record<string, number> | undefined, tx: number, ty: number, br0: 0 | 1 = 0): { t: number; br: 0 | 1 } {
+  const d2 = (t: number, br: 0 | 1) => { const p = conicPointAtT(kind, params, t, br); return p ? (p.x - tx) ** 2 + (p.y - ty) ** 2 : Infinity }
+  const lo0 = kind === 'conicCustomParabola' ? -30 : kind === 'conicCustomHyperbola' ? -3.2 : 0
+  const hi0 = kind === 'conicCustomParabola' ? 30 : kind === 'conicCustomHyperbola' ? 3.2 : Math.PI * 2
+  const brs: (0 | 1)[] = kind === 'conicCustomHyperbola' ? [0, 1] : [br0]
+  let bt = lo0, bb: 0 | 1 = br0, bd = Infinity
+  for (const br of brs) {
+    for (let i = 0; i <= 96; i++) {
+      const t = lo0 + ((hi0 - lo0) * i) / 96
+      const d = d2(t, br)
+      if (d < bd) { bd = d; bt = t; bb = br }
+    }
+  }
+  // 三分细化（在初值附近的小区间里）
+  const span = (hi0 - lo0) / 96
+  let a = Math.max(lo0, bt - span), b = Math.min(hi0, bt + span)
+  for (let k = 0; k < 48; k++) {
+    const m1 = a + (b - a) / 3, m2 = b - (b - a) / 3
+    if (d2(m1, bb) < d2(m2, bb)) b = m2; else a = m1
+  }
+  return { t: (a + b) / 2, br: bb }
+}
 
 /** 第 i 个标注点的**实际位置**：绑在交点上就现算，否则用 px{i}/py{i}。
  *  绑着但线已经离开曲线（无交点）→ 返回 null（这一点暂时不画）。 */
 export function conicPointPos(kind: string, params: Record<string, number> | undefined, i: number, links?: (PointLink | null)[]): { x: number; y: number } | null {
   const pv = withParams(kind, params)
   const lk = links && links[i - 1]
-  if (lk) {
+  if (lk && 'on' in lk) return conicPointAtT(kind, params, lk.t, lk.br ?? 0)   // 动点：在曲线上
+  if (lk && 'line' in lk) {                                                    // 交点：随直线动
     const rs = conicLineRoots(kind, params, lk.line)
     return rs[lk.which] || rs[0] || null
   }
@@ -905,10 +977,10 @@ function drawExtraPoints(kind: string, pv: Record<string, number>, view: View, w
 }
 
 /** 圆锥曲线的**标注点**在元素像素坐标下的位置（拖拽手柄用，坐标系同 .mf-handle）。 */
-export function conicPointHandles(kind: string, w: number, h: number, params?: Record<string, number>, links?: (PointLink | null)[]): { i: number; x: number; y: number }[] {
+export function conicPointHandles(kind: string, w: number, h: number, params?: Record<string, number>, links?: (PointLink | null)[], lineLinks?: (LineLink | null)[]): { i: number; x: number; y: number }[] {
   const def = CONICS[kind]
   if (!def) return []
-  const pv = withParams(kind, params)
+  const pv = conicEffectiveParams(kind, params, links, lineLinks)
   const n = Math.max(0, Math.min(6, Math.round(pv.pn || 0)))
   if (!n) return []
   const view = def.viewOf ? def.viewOf(pv) : def.view
@@ -922,34 +994,45 @@ export function conicPointHandles(kind: string, w: number, h: number, params?: R
   return out
 }
 
-/** 拖动标注点：元素像素坐标 → 图形坐标。
+/** 拖动标注点：元素像素坐标 → 图形坐标。返回的是**元素补丁**（可能写 params，也可能改 pointLinks）。
  *  · 普通点 → 写回 px{i} / py{i}
- *  · **绑在交点上的点 → 平移那条线**（保持斜率，改截距 m），交点自然跟到指针处 ✓ */
-export function conicPointDrag(kind: string, w: number, h: number, params: Record<string, number>, i: number, px: number, py: number, links?: (PointLink | null)[]): Record<string, number> {
+ *  · **动点** → 改它的曲线参数 t：沿曲线滑到**离手指最近**的位置 ✓（绝不会跑出曲线）
+ *  · 交点   → 以另一端为支点**转动那条线**（交点必须落在曲线上，所以不会精确停在指针处 ✓） */
+export function conicPointDrag(
+  kind: string, w: number, h: number, params: Record<string, number>, i: number, px: number, py: number,
+  links?: (PointLink | null)[], lineLinks?: (LineLink | null)[],
+): { params?: Record<string, number>; pointLinks?: (PointLink | null)[] } {
   const def = CONICS[kind]
   if (!def) return {}
-  const pv = withParams(kind, params)
+  const pv = conicEffectiveParams(kind, params, links, lineLinks)
   const view = def.viewOf ? def.viewOf(pv) : def.view
   const sx = w / (view.xmax - view.xmin), sy = h / (view.ymax - view.ymin)
   const fx = view.xmin + px / sx, fy = view.ymin + (h - py) / sy
   const lk = links && links[i - 1]
-  if (lk) {
+  if (lk && 'on' in lk) {
+    const r = conicTAt(kind, params, fx, fy, lk.br ?? 0)
+    const next = [...(links || [])]
+    next[i - 1] = { on: 'curve', t: +r.t.toFixed(4), br: r.br }
+    return { pointLinks: next }
+  }
+  if (lk && 'line' in lk) {
+    // 如果这条线是**绑定的切线**，它的 k/m 是算出来的 ✗ —— 拖动改不了它，直接不动
+    //（要动就动那个切点：动点一滑，切线跟着转 ✓）
+    if (lineLinks && lineLinks[lk.line - 1]) return {}
     // ⚠ 交点**必须落在圆锥曲线上** ✗ —— 所以"拖到指针处"在数学上不可能 ✓。
-    //   正确语义（几何画板里拖弦的端点就是这个）：**以另一端为支点转动这条线**，
-    //   被拖的那一端于是顺着「支点 → 指针」的方向沿曲线走 ✓，看起来完全跟手 ✓。
-    const rs = conicLineRoots(kind, params, lk.line)
+    //   正确语义（几何画板里拖弦的端点就是这个）：**以另一端为支点转动这条线** ✓。
+    const rs = conicLineRoots(kind, pv, lk.line)
     const other = rs[1 - lk.which]
     if (other) {
       let dx = fx - other.x, dy = fy - other.y
-      if (Math.abs(dx) < 1e-6) dx = 1e-6        // 指针与支点几乎同 x：给一点点错位，避免除零
+      if (Math.abs(dx) < 1e-6) dx = 1e-6        // 与支点几乎同 x：给一点点错位，避免除零
       const k2 = dy / dx
-      return { ['k' + lk.line]: +k2.toFixed(4), ['m' + lk.line]: +(other.y - k2 * other.x).toFixed(4) }
+      return { params: { ['k' + lk.line]: +k2.toFixed(4), ['m' + lk.line]: +(other.y - k2 * other.x).toFixed(4) } }
     }
-    // 只剩一个交点（相切）时退化成"平移这条线"
     const k = pv['k' + lk.line] || 0
-    return { ['m' + lk.line]: +(fy - k * fx).toFixed(3) }
+    return { params: { ['m' + lk.line]: +(fy - k * fx).toFixed(3) } }
   }
-  return { ['px' + i]: +fx.toFixed(3), ['py' + i]: +fy.toFixed(3) }
+  return { params: { ['px' + i]: +fx.toFixed(3), ['py' + i]: +fy.toFixed(3) } }
 }
 
 /** 圆锥曲线在 xOy 里的二次型系数：**A x² + B y² + C x + D y + E = 0**（都是轴对齐的，没有 xy 项）。
@@ -1002,7 +1085,10 @@ export function conicLineRoots(kind: string, params: Record<string, number> | un
     if (Math.abs(B2) > 1e-12) roots.push(-C2 / B2)            // 退化成一次方程（抛物线与平行于轴的直线）
   } else {
     const disc = B2 * B2 - 4 * A2 * C2
-    if (disc >= -1e-9) {
+    // 判别式用**相对**容差：相切时 disc 理论上是 0，浮点会给到 ±1e-16 量级；
+    // 写死 1e-9 的话系数一大就误判成"无交点" ✗
+    const tol = 1e-9 * (B2 * B2 + Math.abs(4 * A2 * C2) + 1e-12)
+    if (disc >= -tol) {
       const sq = Math.sqrt(Math.max(0, disc))
       roots.push((-B2 + sq) / (2 * A2), (-B2 - sq) / (2 * A2))
     }
@@ -1012,15 +1098,20 @@ export function conicLineRoots(kind: string, params: Record<string, number> | un
     .filter((x) => isFinite(x) && !(seg && (x < lo - 1e-9 || x > hi + 1e-9)))
     .sort((a, b) => a - b)
     .map((x) => ({ x, y: k * x + m2 }))
-  return pts.length === 2 && Math.abs(pts[0].x - pts[1].x) < 1e-9 ? [pts[0]] : pts
+  // 两个根几乎重合 = **相切**（竖直切线用大斜率近似时尤其明显）→ 只留一个 ✓
+  if (pts.length === 2) {
+    const eps = 1e-3 * (1 + Math.abs(pts[0].x) + Math.abs(pts[0].y))
+    if (Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) < eps) return [pts[0]]
+  }
+  return pts
 }
 
-export function conicLineIntersections(kind: string, params?: Record<string, number>): { x: number; y: number; line: number; which: 0 | 1 }[] {
-  const pv = withParams(kind, params)
+export function conicLineIntersections(kind: string, params?: Record<string, number>, pointLinks?: (PointLink | null)[], lineLinks?: (LineLink | null)[]): { x: number; y: number; line: number; which: 0 | 1 }[] {
+  const pv = conicEffectiveParams(kind, params, pointLinks, lineLinks)
   const n = Math.max(0, Math.min(4, Math.round(pv.n || 0)))
   const raw: { x: number; y: number; line: number; which: 0 | 1 }[] = []
   for (let i = 1; i <= n; i++) {
-    conicLineRoots(kind, params, i).forEach((p, w) => raw.push({ x: p.x, y: p.y, line: i, which: (w === 0 ? 0 : 1) as 0 | 1 }))
+    conicLineRoots(kind, pv, i).forEach((p, w) => raw.push({ x: p.x, y: p.y, line: i, which: (w === 0 ? 0 : 1) as 0 | 1 }))
   }
   // 去重：两条线交于一点、或切点被两个根各算一次
   const uniq: { x: number; y: number; line: number; which: 0 | 1 }[] = []
@@ -1031,10 +1122,52 @@ export function conicLineIntersections(kind: string, params?: Record<string, num
   return uniq
 }
 
-export function conicFigure(kind: string, w: number, h: number, baseStroke: string, sw: number, fill = 'none', params?: Record<string, number>, opt?: { conicStroke?: string; lineColors?: (string | null)[]; pointLabels?: (string | null)[]; pointLinks?: (PointLink | null)[] }): string {
+/** 直线与圆锥曲线的**绑定**：目前一种 —— 这条线是**某个标注点处的切线**（tangentAt = 点序号）。
+ *  绑上之后 k、m 每次**现算** ✓，所以动点一滑、切线就跟着转 ✓。 */
+export interface LineLink { tangentAt: number }
+
+/** 圆锥曲线在点 (x0,y0) 处的**切线** y = kx + m。
+ *  二次型 F = Ax²+By²+Cx+Dy+E → 切线为 (2Ax0+C)(x−x0) + (2By0+D)(y−y0) = 0。
+ *  ⚠ 竖直切线（椭圆左右顶点那种）用**很大的斜率**近似 —— 直线模型 y=kx+m 表示不了竖直 ✓。 */
+export function conicTangentAt(kind: string, params: Record<string, number> | undefined, x0: number, y0: number): { k: number; m: number } | null {
+  const q = conicQuadratic(kind, params)
+  if (!q) return null
+  const A = 2 * q.A * x0 + q.C
+  const B = 2 * q.B * y0 + q.D
+  if (Math.abs(B) < 1e-9) {
+    if (Math.abs(A) < 1e-9) return null
+    return { k: 1e4, m: y0 - 1e4 * x0 }
+  }
+  const k = -A / B
+  return { k, m: y0 - k * x0 }
+}
+
+/** 把"绑定的线"解析成实际参数：切线由它的**切点**现算 → 覆盖 k{i}/m{i}。
+ *  顺序：动点 / 自由点 → 切线 → （交点在 conicPointPos 里用已经生效的参数现算）✓ */
+export function conicEffectiveParams(
+  kind: string, params: Record<string, number> | undefined,
+  pointLinks?: (PointLink | null)[], lineLinks?: (LineLink | null)[],
+): Record<string, number> {
+  const pv = { ...withParams(kind, params) }
+  if (!lineLinks) return pv
+  for (let i = 0; i < lineLinks.length; i++) {
+    const lk = lineLinks[i]
+    if (!lk) continue
+    const pt = conicPointPos(kind, pv, lk.tangentAt, pointLinks)
+    if (!pt) continue
+    const km = conicTangentAt(kind, pv, pt.x, pt.y)
+    // ⚠ **不要四舍五入** ✗ —— 舍入会让"严格相切"变成"差一点点"，判别式掉到负数，
+    //   于是切线算出**0 个交点**（实测 t=0.8 的切线就是这样消失的）。全精度留着 ✓
+    if (km) { pv['k' + (i + 1)] = km.k; pv['m' + (i + 1)] = km.m }
+  }
+  return pv
+}
+
+export function conicFigure(kind: string, w: number, h: number, baseStroke: string, sw: number, fill = 'none', params?: Record<string, number>, opt?: { conicStroke?: string; lineColors?: (string | null)[]; pointLabels?: (string | null)[]; pointLinks?: (PointLink | null)[]; lineLinks?: (LineLink | null)[] }): string {
   const def = CONICS[kind]
   if (!def) return ''
-  const pv = withParams(kind, params)
+  // ⚠ 用**生效参数**：绑定的切线由切点现算 k/m → 覆盖原来的值（动点一动切线就转 ✓）
+  const pv = conicEffectiveParams(kind, params, opt?.pointLinks, opt?.lineLinks)
   // ⚠ 参数名从 stroke 改成 baseStroke，再让 stroke 指向"**圆锥曲线自己的颜色**" ——
   //   这样下面各个绘制分支**一行都不用改**（它们本来就写 stroke）。
   //   坐标轴仍用元素主色 baseStroke；多条线各自用 lineColors[i]（没给就回落主色）。
@@ -1055,7 +1188,7 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
   // 「圆锥曲线 + 直线 / 线段」：在 s 的**最前面**加一次就够 —— 后面各分支只管往 s 上追加再 return s，
   // 所以不需要改动任何一个分支（改四个分支结尾容易漏、也容易错）。
   // 画在圆锥曲线**下面**，交点处线条不会互相压住。
-  s += drawExtraLines(pv, view, w, h, baseStroke, sw, opt?.lineColors)
+  s += drawExtraLines(kind, pv, view, w, h, baseStroke, sw, opt?.lineColors)
   s += drawExtraPoints(kind, pv, view, w, h, baseStroke, opt?.pointLabels, opt?.pointLinks)
   const label = (x: number, y: number, t: string, dx = 0, dy = 0) => textSvg(X(x) + dx, Y(y) + dy, t, fs, stroke)
   const dot = (x: number, y: number, k = 1) => dotSvg(X(x), Y(y), r * k, stroke)
