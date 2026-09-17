@@ -553,6 +553,8 @@ export interface MathFigureElement extends ElementBase {
   edgeStyles?: ({ dash?: 'solid' | 'dash' | 'dot'; width?: number; color?: string; arrow?: boolean } | null)[]
   /** 圆锥曲线**自己的颜色**（不填 = 用元素主色）—— 让"椭圆一个色、每条线另一个色"成为可能 */
   conicStroke?: string
+  /** **坐标轴**的颜色（不填 = 用元素主色）；虚实由 params.axisd 控制 */
+  axisColor?: string
   /** 「圆锥曲线 + 多条直线/线段」里每条线的颜色覆盖，索引 = 第几条线 − 1 */
   lineColors?: (string | null)[]
   /** 「圆锥曲线的标注点」的名字（点个数由 params.pn 控制）；名字是字符串，所以放这里而不是 params */

@@ -138,6 +138,7 @@ function setFigParamSoft(key: string, raw: string) {
 const lineN = computed(() => Math.max(0, Math.min(4, Math.round(figParamVal('n', 0)))))
 const hasLineParams = computed(() => figParams.value.some((p) => p.key === 'n'))
 const conicColorVal = computed(() => mathfig.value?.conicStroke || mathfig.value?.stroke || '#1a1a1a')
+const axisColorVal = computed(() => mathfig.value?.axisColor || mathfig.value?.stroke || '#1a1a1a')
 function lineColorVal(i: number) {
   return (mathfig.value?.lineColors || [])[i] || mathfig.value?.stroke || '#1a1a1a'
 }
@@ -949,7 +950,9 @@ function layerTypeLabel(type: string) {
         </div>
       </div>
 
-      <div v-if="isGraphic" class="panel__section">
+      <!-- ⚠ 数学图形**不显示**「图形类型」这一整块 ✗：那是给形状/直线用的（含"线型"下拉）——
+           数学图形自己的类型切换在下面「数学图形 → 图形」里，虚实也改成逐曲线/逐线控制（用户要求） -->
+      <div v-if="isGraphic && !isMathFig" class="panel__section">
         <h3 class="panel__title">图形类型</h3>
         <div class="graphic-grid">
           <button v-for="g in GRAPHIC_TYPES" :key="g.v" class="graphic-chip"
@@ -1237,8 +1240,11 @@ function layerTypeLabel(type: string) {
           </label>
         </template>
         <template v-if="hasLineParams">
-          <label class="field"><span>椭圆（曲线）颜色</span>
+          <label class="field"><span>曲线颜色</span>
             <ColorSwatches :model-value="conicColorVal" @update:model-value="(v) => setConicColor(v as string)" />
+          </label>
+          <label class="field"><span>坐标轴颜色</span>
+            <ColorSwatches :model-value="axisColorVal" @update:model-value="(v) => patch({ axisColor: v as string } as Partial<SlideElement>)" />
           </label>
           <label v-for="i in lineN" :key="'lc' + i" class="field">
             <span>线{{ i }} 颜色</span>
@@ -1838,9 +1844,9 @@ function layerTypeLabel(type: string) {
 }
 
 /* 分区之间用一条细线分隔，长表单不糊成一片 */
-.panel__section { margin-bottom: 16px; }
+.panel__section { margin-bottom: 10px; }
 .panel__section + .panel__section {
-  padding-top: 14px;
+  padding-top: 10px;
   border-top: 1px solid var(--border);
 }
 .panel__title {
@@ -1848,7 +1854,7 @@ function layerTypeLabel(type: string) {
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--muted);
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1918,9 +1924,9 @@ function layerTypeLabel(type: string) {
 }
 
 /* ---------- 表单字段 ---------- */
-.field { display: block; margin-bottom: 8px; font-size: 11.5px; color: var(--muted); }
+.field { display: block; margin-bottom: 4px; font-size: 11.5px; color: var(--muted); }
 /* 自定义函数（空白）的小表单 */
-.field--row { display: flex; align-items: center; gap: 6px; }
+.field--row { display: flex; align-items: center; gap: 5px; }
 .field--row > span { display: inline; margin: 0; }
 /* 多函数列表：每行 = 表达式 + 颜色 + 虚实 + 线宽 + 删除 */
 .cfn__lines { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
@@ -1936,14 +1942,14 @@ function layerTypeLabel(type: string) {
 .cfn__pair input { width: 62px !important; }
 .cfn__err { margin: 4px 0 8px; font-size: 11px; color: #c0392b; line-height: 1.5; }
 .cfn__hint { margin: 2px 0 0; font-size: 11px; color: #8a8aa0; line-height: 1.55; }
-.field > span { display: block; margin-bottom: 4px; }
+.field > span { display: block; margin-bottom: 2px; }
 .field input[type="number"],
 .field input[type="text"],
 .field select {
   width: 100%;
   box-sizing: border-box;
-  height: 30px;
-  padding: 0 8px;
+  height: 27px;
+  padding: 0 7px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   font-size: 13px;

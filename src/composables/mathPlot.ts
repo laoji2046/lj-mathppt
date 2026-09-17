@@ -89,7 +89,7 @@ export function lineSvg(x1: number, y1: number, x2: number, y2: number, stroke: 
 
 /** 直角坐标轴（带箭头 + 整数刻度；0 不在窗口内时贴边） */
 /** 刻度配置：step=刻度间隔（数学单位）；pi=按弧度标注（π/2、π、3π/2…）；yLabels=要标数字的 y 值 */
-export interface TickCfg { step?: number; pi?: boolean; yLabels?: number[] }
+export interface TickCfg { step?: number; pi?: boolean; yLabels?: number[]; /** 坐标轴的虚线样式（空 = 实线） */ dash?: string }
 
 /** 把弧度值写成课本样式：π/2、π、3π/2、2π（负号用数学减号） */
 export function piLabel(v: number): string {
@@ -110,9 +110,10 @@ export function axesSvg(view: View, w: number, h: number, stroke: string, sw: nu
   const thin = Math.max(1, sw * 0.6)
   const head = Math.max(7, Math.min(w, h) * 0.035)
   let s = ''
-  s += '<line x1="0" y1="' + n1(y0) + '" x2="' + n1(w) + '" y2="' + n1(y0) + '" stroke="' + stroke + '" stroke-width="' + n1(thin) + '"/>'
+  const axd = cfg.dash ? ' stroke-dasharray="' + cfg.dash + '"' : ''
+  s += '<line x1="0" y1="' + n1(y0) + '" x2="' + n1(w) + '" y2="' + n1(y0) + '" stroke="' + stroke + '" stroke-width="' + n1(thin) + '"' + axd + '/>'
   s += '<polygon points="' + n1(w) + ',' + n1(y0) + ' ' + n1(w - head) + ',' + n1(y0 - head * 0.42) + ' ' + n1(w - head) + ',' + n1(y0 + head * 0.42) + '" fill="' + stroke + '"/>'
-  s += '<line x1="' + n1(x0) + '" y1="' + n1(h) + '" x2="' + n1(x0) + '" y2="0" stroke="' + stroke + '" stroke-width="' + n1(thin) + '"/>'
+  s += '<line x1="' + n1(x0) + '" y1="' + n1(h) + '" x2="' + n1(x0) + '" y2="0" stroke="' + stroke + '" stroke-width="' + n1(thin) + '"' + axd + '/>'
   s += '<polygon points="' + n1(x0) + ',0 ' + n1(x0 - head * 0.42) + ',' + n1(head) + ' ' + n1(x0 + head * 0.42) + ',' + n1(head) + '" fill="' + stroke + '"/>'
   const tickFs = Math.max(10, Math.min(w, h) * 0.05)
   if (withTicks) {
@@ -733,7 +734,8 @@ for (let i = 1; i <= 4; i++) {
     { key: 'm' + i, label: '线' + i + ' 截距 m', def: i === 1 ? -1 : 0, step: 0.5, min: -20, max: 20, showIf: on },
     // 起终点放到 ±50：线段要能伸出取景框，"整条直线"才不会显得被一个矩形框住
     { key: 's' + i, label: '线' + i + ' 起点 x', def: 0, step: 0.5, min: -50, max: 50, showIf: on },
-    { key: 'e' + i, label: '线' + i + ' 终点 x（与起点相同 = 整条直线）', def: 0, step: 0.5, min: -50, max: 50, showIf: on },
+    { key: 'e' + i, label: '线' + i + ' 终点 x（同起点 = 整条直线）', def: 0, step: 0.5, min: -50, max: 50, showIf: on },
+    { key: 'd' + i, label: '线' + i + ' 用虚线', def: 0, bool: true, showIf: on },
   )
 }
 /** 「圆锥曲线的标注点」：圆点 + 名称。名称是字符串 ✗（params 只能放数字），
@@ -749,10 +751,16 @@ for (let i = 1; i <= 6; i++) {
   )
 }
 
+/** 圆锥曲线自己的"外观"参数：曲线要不要虚线、坐标轴要不要虚线（颜色是字符串 → 存在元素的 axisColor 上） */
+export const CONIC_LOOK_PARAMS: ParamSpec[] = [
+  { key: 'cdash', label: '曲线用虚线', def: 0, bool: true },
+  { key: 'axisd', label: '坐标轴用虚线', def: 0, bool: true },
+]
+
 // 挂到所有自定义圆锥曲线上（挂在 conicFigure 之前，此时 CONICS 已完整定义）
 for (const kk of ['conicCustomCircle', 'conicCustomEllipse', 'conicCustomEllipseV', 'conicCustomHyperbola', 'conicCustomParabola']) {
   const dd = CONICS[kk]
-  if (dd) dd.params = [...(dd.params || []), ...LINE_PARAMS, ...POINT_PARAMS]
+  if (dd) dd.params = [...(dd.params || []), ...CONIC_LOOK_PARAMS, ...LINE_PARAMS, ...POINT_PARAMS]
 }
 
 /** 把直线 y = kx + m 裁到显示窗口里（**窗口外不画多余线段**），返回可见段两端点。 */
@@ -796,7 +804,8 @@ function drawExtraLines(kind: string, pv: Record<string, number>, view: View, w:
       if (hi - lo < 1e-9) continue
     }
     const col = colors && colors[i - 1] ? colors[i - 1]! : stroke     // 每条线可以有自己的颜色
-    out += lineSvg(mm.X(lo), mm.Y(k * lo + b2), mm.X(hi), mm.Y(k * hi + b2), col, sw)
+    const lDash = Math.round(pv['d' + i] ?? 0) ? '7 5' : ''             // 每条线可以自己选虚实 → 虚线标交点、实线画图形都行
+    out += lineSvg(mm.X(lo), mm.Y(k * lo + b2), mm.X(hi), mm.Y(k * hi + b2), col, sw, lDash)
     if (seg && dots) out += dotSvg(mm.X(lo), mm.Y(k * lo + b2), r, col) + dotSvg(mm.X(hi), mm.Y(k * hi + b2), r, col)
     // 弦长：这条线与曲线的两个交点之间的距离，标在弦中点（默认关）
     if (Math.round(pv.chord ?? 0)) {
@@ -1163,7 +1172,7 @@ export function conicEffectiveParams(
   return pv
 }
 
-export function conicFigure(kind: string, w: number, h: number, baseStroke: string, sw: number, fill = 'none', params?: Record<string, number>, opt?: { conicStroke?: string; lineColors?: (string | null)[]; pointLabels?: (string | null)[]; pointLinks?: (PointLink | null)[]; lineLinks?: (LineLink | null)[] }): string {
+export function conicFigure(kind: string, w: number, h: number, baseStroke: string, sw: number, fill = 'none', params?: Record<string, number>, opt?: { conicStroke?: string; axisColor?: string; lineColors?: (string | null)[]; pointLabels?: (string | null)[]; pointLinks?: (PointLink | null)[]; lineLinks?: (LineLink | null)[] }): string {
   const def = CONICS[kind]
   if (!def) return ''
   // ⚠ 用**生效参数**：绑定的切线由切点现算 k/m → 覆盖原来的值（动点一动切线就转 ✓）
@@ -1182,9 +1191,10 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
   const dash = '6 5'
   const curve = (d: string) => d
     ? '<path d="' + d + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + n1(sw) +
-      '" stroke-linecap="round" stroke-linejoin="round"/>'
+      '" stroke-linecap="round" stroke-linejoin="round"' +
+      (Math.round(pv.cdash ?? 0) ? ' stroke-dasharray="' + dash + '"' : '') + '/>'
     : ''
-  let s = axesSvg(view, w, h, baseStroke, sw, false)
+  let s = axesSvg(view, w, h, opt?.axisColor || baseStroke, sw, false, { dash: Math.round(pv.axisd ?? 0) ? dash : '' })
   // 「圆锥曲线 + 直线 / 线段」：在 s 的**最前面**加一次就够 —— 后面各分支只管往 s 上追加再 return s，
   // 所以不需要改动任何一个分支（改四个分支结尾容易漏、也容易错）。
   // 画在圆锥曲线**下面**，交点处线条不会互相压住。
