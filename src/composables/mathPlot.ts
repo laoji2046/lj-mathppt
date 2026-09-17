@@ -173,6 +173,11 @@ export interface ParamSpec {
   showIf?: (p: Record<string, number>) => boolean
   /** 布尔参数：属性面板渲染成**勾选框**（值仍是 0 / 1，存在同一个 params 里） */
   bool?: boolean
+  /** 把**同一组的参数并成一行**显示（如 x/y/大小 一行、k/m 一行、起/终一行）；
+   *  同一 group 的第一个参数的 label 用来定行，其余用 short 当行内小标题 */
+  group?: string
+  /** 并成一行时用的**短标题**（如 "x"、"k"、"起x"） */
+  short?: string
 }
 
 /** 分段函数的一段：f 在 [from, to] 上 */
@@ -730,11 +735,12 @@ export const LINE_PARAMS: ParamSpec[] = [
 for (let i = 1; i <= 4; i++) {
   const on = (p: Record<string, number>) => (p.n || 0) >= i
   LINE_PARAMS.push(
-    { key: 'k' + i, label: '线' + i + ' 斜率 k', def: i === 1 ? 0.6 : 0, step: 0.1, min: -10, max: 10, showIf: on },
-    { key: 'm' + i, label: '线' + i + ' 截距 m', def: i === 1 ? -1 : 0, step: 0.5, min: -20, max: 20, showIf: on },
+    // k / m 一行、起 / 终 一行（用户要求：别一个参数占一整屏）
+    { key: 'k' + i, label: '线' + i + ' 斜率 k', short: '线' + i + ' k', group: 'lk' + i, def: i === 1 ? 0.6 : 0, step: 0.1, min: -10, max: 10, showIf: on },
+    { key: 'm' + i, label: '线' + i + ' 截距 m', short: 'm', group: 'lk' + i, def: i === 1 ? -1 : 0, step: 0.5, min: -20, max: 20, showIf: on },
     // 起终点放到 ±50：线段要能伸出取景框，"整条直线"才不会显得被一个矩形框住
-    { key: 's' + i, label: '线' + i + ' 起点 x', def: 0, step: 0.5, min: -50, max: 50, showIf: on },
-    { key: 'e' + i, label: '线' + i + ' 终点 x（同起点 = 整条直线）', def: 0, step: 0.5, min: -50, max: 50, showIf: on },
+    { key: 's' + i, label: '线' + i + ' 起点 x', short: '起 x', group: 'ls' + i, def: 0, step: 0.5, min: -50, max: 50, showIf: on },
+    { key: 'e' + i, label: '线' + i + ' 终点 x（同起点 = 整条直线）', short: '终 x', group: 'ls' + i, def: 0, step: 0.5, min: -50, max: 50, showIf: on },
     { key: 'd' + i, label: '线' + i + ' 用虚线', def: 0, bool: true, showIf: on },
   )
 }
@@ -746,8 +752,10 @@ export const POINT_PARAMS: ParamSpec[] = [
 for (let i = 1; i <= 6; i++) {
   const on = (p: Record<string, number>) => (p.pn || 0) >= i
   POINT_PARAMS.push(
-    { key: 'px' + i, label: '点' + i + ' 横坐标 x', def: 0, step: 0.5, min: -50, max: 50, showIf: on },
-    { key: 'py' + i, label: '点' + i + ' 纵坐标 y', def: 0, step: 0.5, min: -50, max: 50, showIf: on },
+    // x / y / 大小 并成一行（用户要求）
+    { key: 'px' + i, label: '点' + i + ' 横坐标 x', short: '点' + i + ' x', group: 'pt' + i, def: 0, step: 0.5, min: -50, max: 50, showIf: on },
+    { key: 'py' + i, label: '点' + i + ' 纵坐标 y', short: 'y', group: 'pt' + i, def: 0, step: 0.5, min: -50, max: 50, showIf: on },
+    { key: 'ps' + i, label: '点' + i + ' 圆点大小', short: '大小', group: 'pt' + i, def: 1, step: 0.1, min: 0.3, max: 3, showIf: on },
   )
 }
 
@@ -965,7 +973,7 @@ export function conicPointPos(kind: string, params: Record<string, number> | und
 /** 画「标注点」：圆点 + 名称（名称取自 pointLabels，没有就用 P_1、P_2…）。
  *  先铺一层白底再画实心点 —— 它画在圆锥曲线**下面**（各分支都是往 s 上追加后 return，
  *  只能加在前面），有白底才不会被曲线压住看不清。 */
-function drawExtraPoints(kind: string, pv: Record<string, number>, view: View, w: number, h: number, stroke: string, labels?: (string | null)[], links?: (PointLink | null)[]): string {
+function drawExtraPoints(kind: string, pv: Record<string, number>, view: View, w: number, h: number, stroke: string, labels?: (string | null)[], links?: (PointLink | null)[], colors?: (string | null)[]): string {
   const n = Math.max(0, Math.min(6, Math.round(pv.pn || 0)))
   if (!n) return ''
   const mm = mapper(view, w, h)
@@ -977,10 +985,12 @@ function drawExtraPoints(kind: string, pv: Record<string, number>, view: View, w
     const pos = conicPointPos(kind, pv, i, links)
     if (!pos) continue
     const px = mm.X(pos.x), py = mm.Y(pos.y)
-    out += dotSvg(px, py, rr * 1.75, '#ffffff')
-    out += dotSvg(px, py, rr, stroke)
+    const col = (colors && colors[i - 1]) || stroke                 // 每个点可以有自己的颜色
+    const kk = Math.max(0.3, Math.min(3, pv['ps' + i] ?? 1))        // 每个点可以有自己的大小
+    out += dotSvg(px, py, rr * 1.75 * kk, '#ffffff')
+    out += dotSvg(px, py, rr * kk, col)
     const t = String((labels && labels[i - 1]) || ('P_' + i)).trim()
-    if (t) out += textSvg(px + fs * 0.8, py - fs * 0.75, t, fs, stroke)
+    if (t) out += textSvg(px + fs * 0.8, py - fs * 0.75, t, fs, col)
   }
   return out
 }
@@ -1172,7 +1182,7 @@ export function conicEffectiveParams(
   return pv
 }
 
-export function conicFigure(kind: string, w: number, h: number, baseStroke: string, sw: number, fill = 'none', params?: Record<string, number>, opt?: { conicStroke?: string; axisColor?: string; lineColors?: (string | null)[]; pointLabels?: (string | null)[]; pointLinks?: (PointLink | null)[]; lineLinks?: (LineLink | null)[] }): string {
+export function conicFigure(kind: string, w: number, h: number, baseStroke: string, sw: number, fill = 'none', params?: Record<string, number>, opt?: { conicStroke?: string; axisColor?: string; lineColors?: (string | null)[]; pointColors?: (string | null)[]; pointLabels?: (string | null)[]; pointLinks?: (PointLink | null)[]; lineLinks?: (LineLink | null)[] }): string {
   const def = CONICS[kind]
   if (!def) return ''
   // ⚠ 用**生效参数**：绑定的切线由切点现算 k/m → 覆盖原来的值（动点一动切线就转 ✓）
@@ -1199,7 +1209,7 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
   // 所以不需要改动任何一个分支（改四个分支结尾容易漏、也容易错）。
   // 画在圆锥曲线**下面**，交点处线条不会互相压住。
   s += drawExtraLines(kind, pv, view, w, h, baseStroke, sw, opt?.lineColors)
-  s += drawExtraPoints(kind, pv, view, w, h, baseStroke, opt?.pointLabels, opt?.pointLinks)
+  s += drawExtraPoints(kind, pv, view, w, h, baseStroke, opt?.pointLabels, opt?.pointLinks, opt?.pointColors)
   const label = (x: number, y: number, t: string, dx = 0, dy = 0) => textSvg(X(x) + dx, Y(y) + dy, t, fs, stroke)
   const dot = (x: number, y: number, k = 1) => dotSvg(X(x), Y(y), r * k, stroke)
 

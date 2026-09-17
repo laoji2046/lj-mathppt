@@ -100,6 +100,19 @@ const figParams = computed(() => {
   const cur = withParams(kind, m.params)
   return figureParams(kind).filter((pr) => !pr.showIf || pr.showIf(cur))
 })
+/** 参数**并行的分组**：同一 group（如 x / y / 大小、k / m、起 x / 终 x）并成一行渲染，面板短一半。
+ *  未分组的参数保持"一行一个"的老样子（勾选框、滑杆等）。 */
+type FigCell = { key: string; label: string; short: string; bool?: boolean; step?: number; min?: number; max?: number; def: number }
+const figRows = computed(() => {
+  const rows: { key: string; title: string; cells: FigCell[] }[] = []
+  for (const pr of figParams.value) {
+    const c: FigCell = { key: pr.key, label: pr.label, short: pr.short || pr.label, bool: pr.bool, step: pr.step, min: pr.min, max: pr.max, def: pr.def }
+    const last = rows[rows.length - 1]
+    if (pr.group && last && last.key === pr.group) { last.cells.push(c); continue }
+    rows.push({ key: pr.group || pr.key, title: String(pr.label).split(/\s+/)[0] || c.short, cells: [c] })
+  }
+  return rows
+})
 function figParamVal(key: string, def: number) {
   const v = mathfig.value?.params?.[key]
   return typeof v === 'number' ? v : def
@@ -233,6 +246,14 @@ function setPointLabel(i: number, v: string) {
   while (a.length <= i) a.push(null)
   a[i] = v.trim() ? v.trim() : null
   patch({ pointLabels: a } as Partial<SlideElement>)
+}
+// ── 每个标注点可以有自己的**颜色**（大小走参数 ps1/ps2…）──
+function pointColorVal(i: number) { return (mathfig.value?.pointColors || [])[i] || mathfig.value?.stroke || '#1a1a1a' }
+function setPointColor(i: number, v: string) {
+  const a: (string | null)[] = [...(mathfig.value?.pointColors || [])]
+  while (a.length <= i) a.push(null)
+  a[i] = v
+  patch({ pointColors: a } as Partial<SlideElement>)
 }
 function setLineColor(i: number, v: string) {
   const a: (string | null)[] = [...(mathfig.value?.lineColors || [])]
@@ -876,6 +897,14 @@ function layerTypeLabel(type: string) {
         <label class="prop-check" style="margin-top:6px">
           <input
             type="checkbox"
+            :checked="!!el.locked"
+            @change="patch({ locked: ($event.target as HTMLInputElement).checked } as Partial<SlideElement>)"
+          />
+          <span>锁定位置（画布上拖不动、也缩放不了，仍然可以选中改属性）</span>
+        </label>
+        <label class="prop-check" style="margin-top:6px">
+          <input
+            type="checkbox"
             :checked="el.fragment"
             @change="patch({ fragment: ($event.target as HTMLInputElement).checked } as Partial<SlideElement>)"
           />
@@ -1214,29 +1243,51 @@ function layerTypeLabel(type: string) {
         <p v-if="linkedN" class="panel__hint">其中 <b>{{ linkedN }}</b> 个点钉在「直线与曲线的交点」上：<b>直线一改它们就跟着动</b>；拖它 = 平移那条线；手动改它的 x/y 则解除绑定。</p>
         <button class="figlib__btn" title="把这个图形的种类与参数存进图形库，之后在「数学图形」面板里一键插回" @click="saveFigToLibrary">存入图形库</button>
         <p v-if="figLibMsg" class="panel__hint">{{ figLibMsg }}</p>
-        <label v-for="pr in figParams" :key="pr.key" class="field" :class="{ 'field--row': pr.bool }">
-          <span>{{ pr.label }}</span>
-          <input
-            v-if="pr.bool"
-            type="checkbox"
-            :checked="figParamVal(pr.key, pr.def) >= 0.5"
-            @change="setFigParam(pr.key, ($event.target as HTMLInputElement).checked ? 1 : 0)"
-          />
-          <input
-            v-else
-            type="number"
-            :step="pr.step ?? 0.1"
-            :min="pr.min"
-            :max="pr.max"
-            :value="figParamVal(pr.key, pr.def)"
-            @input="setFigParamSoft(pr.key, ($event.target as HTMLInputElement).value)"
-          />
-        </label>
+        <template v-for="row in figRows" :key="row.key">
+          <label v-if="row.cells.length === 1" class="field" :class="{ 'field--row': row.cells[0].bool }">
+            <span>{{ row.cells[0].label }}</span>
+            <input
+              v-if="row.cells[0].bool"
+              type="checkbox"
+              :checked="figParamVal(row.cells[0].key, row.cells[0].def) >= 0.5"
+              @change="setFigParam(row.cells[0].key, ($event.target as HTMLInputElement).checked ? 1 : 0)"
+            />
+            <input
+              v-else
+              type="number"
+              :step="row.cells[0].step ?? 0.1"
+              :min="row.cells[0].min"
+              :max="row.cells[0].max"
+              :value="figParamVal(row.cells[0].key, row.cells[0].def)"
+              @input="setFigParamSoft(row.cells[0].key, ($event.target as HTMLInputElement).value)"
+            />
+          </label>
+          <div v-else class="field field--multi">
+            <span>{{ row.title }}</span>
+            <div class="fm">
+              <label v-for="c in row.cells" :key="c.key" class="fm__cell">
+                <i>{{ c.short }}</i>
+                <input
+                  type="number"
+                  :step="c.step ?? 0.1"
+                  :min="c.min"
+                  :max="c.max"
+                  :value="figParamVal(c.key, c.def)"
+                  @input="setFigParamSoft(c.key, ($event.target as HTMLInputElement).value)"
+                />
+              </label>
+            </div>
+          </div>
+        </template>
         <p v-if="figParams.length" class="panel__hint">改参数后图形立即重绘（适合讲"图象变换 / 含参讨论"）。</p>
         <template v-if="pointN > 0">
           <label v-for="i in pointN" :key="'pl' + i" class="field">
             <span>点{{ i }} 名称</span>
             <input type="text" :value="pointLabelVal(i - 1)" placeholder="如 P_1 / 留空则不标" @change="setPointLabel(i - 1, ($event.target as HTMLInputElement).value)">
+          </label>
+          <label v-for="i in pointN" :key="'pc' + i" class="field">
+            <span>点{{ i }} 颜色</span>
+            <ColorSwatches :model-value="pointColorVal(i - 1)" @update:model-value="(v) => setPointColor(i - 1, v as string)" />
           </label>
         </template>
         <template v-if="hasLineParams">
@@ -1928,6 +1979,12 @@ function layerTypeLabel(type: string) {
 /* 自定义函数（空白）的小表单 */
 .field--row { display: flex; align-items: center; gap: 5px; }
 .field--row > span { display: inline; margin: 0; }
+/* 参数**并成一行**：每个小格上面一行小标题（x / y / 大小），下面一个输入框 */
+.field--multi > span { display: block; margin-bottom: 2px; }
+.fm { display: flex; align-items: flex-end; gap: 5px; }
+.fm__cell { flex: 1 1 0; min-width: 0; display: block; }
+.fm__cell > i { display: block; font-style: normal; font-size: 10px; color: var(--muted); margin-bottom: 1px; }
+.fm__cell input { width: 100%; }
 /* 多函数列表：每行 = 表达式 + 颜色 + 虚实 + 线宽 + 删除 */
 .cfn__lines { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .cfn__line { display: flex; align-items: center; gap: 6px; }

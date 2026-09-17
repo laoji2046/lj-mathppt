@@ -45,6 +45,8 @@ interface ElementBase extends Rect {
   /** 动画时长 / 延迟（ms） */
   animDuration?: number
   animDelay?: number
+  /** **锁定位置**：锁定后不能在画布上拖动/缩放（仍然可以选中、编辑属性） */
+  locked?: boolean
   /** 元素阴影（box-shadow）：开启后按 shadowColor 渲染色投影（颜色可选） */
   shadowOn?: boolean
   shadowColor?: string
@@ -559,6 +561,8 @@ export interface MathFigureElement extends ElementBase {
   lineColors?: (string | null)[]
   /** 「圆锥曲线的标注点」的名字（点个数由 params.pn 控制）；名字是字符串，所以放这里而不是 params */
   pointLabels?: (string | null)[]
+  /** 每个标注点的颜色覆盖（索引 = 点序号 − 1）；大小走 params.ps{i} */
+  pointColors?: (string | null)[]
   /** 把某个标注点**钉在"直线与曲线的交点"上**（line = 第几条线，which = 两个交点里的哪一个）。
    *  绑上之后该点的位置每次**现算**，所以直线一动它就跟着动 ✓；null = 普通点（用 px/py）。 */
   pointLinks?: ({ line: number; which: 0 | 1 } | { on: 'curve'; t: number; br?: 0 | 1 } | null)[]

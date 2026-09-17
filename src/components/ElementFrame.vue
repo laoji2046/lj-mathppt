@@ -83,9 +83,12 @@ const frameStyle = computed(() => ({
 }))
 
 function onPointerDown(e: PointerEvent) {
+  // 锁定的元素：不发出 grab → 画布不会开始拖动。点击仍然会被画布选中（选中逻辑不在这里）
+  if (props.el.locked) return
   emit('grab', { ev: e, mode: 'move', handle: 'se' })
 }
 function onHandleDown(e: PointerEvent, handle: Handle) {
+  if (props.el.locked) return
   emit('grab', { ev: e, mode: 'resize', handle })
 }
 function onDblClick() {
@@ -108,7 +111,7 @@ function onDblClick() {
     class="el-frame"
     :data-el-id="el.id"
     :class="[
-      { 'el-frame--selected': selected && !isLineLike },
+      { 'el-frame--selected': selected && !isLineLike, 'el-frame--locked': !!el.locked },
       animPreview && animPreview.id === el.id
         ? (animPreview.phase === 'em' ? animEmphasisClass(animPreview.em)
           : animPreview.phase === 'out' ? animOutClass(animPreview.out)
@@ -140,7 +143,7 @@ function onDblClick() {
     <EmbedElement v-else-if="el.type === 'embed'" :el="el" :selected="selected" />
     <RichTextElement v-else-if="el.type === 'richtex'" :el="el" @update="(p) => emit('update', el.id, p)" />
 
-    <template v-if="selected && showHandles && !isLineLike">
+    <template v-if="selected && showHandles && !isLineLike && !el.locked">
       <span
         v-for="h in HANDLES"
         :key="h"
@@ -159,6 +162,7 @@ function onDblClick() {
   cursor: move;
   transition: none;
 }
+.el-frame--locked { cursor: default; }
 .el-frame--selected {
   outline: 2px solid var(--brand-600);
   outline-offset: 0;
