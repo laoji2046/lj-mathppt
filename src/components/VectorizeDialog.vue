@@ -1470,6 +1470,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <template>
+  <!-- ⚠ 必须 Teleport 到 body —— 与三维窗口同一个坑：App.vue 里的弹窗困在 .app 的层叠上下文内，
+       而试卷 PaperModal 是 Teleport 到 body 的，所以 z-index 再高也压不过它。
+       （用户实测：点「矢量描摹」像没反应一样。） -->
+  <Teleport to="body">
   <div class="vd" @mousedown.self="emit('close')">
     <div class="vd__box">
       <header class="vd__head">
@@ -1699,10 +1703,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       </footer>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>
-.vd { position: fixed; inset: 0; z-index: 500; background: rgba(20, 24, 34, 0.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; }
+.vd { position: fixed; inset: 0; z-index: 3200; /* 必须高于试卷弹层(.pm 是 2000) —— 与三维窗口一致 */ background: rgba(20, 24, 34, 0.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; }
 .vd__box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: 92vw; max-width: 1000px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
 .vd__head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .vd__title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; color: var(--text); }
