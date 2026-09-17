@@ -358,7 +358,7 @@ function labelHalfWidth(lab: string, fs: number, w: number) {
 }
 
 /** 顶点字母标注：A、A_1（下标）、B^2（上标）、A'…… 用 SVG tspan 排版 */
-function labelSvg(s: string, x: number, y: number, color: string, fs: number): string {
+export function labelSvg(s: string, x: number, y: number, color: string, fs: number): string {
   const { base, sub, sup } = decodeLabel(s)
   // 白色描边当垫底（paint-order: stroke = 先描边后填字），压在线上也读得清 ——
   // 原图里 A 就是直接压在 AB / AD 那两条虚线上的

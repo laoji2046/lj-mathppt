@@ -15,7 +15,7 @@ import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type { MathFigureElement, SlideElement, FigureArc } from '@/types'
 import { loadImageElement, type VectorizeOpt, type VectorizeResult } from '@/composables/vectorize'
-import { labelFontSize, labelGap, arcPolyline } from '@/composables/solid3d'
+import { labelFontSize, labelGap, labelSvg, arcPolyline } from '@/composables/solid3d'
 
 type VectorizeWorker = Worker & { __nextId?: number }
 let vectorWorker: VectorizeWorker | null = null
@@ -214,6 +214,68 @@ function toFull(i: number): [number, number] {
 function px(i: number) { return toFull(i)[0] * viewW.value }
 function py(i: number) { return toFull(i)[1] * viewH.value }
 function ex(i: number) { const e = edges.value[i]; return e ? [px(e[0]), py(e[0]), px(e[1]), py(e[1])] : [0, 0, 0, 0] }
+
+/** 字母落点在 overlay 里的像素位置 = 顶点 + 该顶点的字母偏移（offs 是"相对识别框"的单位）。
+ *  跟插入时 labelOffsets 的算法同源，所以弹窗里看到的字母位置就是插进试卷后的位置。 */
+function labXY(i: number): [number, number] {
+  const r = res.value
+  if (!r) return [0, 0]
+  const [bx, by, ex2, ey2] = r.box
+  const cw = ex2 - bx, ch = ey2 - by
+  const x = pts.value[i * 2] + (offs.value[i]?.dx || 0)
+  const y = pts.value[i * 2 + 1] + (offs.value[i]?.dy || 0)
+  return [((x * cw + bx) / r.imgW) * viewW.value, ((y * ch + by) / r.imgH) * viewH.value]
+}
+/** 复用渲染器的字母排版（下标 A_1 / 上标 B^2 / 撇 A'），弹窗预览 = 插入后的样子 */
+function labelHtml(i: number): string {
+  const lab = (labels.value[i] || '').trim()
+  if (!lab || !res.value) return ''
+  const [x, y] = labXY(i)
+  const fs = labelFontSize(viewH.value)
+  const uncertain = lconf.value[i] > 0 && lconf.value[i] < 0.8
+  return labelSvg(lab, x, y, uncertain ? '#c77700' : '#1a1a1a', fs)
+}
+
+/** 原图里认到的字母总数（含没配上顶点的）。以前配不上就**静默丢掉**，现在放出来。 */
+const anchorN = computed(() => (res.value?.anchors || []).filter((a) => !!(a.text || '').trim()).length)
+const orphanN = computed(() => Math.max(0, anchorN.value - labels.value.filter((s) => (s || '').trim()).length))
+
+/** 再自动配一次字母：半径和置信度都放宽。
+ *  默认配对只认识别框 0.16 以内、置信度 ≥0.7 的字母；扫描件的字母常常差一点就配不上，
+ *  配不上就一个字都不显示 —— 用户要的"自动识别原图的字母"就卡在这一步。 */
+function rematch() {
+  const r = res.value
+  if (!r) return
+  const n = pts.value.length / 2
+  const RAD = 0.32, CONF = 0.45
+  const cand: { i: number; k: number; d: number }[] = []
+  for (let i = 0; i < n; i++) {
+    const vx = pts.value[i * 2], vy = pts.value[i * 2 + 1]
+    for (let k = 0; k < r.anchors.length; k++) {
+      const an = r.anchors[k]
+      if (!(an.text || '').trim() || an.conf < CONF) continue
+      const d = Math.hypot(an.x - vx, an.y - vy)
+      if (d <= RAD) cand.push({ i, k, d })
+    }
+  }
+  cand.sort((a, b) => a.d - b.d)
+  const vTake = new Array(n).fill(false)
+  const aTake = new Array(r.anchors.length).fill(false)
+  let got = 0
+  for (const c of cand) {
+    if (aTake[c.k] || vTake[c.i]) continue
+    aTake[c.k] = true; vTake[c.i] = true
+    if ((labels.value[c.i] || '').trim()) continue        // 手填的 / 已配好的不覆盖
+    const vx = pts.value[c.i * 2], vy = pts.value[c.i * 2 + 1]
+    labels.value[c.i] = r.anchors[c.k].text
+    lconf.value[c.i] = r.anchors[c.k].conf
+    offs.value[c.i] = { dx: r.anchors[c.k].x - vx, dy: r.anchors[c.k].y - vy }
+    got++
+  }
+  note.value = got
+    ? ('又配上 ' + got + ' 个字母' + (orphanN.value ? '，还剩 ' + orphanN.value + ' 个没配到，可能要手填' : ''))
+    : (anchorN.value ? '没配上 —— 这些字母离顶点都太远，只能在右边手填' : '原图里没认到字母（字母可能压在线上，或太小）')
+}
 
 /** 识别结果 → 可编辑副本；字母位置按"离得最近且没被占用的原字母"给 */
 function adopt(r: VectorizeResult) {
@@ -1629,6 +1691,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                     style="pointer-events:none"
                   >{{ i - 1 }}</text>
                 </g>
+                <!-- 顶点字母：直接复用渲染器的排版（下标/上标/白描边垫底），
+                     所以弹窗里看到的位置和字形就是插进试卷后的样子 -->
+                <g v-for="i in nVerts" :key="'lab' + (i - 1)" class="vd__lab" v-html="labelHtml(i - 1)" />
               </svg>
               <div
                 v-if="drag" class="vd__drag"
@@ -1720,6 +1785,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
             <div class="vd__label">
               顶点字母 —— 已自动填 <b>{{ labels.filter((s) => s.trim()).length }}</b> 个<template v-if="unsureN">，其中 <b class="vd__warn">{{ unsureN }}</b> 个不太确定，请对一眼</template>
+            </div>
+            <div class="vd__row">
+              <span class="vd__selnum">原图里认到 <b>{{ anchorN }}</b> 个字母<template v-if="orphanN">，还有 <b class="vd__warn">{{ orphanN }}</b> 个没配到顶点</template></span>
+              <button class="vd__btn vd__btn--sm" :disabled="!res || !anchorN" @click="rematch()">再自动配一次</button>
             </div>
             <div class="vd__list">
               <div v-for="i in nVerts" :key="'l' + (i - 1)" class="vd__item" :class="{ 'vd__item--on': selVs.includes(i - 1) }">
