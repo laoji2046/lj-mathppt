@@ -80,6 +80,8 @@ export interface VectorizeOpt {
    *   真实虚线边全都至少有一头搭在图形顶点上。所以这是个"想拉多紧都安全"的旋钮，专门用来扔掉悬空的杂点段。
    */
   dashMinEdge?: number
+  /** 自动把曲线拟合成弧时，要求弧**至少扫过**这么多度（默认 30）。太小会把角当成弧。 */
+  arcMinSpan?: number
   /**
    * 「度 2 且几乎在一条直线上」的顶点判为假顶点的方向余弦门槛（默认 0.995 ≈ 5.7°）。
    * 手绘/扫描的直线在中间会有微小折角，0.995 偏严时就会留下用户说的"直线上多出来的点"（例如点 9）。
@@ -124,7 +126,7 @@ export interface VectorizeResult {
 /** 把一串点拟合成**轴对齐**椭圆，返回像素单位的中心/半径/参数角与拟合残差。
  *  立体几何里的底面圆投影下来基本都是轴对齐椭圆，够用；拟合得不像（残差大）就退回折线。
  *  用代数距离最小二乘：x² + B·y² + C·x + D·y + E = 0，展开成 4 元线性方程组。 */
-export function fitEllipse(pts: [number, number][]): { cx: number; cy: number; rx: number; ry: number; a0: number; a1: number; rms: number } | null {
+export function fitEllipse(pts: [number, number][], w?: number[]): { cx: number; cy: number; rx: number; ry: number; a0: number; a1: number; rms: number } | null {
   const n = pts.length
   if (n < 8) return null
   // **先在单位框里拟合**：直接拿像素坐标算，x² 的量级是 500²=25 万，跟常数项差 5 个数量级，
@@ -135,14 +137,18 @@ export function fitEllipse(pts: [number, number][]): { cx: number; cy: number; r
   const P = pts.map(([x, y]) => [(x - x0) / bw, (y - y0) / bh] as [number, number])
   let a11 = 0, a12 = 0, a13 = 0, a14 = 0, a22 = 0, a23 = 0, a24 = 0, a33 = 0, a34 = 0, a44 = 0
   let b1 = 0, b2 = 0, b3 = 0, b4 = 0
-  for (const [x, y] of P) {
+  // w 是**梯度加权**（Sampson 近似）用的权重：不传就是普通代数拟合（结果与原来完全一致）。
+  // 传了的话法方程按 w 加权，外层迭代几轮就把"代数距离"逼近成"几何距离"。
+  for (let i = 0; i < n; i++) {
+    const [x, y] = P[i]
+    const wi = w ? w[i] : 1
     const r0 = y * y, r1 = x, r2 = y
     const t = -x * x
-    a11 += r0 * r0; a12 += r0 * r1; a13 += r0 * r2; a14 += r0
-    a22 += r1 * r1; a23 += r1 * r2; a24 += r1
-    a33 += r2 * r2; a34 += r2
-    a44 += 1
-    b1 += r0 * t; b2 += r1 * t; b3 += r2 * t; b4 += t
+    a11 += wi * r0 * r0; a12 += wi * r0 * r1; a13 += wi * r0 * r2; a14 += wi * r0
+    a22 += wi * r1 * r1; a23 += wi * r1 * r2; a24 += wi * r1
+    a33 += wi * r2 * r2; a34 += wi * r2
+    a44 += wi
+    b1 += wi * r0 * t; b2 += wi * r1 * t; b3 += wi * r2 * t; b4 += wi * t
   }
   // 4x4 高斯消元（带部分主元）
   const M = [[a11, a12, a13, a14, b1], [a12, a22, a23, a24, b2], [a13, a23, a33, a34, b3], [a14, a24, a34, a44, b4]]
@@ -187,16 +193,28 @@ export function fitEllipse(pts: [number, number][]): { cx: number; cy: number; r
 
 /** 最小二乘拟合**圆**（Kasa 法）。只有 3 个参数，短弧上也稳 ——
  *  用它先找出"哪一段确实是弧"，再对整段拟合椭圆（椭圆 5 个参数，短弧上是病态的：实测残差几十像素、甚至解出 rx=452531）。 */
-export function fitCircle(pts: [number, number][]): { cx: number; cy: number; r: number; rms: number } | null {
+export function fitCircle(pts: [number, number][], w?: number[]): { cx: number; cy: number; r: number; rms: number } | null {
   const n = pts.length
   if (n < 5) return null
-  let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sxz = 0, syz = 0, sz = 0
-  for (const [x, y] of pts) {
+  // ⚠ **先平移到质心再拟合**：Kåsa 的法方程里 x² 和常数项差好几个数量级，弧又短，
+  //   直接拿像素坐标算会严重病态 —— 实测圆心在 (180,150) 的一段 120° 弧就直接拟合不出来。
+  //   平移不改变圆（只是换参考点），把法方程的尺度拉回来，纯粹的数值改善。
+  let mx = 0, my = 0
+  for (const [x, y] of pts) { mx += x; my += y }
+  mx /= n; my /= n
+  let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sxz = 0, syz = 0, sz = 0, sw = 0
+  // 同 fitEllipse：不传 w 时（sw === n）结果与原来逐位一致
+  for (let i = 0; i < n; i++) {
+    const x = pts[i][0] - mx, y = pts[i][1] - my
+    const wi = w ? w[i] : 1
     const z = x * x + y * y
-    sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y
-    sxz += x * z; syz += y * z; sz += z
+    sw += wi
+    sx += wi * x; sy += wi * y; sxx += wi * x * x; syy += wi * y * y; sxy += wi * x * y
+    sxz += wi * x * z; syz += wi * y * z; sz += wi * z
   }
-  const A = [[sxx, sxy, sx, -sxz], [sxy, syy, sy, -syz], [sx, sy, n, -sz]]
+  // ⚠ 第 3 行第 3 列必须是 **Σw**，不能写死 n ✗ —— 加权时 RHS 按 w 累加、LHS 却还是 n，
+  //   方程左右不一致 → 解直接飞掉（实测圆心飞到 220 万像素外、半径同量级）。
+  const A = [[sxx, sxy, sx, -sxz], [sxy, syy, sy, -syz], [sx, sy, sw, -sz]]
   for (let c = 0; c < 3; c++) {
     let piv = c
     for (let r2 = c + 1; r2 < 3; r2++) if (Math.abs(A[r2][c]) > Math.abs(A[piv][c])) piv = r2
@@ -213,10 +231,11 @@ export function fitCircle(pts: [number, number][]): { cx: number; cy: number; r:
     for (let k = r2 + 1; k < 3; k++) v -= A[r2][k] * s[k]
     s[r2] = v / A[r2][r2]
   }
-  const cx = -s[0] / 2, cy = -s[1] / 2
-  const rr = cx * cx + cy * cy - s[2]
+  const cx0 = -s[0] / 2, cy0 = -s[1] / 2        // 相对质心的圆心
+  const rr = cx0 * cx0 + cy0 * cy0 - s[2]
   if (!(rr > 1)) return null
   const r = Math.sqrt(rr)
+  const cx = cx0 + mx, cy = cy0 + my            // 换回原坐标系
   let sum = 0
   for (const [x, y] of pts) sum += (Math.hypot(x - cx, y - cy) - r) ** 2
   return { cx, cy, r, rms: Math.sqrt(sum / n) }
@@ -227,6 +246,102 @@ function diagOf(pts: [number, number][]) {
   for (const [x, y] of pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y }
   return Math.max(1, Math.hypot(x1 - x0, y1 - y0))
 }
+
+/** 一条路径用**直线**拟合时的正交距离 RMS（PCA 主轴）。
+ *  它是"这段到底是不是弧"的关键对照：稍微有点弯的直线也能拟合出一个半径几千像素的圆 ——
+ *  v1142 那次"凭空多画出一段弧"就是这么来的。所以弧必须**显著优于**直线才算数。 */
+function lineRms(pts: [number, number][]): number {
+  const n = pts.length
+  if (n < 2) return 0
+  let mx = 0, my = 0
+  for (const [x, y] of pts) { mx += x; my += y }
+  mx /= n; my /= n
+  let sxx = 0, sxy = 0, syy = 0
+  for (const [x, y] of pts) { const dx = x - mx, dy = y - my; sxx += dx * dx; sxy += dx * dy; syy += dy * dy }
+  const th = 0.5 * Math.atan2(2 * sxy, sxx - syy)
+  const ux = Math.cos(th), uy = Math.sin(th)
+  let s = 0
+  for (const [x, y] of pts) { const dx = x - mx, dy = y - my; const d = dx * -uy + dy * ux; s += d * d }
+  return Math.sqrt(s / n)
+}
+
+/** 梯度加权迭代（Sampson 近似）：把**代数距离**逐步逼近**几何距离**。
+ *  普通代数拟合在局部弧上有系统偏差（Kåsa 尤其明显：弧越短偏得越多）——
+ *  这是"拟合方法本身"能改进的地方，迭代几轮就把偏差压下去。 */
+export function arcRefine(pts: [number, number][], kind: 'circle' | 'ellipse') {
+  const n = pts.length
+  let w: number[] | undefined
+  let out: { cx: number; cy: number; rx: number; ry: number; rms: number } | null = null
+  for (let it = 0; it < 6; it++) {
+    if (kind === 'circle') {
+      const c = fitCircle(pts, w)
+      out = c ? { cx: c.cx, cy: c.cy, rx: c.r, ry: c.r, rms: c.rms } : null
+    } else {
+      const e = fitEllipse(pts, w)
+      out = e ? { cx: e.cx, cy: e.cy, rx: e.rx, ry: e.ry, rms: e.rms } : null
+    }
+    if (!out) return null
+    // Sampson 权重 = 1/|∇F|²；这里 F = u²+v²−1（u=(x−cx)/rx，v=(y−cy)/ry）
+    const { cx, cy, rx, ry } = out
+    w = pts.map(([x, y]) => {
+      const u = (x - cx) / rx, v = (y - cy) / ry
+      const g = (u * u) / (rx * rx) + (v * v) / (ry * ry)
+      return 1 / Math.max(1e-9, g)
+    })
+  }
+  return out
+}
+
+/** 把一条骨架路径**可靠地**拟合成弧；不可靠返回 null（宁可不出弧，也不凭空画一条）。
+ *  v1142 是直接把拟合结果加成弧 → 用户反馈"图上凭空多画出一段弧" ✗。所以三道门槛：
+ *   ① 弧 RMS < 1.2px，且必须 < 直线 RMS 的 1/3（不够优于直线就当直线）；
+ *   ② 95% 以上的点都要贴着弧（覆盖整条路径，不能是"弧 + 顺势追下去的直线"）；
+ *   ③ 长短轴比 ≤ 4、半径不超过路径跨度的 3 倍（拟合发散的一律不要）。
+ *  返回**像素坐标**下的弧（调用方最后统一归一化）。 */
+export function tryFitArc(pts: [number, number][], minSpanDeg: number) {
+  const n = pts.length
+  if (n < 16) return null
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9
+  for (const [x, y] of pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y }
+  const ext = Math.max(1, Math.hypot(x1 - x0, y1 - y0))
+  const lr = lineRms(pts)
+  // ⚠ 必须**先逐条过滤、再挑**（不能"先挑残差最小的、再看它合不合理"）：
+  //   椭圆多 2 个参数，短弧上很容易给出一个"残差极小但形状离谱"的假解（例如 ry 上千）；
+  //   旧写法会挑中它、然后被形状门槛整条否掉 —— **连旁边那个完全正确的圆一起丢掉**。
+  //   实测：120° / 90° / 60° 的弧全部被这个坑否掉（见 .probe/vfit.cjs）。
+  const gate = (c: { cx: number; cy: number; rx: number; ry: number; rms: number } | null) => {
+    if (!c || !isFinite(c.rms)) return null
+    const r0 = Math.min(c.rx, c.ry), r1 = Math.max(c.rx, c.ry)
+    if (!(r0 > 2)) return null                          // 太小 = 噪声
+    if (c.rms > 1.2) return null                        // ① 拟合本身要够贴
+    if (lr < c.rms * 3) return null                     // ① 不够优于直线 → 当直线
+    if (r1 / r0 > 4) return null                        // ③ 太扁 = 发散
+    if (r1 > ext * 3) return null                       // ③ 半径离谱
+    let bad = 0                                          // ② 必须盖住整条路径
+    for (const [x, y] of pts) {
+      const q = Math.hypot((x - c.cx) / c.rx, (y - c.cy) / c.ry)
+      if (Math.abs(q - 1) * r0 > 2.5) bad++
+    }
+    if (bad > n * 0.05) return null
+    return c
+  }
+  const okC = gate(arcRefine(pts, 'circle'))
+  const okE = gate(arcRefine(pts, 'ellipse'))
+  // 椭圆只在**明显更准**时才压过圆（多 2 个参数，容易被短弧上的低残差假解骗到）
+  const best = okE && (!okC || okE.rms < okC.rms * 0.7) ? okE : okC
+  if (!best) return null
+  const angOf = (p: [number, number]) => Math.atan2((p[1] - best.cy) / best.ry, (p[0] - best.cx) / best.rx)
+  let span = 0
+  for (let i = 1; i < n; i++) {
+    let d = angOf(pts[i]) - angOf(pts[i - 1])
+    while (d > Math.PI) d -= 2 * Math.PI
+    while (d < -Math.PI) d += 2 * Math.PI
+    span += Math.abs(d)
+  }
+  if ((span * 180) / Math.PI < minSpanDeg) return null   // 太短的弧不值得，折线更稳
+  return { cx: best.cx, cy: best.cy, rx: best.rx, ry: best.ry, a0: angOf(pts[0]), a1: angOf(pts[n - 1]) }
+}
+
 
 /** 在一串骨架点里找出"确实是弧"的连续段。
  *  一条路常常是「弧 + 紧接着追下去的直线」，整条拟合残差几十像素；
@@ -783,11 +898,16 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     let plen2 = 0
     for (let k = 1; k < P.pts.length; k++) plen2 += Math.hypot(P.pts[k][0] - P.pts[k - 1][0], P.pts[k][1] - P.pts[k - 1][1])
     const isCurve = poly.length >= 3 && plen2 > maxPiece
-    // 【自动拟合弧：暂时关掉】
-    // v1142 试过在识别时自动把曲线拟合成弧图元。结果是**指标一点没涨**（覆盖/顶点数逐项一致），
-    // 却会在图上凭空多画出一段弧（实测有用户反馈）。收益为零、还会出错，所以先关掉：
-    // 弧改成完全由用户手工画（弹窗「＋ 画一段弧」，见 v1143），确定性高得多。
-    // fitArcRuns / fitEllipse / fitCircle 这三个函数留着，将来要做"可靠的自动拟合"时接着用。
+    // 【自动拟合弧：v1374 接回来了】
+    // v1142 试过、又因为"图上凭空多画出一段弧"回退掉。这次的差别是**先判定可靠才出弧**：
+    //   · 用**原始骨架点**拟合（rdp 之后曲率信息就没了）；
+    //   · 弧必须**显著优于直线**（直线 RMS < 3×弧残差）—— 稍弯的直线一律当直线；
+    //   · 必须覆盖整条路径（"弧 + 顺势追下去的直线"不出弧）；
+    //   · 梯度加权迭代压掉代数拟合在短弧上的系统偏差。
+    // 弧代表这条路径时**不再出折线**：折线留着就会与弧重叠 —— 那正是 v1142 看到的"多画一段"。
+    // 顶点不受影响：顶点是从骨架图 G.nodes 建的，与出不出折线无关。
+    const arc = tryFitArc(P.pts, opt.arcMinSpan ?? 30)
+    if (arc) { fittedArcs.push({ cx: arc.cx, cy: arc.cy, rx: arc.rx, ry: arc.ry, a0: arc.a0, a1: arc.a1, dash: 0 }); continue }
     void isCurve
     for (let k = 0; k < poly.length - 1; k++) {
       const a = poly[k], b = poly[k + 1]
