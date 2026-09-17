@@ -20,14 +20,14 @@ if (-not (Test-Path (Join-Path $root 'package.json'))) {
   exit 1
 }
 
-$stamp = Get-Date -Format 'yyyyMMdd-HHmm'
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'    # 带秒：同一分钟内跑两次也会同名，Create 会直接抛"文件已存在" ✗
 $backupDir = Join-Path $root '_backup'
 New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
 $zipPath = Join-Path $backupDir ('save-' + $stamp + '.zip')
 
 Write-Host '=== 收集文件（保留相对路径）===' -ForegroundColor Cyan
 $files = New-Object System.Collections.ArrayList
-foreach ($d in @('src', 'public', 'docs', 'images', '参考', 'jiaoxuekejian')) {
+foreach ($d in @('src', 'public', 'docs', 'images', '参考', 'jiaoxuekejian', '.probe')) {
   if (Test-Path $d) {
     $fs = @(Get-ChildItem $d -Recurse -File -ErrorAction SilentlyContinue)
     [void]$files.AddRange($fs)
@@ -39,12 +39,13 @@ if (Test-Path 'src-tauri') {
   [void]$files.AddRange($fs)
   Write-Host ('  src-tauri(无 target) ' + $fs.Count + ' 个')
 }
-foreach ($f in @('package.json', 'package-lock.json', 'README.md', 'vite.config.ts', 'tsconfig.json', 'index.html', '.gitignore', 'clean-dist.cjs', 'dev.cmd', 'example-customized-calculators.html')) {
+foreach ($f in @('package.json', 'package-lock.json', 'README.md', 'vite.config.ts', 'tsconfig.json', 'index.html', '.gitignore', 'clean-dist.cjs', 'dev.cmd', 'example-customized-calculators.html', 'backup.ps1')) {
   if (Test-Path $f) { [void]$files.Add((Get-Item $f)) }
 }
 Write-Host ('  合计 ' + $files.Count + ' 个文件')
 
 Write-Host '=== 逐条写入压缩包（保留路径）===' -ForegroundColor Cyan
+if (Test-Path $zipPath) { Remove-Item $zipPath -Force }   # 双保险：万一还是撞名，先删掉再建
 $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Create')
 $n = 0
 foreach ($f in $files) {
