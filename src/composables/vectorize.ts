@@ -64,16 +64,20 @@ export interface VectorizeOpt {
    */
   dashMinPiece?: number
   /**
-   * 杂点门槛②：一堆短划的总长度不足这么多（px，默认 10）就整堆当噪点抹掉。
+   * 杂点门槛②：一堆短划的总长度不足这么多（px，默认 16）就整堆当噪点抹掉。
    * 两个杂点被"虚线成链"连起来 = 凭空多出一条悬空线段（用户实报的"可删掉又不影响其他的线段"）。
    * 真短虚线哪怕只有两截（D–E 那种），两块加起来也远超这个值。
+   * ⚠ 实测（1-原图.png 逐值扫描）：最小的**真实**短划堆总长在 21~22px（阈值提到 22 就会杀掉一堆真短划），
+   *   所以 16 是留了 5px 余量后的安全上限 —— 而两个 7px 的杂点凑成的一堆只有 14px，正好被它拦住。
    */
   dashMinTotal?: number
   /**
-   * 杂点门槛③：**两端都没吸附到图形顶点**的虚线边，如果短于这个长度（px，默认 40）就整条丢掉。
+   * 杂点门槛③：**两端都没吸附到图形顶点**的虚线边，如果短于这个长度（px，默认 80）就整条丢掉。
    * 这才是用户报的"多了一些可删掉又不影响其他的线段"：一小撮杂点自成一段，
    * 两头都是新造出来的孤立顶点 → 画面上就是一条凭空多出来的短线段（删掉它不影响任何别的边）。
    * 只要有一头吸附到了真顶点就不会被丢，所以图中真实的虚线边（实测 89~444px）一律不受影响。
+   * ⚠ 实测：这个阈值从 40 一路提到 120，1-原图.png 与 3-人工修正.png 的输出**一条边都没变** ——
+   *   真实虚线边全都至少有一头搭在图形顶点上。所以这是个"想拉多紧都安全"的旋钮，专门用来扔掉悬空的杂点段。
    */
   dashMinEdge?: number
 }
@@ -462,7 +466,7 @@ export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array
     // 按 ≥3 判的话它们会被当字母碎片抹掉，用户看到的就是"这条边没识别出来"
     // 整堆总长度不够 = 几个杂点凑出来的假虚线 → 整堆抹掉（真短虚线两截加起来也远超这个值）
     const mass = grp.reduce((s, c) => s + c.len, 0)
-    if (grp.length >= 2 && mass >= (opt.dashMinTotal ?? 10)) groups.push(grp)
+    if (grp.length >= 2 && mass >= (opt.dashMinTotal ?? 16)) groups.push(grp)
     else for (const c of grp) texts.push(c)
   }
   const out = ink.slice()
@@ -911,7 +915,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     if (bi < 0) bi = addV(E.b[0], E.b[1])
     if (ai === bi) continue
     // 两头都没搭上图形 = 自成一段的杂点，且又短 → 整条丢掉（见 dashMinEdge 注释）
-    if (E.dash && aNew && bNew && Math.hypot(E.b[0] - E.a[0], E.b[1] - E.a[1]) < (opt.dashMinEdge ?? 40)) continue
+    if (E.dash && aNew && bNew && Math.hypot(E.b[0] - E.a[0], E.b[1] - E.a[1]) < (opt.dashMinEdge ?? 80)) continue
     if (Math.hypot(verts[ai].x - verts[bi].x, verts[ai].y - verts[bi].y) < 4) continue
     outEdges.push([ai, bi, E.dash])
   }
