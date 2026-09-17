@@ -557,6 +557,9 @@ export interface MathFigureElement extends ElementBase {
   lineColors?: (string | null)[]
   /** 「圆锥曲线的标注点」的名字（点个数由 params.pn 控制）；名字是字符串，所以放这里而不是 params */
   pointLabels?: (string | null)[]
+  /** 把某个标注点**钉在"直线与曲线的交点"上**（line = 第几条线，which = 两个交点里的哪一个）。
+   *  绑上之后该点的位置每次**现算**，所以直线一动它就跟着动 ✓；null = 普通点（用 px/py）。 */
+  pointLinks?: ({ line: number; which: 0 | 1 } | null)[]
   /** 每个顶点字母相对默认位置(顶点上方)的拖拽偏移(归一化)，用于避免遮挡 */
   labelOffsets?: { dx: number; dy: number }[]
   /** 每个面的样式覆盖（填充色/透明度/隐藏该面），索引与面表一致 */

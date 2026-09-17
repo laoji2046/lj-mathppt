@@ -18,7 +18,7 @@ import { layoutTable, mergeAt, unmergeAt } from '@/composables/tableLayout'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
 import { openShapeEdit } from '@/ui/shapeEditor'
-import { compileExpr, conicLineIntersections, figureParams, withParams } from '@/composables/mathPlot'
+import { compileExpr, conicLineIntersections, conicPointPos, figureParams, withParams } from '@/composables/mathPlot'
 import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type EdgeStyle, type FaceStyle } from '@/composables/solid3d'
 import { solidSel } from '@/composables/solidSel'
 import { openImageEditor } from '@/ui/imageEditor'
@@ -105,8 +105,23 @@ function figParamVal(key: string, def: number) {
   return typeof v === 'number' ? v : def
 }
 function setFigParam(key: string, v: number) {
-  patch({ params: { ...(mathfig.value?.params || {}), [key]: v } } as Partial<SlideElement>)
+  const p: Partial<SlideElement> & { pointLinks?: ({ line: number; which: 0 | 1 } | null)[] } = {
+    params: { ...(mathfig.value?.params || {}), [key]: v },
+  }
+  // 手动改标注点的 x/y = 想让它当**普通点** → 顺手解除"钉在交点上"的绑定
+  //（不解除的话改了没反应，用起来像坏了 ✗）
+  if (key.startsWith('px') || key.startsWith('py')) {
+    const idx = Number(key.slice(2)) - 1
+    const links = [...(mathfig.value?.pointLinks || [])]
+    if (idx >= 0 && links[idx]) {
+      links[idx] = null
+      p.pointLinks = links
+    }
+  }
+  patch(p as Partial<SlideElement>)
 }
+/** 有几个标注点是"钉在交点上、随直线自动变化"的 */
+const linkedN = computed(() => (mathfig.value?.pointLinks || []).filter(Boolean).length)
 /** 参数输入：**只在能解析成数字时才提交**。
  *  ⚠ 原来直接 num(...) 提交 —— type=number 里刚敲一个负号时 value 是空串，
  *  被判成"非法 → 用默认值"，再回写 :value，**负号当场被抹掉 → 压根输不了负数**（用户实报）。
@@ -136,22 +151,37 @@ function calcIntersections() {
   const pts = conicLineIntersections(String(m.kind || ''), m.params)
   const flash = (t: string) => { ixMsg.value = t; window.setTimeout(() => { ixMsg.value = '' }, 4000) }
   if (!pts.length) { flash('没算到交点 —— 检查直线的 k、m，以及线段起终点是否把交点排除在外了'); return }
+  const kind = String(m.kind || '')
   const params = { ...(m.params || {}) }
   const labels: (string | null)[] = [...(m.pointLabels || [])]
+  const links: ({ line: number; which: 0 | 1 } | null)[] = [...(m.pointLinks || [])]
   const base = Math.max(0, Math.min(6, Math.round(Number(params.pn) || 0)))
-  let added = 0
+  // 已有点的位置（含已经钉住的），用来去重 —— 再点一次不会又加一批重复的点
+  const existing: { x: number; y: number }[] = []
+  for (let i = 1; i <= base; i++) {
+    const p0 = conicPointPos(kind, params, i, links)
+    if (p0) existing.push(p0)
+  }
+  let added = 0, dup = 0
   for (const p of pts) {
+    if (existing.some((e) => Math.hypot(e.x - p.x, e.y - p.y) < 1e-6)) { dup++; continue }
     const idx = base + added
     if (idx >= 6) break
     params['px' + (idx + 1)] = +p.x.toFixed(3)
     params['py' + (idx + 1)] = +p.y.toFixed(3)
     while (labels.length <= idx) labels.push(null)
     labels[idx] = 'P_' + (idx + 1)
+    while (links.length <= idx) links.push(null)
+    links[idx] = { line: p.line, which: p.which }        // ★ 钉在交点上 → 随直线自动变化
+    existing.push({ x: p.x, y: p.y })
     added++
   }
   params.pn = base + added
-  patch({ params, pointLabels: labels } as Partial<SlideElement>)
-  flash('算了 ' + pts.length + ' 个交点，已生成 ' + added + ' 个标注点' + (added < pts.length ? '（上限 6 个）' : '') + ' —— 可拖动橙色手柄微调')
+  patch({ params, pointLabels: labels, pointLinks: links } as Partial<SlideElement>)
+  flash(added
+    ? ('算了 ' + pts.length + ' 个交点，生成 ' + added + ' 个标注点' + (dup ? '（' + dup + ' 个已存在）' : '') +
+       ' —— 这些点已**钉在交点上，随直线自动变化**；拖它 = 平移那条线')
+    : (dup ? '这些交点已经有对应的标注点了' : '最多 6 个标注点，先删掉几个再算'))
 }
 // ── 圆锥曲线的标注点：名称是字符串，所以存在元素的 pointLabels 里（点个数由 params.pn 控制）──
 const pointN = computed(() => Math.max(0, Math.min(6, Math.round(figParamVal('pn', 0)))))
@@ -1135,6 +1165,7 @@ function layerTypeLabel(type: string) {
         <!-- 可调参数（正弦型 A/ω/φ、含参二次的 a…） -->
         <button v-if="hasLineParams" class="figlib__btn" title="算出每条直线/线段与这条圆锥曲线的交点，直接生成标注点（之后可用橙色手柄拖动微调）" @click="calcIntersections">求交点 → 生成标注点</button>
         <p v-if="ixMsg" class="panel__hint">{{ ixMsg }}</p>
+        <p v-if="linkedN" class="panel__hint">其中 <b>{{ linkedN }}</b> 个点钉在「直线与曲线的交点」上：<b>直线一改它们就跟着动</b>；拖它 = 平移那条线；手动改它的 x/y 则解除绑定。</p>
         <button class="figlib__btn" title="把这个图形的种类与参数存进图形库，之后在「数学图形」面板里一键插回" @click="saveFigToLibrary">存入图形库</button>
         <p v-if="figLibMsg" class="panel__hint">{{ figLibMsg }}</p>
         <label v-for="pr in figParams" :key="pr.key" class="field" :class="{ 'field--row': pr.bool }">

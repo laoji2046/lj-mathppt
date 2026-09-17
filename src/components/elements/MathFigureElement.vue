@@ -73,7 +73,7 @@ const innerHtml = computed(() => {
   if (FUNCTION_KINDS.includes(kind)) return functionFigure(kind, w, h, stroke, s, props.el.params)
   if (CONIC_KINDS.includes(kind)) {
     return conicFigure(kind, w, h, stroke, s, fillColor, props.el.params,
-      { conicStroke: props.el.conicStroke, lineColors: props.el.lineColors, pointLabels: props.el.pointLabels })
+      { conicStroke: props.el.conicStroke, lineColors: props.el.lineColors, pointLabels: props.el.pointLabels, pointLinks: props.el.pointLinks })
   }
 
   // 三维多面体统一走顶点模型渲染（支持拖拽顶点编辑）
@@ -403,7 +403,7 @@ function onLineHandleUp() { dragLine = null; dragPt.value = null; dragging.value
 
 // ---- 圆锥曲线「标注点」的拖拽（与直线端点同一套做法） ----
 const pointHandles = computed(() =>
-  CONIC_KINDS.includes(props.el.kind) ? conicPointHandles(props.el.kind, props.el.w, props.el.h, props.el.params) : [])
+  CONIC_KINDS.includes(props.el.kind) ? conicPointHandles(props.el.kind, props.el.w, props.el.h, props.el.params, props.el.pointLinks) : [])
 const showPointHandles = computed(() => !!props.selected && pointHandles.value.length > 0)
 let dragPointIdx = -1
 const dragPointPos = ref<{ x: number; y: number } | null>(null)
@@ -426,7 +426,7 @@ function onPointHandleMove(e: PointerEvent) {
   const px = ((e.clientX - r.left) / r.width) * props.el.w
   const py = ((e.clientY - r.top) / r.height) * props.el.h
   dragPointPos.value = { x: px, y: py }
-  const patch = conicPointDrag(props.el.kind, props.el.w, props.el.h, props.el.params || {}, dragPointIdx, px, py)
+  const patch = conicPointDrag(props.el.kind, props.el.w, props.el.h, props.el.params || {}, dragPointIdx, px, py, props.el.pointLinks)
   if (Object.keys(patch).length) {
     emit('update', { params: { ...(props.el.params || {}), ...patch } } as Partial<SlideElement>)
   }
