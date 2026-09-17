@@ -10,6 +10,9 @@ const props = defineProps<{
   size?: number
   /** 紧凑模式：精简色板（一行常用色）+ 加长的自定义色条（窄面板用，如混排公式面板） */
   compact?: boolean
+  /** **圆点模式**：只显示一个当前色的圆点（点开仍是同一套主题色面板）——
+   *  给"属性都装进一个矩形框"的窄格子用（线1/点1 那个框） */
+  dot?: boolean
   /** 在预设色板后面追加的颜色（各入口按需补充，如公式色 +4、背景色 +3） */
   extra?: string[]
 }>()
@@ -86,9 +89,24 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="sw" :class="{ 'sw--compact': compact }" :style="swStyle">
+  <div class="sw" :class="{ 'sw--compact': compact, 'sw--dot': dot }" :style="swStyle">
+    <!-- 圆点模式：一个当前色的圆点（窄框里的颜色属性） -->
+    <button
+      v-if="dot"
+      ref="triggerRef"
+      class="sw__dotbtn"
+      type="button"
+      :title="chipTitle"
+      @click.stop="openPopup"
+    >
+      <span
+        class="sw__dot"
+        :class="{ 'sw__dot--trans': modelValue === 'transparent' }"
+        :style="modelValue && modelValue !== 'transparent' ? { background: modelValue } : undefined"
+      ></span>
+    </button>
     <!-- 紧凑模式（窄面板，如公式行）：保留一排常用色 + 彩虹入口，点一下就换色 -->
-    <template v-if="compact">
+    <template v-else-if="compact">
       <button
         v-for="c in presets"
         :key="c"
@@ -193,6 +211,14 @@ onBeforeUnmount(() => {
   background: #fff;
 }
 .sw--compact .sw__custom { padding: 2px 6px 2px 3px; gap: 6px; }
+.sw__dotbtn {
+  width: 24px; height: 24px; padding: 0; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-strong, #dcdce5); border-radius: 50%;
+  background: var(--panel, #fff); cursor: pointer;
+}
+.sw__dotbtn:hover { border-color: var(--brand-400, #a78bfa); }
+.sw__dotbtn .sw__dot { width: 14px; height: 14px; border-radius: 50%; }
 .sw__custom input[type="color"] {
   width: var(--sw-bar-w, 26px);
   height: var(--sw-bar-h, 22px);

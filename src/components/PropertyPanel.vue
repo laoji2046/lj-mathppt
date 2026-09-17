@@ -102,7 +102,12 @@ const figParams = computed(() => {
 })
 /** 参数**并行的分组**：同一 group（如 x / y / 大小、k / m、起 x / 终 x）并成一行渲染，面板短一半。
  *  未分组的参数保持"一行一个"的老样子（勾选框、滑杆等）。 */
-type FigCell = { key: string; label: string; short: string; bool?: boolean; step?: number; min?: number; max?: number; def: number }
+type FigCell = {
+  key: string; label: string; short: string; bool?: boolean
+  /** 颜色格子：'line' = 第 ci 条线的颜色，'point' = 第 ci 个点的颜色 */
+  color?: 'line' | 'point'; ci?: number
+  step?: number; min?: number; max?: number; def: number
+}
 const figRows = computed(() => {
   const rows: { key: string; title: string; cells: FigCell[] }[] = []
   for (const pr of figParams.value) {
@@ -110,6 +115,13 @@ const figRows = computed(() => {
     const last = rows[rows.length - 1]
     if (pr.group && last && last.key === pr.group) { last.cells.push(c); continue }
     rows.push({ key: pr.group || pr.key, title: String(pr.label).split(/\s+/)[0] || c.short, cells: [c] })
+  }
+  // 颜色也是"这个元素的属性" → 一并塞进同一个矩形框（省掉"线N 颜色""点N 颜色"两排单独的行）
+  for (const row of rows) {
+    const ml = /^线(\d+)$/.exec(row.title)
+    const mp = /^点(\d+)$/.exec(row.title)
+    if (ml && Number(ml[1]) <= lineN.value) row.cells.push({ key: 'lc' + ml[1], label: '线' + ml[1] + ' 颜色', short: '色', color: 'line', ci: Number(ml[1]) - 1, def: 0 })
+    else if (mp && Number(mp[1]) <= pointN.value) row.cells.push({ key: 'pc' + mp[1], label: '点' + mp[1] + ' 颜色', short: '色', color: 'point', ci: Number(mp[1]) - 1, def: 0 })
   }
   return rows
 })
@@ -1262,12 +1274,25 @@ function layerTypeLabel(type: string) {
               @input="setFigParamSoft(row.cells[0].key, ($event.target as HTMLInputElement).value)"
             />
           </label>
-          <div v-else class="field field--multi">
-            <span>{{ row.title }}</span>
+          <div v-else class="field fbox">
+            <span class="fbox__t">{{ row.title }}</span>
             <div class="fm">
-              <label v-for="c in row.cells" :key="c.key" class="fm__cell">
+              <label v-for="c in row.cells" :key="c.key" class="fm__cell" :class="{ 'fm__cell--ck': c.bool }" :title="c.label">
                 <i>{{ c.short }}</i>
+                <ColorSwatches
+                  v-if="c.color"
+                  dot
+                  :model-value="c.color === 'line' ? lineColorVal(c.ci ?? 0) : pointColorVal(c.ci ?? 0)"
+                  @update:model-value="(v) => (c.color === 'line' ? setLineColor(c.ci ?? 0, v as string) : setPointColor(c.ci ?? 0, v as string))"
+                />
                 <input
+                  v-else-if="c.bool"
+                  type="checkbox"
+                  :checked="figParamVal(c.key, c.def) >= 0.5"
+                  @change="setFigParam(c.key, ($event.target as HTMLInputElement).checked ? 1 : 0)"
+                />
+                <input
+                  v-else
                   type="number"
                   :step="c.step ?? 0.1"
                   :min="c.min"
@@ -1285,10 +1310,7 @@ function layerTypeLabel(type: string) {
             <span>点{{ i }} 名称</span>
             <input type="text" :value="pointLabelVal(i - 1)" placeholder="如 P_1 / 留空则不标" @change="setPointLabel(i - 1, ($event.target as HTMLInputElement).value)">
           </label>
-          <label v-for="i in pointN" :key="'pc' + i" class="field">
-            <span>点{{ i }} 颜色</span>
-            <ColorSwatches :model-value="pointColorVal(i - 1)" @update:model-value="(v) => setPointColor(i - 1, v as string)" />
-          </label>
+          <!-- 点N 的颜色同上，已进框 -->
         </template>
         <template v-if="hasLineParams">
           <label class="field"><span>曲线颜色</span>
@@ -1297,10 +1319,7 @@ function layerTypeLabel(type: string) {
           <label class="field"><span>坐标轴颜色</span>
             <ColorSwatches :model-value="axisColorVal" @update:model-value="(v) => patch({ axisColor: v as string } as Partial<SlideElement>)" />
           </label>
-          <label v-for="i in lineN" :key="'lc' + i" class="field">
-            <span>线{{ i }} 颜色</span>
-            <ColorSwatches :model-value="lineColorVal(i - 1)" @update:model-value="(v) => setLineColor(i - 1, v as string)" />
-          </label>
+          <!-- 线N / 点N 的颜色已经放进各自的矩形框里了（见上面的 .fbox） -->
         </template>
         <label class="field"><span>线条颜色<span v-if="edgeTarget != null" class="panel__tag">▶ 边{{ edgeTarget + 1 }}</span></span>
           <ColorSwatches :model-value="strokeColorVal" @update:model-value="(v) => onStrokeColor(v as string)" />
@@ -1979,12 +1998,23 @@ function layerTypeLabel(type: string) {
 /* 自定义函数（空白）的小表单 */
 .field--row { display: flex; align-items: center; gap: 5px; }
 .field--row > span { display: inline; margin: 0; }
-/* 参数**并成一行**：每个小格上面一行小标题（x / y / 大小），下面一个输入框 */
-.field--multi > span { display: block; margin-bottom: 2px; }
-.fm { display: flex; align-items: flex-end; gap: 5px; }
+/* **同一个元素的所有属性装进一个矩形框**（线1：k/m/起x/终x/虚线），一整行排开 */
+.fbox {
+  display: flex; align-items: flex-end; gap: 3px;
+  border: 1px solid var(--gray-300); background: var(--gray-50);
+  border-radius: 7px; padding: 3px 4px 4px; margin-bottom: 6px;
+}
+.fbox__t { flex: 0 0 auto; font-weight: 600; color: var(--text); font-size: 10.5px; line-height: 22px; }
+.fm { display: flex; flex: 1 1 auto; align-items: flex-end; gap: 2px; min-width: 0; }
 .fm__cell { flex: 1 1 0; min-width: 0; display: block; }
+.fm__cell--ck { flex: 0 0 auto; }
 .fm__cell > i { display: block; font-style: normal; font-size: 10px; color: var(--muted); margin-bottom: 1px; }
-.fm__cell input { width: 100%; }
+/* 输入框**变窄**：一格只占 1/N（原来是整个面板宽）。
+   ⚠ 这些格子里必须关掉 number 的上下箭头 —— 它会吃掉一格近一半宽度，数字被裁成"(" */
+.fm__cell input[type="number"] { width: 100%; padding: 0 3px; font-size: 11.5px; height: 24px; }
+.fm__cell input[type="number"]::-webkit-outer-spin-button,
+.fm__cell input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.fm__cell input[type="checkbox"] { display: block; margin: 5px 2px 6px 4px; }
 /* 多函数列表：每行 = 表达式 + 颜色 + 虚实 + 线宽 + 删除 */
 .cfn__lines { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .cfn__line { display: flex; align-items: center; gap: 6px; }

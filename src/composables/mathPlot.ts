@@ -736,12 +736,13 @@ for (let i = 1; i <= 4; i++) {
   const on = (p: Record<string, number>) => (p.n || 0) >= i
   LINE_PARAMS.push(
     // k / m 一行、起 / 终 一行（用户要求：别一个参数占一整屏）
-    { key: 'k' + i, label: '线' + i + ' 斜率 k', short: '线' + i + ' k', group: 'lk' + i, def: i === 1 ? 0.6 : 0, step: 0.1, min: -10, max: 10, showIf: on },
-    { key: 'm' + i, label: '线' + i + ' 截距 m', short: 'm', group: 'lk' + i, def: i === 1 ? -1 : 0, step: 0.5, min: -20, max: 20, showIf: on },
+    // 一条线的**所有属性同一个 group** → 面板把它们装进**一个矩形框**、排成**一整行**
     // 起终点放到 ±50：线段要能伸出取景框，"整条直线"才不会显得被一个矩形框住
-    { key: 's' + i, label: '线' + i + ' 起点 x', short: '起 x', group: 'ls' + i, def: 0, step: 0.5, min: -50, max: 50, showIf: on },
-    { key: 'e' + i, label: '线' + i + ' 终点 x（同起点 = 整条直线）', short: '终 x', group: 'ls' + i, def: 0, step: 0.5, min: -50, max: 50, showIf: on },
-    { key: 'd' + i, label: '线' + i + ' 用虚线', def: 0, bool: true, showIf: on },
+    { key: 'k' + i, label: '线' + i + ' 斜率 k（直线 y = kx + m）', short: 'k', group: 'ln' + i, def: i === 1 ? 0.6 : 0, step: 0.1, min: -10, max: 10, showIf: on },
+    { key: 'm' + i, label: '线' + i + ' 截距 m', short: 'm', group: 'ln' + i, def: i === 1 ? -1 : 0, step: 0.5, min: -20, max: 20, showIf: on },
+    { key: 's' + i, label: '线' + i + ' 起点 x（与终点相同 = 整条直线）', short: '起x', group: 'ln' + i, def: 0, step: 0.5, min: -50, max: 50, showIf: on },
+    { key: 'e' + i, label: '线' + i + ' 终点 x（与起点相同 = 整条直线）', short: '终x', group: 'ln' + i, def: 0, step: 0.5, min: -50, max: 50, showIf: on },
+    { key: 'd' + i, label: '线' + i + ' 用虚线', short: '虚线', group: 'ln' + i, def: 0, bool: true, showIf: on },
   )
 }
 /** 「圆锥曲线的标注点」：圆点 + 名称。名称是字符串 ✗（params 只能放数字），
@@ -753,7 +754,7 @@ for (let i = 1; i <= 6; i++) {
   const on = (p: Record<string, number>) => (p.pn || 0) >= i
   POINT_PARAMS.push(
     // x / y / 大小 并成一行（用户要求）
-    { key: 'px' + i, label: '点' + i + ' 横坐标 x', short: '点' + i + ' x', group: 'pt' + i, def: 0, step: 0.5, min: -50, max: 50, showIf: on },
+    { key: 'px' + i, label: '点' + i + ' 横坐标 x', short: 'x', group: 'pt' + i, def: 0, step: 0.5, min: -50, max: 50, showIf: on },
     { key: 'py' + i, label: '点' + i + ' 纵坐标 y', short: 'y', group: 'pt' + i, def: 0, step: 0.5, min: -50, max: 50, showIf: on },
     { key: 'ps' + i, label: '点' + i + ' 圆点大小', short: '大小', group: 'pt' + i, def: 1, step: 0.1, min: 0.3, max: 3, showIf: on },
   )
