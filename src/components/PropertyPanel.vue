@@ -18,7 +18,7 @@ import { layoutTable, mergeAt, unmergeAt } from '@/composables/tableLayout'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
 import { openShapeEdit } from '@/ui/shapeEditor'
-import { compileExpr, figureParams, withParams } from '@/composables/mathPlot'
+import { compileExpr, conicLineIntersections, figureParams, withParams } from '@/composables/mathPlot'
 import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type EdgeStyle, type FaceStyle } from '@/composables/solid3d'
 import { solidSel } from '@/composables/solidSel'
 import { openImageEditor } from '@/ui/imageEditor'
@@ -127,6 +127,32 @@ function lineColorVal(i: number) {
   return (mathfig.value?.lineColors || [])[i] || mathfig.value?.stroke || '#1a1a1a'
 }
 function setConicColor(v: string) { patch({ conicStroke: v } as Partial<SlideElement>) }
+/** **一键求交点**：算出每条直线/线段与圆锥曲线的交点，直接生成标注点（可用橙色手柄继续拖）。
+ *  已有点不动，从 pn 之后接着加；最多 6 个。 */
+const ixMsg = ref('')
+function calcIntersections() {
+  const m = mathfig.value
+  if (!m) return
+  const pts = conicLineIntersections(String(m.kind || ''), m.params)
+  const flash = (t: string) => { ixMsg.value = t; window.setTimeout(() => { ixMsg.value = '' }, 4000) }
+  if (!pts.length) { flash('没算到交点 —— 检查直线的 k、m，以及线段起终点是否把交点排除在外了'); return }
+  const params = { ...(m.params || {}) }
+  const labels: (string | null)[] = [...(m.pointLabels || [])]
+  const base = Math.max(0, Math.min(6, Math.round(Number(params.pn) || 0)))
+  let added = 0
+  for (const p of pts) {
+    const idx = base + added
+    if (idx >= 6) break
+    params['px' + (idx + 1)] = +p.x.toFixed(3)
+    params['py' + (idx + 1)] = +p.y.toFixed(3)
+    while (labels.length <= idx) labels.push(null)
+    labels[idx] = 'P_' + (idx + 1)
+    added++
+  }
+  params.pn = base + added
+  patch({ params, pointLabels: labels } as Partial<SlideElement>)
+  flash('算了 ' + pts.length + ' 个交点，已生成 ' + added + ' 个标注点' + (added < pts.length ? '（上限 6 个）' : '') + ' —— 可拖动橙色手柄微调')
+}
 // ── 圆锥曲线的标注点：名称是字符串，所以存在元素的 pointLabels 里（点个数由 params.pn 控制）──
 const pointN = computed(() => Math.max(0, Math.min(6, Math.round(figParamVal('pn', 0)))))
 function pointLabelVal(i: number) { return (mathfig.value?.pointLabels || [])[i] || '' }
@@ -1107,6 +1133,8 @@ function layerTypeLabel(type: string) {
           <p class="cfn__hint">值域就是显示窗口的 y 范围；改完在画布上直接拖缩放即可调整大小。</p>
         </template>
         <!-- 可调参数（正弦型 A/ω/φ、含参二次的 a…） -->
+        <button v-if="hasLineParams" class="figlib__btn" title="算出每条直线/线段与这条圆锥曲线的交点，直接生成标注点（之后可用橙色手柄拖动微调）" @click="calcIntersections">求交点 → 生成标注点</button>
+        <p v-if="ixMsg" class="panel__hint">{{ ixMsg }}</p>
         <button class="figlib__btn" title="把这个图形的种类与参数存进图形库，之后在「数学图形」面板里一键插回" @click="saveFigToLibrary">存入图形库</button>
         <p v-if="figLibMsg" class="panel__hint">{{ figLibMsg }}</p>
         <label v-for="pr in figParams" :key="pr.key" class="field" :class="{ 'field--row': pr.bool }">

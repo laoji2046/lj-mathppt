@@ -913,6 +913,79 @@ export function conicPointDrag(kind: string, w: number, h: number, params: Recor
   return patch
 }
 
+/** 圆锥曲线在 xOy 里的二次型系数：**A x² + B y² + C x + D y + E = 0**（都是轴对齐的，没有 xy 项）。
+ *  抛物线的四个开口方向各对应一组一次项 —— 与 conicFigure 里 mapPt 的映射严格一致。 */
+export function conicQuadratic(kind: string, params?: Record<string, number>): { A: number; B: number; C: number; D: number; E: number } | null {
+  const pv = withParams(kind, params)
+  const g = (k: string, d = 0) => (typeof pv[k] === 'number' ? pv[k] : d)
+  if (kind === 'conicCustomCircle') {
+    const cx = g('cx'), cy = g('cy'), r = Math.max(0.2, g('cr', 3))
+    return { A: 1, B: 1, C: -2 * cx, D: -2 * cy, E: cx * cx + cy * cy - r * r }
+  }
+  if (kind === 'conicCustomEllipse') {
+    const a = Math.max(0.2, g('a', 4)), b = Math.max(0.2, g('b', 3))
+    return { A: 1 / (a * a), B: 1 / (b * b), C: 0, D: 0, E: -1 }
+  }
+  if (kind === 'conicCustomEllipseV') {
+    const a = Math.max(0.2, g('a', 4)), b = Math.max(0.2, g('b', 3))
+    return { A: 1 / (b * b), B: 1 / (a * a), C: 0, D: 0, E: -1 }
+  }
+  if (kind === 'conicCustomHyperbola') {
+    const a = Math.max(0.1, g('a', 3)), b = Math.max(0.1, g('b', 2))
+    return { A: 1 / (a * a), B: -1 / (b * b), C: 0, D: 0, E: -1 }
+  }
+  if (kind === 'conicCustomParabola') {
+    const p = Math.max(0.05, g('p', 4)), dir = Math.round(g('dir', 1))
+    if (dir === 1) return { A: 0, B: 1, C: -2 * p, D: 0, E: 0 }   // y² = 2px
+    if (dir === 2) return { A: 1, B: 0, C: 0, D: -2 * p, E: 0 }   // x² = 2py
+    if (dir === 3) return { A: 0, B: 1, C: 2 * p, D: 0, E: 0 }    // y² = −2px
+    return { A: 1, B: 0, C: 0, D: 2 * p, E: 0 }                   // x² = −2py
+  }
+  return null
+}
+
+/** **直线 / 线段 与圆锥曲线的交点**。把 y = kx + m 代入二次型解一元二次方程；
+ *  线段只保留落在它起终 x 之间的根。相切（判别式 0）自然只出一个点。
+ *  返回图形坐标，line 是第几条线（从 1 起）。 */
+export function conicLineIntersections(kind: string, params?: Record<string, number>): { x: number; y: number; line: number }[] {
+  const q = conicQuadratic(kind, params)
+  if (!q) return []
+  const pv = withParams(kind, params)
+  const n = Math.max(0, Math.min(4, Math.round(pv.n || 0)))
+  const raw: { x: number; y: number; line: number }[] = []
+  for (let i = 1; i <= n; i++) {
+    const k = pv['k' + i] || 0, m2 = pv['m' + i] || 0
+    const sN = pv['s' + i] ?? 0, eN = pv['e' + i] ?? 0
+    const seg = Math.abs(eN - sN) > 1e-6
+    const lo = Math.min(sN, eN), hi = Math.max(sN, eN)
+    const A2 = q.A + q.B * k * k
+    const B2 = 2 * q.B * k * m2 + q.C + q.D * k
+    const C2 = q.B * m2 * m2 + q.D * m2 + q.E
+    const roots: number[] = []
+    if (Math.abs(A2) < 1e-12) {
+      if (Math.abs(B2) > 1e-12) roots.push(-C2 / B2)          // 退化成一次方程（抛物线与平行于轴的直线）
+    } else {
+      const disc = B2 * B2 - 4 * A2 * C2
+      if (disc >= -1e-9) {
+        const sq = Math.sqrt(Math.max(0, disc))
+        roots.push((-B2 + sq) / (2 * A2), (-B2 - sq) / (2 * A2))
+      }
+    }
+    for (const x of roots) {
+      if (!isFinite(x)) continue
+      if (seg && (x < lo - 1e-9 || x > hi + 1e-9)) continue
+      raw.push({ x, y: k * x + m2, line: i })
+    }
+  }
+  // 去重：两条线交于一点、或切点被两个根各算一次
+  const uniq: { x: number; y: number; line: number }[] = []
+  for (const p of raw) {
+    if (uniq.some((q2) => Math.hypot(q2.x - p.x, q2.y - p.y) < 1e-6)) continue
+    uniq.push(p)
+  }
+  return uniq
+}
+
 export function conicFigure(kind: string, w: number, h: number, baseStroke: string, sw: number, fill = 'none', params?: Record<string, number>, opt?: { conicStroke?: string; lineColors?: (string | null)[]; pointLabels?: (string | null)[] }): string {
   const def = CONICS[kind]
   if (!def) return ''
