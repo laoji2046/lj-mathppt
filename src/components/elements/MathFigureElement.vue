@@ -76,6 +76,7 @@ const innerHtml = computed(() => {
       {
         conicStroke: props.el.conicStroke, axisColor: props.el.axisColor, lineColors: props.el.lineColors,
         pointLabels: props.el.pointLabels, pointLinks: props.el.pointLinks, lineLinks: props.el.lineLinks,
+    pointColors: props.el.pointColors,
       })
   }
 
