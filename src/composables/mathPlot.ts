@@ -679,6 +679,9 @@ export const CONICS: Record<string, {
  *  n 默认 0 = 一条都不画 —— **老图元完全不变**；showIf 让属性面板只显示用得上的那几个。 */
 export const LINE_PARAMS: ParamSpec[] = [
   { key: 'n', label: '直线 / 线段条数', def: 0, step: 1, min: 0, max: 4 },
+  // 线段两端的圆点本来是"一眼区分线段 / 整条直线"用的；但教材图里常常不要，所以做成可选项。
+  // 默认 1（显示）→ **老图元外观完全不变**。
+  { key: 'ldot', label: '线段端点圆点', def: 1, bool: true, showIf: (p) => (p.n || 0) >= 1 },
 ]
 for (let i = 1; i <= 4; i++) {
   const on = (p: Record<string, number>) => (p.n || 0) >= i
@@ -719,6 +722,7 @@ function clipLine(k: number, b2: number, view: View): [[number, number], [number
 function drawExtraLines(pv: Record<string, number>, view: View, w: number, h: number, stroke: string, sw: number, colors?: (string | null)[]): string {
   const n = Math.max(0, Math.min(4, Math.round(pv.n || 0)))
   if (!n) return ''
+  const dots = Math.round(pv.ldot ?? 1) !== 0        // 线段端点圆点，可选
   const mm = mapper(view, w, h)
   const r = Math.max(2, Math.min(w, h) * 0.011)
   let out = ''
@@ -736,7 +740,7 @@ function drawExtraLines(pv: Record<string, number>, view: View, w: number, h: nu
     }
     const col = colors && colors[i - 1] ? colors[i - 1]! : stroke     // 每条线可以有自己的颜色
     out += lineSvg(mm.X(lo), mm.Y(k * lo + b2), mm.X(hi), mm.Y(k * hi + b2), col, sw)
-    if (seg) out += dotSvg(mm.X(lo), mm.Y(k * lo + b2), r, col) + dotSvg(mm.X(hi), mm.Y(k * hi + b2), r, col)
+    if (seg && dots) out += dotSvg(mm.X(lo), mm.Y(k * lo + b2), r, col) + dotSvg(mm.X(hi), mm.Y(k * hi + b2), r, col)
   }
   return out
 }
