@@ -4,7 +4,7 @@ import type { MathFigureElement, SlideElement } from '@/types'
 import { lineDashCss } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
 import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg, vertexDotsSvg } from '@/composables/solid3d'
-import { CONIC_KINDS, FUNCTION_KINDS, conicFigure, conicLineDrag, conicLineHandles, customFigure, functionFigure } from '@/composables/mathPlot'
+import { CONIC_KINDS, FUNCTION_KINDS, conicFigure, conicLineDrag, conicLineHandles, conicPointDrag, conicPointHandles, customFigure, functionFigure } from '@/composables/mathPlot'
 import { solidSel, selectSolidVertex, selectSolidEdge, selectSolidFace, clearSolidSel } from '@/composables/solidSel'
 
 const props = defineProps<{ el: MathFigureElement; selected?: boolean; /** 预览用：等比缩放（contain）而不是拉伸（stretch） */ fit?: 'stretch' | 'contain' }>()
@@ -401,6 +401,38 @@ function onLineHandleMove(e: PointerEvent) {
 }
 function onLineHandleUp() { dragLine = null; dragPt.value = null; dragging.value = false }
 
+// ---- 圆锥曲线「标注点」的拖拽（与直线端点同一套做法） ----
+const pointHandles = computed(() =>
+  CONIC_KINDS.includes(props.el.kind) ? conicPointHandles(props.el.kind, props.el.w, props.el.h, props.el.params) : [])
+const showPointHandles = computed(() => !!props.selected && pointHandles.value.length > 0)
+let dragPointIdx = -1
+const dragPointPos = ref<{ x: number; y: number } | null>(null)
+function pointHandlePos(h: { i: number; x: number; y: number }) {
+  if (dragPointPos.value && dragPointIdx === h.i) return dragPointPos.value
+  return { x: h.x, y: h.y }
+}
+function onPointHandleDown(e: PointerEvent, i: number) {
+  e.stopPropagation()
+  const t = e.currentTarget as HTMLElement
+  try { t.setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
+  dragPointIdx = i
+  dragPointPos.value = null
+  dragging.value = true
+}
+function onPointHandleMove(e: PointerEvent) {
+  if (dragPointIdx < 0 || !dragging.value) return
+  const r = box.value?.getBoundingClientRect()
+  if (!r || !r.width || !r.height) return
+  const px = ((e.clientX - r.left) / r.width) * props.el.w
+  const py = ((e.clientY - r.top) / r.height) * props.el.h
+  dragPointPos.value = { x: px, y: py }
+  const patch = conicPointDrag(props.el.kind, props.el.w, props.el.h, props.el.params || {}, dragPointIdx, px, py)
+  if (Object.keys(patch).length) {
+    emit('update', { params: { ...(props.el.params || {}), ...patch } } as Partial<SlideElement>)
+  }
+}
+function onPointHandleUp() { dragPointIdx = -1; dragPointPos.value = null; dragging.value = false }
+
 
 
 function segDist(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
@@ -545,6 +577,19 @@ function onSvgDbl(e: MouseEvent) {
         @pointercancel="onLineHandleUp"
       ></span>
     </template>
+    <template v-if="showPointHandles">
+      <span
+        v-for="(h, hi) in pointHandles"
+        :key="'ph' + hi"
+        class="mf-handle mf-handle--pt"
+        :style="{ left: pointHandlePos(h).x + 'px', top: pointHandlePos(h).y + 'px' }"
+        :title="'拖动标注点 ' + h.i"
+        @pointerdown.stop="onPointHandleDown($event, h.i)"
+        @pointermove="onPointHandleMove"
+        @pointerup="onPointHandleUp"
+        @pointercancel="onPointHandleUp"
+      ></span>
+    </template>
     <span v-if="showHandles && selLabelPos" class="mf-vlabel" :style="{ left: selLabelPos.left, top: selLabelPos.top }" @pointerdown.stop="onLabelDown($event, selLabelPos.idx)" @pointermove="onLabelMove($event, selLabelPos.idx)" @pointerup="onLabelUp" v-html="labelHtml(selLabelText)"></span>
   </div>
 </template>
@@ -569,6 +614,9 @@ function onSvgDbl(e: MouseEvent) {
 /* 「圆锥曲线 + 多条线」的端点手柄：方形 + 绿色，跟圆形顶点手柄一眼区分 */
 .mf-handle--line { border-radius: 3px; border-color: #12b76a; cursor: grab; }
 .mf-handle--line:hover { background: #e8f8f0; }
+/* 「标注点」的手柄：橙色实心，跟绿方（线端点）、蓝圆（顶点）区分 */
+.mf-handle--pt { background: #ff8f1f; border-color: #fff; cursor: grab; }
+.mf-handle--pt:hover { background: #ffab52; transform: scale(1.15); }
 .mf-vlabel {
   position: absolute; z-index: 5;
   transform: translate(-50%, -50%);

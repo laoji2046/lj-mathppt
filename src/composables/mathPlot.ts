@@ -886,6 +886,33 @@ function drawExtraPoints(pv: Record<string, number>, view: View, w: number, h: n
   return out
 }
 
+/** 圆锥曲线的**标注点**在元素像素坐标下的位置（拖拽手柄用，坐标系同 .mf-handle）。 */
+export function conicPointHandles(kind: string, w: number, h: number, params?: Record<string, number>): { i: number; x: number; y: number }[] {
+  const def = CONICS[kind]
+  if (!def) return []
+  const pv = withParams(kind, params)
+  const n = Math.max(0, Math.min(6, Math.round(pv.pn || 0)))
+  if (!n) return []
+  const view = def.viewOf ? def.viewOf(pv) : def.view
+  const mm = mapper(view, w, h)
+  const out: { i: number; x: number; y: number }[] = []
+  for (let i = 1; i <= n; i++) out.push({ i, x: mm.X(pv['px' + i] || 0), y: mm.Y(pv['py' + i] || 0) })
+  return out
+}
+
+/** 拖动标注点：元素像素坐标 → 图形坐标，写回 px{i} / py{i}。 */
+export function conicPointDrag(kind: string, w: number, h: number, params: Record<string, number>, i: number, px: number, py: number): Record<string, number> {
+  const def = CONICS[kind]
+  if (!def) return {}
+  const pv = withParams(kind, params)
+  const view = def.viewOf ? def.viewOf(pv) : def.view
+  const sx = w / (view.xmax - view.xmin), sy = h / (view.ymax - view.ymin)
+  const patch: Record<string, number> = {}
+  patch['px' + i] = +(view.xmin + px / sx).toFixed(3)
+  patch['py' + i] = +(view.ymin + (h - py) / sy).toFixed(3)
+  return patch
+}
+
 export function conicFigure(kind: string, w: number, h: number, baseStroke: string, sw: number, fill = 'none', params?: Record<string, number>, opt?: { conicStroke?: string; lineColors?: (string | null)[]; pointLabels?: (string | null)[] }): string {
   const def = CONICS[kind]
   if (!def) return ''
