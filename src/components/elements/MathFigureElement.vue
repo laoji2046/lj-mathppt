@@ -389,8 +389,10 @@ function onLineHandleMove(e: PointerEvent) {
   if (!dragLine || !dragging.value) return
   const r = box.value?.getBoundingClientRect()
   if (!r || !r.width || !r.height) return
-  const px = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * props.el.w
-  const py = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) * props.el.h
+  // ⚠ **不夹在元素框内** —— 原来钳到 [0,1] ✗，于是端点只能停在框内、线看起来"被一个矩形框住"（用户实报 ✓）。
+  //   允许拖到框外：线会一直延伸到框边（可见部分由 SVG 的 viewBox 裁掉 ✓，参数里记的是真实位置 ✓）。
+  const px = ((e.clientX - r.left) / r.width) * props.el.w
+  const py = ((e.clientY - r.top) / r.height) * props.el.h
   dragPt.value = { x: px, y: py }
   const patch = conicLineDrag(props.el.kind, props.el.w, props.el.h, props.el.params || {}, dragLine.i, dragLine.which, px, py)
   if (Object.keys(patch).length) {

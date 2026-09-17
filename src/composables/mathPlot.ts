@@ -667,10 +667,18 @@ export const CONICS: Record<string, {
     params: [
       { key: 'p', label: 'p（焦准距）', def: 4, step: 0.5, min: 0.2, max: 20 },
       { key: 'dir', label: '开口：1右 2上 3左 4下', def: 1, step: 1, min: 1, max: 4 },
+      { key: 'dline', label: '显示准线', def: 1, bool: true },
     ],
     viewOf: (p) => {
-      const h = Math.max(2, p.p * 1.6)
-      return { xmin: -h * 1.3333, xmax: h * 1.3333, ymin: -h, ymax: h }   // 4:3，与静态 view 一致
+      // 取景按**开口方向**整体偏移：图形朝开口的**反方向**靠，给开口那边留出空间
+      //（用户实报：开口向右时原来只占右半、左边一大片空 ✗）。
+      // ⚠ 四种方向都必须保持 **4:3** —— 元素框是按静态 view 的纵横比给的，纵横比不一致会把图形拉伸。
+      const pp = Math.max(0.2, p.p || 2)
+      const dir = Math.round(p.dir || 1)
+      if (dir === 1) return { xmin: -3 * pp, xmax: 7 * pp, ymin: -3.75 * pp, ymax: 3.75 * pp }
+      if (dir === 3) return { xmin: -7 * pp, xmax: 3 * pp, ymin: -3.75 * pp, ymax: 3.75 * pp }
+      if (dir === 2) return { xmin: -1.76 * pp, xmax: 1.76 * pp, ymin: -0.66 * pp, ymax: 1.98 * pp }
+      return { xmin: -1.76 * pp, xmax: 1.76 * pp, ymin: -1.98 * pp, ymax: 0.66 * pp }
     },
   },
 }
@@ -688,8 +696,9 @@ for (let i = 1; i <= 4; i++) {
   LINE_PARAMS.push(
     { key: 'k' + i, label: '线' + i + ' 斜率 k', def: i === 1 ? 0.6 : 0, step: 0.1, min: -10, max: 10, showIf: on },
     { key: 'm' + i, label: '线' + i + ' 截距 m', def: i === 1 ? -1 : 0, step: 0.5, min: -20, max: 20, showIf: on },
-    { key: 's' + i, label: '线' + i + ' 起点 x', def: 0, step: 0.5, min: -20, max: 20, showIf: on },
-    { key: 'e' + i, label: '线' + i + ' 终点 x（与起点相同 = 整条直线）', def: 0, step: 0.5, min: -20, max: 20, showIf: on },
+    // 起终点放到 ±50：线段要能伸出取景框，"整条直线"才不会显得被一个矩形框住
+    { key: 's' + i, label: '线' + i + ' 起点 x', def: 0, step: 0.5, min: -50, max: 50, showIf: on },
+    { key: 'e' + i, label: '线' + i + ' 终点 x（与起点相同 = 整条直线）', def: 0, step: 0.5, min: -50, max: 50, showIf: on },
   )
 }
 // 挂到所有自定义圆锥曲线上（挂在 conicFigure 之前，此时 CONICS 已完整定义）
@@ -891,11 +900,16 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
     }
     const yLo = (dir === 2 || dir === 4) ? view.xmin : view.ymin
     const yHi = (dir === 2 || dir === 4) ? view.xmax : view.ymax
+    // 采样到「开口轴」在取景里的真实范围为止。
+    // ⚠ 原来用 max(xmax, ymax)*1.2 当上限、且越界就把 d 置空 —— 那是把整条路径**清空** ✗。
+    //   开口向左/向下时取景是镜像的，上限会被算小，末尾几个采样点一越界整条曲线就没了（实测）。
+    //   现在按方向取真实上限，越界只跳过（continue）而不清空。
+    const lim = dir === 1 ? view.xmax : dir === 3 ? -view.xmin : dir === 2 ? view.ymax : -view.ymin
     const step = (yHi - yLo) / 400
     let d = ''
     for (let y = yLo; y <= yHi + 1e-9; y += step) {
       const x = (y * y) / (2 * pp)
-      if (x < -1e-9 || x > Math.max(view.xmax, view.ymax) * 1.2) { d = ''; continue }
+      if (x < -1e-9 || x > lim * 1.02) continue
       const [qx, qy] = mapPt(x, y)
       d += (d ? ' L ' : 'M ') + X(qx).toFixed(1) + ' ' + Y(qy).toFixed(1)
     }
@@ -903,9 +917,12 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
     const [fx, fy] = mapPt(pp / 2, 0)
     const [dx2, dy2] = mapPt(-pp / 2, 0)
     s += dot(fx, fy) + label(fx, fy, 'F', fs * 0.6, -fs * 0.7)
-    if (dir === 1 || dir === 3) s += lineSvg(X(dx2), Y(-view.ymax), X(dx2), Y(view.ymax), stroke, thin, dash)
-    else s += lineSvg(X(view.xmin), Y(dy2), X(view.xmax), Y(dy2), stroke, thin, dash)
-    s += label(dx2, (dir === 1 || dir === 3) ? view.ymax * 0.92 : view.xmax * 0.92, '准线', 0, 0)
+    // 准线可选（默认显示 → 老图元不变）
+    if (Math.round(pv.dline ?? 1)) {
+      if (dir === 1 || dir === 3) s += lineSvg(X(dx2), Y(-view.ymax), X(dx2), Y(view.ymax), stroke, thin, dash)
+      else s += lineSvg(X(view.xmin), Y(dy2), X(view.xmax), Y(dy2), stroke, thin, dash)
+      s += label(dx2, (dir === 1 || dir === 3) ? view.ymax * 0.92 : view.xmax * 0.92, '准线', 0, 0)
+    }
     return s
   }
   if (kind === 'conicCircle') {
