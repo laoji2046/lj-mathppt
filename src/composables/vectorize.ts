@@ -58,6 +58,24 @@ export interface VectorizeOpt {
   dashCos?: number
   /** 虚线短划「沿轴方向的间距」余量（px，默认 20）。碎片化严重时调大。 */
   dashGap?: number
+  /**
+   * 杂点门槛①：短划短于这么长（px，默认 4）就不算短划，直接当噪点抹掉。
+   * 扫描件的噪点小墨团主轴长度只有 1~3px，而真实短划是十几像素 —— 两者差着一个数量级。
+   */
+  dashMinPiece?: number
+  /**
+   * 杂点门槛②：一堆短划的总长度不足这么多（px，默认 10）就整堆当噪点抹掉。
+   * 两个杂点被"虚线成链"连起来 = 凭空多出一条悬空线段（用户实报的"可删掉又不影响其他的线段"）。
+   * 真短虚线哪怕只有两截（D–E 那种），两块加起来也远超这个值。
+   */
+  dashMinTotal?: number
+  /**
+   * 杂点门槛③：**两端都没吸附到图形顶点**的虚线边，如果短于这个长度（px，默认 40）就整条丢掉。
+   * 这才是用户报的"多了一些可删掉又不影响其他的线段"：一小撮杂点自成一段，
+   * 两头都是新造出来的孤立顶点 → 画面上就是一条凭空多出来的短线段（删掉它不影响任何别的边）。
+   * 只要有一头吸附到了真顶点就不会被丢，所以图中真实的虚线边（实测 89~444px）一律不受影响。
+   */
+  dashMinEdge?: number
 }
 
 export interface VectorizeStats {
@@ -399,16 +417,20 @@ function axisOf(c: Comp, W: number) {
  */
 export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array, opt: VectorizeOpt) {
   const smallMax = opt.textMax ?? 0.16
+  const minPiece = opt.dashMinPiece ?? 4
   const bars: Comp[] = []
+  const texts: Comp[] = []
   for (const c of comp) {
     if (c.diag >= smallMax * diag) continue      // 大块 = 线网本体，留下
     const ax = axisOf(c, W)
     c.ux = ax.ux; c.uy = ax.uy; c.len = ax.len
+    // 杂点：扫描噪声形成的小墨团，主轴长度往往只有 1~3px（真实短划十几像素）。
+    // 若让它参与"虚线成链"，两个杂点就会凑成一条"两截的短虚线" → 凭空多出一条悬空线段。
+    if (c.len < minPiece) { texts.push(c); continue }
     bars.push(c)
   }
   const used = new Array(bars.length).fill(false)
   const groups: Comp[][] = []
-  const texts: Comp[] = []
   for (let a = 0; a < bars.length; a++) {
     if (used[a]) continue
     const grp = [bars[a]]
@@ -438,7 +460,9 @@ export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array
     }
     // ≥2 就算虚线：**只有两截的短虚线**（例如 D–E、C–F 那种）天生凑不满 3，
     // 按 ≥3 判的话它们会被当字母碎片抹掉，用户看到的就是"这条边没识别出来"
-    if (grp.length >= 2) groups.push(grp)
+    // 整堆总长度不够 = 几个杂点凑出来的假虚线 → 整堆抹掉（真短虚线两截加起来也远超这个值）
+    const mass = grp.reduce((s, c) => s + c.len, 0)
+    if (grp.length >= 2 && mass >= (opt.dashMinTotal ?? 10)) groups.push(grp)
     else for (const c of grp) texts.push(c)
   }
   const out = ink.slice()
@@ -832,7 +856,12 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     }
     // 虚线链的另一头可能离角点很远（原图里那一段虚线被字母/其它线吃掉了），
     // 所以吸附半径给得比实线大得多；靠 dir 上的垂距约束保证不会吸到隔壁那条线上去。
-    edges.push({ aId: -1, bId: -1, a: best0, b: best1, dash: 1, snap: opt.snapDash ?? 60, dir: [ux, uy] })
+    // ⚠ 吸附半径不得超过链自身的跨度：真正的虚线跨度大，够得着远处的顶点；
+    //   而几个杂点凑出来的短链跨度只有十几像素，却拿着 60px 的半径去勾远处的顶点 ——
+    //   结果就是凭空多出一条横跨图形的线段。跨度 >= 60px 的链行为完全不变。
+    const span = Math.max(0, maxT - minT)
+    const sr = Math.min(opt.snapDash ?? 60, Math.max(opt.snapR ?? 14, span))
+    edges.push({ aId: -1, bId: -1, a: best0, b: best1, dash: 1, snap: sr, dir: [ux, uy] })
   }
 
   // 顶点
@@ -875,10 +904,14 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     const pick = (x: number, y: number, sgn: number) =>
       E.dir ? nearestOn(x, y, sr, E.dir[0] * sgn, E.dir[1] * sgn, snapPerp) : nearest(x, y, sr)
     let ai = E.aId >= 0 ? nodeVert[E.aId] : pick(E.a[0], E.a[1], -1)
+    const aNew = ai < 0
     if (ai < 0) ai = addV(E.a[0], E.a[1])
     let bi = E.bId >= 0 ? nodeVert[E.bId] : pick(E.b[0], E.b[1], 1)
+    const bNew = bi < 0
     if (bi < 0) bi = addV(E.b[0], E.b[1])
     if (ai === bi) continue
+    // 两头都没搭上图形 = 自成一段的杂点，且又短 → 整条丢掉（见 dashMinEdge 注释）
+    if (E.dash && aNew && bNew && Math.hypot(E.b[0] - E.a[0], E.b[1] - E.a[1]) < (opt.dashMinEdge ?? 40)) continue
     if (Math.hypot(verts[ai].x - verts[bi].x, verts[ai].y - verts[bi].y) < 4) continue
     outEdges.push([ai, bi, E.dash])
   }
