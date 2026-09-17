@@ -290,6 +290,159 @@ export async function importParsedQuestions(list: ParsedQuestion[]): Promise<{ a
   return libSaveMany(drafts)
 }
 
+/* ---------------- 规则组卷（双向细目表）+ 组卷查重 ---------------- */
+
+/** 一条组卷规则（细目表的一行）：条件 + 题量；条件留空表示不限 */
+export interface PaperRule {
+  id: number
+  qtype: QType | ''
+  section: string
+  level: Level | ''
+  count: number
+}
+
+/** 每条规则的命中情况（题量不够时要明确告诉用户，不能悄悄少给） */
+export interface RuleResult {
+  rule: PaperRule
+  got: number
+  want: number
+  short: boolean
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  const a = arr.slice()
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const t = a[i]; a[i] = a[j]; a[j] = t
+  }
+  return a
+}
+
+/**
+ * 按规则抽题。要点：
+ *  - **同一道题只会被抽中一次**（后面规则自动跳过前面已选的）—— 这是查重的第一层；
+ *  - 默认**优先抽用得少的**（避免每份卷子都是同样那几道），可切换随机；
+ *  - **题量不够时如实回报**（short），不凑数、不重复。
+ */
+export function pickByRules(
+  pool: QuestionEntry[],
+  rules: PaperRule[],
+  opt: { random?: boolean } = {}
+): { picked: QuestionEntry[]; results: RuleResult[] } {
+  const used = new Set<number>()
+  const picked: QuestionEntry[] = []
+  const results: RuleResult[] = []
+  for (const r of rules) {
+    const want = Math.max(0, Math.floor(Number(r.count) || 0))
+    if (!want) { results.push({ rule: r, got: 0, want: 0, short: false }); continue }
+    let cands = pool.filter((x) =>
+      !used.has(x.id) &&
+      (!r.qtype || x.q.qtype === r.qtype) &&
+      (!r.section || x.q.section === r.section) &&
+      (!r.level || levelOf(x.q.difficulty) === r.level)
+    )
+    cands = opt.random
+      ? shuffle(cands)
+      : cands.slice().sort((a, b) => a.usedCount - b.usedCount || a.id - b.id)
+    const take = cands.slice(0, want)
+    for (const x of take) { used.add(x.id); picked.push(x) }
+    results.push({ rule: r, got: take.length, want, short: take.length < want })
+  }
+  return { picked, results }
+}
+
+/** 规则的可读描述（用于回报与提示） */
+export function ruleText(r: PaperRule): string {
+  const parts: string[] = []
+  parts.push(r.qtype ? qtypeLabel(r.qtype) : '不限题型')
+  parts.push(r.section || '不限板块')
+  parts.push(r.level ? LEVELS.find((l) => l.v === r.level)?.label || '' : '不限难度')
+  return parts.join(' · ') + ' × ' + (r.count || 0)
+}
+
+/** 归一化题干：去空白、标点、LaTeX 命令与符号 —— 只留正文字符 */
+export function normalizeStem(s: string): string {
+  return (s || '')
+    .replace(/\\[a-zA-Z]+/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[，。、；：？！,.;:?!()\[\]（）【】{}《》"'`~·—－-]/g, '')
+    .replace(/[{}^_$\\]/g, '')
+    .toLowerCase()
+}
+
+function bigrams(s: string): Set<string> {
+  const out = new Set<string>()
+  for (let i = 0; i + 1 < s.length; i++) out.add(s.slice(i, i + 2))
+  if (s.length === 1) out.add(s)
+  return out
+}
+
+/** 字符二元组 Jaccard 相似度（0~1）。中文短文本上比编辑距离稳。 */
+export function similarity(a: string, b: string): number {
+  if (!a || !b) return 0
+  if (a === b) return 1
+  const A = bigrams(a), B = bigrams(b)
+  if (!A.size || !B.size) return 0
+  let inter = 0
+  for (const g of A) if (B.has(g)) inter++
+  return inter / (A.size + B.size - inter)
+}
+
+export interface DupPair {
+  a: QuestionEntry
+  b: QuestionEntry
+  /** 归一化后完全相同 */
+  same: boolean
+  sim: number
+}
+
+/**
+ * 在一份卷子里找重复题。两层：
+ *  ① **归一化后完全相同** —— 一定是重复；
+ *  ② **相似度 ≥ threshold**（默认 0.9）—— 高度相似，多半是同一道题的两次录入。
+ * 为避免卡界面，题目超过 400 道时只做第 ① 层（并回报该情况）。
+ */
+export function findDuplicates(list: QuestionEntry[], threshold = 0.85): { pairs: DupPair[]; skippedNear: boolean } {
+  const pairs: DupPair[] = []
+  const norm = list.map((x) => normalizeStem(x.q.stem || x.body))
+  const groups = new Map<string, number[]>()
+  norm.forEach((n, i) => {
+    if (!n) return
+    const gr = groups.get(n)
+    if (gr) gr.push(i)
+    else groups.set(n, [i])
+  })
+  const seen = new Set<string>()
+  for (const idxs of groups.values()) {
+    if (idxs.length < 2) continue
+    for (let i = 0; i < idxs.length; i++) {
+      for (let j = i + 1; j < idxs.length; j++) {
+        const k = idxs[i] + '-' + idxs[j]
+        if (seen.has(k)) continue
+        seen.add(k)
+        pairs.push({ a: list[idxs[i]], b: list[idxs[j]], same: true, sim: 1 })
+      }
+    }
+  }
+  const skippedNear = list.length > 400
+  if (!skippedNear) {
+    for (let i = 0; i < list.length; i++) {
+      if (!norm[i]) continue
+      for (let j = i + 1; j < list.length; j++) {
+        if (!norm[j]) continue
+        if (norm[i] === norm[j]) continue
+        const k = i + '-' + j
+        if (seen.has(k)) continue
+        const s = similarity(norm[i], norm[j])
+        if (s >= threshold) {
+          seen.add(k)
+          pairs.push({ a: list[i], b: list[j], same: false, sim: s })
+        }
+      }
+    }
+  }
+  return { pairs, skippedNear }
+}
 /* ---------------- 整库导入导出（JSON） ---------------- */
 
 /** 导出文件的格式标记（导入时用它判断是不是我们的题库文件） */

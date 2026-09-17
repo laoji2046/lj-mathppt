@@ -5,9 +5,10 @@ import {
   listQuestions, addQuestion, updateQuestion, removeQuestion, touchQuestion,
   listQuestionTags, autoTitle, questionToText, filterQuestions,
   importParsedQuestions, proposeAnswers, parseQuestionsJson, exportQuestionsJson,
+  pickByRules, ruleText, findDuplicates,
   QTYPES, SECTIONS, LEVELS, levelOf, levelLabel, levelToDifficulty, qtypeLabel, withDefaults,
 } from '@/composables/useQuestionLibrary'
-import type { QuestionEntry, QuestionMeta, QType, Level } from '@/composables/useQuestionLibrary'
+import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult } from '@/composables/useQuestionLibrary'
 import { parseQuestions, PARSE_HELP } from '@/composables/parseQuestions'
 import { saveTextFile } from '@/composables/useTauri'
 
@@ -31,6 +32,53 @@ async function doBatch() {
   batchText.value = ''
   flash('已导入 ' + r.added + ' 道题' + (r.skipped ? '，跳过 ' + r.skipped + ' 道（与库里已有的题干重复）' : ''))
 }
+/* ---- 规则组卷（双向细目表）+ 组卷查重 ---- */
+const paperOpen = ref(false)
+const paperRandom = ref(false)
+const rules = ref<PaperRule[]>([{ id: 1, qtype: 'choice', section: '', level: '', count: 5 }])
+let ruleSeq = 1
+const paperResult = ref<{ picked: QuestionEntry[]; results: RuleResult[] } | null>(null)
+const dupReport = ref<{ pairs: { a: QuestionEntry; b: QuestionEntry; same: boolean; sim: number }[]; skippedNear: boolean } | null>(null)
+
+function addRule() {
+  ruleSeq++
+  rules.value = [...rules.value, { id: ruleSeq, qtype: '', section: '', level: '', count: 5 }]
+}
+function removeRule(id: number) {
+  rules.value = rules.value.filter((r) => r.id !== id)
+}
+function resetRules() {
+  rules.value = [{ id: ++ruleSeq, qtype: 'choice', section: '', level: '', count: 5 }]
+  paperResult.value = null
+  dupReport.value = null
+}
+/** 一键挑题：从**当前筛选结果**里按规则抽，并顺手做组卷查重 */
+function doPick() {
+  const pool = shown.value
+  if (!pool.length) { flash('当前筛选结果里没有题 —— 先放宽筛选条件'); return }
+  const active = rules.value.filter((r) => (Number(r.count) || 0) > 0)
+  if (!active.length) { flash('至少填一条规则的题量'); return }
+  const r = pickByRules(pool, active, { random: paperRandom.value })
+  paperResult.value = r
+  dupReport.value = findDuplicates(r.picked)
+  const shortCnt = r.results.filter((x) => x.short).length
+  flash('已挑出 ' + r.picked.length + ' 道' + (shortCnt ? '，有 ' + shortCnt + ' 条规则题量不够（已如实标注）' : ''))
+}
+/** 把挑好的卷子送进 PDF 生成（按 选择→填空→解答 排序） */
+function sendPaper(withSolution: boolean) {
+  const arr = paperResult.value ? paperResult.value.picked : []
+  if (!arr.length) { flash('先点「一键挑题」'); return }
+  const order: Record<string, number> = { choice: 0, multi: 1, blank: 2, answer: 3 }
+  const sorted = [...arr].sort((a, b) => (order[a.q.qtype] ?? 9) - (order[b.q.qtype] ?? 9))
+  const parts = sorted.map((x, i) => {
+    const body = questionToText(x, withSolution).replace(/^\s*\d{1,3}\s*[.、．)）]\s*/, '')
+    return (i + 1) + '. ' + body
+  })
+  emit('insert', parts.join('\n\n'), 0)
+  sorted.forEach((x) => void touchQuestion(x.id))
+  flash('已把 ' + sorted.length + ' 道题送进 PDF 生成')
+}
+
 /* ---- 整库导入导出：导入 MD / 导入 JSON / 导出 JSON ---- */
 const fileInput = ref<HTMLInputElement | null>(null)
 const fileMode = ref<'md' | 'json'>('md')
@@ -237,6 +285,7 @@ function close() { emit('close') }
           <div class="qb__title">试题库<em>（供 PDF 生成组卷：选定后插入题干，可带答案解析）</em></div>
           <div class="qb__tools">
             <button class="qb__btn" title="把整份试题粘贴进来，一次性识别并入库" @click="batchOpen = true; editing = false">批量导入</button>
+            <button class="qb__btn" title="按规则挑题（双向细目表）：设题型/板块/难度/题量，一键抽出整卷" @click="paperOpen = true; editing = false; batchOpen = false">规则组卷</button>
             <button class="qb__btn" title="导入 Markdown / 纯文本：读进来后先给你看识别结果，确认再入库" @click="pickFile('md')">导入 MD</button>
             <button class="qb__btn" title="导入题库 JSON（我们自己导出的、或 {questions:[…]} / 数组 都认）" @click="pickFile('json')">导入 JSON</button>
             <button class="qb__btn" title="把当前筛选出的题导出成 JSON（题库为空时导出全部）" @click="exportJson">导出 JSON</button>
@@ -305,6 +354,62 @@ function close() { emit('close') }
           </div>
 
           <div class="qb__detail">
+            <template v-if="paperOpen">
+              <div class="qb__paper">
+                <div class="qb__bhead">按规则挑题 —— 从「当前筛选结果」里抽；同一道题不会被抽两次</div>
+                <div v-for="r in rules" :key="r.id" class="qb__rule">
+                  <select v-model="r.qtype" class="qb__rsel" title="题型">
+                    <option value="">不限题型</option>
+                    <option v-for="t in QTYPES" :key="t.v" :value="t.v">{{ t.label }}</option>
+                  </select>
+                  <select v-model="r.section" class="qb__rsel" title="板块">
+                    <option value="">不限板块</option>
+                    <option v-for="s in SECTIONS" :key="s" :value="s">{{ s }}</option>
+                  </select>
+                  <select v-model="r.level" class="qb__rsel" title="难度">
+                    <option value="">不限难度</option>
+                    <option v-for="l in LEVELS" :key="l.v" :value="l.v">{{ l.label }}</option>
+                  </select>
+                  <input v-model.number="r.count" type="number" min="0" max="99" class="qb__rcount" title="题量" />
+                  <button class="qb__btn qb__btn--tiny" title="删除这条规则" @click="removeRule(r.id)">×</button>
+                </div>
+                <div class="qb__actions">
+                  <button class="qb__btn" @click="addRule">＋ 添加规则</button>
+                  <label class="qb__chk"><input type="checkbox" v-model="paperRandom" /> 随机抽取（不勾则优先抽用得少的）</label>
+                </div>
+                <div class="qb__actions">
+                  <button class="qb__btn qb__btn--pri" @click="doPick">一键挑题</button>
+                  <button class="qb__btn" :disabled="!paperResult || !paperResult.picked.length" @click="sendPaper(false)">送进 PDF（仅题干）</button>
+                  <button class="qb__btn" :disabled="!paperResult || !paperResult.picked.length" @click="sendPaper(true)">送进 PDF（含答案）</button>
+                  <button class="qb__btn" @click="resetRules">清空规则</button>
+                  <button class="qb__btn" @click="paperOpen = false">返回列表</button>
+                </div>
+
+                <div v-if="paperResult" class="qb__pres">
+                  <div class="qb__bptitle">挑题结果：共 {{ paperResult.picked.length }} 道</div>
+                  <div v-for="(x, i) in paperResult.results" :key="i" class="qb__prow" :class="{ 'qb__prow--short': x.short }">
+                    {{ ruleText(x.rule) }} —— 命中 {{ x.got }} / {{ x.want }}
+                    <b v-if="x.short">（库里只有这么多，少了 {{ x.want - x.got }} 道）</b>
+                  </div>
+                </div>
+
+                <div v-if="dupReport" class="qb__dups">
+                  <div class="qb__bptitle">
+                    组卷查重：
+                    <template v-if="!dupReport.pairs.length">未发现重复</template>
+                    <template v-else>发现 <b class="qb__noans">{{ dupReport.pairs.length }}</b> 组疑似重复</template>
+                  </div>
+                  <div v-for="(p, i) in dupReport.pairs.slice(0, 8)" :key="i" class="qb__dup">
+                    <span class="qb__dupk">{{ p.same ? '完全相同' : '相似 ' + (p.sim * 100).toFixed(0) + '%' }}</span>
+                    <b>#{{ p.a.id }} {{ p.a.title }}</b>
+                    <span class="qb__dupvs">↔</span>
+                    <b>#{{ p.b.id }} {{ p.b.title }}</b>
+                  </div>
+                  <div class="qb__dupnote">近重复只认「文字高度接近」的（错字、空格、标点）；语义相同的改写认不出来，需要人工核对。</div>
+                </div>
+              </div>
+            </template>
+
             <template v-if="batchOpen">
               <div class="qb__batch">
                 <div class="qb__bhead">把整份试题粘贴到下面，点「识别并导入」</div>
@@ -410,6 +515,21 @@ B. 2
 </template>
 
 <style scoped>
+.qb__paper { display: flex; flex-direction: column; gap: 8px; }
+.qb__rule { display: flex; align-items: center; gap: 6px; }
+.qb__rsel { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid #dcdce6; border-radius: 8px; font-size: 12.5px; }
+.qb__rcount { width: 68px; padding: 5px 8px; border: 1px solid #dcdce6; border-radius: 8px; font-size: 12.5px; }
+.qb__btn--tiny { padding: 3px 9px; font-size: 14px; line-height: 1; }
+.qb__chk { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted, #888); }
+.qb__pres { border-top: 1px dashed #e4e4ee; padding-top: 8px; }
+.qb__prow { font-size: 12.5px; padding: 4px 8px; border-radius: 6px; background: #fafafd; margin-bottom: 4px; }
+.qb__prow--short { background: #fff7e6; }
+.qb__prow--short b { color: #b25f00; }
+.qb__dups { border-top: 1px dashed #e4e4ee; padding-top: 8px; }
+.qb__dup { font-size: 12.5px; padding: 4px 8px; background: #fff7e6; border-radius: 6px; margin-bottom: 4px; }
+.qb__dupk { display: inline-block; min-width: 64px; color: #b25f00; }
+.qb__dupvs { margin: 0 6px; color: var(--muted, #999); }
+.qb__dupnote { font-size: 11.5px; color: var(--muted, #999); margin-top: 4px; }
 /* ⚠ z-index 要高于试卷弹层（.pm 是 2000、.pm__help 是 3000）—— 本弹窗是从试卷里打开的 */
 .qb { position: fixed; inset: 0; z-index: 3400; background: rgba(20, 20, 28, .42); display: flex; align-items: center; justify-content: center; }
 .qb__box { width: 1080px; max-width: 95vw; height: 86vh; background: var(--surface, #fff); border-radius: 12px; box-shadow: 0 18px 60px rgba(0,0,0,.28); display: flex; flex-direction: column; overflow: hidden; }
