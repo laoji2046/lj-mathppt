@@ -4,7 +4,7 @@ import type { MathFigureElement, SlideElement } from '@/types'
 import { lineDashCss } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
 import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg, vertexDotsSvg } from '@/composables/solid3d'
-import { CONIC_KINDS, FUNCTION_KINDS, conicFigure, customFigure, functionFigure } from '@/composables/mathPlot'
+import { CONIC_KINDS, FUNCTION_KINDS, conicFigure, conicLineDrag, conicLineHandles, customFigure, functionFigure } from '@/composables/mathPlot'
 import { solidSel, selectSolidVertex, selectSolidEdge, selectSolidFace, clearSolidSel } from '@/composables/solidSel'
 
 const props = defineProps<{ el: MathFigureElement; selected?: boolean; /** 预览用：等比缩放（contain）而不是拉伸（stretch） */ fit?: 'stretch' | 'contain' }>()
@@ -362,6 +362,43 @@ function onHandleUp() {
   dragging.value = false; dragIdx = -1
 }
 
+// ---- 「圆锥曲线 + 多条线」的**端点拖拽** ----
+// 手柄就是每条线在当前窗口里的两个可见端点（公式见 mathPlot 的 conicLineHandles）；
+// 拖一个端点 = 另一端固定、反算 k/m（直线 2 个自由度，两点正好定死）。线段还要跟着改起终点 x。
+const lineHandles = computed(() =>
+  CONIC_KINDS.includes(props.el.kind) ? conicLineHandles(props.el.kind, props.el.w, props.el.h, props.el.params) : [])
+const showLineHandles = computed(() => !!props.selected && lineHandles.value.length > 0)
+let dragLine: { i: number; which: 0 | 1 } | null = null
+/** 拖动过程中把被抓手柄钉在手指下面。
+ *  ⚠ 整条直线的端点是由**窗口裁剪**算出来的：把端点拖到图形内部后，线会继续延伸到框边，
+ *    手柄随即"跑掉"。所以拖动期间用实际指针位置画这个手柄，松手后再回到裁剪位置。 */
+const dragPt = ref<{ x: number; y: number } | null>(null)
+function lineHandlePos(h: { i: number; which: 0 | 1; x: number; y: number }) {
+  if (dragPt.value && dragLine && dragLine.i === h.i && dragLine.which === h.which) return dragPt.value
+  return { x: h.x, y: h.y }
+}
+function onLineHandleDown(e: PointerEvent, i: number, which: 0 | 1) {
+  e.stopPropagation()
+  const t = e.currentTarget as HTMLElement
+  try { t.setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
+  dragLine = { i, which }
+  dragPt.value = null
+  dragging.value = true
+}
+function onLineHandleMove(e: PointerEvent) {
+  if (!dragLine || !dragging.value) return
+  const r = box.value?.getBoundingClientRect()
+  if (!r || !r.width || !r.height) return
+  const px = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * props.el.w
+  const py = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) * props.el.h
+  dragPt.value = { x: px, y: py }
+  const patch = conicLineDrag(props.el.kind, props.el.w, props.el.h, props.el.params || {}, dragLine.i, dragLine.which, px, py)
+  if (Object.keys(patch).length) {
+    emit('update', { params: { ...(props.el.params || {}), ...patch } } as Partial<SlideElement>)
+  }
+}
+function onLineHandleUp() { dragLine = null; dragPt.value = null; dragging.value = false }
+
 
 
 function segDist(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
@@ -494,6 +531,18 @@ function onSvgDbl(e: MouseEvent) {
         @pointerup="onHandleUp"
       ></span>
     </template>
+    <template v-if="showLineHandles">
+      <span
+        v-for="(h, hi) in lineHandles"
+        :key="'lh' + hi"
+        class="mf-handle mf-handle--line"
+        :style="{ left: lineHandlePos(h).x + 'px', top: lineHandlePos(h).y + 'px' }"
+        @pointerdown.stop="onLineHandleDown($event, h.i, h.which)"
+        @pointermove="onLineHandleMove"
+        @pointerup="onLineHandleUp"
+        @pointercancel="onLineHandleUp"
+      ></span>
+    </template>
     <span v-if="showHandles && selLabelPos" class="mf-vlabel" :style="{ left: selLabelPos.left, top: selLabelPos.top }" @pointerdown.stop="onLabelDown($event, selLabelPos.idx)" @pointermove="onLabelMove($event, selLabelPos.idx)" @pointerup="onLabelUp" v-html="labelHtml(selLabelText)"></span>
   </div>
 </template>
@@ -515,6 +564,9 @@ function onSvgDbl(e: MouseEvent) {
 }
 .mf-handle:hover { background: var(--brand-soft); transform: scale(1.15); }
 .mf-handle.sel { border-color: #ff8f1f; box-shadow: 0 0 0 4px rgba(255,143,31,0.28); }
+/* 「圆锥曲线 + 多条线」的端点手柄：方形 + 绿色，跟圆形顶点手柄一眼区分 */
+.mf-handle--line { border-radius: 3px; border-color: #12b76a; cursor: grab; }
+.mf-handle--line:hover { background: #e8f8f0; }
 .mf-vlabel {
   position: absolute; z-index: 5;
   transform: translate(-50%, -50%);

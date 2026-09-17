@@ -745,6 +745,70 @@ function drawExtraLines(pv: Record<string, number>, view: View, w: number, h: nu
   return out
 }
 
+/** 圆锥曲线 + 直线：把每条线在当前窗口里的**两个可见端点**算成元素像素坐标，给拖拽手柄用。
+ *  （手柄的 left/top 就是这个坐标系，见 MathFigureElement 的 .mf-handle） */
+export function conicLineHandles(kind: string, w: number, h: number, params?: Record<string, number>): { i: number; which: 0 | 1; x: number; y: number }[] {
+  const def = CONICS[kind]
+  if (!def) return []
+  const pv = withParams(kind, params)
+  const n = Math.max(0, Math.min(4, Math.round(pv.n || 0)))
+  if (!n) return []
+  const view = def.viewOf ? def.viewOf(pv) : def.view
+  const mm = mapper(view, w, h)
+  const out: { i: number; which: 0 | 1; x: number; y: number }[] = []
+  for (let i = 1; i <= n; i++) {
+    const k = pv['k' + i] || 0, b2 = pv['m' + i] || 0
+    const sN = pv['s' + i] ?? 0, eN = pv['e' + i] ?? 0
+    const seg = Math.abs(eN - sN) > 1e-6
+    const span = clipLine(k, b2, view)
+    if (!span) continue
+    let lo = Math.min(span[0][0], span[1][0]), hi = Math.max(span[0][0], span[1][0])
+    if (seg) {
+      lo = Math.max(lo, Math.min(sN, eN))
+      hi = Math.min(hi, Math.max(sN, eN))
+      if (hi - lo < 1e-9) continue
+    }
+    out.push({ i, which: 0, x: mm.X(lo), y: mm.Y(k * lo + b2) })
+    out.push({ i, which: 1, x: mm.X(hi), y: mm.Y(k * hi + b2) })
+  }
+  return out
+}
+
+/** 拖动某条线的**一个端点**：另一端固定，由这两点反算斜率 k 与截距 m
+ *  （直线只有 2 个自由度，两个点正好定死）；线段还要一并更新起终点 x。
+ *  传入的是被拖端点的元素像素坐标。返回要写回 params 的补丁。 */
+export function conicLineDrag(
+  kind: string, w: number, h: number, params: Record<string, number>,
+  i: number, which: 0 | 1, px: number, py: number,
+): Record<string, number> {
+  const def = CONICS[kind]
+  if (!def) return {}
+  const pv = withParams(kind, params)
+  const view = def.viewOf ? def.viewOf(pv) : def.view
+  const own = conicLineHandles(kind, w, h, params).filter((q) => q.i === i)
+  const other = own.find((q) => q.which !== which)
+  if (!other) return {}
+  // mapper 的逆：X(x)=(x−xmin)·w/(xmax−xmin)，Y(y)=h−(y−ymin)·h/(ymax−ymin)
+  const sx = w / (view.xmax - view.xmin), sy = h / (view.ymax - view.ymin)
+  const fx = (p: number) => view.xmin + p / sx
+  const fy = (p: number) => view.ymin + (h - p) / sy
+  const ax = fx(other.x), ay = fy(other.y)
+  let bx = fx(px), by = fy(py)
+  // 拖成竖直时斜率无穷：给一点点错位（k 会很大，但不出 NaN / Infinity）
+  if (Math.abs(bx - ax) < 1e-6) bx = ax + 1e-6
+  const k = (by - ay) / (bx - ax)
+  const m2 = ay - k * ax
+  const patch: Record<string, number> = {}
+  patch['k' + i] = +k.toFixed(4)
+  patch['m' + i] = +m2.toFixed(4)
+  const sN = pv['s' + i] ?? 0, eN = pv['e' + i] ?? 0
+  if (Math.abs(eN - sN) > 1e-6) {                 // 线段：两端 x 跟着两个端点走
+    patch['s' + i] = +Math.min(ax, bx).toFixed(3)
+    patch['e' + i] = +Math.max(ax, bx).toFixed(3)
+  }
+  return patch
+}
+
 export function conicFigure(kind: string, w: number, h: number, baseStroke: string, sw: number, fill = 'none', params?: Record<string, number>, opt?: { conicStroke?: string; lineColors?: (string | null)[] }): string {
   const def = CONICS[kind]
   if (!def) return ''
