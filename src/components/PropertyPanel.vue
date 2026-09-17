@@ -107,6 +107,17 @@ function figParamVal(key: string, def: number) {
 function setFigParam(key: string, v: number) {
   patch({ params: { ...(mathfig.value?.params || {}), [key]: v } } as Partial<SlideElement>)
 }
+/** 参数输入：**只在能解析成数字时才提交**。
+ *  ⚠ 原来直接 num(...) 提交 —— type=number 里刚敲一个负号时 value 是空串，
+ *  被判成"非法 → 用默认值"，再回写 :value，**负号当场被抹掉 → 压根输不了负数**（用户实报）。
+ *  中间状态（空串 / 只有 "-" / "."）一律不提交、也不回写，让用户把数打完。 */
+function setFigParamSoft(key: string, raw: string) {
+  const t = String(raw).trim()
+  if (t === '' || t === '-' || t === '.' || t === '-.' || t === '+') return
+  const v = num(t, NaN)
+  if (!Number.isFinite(v)) return
+  setFigParam(key, v)
+}
 const isGraphic = computed(() => isShape.value || isLine.value || isArrow.value || isPen.value || isMathFig.value)
 function isCurrentGraphic(g: { v: string; cat: string }) {
   const t = el.value
@@ -1074,15 +1085,22 @@ function layerTypeLabel(type: string) {
         <!-- 可调参数（正弦型 A/ω/φ、含参二次的 a…） -->
         <button class="figlib__btn" title="把这个图形的种类与参数存进图形库，之后在「数学图形」面板里一键插回" @click="saveFigToLibrary">存入图形库</button>
         <p v-if="figLibMsg" class="panel__hint">{{ figLibMsg }}</p>
-        <label v-for="pr in figParams" :key="pr.key" class="field">
+        <label v-for="pr in figParams" :key="pr.key" class="field" :class="{ 'field--row': pr.bool }">
           <span>{{ pr.label }}</span>
           <input
+            v-if="pr.bool"
+            type="checkbox"
+            :checked="figParamVal(pr.key, pr.def) >= 0.5"
+            @change="setFigParam(pr.key, ($event.target as HTMLInputElement).checked ? 1 : 0)"
+          />
+          <input
+            v-else
             type="number"
             :step="pr.step ?? 0.1"
             :min="pr.min"
             :max="pr.max"
             :value="figParamVal(pr.key, pr.def)"
-            @input="setFigParam(pr.key, num(($event.target as HTMLInputElement).value, pr.def))"
+            @input="setFigParamSoft(pr.key, ($event.target as HTMLInputElement).value)"
           />
         </label>
         <p v-if="figParams.length" class="panel__hint">改参数后图形立即重绘（适合讲"图象变换 / 含参讨论"）。</p>

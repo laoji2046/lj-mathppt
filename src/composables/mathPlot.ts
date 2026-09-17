@@ -170,6 +170,8 @@ export interface ParamSpec {
   key: string; label: string; def: number; step?: number; min?: number; max?: number
   /** 只在**满足条件**时才在属性面板里显示（例如"线2"的参数在条数设为 1 时先藏起来） */
   showIf?: (p: Record<string, number>) => boolean
+  /** 布尔参数：属性面板渲染成**勾选框**（值仍是 0 / 1，存在同一个 params 里） */
+  bool?: boolean
 }
 
 /** 分段函数的一段：f 在 [from, to] 上 */
@@ -635,6 +637,7 @@ export const CONICS: Record<string, {
     params: [
       { key: 'a', label: 'a（半长轴）', def: 4, step: 0.5, min: 0.5, max: 20 },
       { key: 'b', label: 'b（半短轴）', def: 3, step: 0.5, min: 0.5, max: 20 },
+      { key: 'ab', label: '显示 a、b 标注', def: 1, bool: true },
     ],
     viewOf: (p) => ellipseWindow(p.a || 1, p.b || 1),
   },
@@ -644,6 +647,7 @@ export const CONICS: Record<string, {
     params: [
       { key: 'a', label: 'a（半长轴）', def: 4, step: 0.5, min: 0.5, max: 20 },
       { key: 'b', label: 'b（半短轴）', def: 3, step: 0.5, min: 0.5, max: 20 },
+      { key: 'ab', label: '显示 a、b 标注', def: 1, bool: true },
     ],
     viewOf: (p) => ellipseWindowV(p.a || 1, p.b || 1),
   },
@@ -769,8 +773,11 @@ export function conicFigure(kind: string, w: number, h: number, stroke: string, 
     s += lineSvg(X(-a), Y(0), X(a), Y(0), stroke, thin, dash)
     s += dot(-c, 0) + dot(c, 0)
     s += label(-c, 0, 'F₁', 0, fs * 1.15) + label(c, 0, 'F₂', 0, fs * 1.15)
-    s += label(a, 0, 'a=' + a, fs * 0.5, -fs * 0.6)
-    s += label(0, b, 'b=' + b, fs * 0.5, -fs * 0.6)
+    // a / b 标注可选（默认显示，老图元不变）—— 教材图里一般不把参数值印在图上
+    if (Math.round(pv.ab ?? 1)) {
+      s += label(a, 0, 'a=' + a, fs * 0.5, -fs * 0.6)
+      s += label(0, b, 'b=' + b, fs * 0.5, -fs * 0.6)
+    }
     return s
   }
   if (kind === 'conicCustomEllipseV') {
@@ -782,8 +789,10 @@ export function conicFigure(kind: string, w: number, h: number, stroke: string, 
     s += lineSvg(X(0), Y(-a), X(0), Y(a), stroke, thin, dash)
     s += dot(0, -c) + dot(0, c)
     s += label(0, -c, 'F₁', fs * 1.25, 0) + label(0, c, 'F₂', fs * 1.25, 0)
-    s += label(0, a, 'a=' + a, fs * 0.5, -fs * 0.6)
-    s += label(b, 0, 'b=' + b, -fs * 1.6, -fs * 0.6)
+    if (Math.round(pv.ab ?? 1)) {
+      s += label(0, a, 'a=' + a, fs * 0.5, -fs * 0.6)
+      s += label(b, 0, 'b=' + b, -fs * 1.6, -fs * 0.6)
+    }
     return s
   }
   if (kind === 'conicCustomHyperbola') {
