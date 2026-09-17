@@ -164,6 +164,9 @@ function stripNonQuestionLines(text: string): { text: string; skipped: number } 
     if (!t) { out.push(l); return }
     if (noteHits(t) >= 2) { skipped++; return }
     if (RE_NOTE_HEAD.test(t)) { skipped++; return }
+    // 分段标题行（一、选择题）与「(12 分)」这种分值行 —— 都不是题目
+    if (/^[一二三四五六七八九十]+\s*[、.．]\s*\S{0,6}$/.test(t) && t.length < 20) { skipped++; return }
+    if (/^[（(]\s*\d{1,3}\s*分\s*[)）]\s*$/.test(t)) { skipped++; return }
     if (i < 8 && isTitleLine(t)) { skipped++; return }
     out.push(l)
   })
@@ -177,6 +180,8 @@ function isNonQuestionBlock(block: string): boolean {
   let hits = 0
   for (const w of NOTE_WORDS) if (t.indexOf(w) >= 0) hits++
   if (hits >= 2) return true
+  // 分段标题行：「一、选择题」「二、填空题」「三、解答题」这类 —— 也不是题目
+  if (/^\s*[一二三四五六七八九十]+\s*[、.．]\s*(选择题|填空题|解答题|多选题|单选题|判断题|计算题|证明题|应用题)\s*$/.test(t)) return true
   const lines = t.split('\n').map((s) => s.trim()).filter(Boolean)
   if (lines.length === 1) {
     const l = lines[0]
