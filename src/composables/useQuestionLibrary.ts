@@ -121,7 +121,10 @@ export interface QuestionMeta {
   section: string
   /** 录入/来源日期 YYYY-MM-DD */
   date: string
+  /** 年份（如 2024）；整套插入时按它 + 试卷名归组 */
   year: string
+  /** 试卷名（如 2024届某市一模）；整套插入时按它 + 年份归组 */
+  paperName: string
   region: string
   /** 答案来源：manual 人工 / auto 从解析自动提取 / 空 未填 */
   answerFrom: '' | 'manual' | 'auto'
@@ -134,7 +137,7 @@ export interface QuestionEntry extends LibItem {
 const EMPTY_META: QuestionMeta = {
   stem: '', options: [], answer: '', solution: '',
   knowledge: [], difficulty: 3, qtype: 'choice', section: '', date: '',
-  year: '', region: '', answerFrom: '',
+  year: '', paperName: '', region: '', answerFrom: '',
 }
 
 function readMeta(raw: Record<string, unknown>): QuestionMeta {
@@ -155,6 +158,7 @@ function readMeta(raw: Record<string, unknown>): QuestionMeta {
     section: String(m.section || ''),
     date: String(m.date || ''),
     year: String(m.year || ''),
+    paperName: String(m.paperName || ''),
     region: String(m.region || ''),
     answerFrom: (String(m.answerFrom || '') as QuestionMeta['answerFrom']) || (answer ? 'manual' : ''),
   }
@@ -227,6 +231,10 @@ function today(): string {
 export function withDefaults(meta: Partial<QuestionMeta>): QuestionMeta {
   const q: QuestionMeta = { ...EMPTY_META, ...meta }
   if (!q.date) q.date = today()
+  if (!q.year) {
+    const y = (q.region || '').match(/(19|20)\d{2}/)
+    if (y) q.year = y[0]
+  }
   if (!q.qtype) q.qtype = inferQType(q)
   if (!q.section) q.section = guessSection(q.stem, q.knowledge)
   if (q.answer && !q.answerFrom) q.answerFrom = 'manual'
@@ -283,6 +291,7 @@ export async function importParsedQuestions(list: ParsedQuestion[]): Promise<{ a
       qtype: (p as { qtype?: QType }).qtype,
       section: (p as { section?: string }).section,
       date: (p as { date?: string }).date,
+      paperName: (p as { paperName?: string }).paperName,
       answerFrom,
     })
     return draftOf(q, p.title)
@@ -326,8 +335,7 @@ function shuffle<T>(arr: T[]): T[] {
  */
 export function pickByRules(
   pool: QuestionEntry[],
-  rules: PaperRule[],
-  opt: { random?: boolean } = {}
+  rules: PaperRule[]
 ): { picked: QuestionEntry[]; results: RuleResult[] } {
   const used = new Set<number>()
   const picked: QuestionEntry[] = []
@@ -341,9 +349,8 @@ export function pickByRules(
       (!r.section || x.q.section === r.section) &&
       (!r.level || levelOf(x.q.difficulty) === r.level)
     )
-    cands = opt.random
-      ? shuffle(cands)
-      : cands.slice().sort((a, b) => a.usedCount - b.usedCount || a.id - b.id)
+    // 不按「引用次数」排序（用户明确不要这个属性）—— 默认随机，保证每次抽出的卷子不一样
+    cands = shuffle(cands)
     const take = cands.slice(0, want)
     for (const x of take) { used.add(x.id); picked.push(x) }
     results.push({ rule: r, got: take.length, want, short: take.length < want })
@@ -443,6 +450,47 @@ export function findDuplicates(list: QuestionEntry[], threshold = 0.85): { pairs
   }
   return { pairs, skippedNear }
 }
+/* ---------------- 整套（按年份 + 试卷名） ---------------- */
+
+export interface PaperGroup {
+  year: string
+  paperName: string
+  count: number
+  items: QuestionEntry[]
+}
+
+/** 键：年份 + 试卷名。任缺其一用占位，保证也能成组。 */
+export function paperKey(year: string, paperName: string): string {
+  return (year || '未标年份') + '||' + (paperName || '未标试卷名')
+}
+
+/** 把题库按「年份 + 试卷名」归组，供整套插入用（组内按 id 保持录入顺序） */
+export function groupPapers(list: QuestionEntry[]): PaperGroup[] {
+  const map = new Map<string, PaperGroup>()
+  for (const x of list) {
+    const k = paperKey(x.q.year, x.q.paperName)
+    const g = map.get(k)
+    if (g) { g.items.push(x); g.count++ }
+    else map.set(k, { year: x.q.year, paperName: x.q.paperName, count: 1, items: [x] })
+  }
+  const arr = Array.from(map.values())
+  arr.forEach((g) => g.items.sort((a, b) => a.id - b.id))
+  arr.sort((a, b) => (b.year || '').localeCompare(a.year || '') || (a.paperName || '').localeCompare(b.paperName || ''))
+  return arr
+}
+
+/** 整套卷子的文本：抬头 + 按 选择→填空→解答 排序的题目 */
+export function paperGroupToText(g: PaperGroup, withSolution = false, startNo = 1): string {
+  const order: Record<string, number> = { choice: 0, multi: 1, blank: 2, answer: 3 }
+  const sorted = [...g.items].sort((a, b) => (order[a.q.qtype] ?? 9) - (order[b.q.qtype] ?? 9) || a.id - b.id)
+  const head = (g.year ? g.year + ' 年 ' : '') + (g.paperName || '未命名试卷')
+  const body = sorted.map((x, i) => {
+    const t = questionToText(x, withSolution).replace(/^\s*\d{1,3}\s*[.、．)）]\s*/, '')
+    return (startNo + i) + '. ' + t
+  }).join('\n\n')
+  return head + '\n\n' + body
+}
+
 /* ---------------- 整库导入导出（JSON） ---------------- */
 
 /** 导出文件的格式标记（导入时用它判断是不是我们的题库文件） */
@@ -542,6 +590,8 @@ export interface FilterOpt {
   section?: string | ''
   level?: Level | ''
   onlyMissingAnswer?: boolean
+  year?: string
+  paperName?: string
 }
 
 export function filterQuestions(list: QuestionEntry[], opt: FilterOpt): QuestionEntry[] {
@@ -553,6 +603,8 @@ export function filterQuestions(list: QuestionEntry[], opt: FilterOpt): Question
     if (opt.section && x.q.section !== opt.section) return false
     if (opt.level && levelOf(x.q.difficulty) !== opt.level) return false
     if (opt.onlyMissingAnswer && x.q.answer.trim()) return false
+    if (opt.year && x.q.year !== opt.year) return false
+    if (opt.paperName && x.q.paperName !== opt.paperName) return false
     if (tags.length && !tags.every((t) => x.q.knowledge.indexOf(t) >= 0 || x.tags.indexOf(t) >= 0)) return false
     if (!k) return true
     return (
@@ -561,7 +613,9 @@ export function filterQuestions(list: QuestionEntry[], opt: FilterOpt): Question
       x.q.answer.toLowerCase().includes(k) ||
       x.q.solution.toLowerCase().includes(k) ||
       x.tags.toLowerCase().includes(k) ||
-      x.q.section.toLowerCase().includes(k)
+      x.q.section.toLowerCase().includes(k) ||
+      x.q.year.toLowerCase().includes(k) ||
+      x.q.paperName.toLowerCase().includes(k)
     )
   })
 }

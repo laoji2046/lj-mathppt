@@ -31,6 +31,10 @@ export interface ParsedQuestion {
   section?: string
   /** 日期 YYYY-MM-DD */
   date?: string
+  /** 年份（如 2024） */
+  yearExplicit?: string
+  /** 试卷名（如 2024届某市一模） */
+  paperName?: string
   year: string
   region: string
   warn?: string
@@ -47,6 +51,8 @@ const RE_SOURCE = /^\s*(?:【来源】|来源\s*[:：])\s*(.*)$/
 const RE_QTYPE = /^\s*(?:【题型】|题型\s*[:：])\s*(.+?)\s*$/
 const RE_SECTION = /^\s*(?:【板块】|板块\s*[:：])\s*(.+?)\s*$/
 const RE_DATE = /^\s*(?:【日期】|日期\s*[:：])\s*(.+?)\s*$/
+const RE_YEAR = /^\s*(?:【年份】|年份\s*[:：])\s*(.+?)\s*$/
+const RE_PAPER = /^\s*(?:【试卷】|【试卷名】|试卷\s*[:：]|试卷名\s*[:：])\s*(.+?)\s*$/
 
 /** 难度文字 → 1-5（易=2 / 中=3 / 难=5；也认 1-5 与「较难」这类说法） */
 function parseDiff(raw: string): number {
@@ -141,6 +147,8 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
     let qtype = ''
     let section = ''
     let date = ''
+    let yearExplicit = ''
+    let paperName = ''
     let mode = 'stem'
 
     for (const line of ls) {
@@ -156,6 +164,10 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
       if (m) { section = m[1].trim(); continue }
       m = line.match(RE_DATE)
       if (m) { date = parseDate(m[1]); continue }
+      m = line.match(RE_YEAR)
+      if (m) { const y = (m[1].match(/(19|20)\d{2}/) || [])[0]; if (y) yearExplicit = y; continue }
+      m = line.match(RE_PAPER)
+      if (m) { paperName = m[1].trim(); continue }
       m = line.match(RE_KNOW)
       if (m) { knowledge = knowledge.concat(splitTags(m[1])); continue }
       m = line.match(RE_SOURCE)
@@ -208,6 +220,8 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
       qtype,
       section,
       date,
+      yearExplicit,
+      paperName,
       year,
       region,
       warn: !answer && !options.length ? '没有识别到答案' : undefined,
@@ -227,4 +241,5 @@ export const PARSE_HELP: string[] = [
   '题型写 【题型】单选 / 多选 / 填空 / 解答；不写会自动推断（有选项→选择，有下划线→填空）。',
   '板块写 【板块】集合与逻辑 / 函数与导数 / 三角函数与向量 / 解析几何 / 立体几何 / 概率与统计；不写会按关键词自动归类。',
   '日期写 【日期】2024-05-20（也认 2024.5.20 / 2024年5月20日）。',
+  '年份写 【年份】2024；试卷名写 【试卷】2024届某市一模 —— 这两项是「整套插入」的归组依据。',
 ]

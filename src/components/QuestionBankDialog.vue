@@ -5,10 +5,10 @@ import {
   listQuestions, addQuestion, updateQuestion, removeQuestion, touchQuestion,
   listQuestionTags, autoTitle, questionToText, filterQuestions,
   importParsedQuestions, proposeAnswers, parseQuestionsJson, exportQuestionsJson,
-  pickByRules, ruleText, findDuplicates,
+  pickByRules, ruleText, findDuplicates, groupPapers, paperGroupToText,
   QTYPES, SECTIONS, LEVELS, levelOf, levelLabel, levelToDifficulty, qtypeLabel, withDefaults,
 } from '@/composables/useQuestionLibrary'
-import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult } from '@/composables/useQuestionLibrary'
+import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup } from '@/composables/useQuestionLibrary'
 import { parseQuestions, PARSE_HELP } from '@/composables/parseQuestions'
 import { saveTextFile } from '@/composables/useTauri'
 
@@ -24,9 +24,26 @@ const q = ref('')
 const batchOpen = ref(false)
 const batchText = ref('')
 const parsed = computed(() => parseQuestions(batchText.value))
+/** 本批次统一套用的年份与试卷名（题内写了【年份】【试卷】则以题内为准） */
+const batchYear = ref('')
+const batchPaper = ref('')
+/** 整套插入：按「年份 + 试卷名」归组的卷子列表 */
+const paperGroups = computed(() => groupPapers(list.value))
+function insertPaperGroup(g: PaperGroup, withSolution: boolean) {
+  if (!g.items.length) { flash('这一套里没有题'); return }
+  emit('insert', paperGroupToText(g, withSolution), 0)
+  g.items.forEach((x) => void touchQuestion(x.id))
+  flash('已整套插入「' + (g.year ? g.year + ' ' : '') + (g.paperName || '未命名试卷') + '」共 ' + g.count + ' 道')
+}
 async function doBatch() {
   if (!parsed.value.length) return
-  const r = await importParsedQuestions(parsed.value)
+  // 批次级的年份 / 试卷名：题内没写就套用批次的
+  const items = parsed.value.map((p) => ({
+    ...p,
+    yearExplicit: p.yearExplicit || batchYear.value.trim(),
+    paperName: p.paperName || batchPaper.value.trim(),
+  }))
+  const r = await importParsedQuestions(items)
   await load()
   batchOpen.value = false
   batchText.value = ''
@@ -34,7 +51,6 @@ async function doBatch() {
 }
 /* ---- 规则组卷（双向细目表）+ 组卷查重 ---- */
 const paperOpen = ref(false)
-const paperRandom = ref(false)
 const rules = ref<PaperRule[]>([{ id: 1, qtype: 'choice', section: '', level: '', count: 5 }])
 let ruleSeq = 1
 const paperResult = ref<{ picked: QuestionEntry[]; results: RuleResult[] } | null>(null)
@@ -58,7 +74,7 @@ function doPick() {
   if (!pool.length) { flash('当前筛选结果里没有题 —— 先放宽筛选条件'); return }
   const active = rules.value.filter((r) => (Number(r.count) || 0) > 0)
   if (!active.length) { flash('至少填一条规则的题量'); return }
-  const r = pickByRules(pool, active, { random: paperRandom.value })
+  const r = pickByRules(pool, active)
   paperResult.value = r
   dupReport.value = findDuplicates(r.picked)
   const shortCnt = r.results.filter((x) => x.short).length
@@ -172,7 +188,7 @@ async function doComplete() {
 const emptyMeta = (): QuestionMeta => ({
   stem: '', options: [], answer: '', solution: '',
   knowledge: [], difficulty: 3, qtype: 'choice', section: '', date: '',
-  year: '', region: '', answerFrom: '',
+  year: '', paperName: '', region: '', answerFrom: '',
 })
 const editing = ref(false)
 const editingId = ref(0)
@@ -376,13 +392,24 @@ function close() { emit('close') }
                 </div>
                 <div class="qb__actions">
                   <button class="qb__btn" @click="addRule">＋ 添加规则</button>
-                  <label class="qb__chk"><input type="checkbox" v-model="paperRandom" /> 随机抽取（不勾则优先抽用得少的）</label>
+                  <span class="qb__chk">抽题是随机的 —— 同样的规则每次抽出的卷子不一样</span>
                 </div>
                 <div class="qb__actions">
                   <button class="qb__btn qb__btn--pri" @click="doPick">一键挑题</button>
                   <button class="qb__btn" :disabled="!paperResult || !paperResult.picked.length" @click="sendPaper(false)">送进 PDF（仅题干）</button>
                   <button class="qb__btn" :disabled="!paperResult || !paperResult.picked.length" @click="sendPaper(true)">送进 PDF（含答案）</button>
                   <button class="qb__btn" @click="resetRules">清空规则</button>
+                </div>
+
+                <div class="qb__papers">
+                  <div class="qb__bptitle">或按试卷整套插入（按「年份 + 试卷名」归组）</div>
+                  <div v-if="!paperGroups.length" class="qb__empty">题库里还没有带年份/试卷名的题 —— 批量导入时填「年份」「试卷名」，或在题里写【年份】【试卷】。</div>
+                  <div v-for="(gp, i) in paperGroups" :key="i" class="qb__prow qb__prow--paper">
+                    <span class="qb__ptitle">{{ gp.year || '未标年份' }} · {{ gp.paperName || '未标试卷名' }}</span>
+                    <span class="qb__pcount">{{ gp.count }} 道</span>
+                    <button class="qb__btn qb__btn--tiny" @click="insertPaperGroup(gp, false)">插入整套</button>
+                    <button class="qb__btn qb__btn--tiny" @click="insertPaperGroup(gp, true)">含答案整套</button>
+                  </div>
                   <button class="qb__btn" @click="paperOpen = false">返回列表</button>
                 </div>
 
@@ -414,6 +441,10 @@ function close() { emit('close') }
             <template v-if="batchOpen">
               <div class="qb__batch">
                 <div class="qb__bhead">把整份试题粘贴到下面，点「识别并导入」</div>
+                <div class="qb__batchtop">
+                  <label class="qb__byl">年份<input v-model="batchYear" class="qb__byi" type="text" placeholder="2024（本批全部套用）" /></label>
+                  <label class="qb__byl">试卷名<input v-model="batchPaper" class="qb__byi" type="text" placeholder="2024届某市一模（本批全部套用）" /></label>
+                </div>
                 <textarea v-model="batchText" class="qb__btext" rows="15" placeholder="示例：
 1. 已知 x&gt;0，求 x+1/x 的最小值。
 A. 1
@@ -522,6 +553,13 @@ B. 2
 .qb__rcount { width: 68px; padding: 5px 8px; border: 1px solid #dcdce6; border-radius: 8px; font-size: 12.5px; }
 .qb__btn--tiny { padding: 3px 9px; font-size: 14px; line-height: 1; }
 .qb__chk { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted, #888); }
+.qb__papers { border-top: 1px dashed #e4e4ee; padding-top: 8px; }
+.qb__prow--paper { display: flex; align-items: center; gap: 8px; }
+.qb__ptitle { flex: 1; min-width: 0; font-weight: 600; }
+.qb__pcount { font-size: 11.5px; color: var(--muted, #888); }
+.qb__batchtop { display: flex; gap: 12px; flex-wrap: wrap; }
+.qb__byl { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted, #777); flex: 1; min-width: 160px; }
+.qb__byi { padding: 6px 9px; border: 1px solid #dcdce6; border-radius: 8px; font-size: 13px; }
 .qb__pres { border-top: 1px dashed #e4e4ee; padding-top: 8px; }
 .qb__prow { font-size: 12.5px; padding: 4px 8px; border-radius: 6px; background: #fafafd; margin-bottom: 4px; }
 .qb__prow--short { background: #fff7e6; }
