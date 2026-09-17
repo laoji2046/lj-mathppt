@@ -17,6 +17,15 @@
  *  来源       —— 【来源】 或 来源：（顺带识别其中的年份）
  */
 
+/** 上次解析时被判为「非题目」而跳过的**行数**（须知/抬头/注意事项），供界面提示用 */
+export let skippedNonQuestion = 0
+
+/** 带信息的解析：返回题目列表 + 跳过行数（界面提示用；parseQuestions 保持向后兼容） */
+export function parseQuestionsWithInfo(raw: string): { list: ParsedQuestion[]; skipped: number } {
+  const list = parseQuestions(raw)
+  return { list, skipped: skippedNonQuestion }
+}
+
 export interface ParsedQuestion {
   title: string
   stem: string
@@ -97,6 +106,88 @@ function autoTitle(stem: string): string {
   return t.length > 20 ? t.slice(0, 20) + '…' : t
 }
 
+/* ---------------- 过滤「不是题目」的内容 ---------------- */
+
+/**
+ * 考生须知 / 答题说明类词汇。**真实数学题几乎不会同时出现两个**，所以命中 ≥2 个就判为须知。
+ * （这些内容在试卷里常常也以 1. 2. 3. 编号，会被切题规则误切成题目 —— 必须单独滤掉）
+ */
+const NOTE_WORDS = [
+  '答题卡', '条形码', '准考证', '监考', '考生', '2B铅笔', '铅笔', '签字笔', '橡皮擦', '橡皮',
+  '填涂', '答题区域', '超出答题区域', '草稿纸', '注意事项', '考生须知', '姓名', '学校', '毫米', '无效',
+]
+/** 这些开头直接判为说明段 */
+const RE_NOTE_HEAD = /^\s*(?:注意事项|考生须知|答题说明|说明|考试须知)\s*[:：]?\s*$/
+/** 标题类词（与 detectPaperInfo 用的是同一套思路） */
+const RE_TITLE_WORD2 = /(试卷|试题|考试|模拟|联考|一模|二模|三模|高考|期末|期中|月考|调研|统考|质检|适应性|诊断|真题)/
+
+/**
+ * 判断一段文本**不是题目**。三种情况：
+ *  ① 命中 ≥2 个须知类词（如同时出现「答题卡」「签字笔」）；
+ *  ② 就是「注意事项」这类小标题本身；
+ *  ③ **单行标题**：只有一行、长度 < 40、含标题类词，且**没有任何题目特征**（选项/答案/解析/数学符号/下划线）。
+ */
+/** 单行标题判断（只在正文开头的几行里用，避免误伤正文中间的题） */
+function isTitleLine(t: string): boolean {
+  if (t.length >= 40) return false
+  if (!RE_TITLE_WORD2.test(t)) return false
+  const hasQuestionMark =
+    RE_OPT.test(t) || RE_ANSWER.test(t) || RE_SOLUTION.test(t) ||
+    /[=＋+≥≤<>＜＞√∑∫π²³]|_\{2,}|＿|（\s*）|\(\s*\)/.test(t)
+  return !hasQuestionMark
+}
+
+/** 一行里须知类词的命中数 */
+function noteHits(t: string): number {
+  let n = 0
+  for (const w of NOTE_WORDS) if (t.indexOf(w) >= 0) n++
+  return n
+}
+
+/**
+ * **按行**剔除「不是题目」的内容，返回清理后的文本与被丢掉的行数。
+ *
+ * ⚠ 必须按行做，不能按块做 —— 因为切块的 `---` 只分开题目，
+ * 一旦须知和第一道题落在同一个块里，按块过滤会把真题一起丢掉（实测踩过）。
+ *
+ * 规则：
+ *  ① 一行命中 **≥2 个须知类词** → 丢掉（须知段落）；
+ *  ② 「注意事项」「考生须知」这类小标题本身 → 丢掉；
+ *  ③ **只在正文开头 8 行内**，把单行标题（含试卷类词、无题目特征）丢掉。
+ */
+function stripNonQuestionLines(text: string): { text: string; skipped: number } {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n')
+  const out: string[] = []
+  let skipped = 0
+  lines.forEach((l, i) => {
+    const t = l.trim()
+    if (!t) { out.push(l); return }
+    if (noteHits(t) >= 2) { skipped++; return }
+    if (RE_NOTE_HEAD.test(t)) { skipped++; return }
+    if (i < 8 && isTitleLine(t)) { skipped++; return }
+    out.push(l)
+  })
+  return { text: out.join('\n'), skipped }
+}
+
+function isNonQuestionBlock(block: string): boolean {
+  const t = block.trim()
+  if (!t) return true
+  if (RE_NOTE_HEAD.test(t)) return true
+  let hits = 0
+  for (const w of NOTE_WORDS) if (t.indexOf(w) >= 0) hits++
+  if (hits >= 2) return true
+  const lines = t.split('\n').map((s) => s.trim()).filter(Boolean)
+  if (lines.length === 1) {
+    const l = lines[0]
+    const hasQuestionMark =
+      RE_OPT.test(l) || RE_ANSWER.test(l) || RE_SOLUTION.test(l) ||
+      /[=＋+≥≤<>＜＞√∑∫π²³]|_\{2,}|＿|（\s*）|\(\s*\)/.test(l)
+    if (!hasQuestionMark && l.length < 40 && RE_TITLE_WORD2.test(l)) return true
+  }
+  return false
+}
+
 /** 一行里可能有多个选项：A．1　B．2　C．3 —— 拆成数组 */
 function splitOptionsLine(line: string): string[] {
   const parts = line.split(/(?=[（(]?\s*[A-Ha-h]\s*[.、．)）]\s*)/g)
@@ -136,8 +227,12 @@ function splitBlocks(text: string): string[] {
 }
 
 export function parseQuestions(raw: string): ParsedQuestion[] {
+  const stripped = stripNonQuestionLines(raw)
+  skippedNonQuestion = stripped.skipped
   const out: ParsedQuestion[] = []
-  for (const block of splitBlocks(raw)) {
+  for (const block of splitBlocks(stripped.text)) {
+    // ⚠ 考生须知 / 抬头 / 注意事项**不是题目** —— 它们也常以 1. 2. 编号，会被切题规则误切
+    if (isNonQuestionBlock(block)) { skippedNonQuestion += 1; continue }
     const ls = block.split('\n')
     const stemParts: string[] = []
     const options: string[] = []

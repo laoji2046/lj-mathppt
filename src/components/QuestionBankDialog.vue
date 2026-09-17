@@ -10,7 +10,7 @@ import {
   QTYPES, SECTIONS, LEVELS, levelOf, levelLabel, levelToDifficulty, qtypeLabel, withDefaults,
 } from '@/composables/useQuestionLibrary'
 import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup } from '@/composables/useQuestionLibrary'
-import { parseQuestions, PARSE_HELP, detectPaperInfo } from '@/composables/parseQuestions'
+import { parseQuestionsWithInfo, PARSE_HELP, detectPaperInfo } from '@/composables/parseQuestions'
 import { saveTextFile } from '@/composables/useTauri'
 
 const emit = defineEmits<{ (e: 'close'): void; (e: 'insert', text: string, id: number): void }>()
@@ -24,7 +24,8 @@ const q = ref('')
 /* ---- 批量导入（粘一整个文档，解析后一次性入库） ---- */
 const batchOpen = ref(false)
 const batchText = ref('')
-const parsed = computed(() => parseQuestions(batchText.value))
+const parsedInfo = computed(() => parseQuestionsWithInfo(batchText.value))
+const parsed = computed(() => parsedInfo.value.list)
 /** 本批次统一套用的年份与试卷名（题内写了【年份】【试卷】则以题内为准） */
 const batchYear = ref('')
 const batchPaper = ref('')
@@ -481,6 +482,7 @@ B. 2
                   <b>识别到 {{ parsed.length }} 道题</b>
                   <span v-if="parsed.length" class="qb__bwarn">
                     <template v-if="parsed.filter((p) => p.warn).length">其中 {{ parsed.filter((p) => p.warn).length }} 道没识别到答案</template>
+                    <template v-if="parsedInfo.skipped">；已跳过 {{ parsedInfo.skipped }} 行考生须知／抬头</template>
                   </span>
                 </div>
                 <details class="qb__bhelp">
