@@ -269,7 +269,6 @@ function lineRms(pts: [number, number][]): number {
  *  普通代数拟合在局部弧上有系统偏差（Kåsa 尤其明显：弧越短偏得越多）——
  *  这是"拟合方法本身"能改进的地方，迭代几轮就把偏差压下去。 */
 export function arcRefine(pts: [number, number][], kind: 'circle' | 'ellipse') {
-  const n = pts.length
   let w: number[] | undefined
   let out: { cx: number; cy: number; rx: number; ry: number; rms: number } | null = null
   for (let it = 0; it < 6; it++) {
