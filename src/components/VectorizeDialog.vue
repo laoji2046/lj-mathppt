@@ -9,7 +9,7 @@
  *  而"改错了只能整图重识别"会把手填的字母一起丢掉，所以这里配了独立的历史栈。
  *  重识别会换掉坐标系（box 变了），所以它是**历史清空点**，且动手前会先问一句。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { vectorizeSink } from '@/ui/vectorize'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
@@ -562,7 +562,7 @@ async function run(crop?: [number, number, number, number] | null) {
   err.value = ''
   await new Promise((r) => setTimeout(r, 30))   // 让"识别中"先画出来
   try {
-    const r = await vectorizeInWorker(im, crop ? { crop } : {})
+    const r = await vectorizeInWorker(im, { ...advOpt(), ...(crop ? { crop } : {}) })
     if (!r.stats.verts) throw new Error('没认出来东西 —— 可能不是线稿（灰度图 / 照片都不行）')
     res.value = r
     adopt(r)
@@ -584,6 +584,70 @@ function rerun(crop?: [number, number, number, number] | null) {
   if (dirty.value && !confirm('重新识别会丢掉这次的顶点 / 边 / 字母修改（可以用撤销找回，但只在重识别之前有效）。\n\n确定重新识别？')) return
   void run(crop)
 }
+
+// ---------------- 阈值细调（滑杆） ----------------
+/** 识别算法里那些"一调就好、但每调一次都得我重发一版 exe"的阈值。
+ *  用户实测反馈：多出来的点 / 多出来的线段、以及虚线漏边，靠这几个阈值就能掰到位 —— 所以直接给他滑杆。
+ *  只把**被改过**的项传给算法（见 advOpt），没改的继续吃算法默认值。 */
+const ADV_GROUPS = [
+  {
+    title: '杂点 / 多余的点与线段',
+    items: [
+      { k: 'dashMinPiece', label: '最小短划', min: 0, max: 20, step: 1, def: 4, hint: '主轴短于此长度的小墨团直接当噪点抹掉（px）' },
+      { k: 'dashMinTotal', label: '最小短划堆', min: 0, max: 60, step: 1, def: 16, hint: '一堆短划的总长不足此值就整堆抹掉（px）；两个 7px 杂点凑的假虚线是 14px' },
+      { k: 'dashMinEdge', label: '孤立虚线边', min: 0, max: 200, step: 5, def: 80, hint: '两头都没搭上顶点的虚线边，短于此值整条丢掉（px）' },
+      { k: 'collinearCos', label: '共线判据', min: 0.9, max: 1, step: 0.005, def: 0.995, hint: '度 2 顶点两侧"接近直线"的程度（1 = 完全直）。调大更容易把直线上的多余点并掉' },
+    ],
+  },
+  {
+    title: '虚线合并（漏边 / 虚线整条消失）',
+    items: [
+      { k: 'dashCos', label: '方向对齐', min: 0.8, max: 0.99, step: 0.005, def: 0.94, hint: '调小 = 更松，虚线更容易并起来；太松会把别的线的短划也并进来' },
+      { k: 'dashPerp', label: '垂距', min: 2, max: 40, step: 1, def: 16, hint: '短划相对理想直线的垂距上限（px）' },
+      { k: 'dashGap', label: '间距', min: 0, max: 60, step: 1, def: 20, hint: '短划沿轴方向的间距余量（px），碎片化严重时调大' },
+    ],
+  },
+  {
+    title: '吸附（顶点位置不对）',
+    items: [
+      { k: 'snapDash', label: '虚线链吸附', min: 0, max: 120, step: 5, def: 60, hint: '虚线链端点吸到顶点的半径（px）。源码注释说这是"多出点"最主要的来源 —— 调小更干净，太小会吸不上、虚线变悬空' },
+      { k: 'snapPerp', label: '链吸附垂距', min: 0, max: 60, step: 2, def: 18, hint: '链端点吸附时允许偏离链所在直线的距离（px）' },
+      { k: 'mergeR', label: '顶点合并', min: 0, max: 24, step: 1, def: 8, hint: '相距小于此值的两个顶点合并成一个（px）' },
+    ],
+  },
+] as const
+
+const advOpen = ref(false)
+const ADV_KEY = 'lj-mathslides-vue:vec-adv'
+const adv = reactive<Record<string, number>>({})
+function advReset() {
+  for (const g of ADV_GROUPS) for (const d of g.items) adv[d.k] = d.def
+}
+advReset()
+try {
+  const raw = localStorage.getItem(ADV_KEY)
+  if (raw) {
+    const o = JSON.parse(raw) as Record<string, number>
+    for (const g of ADV_GROUPS) for (const d of g.items) if (typeof o[d.k] === 'number') adv[d.k] = o[d.k]
+  }
+} catch { /* 坏数据就当没存过 */ }
+watch(adv, () => {
+  try { localStorage.setItem(ADV_KEY, JSON.stringify(adv)) } catch { /* 存不下就算了 */ }
+})
+/** 只传**改过**的项：没改的继续吃算法默认值，以后我改默认值你这边仍然生效 */
+function advOpt(): VectorizeOpt {
+  const o: Record<string, number> = {}
+  for (const g of ADV_GROUPS) for (const d of g.items) {
+    const v = adv[d.k]
+    if (typeof v === 'number' && v !== d.def) o[d.k] = v
+  }
+  return o as VectorizeOpt
+}
+/** 有没有偏离默认值（面板头上显示一个「已改」） */
+const advDirty = computed(() => {
+  for (const g of ADV_GROUPS) for (const d of g.items) if (adv[d.k] !== d.def) return true
+  return false
+})
 
 // ---------------- 坐标换算 ----------------
 /** 屏幕坐标 → 识别框归一化坐标（顶点坐标用的是这一套） */
@@ -1616,6 +1680,30 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <button class="vd__btn" :class="{ 'vd__btn--on': cropping }" @click="toggleCrop">框选识别范围</button>
               <button class="vd__btn" :disabled="busy" @click="rerun(null)">整图重识别</button>
             </div>
+            <div class="vd__adv">
+              <button class="vd__advhead" @click="advOpen = !advOpen">
+                <span class="vd__advcaret">{{ advOpen ? '▾' : '▸' }}</span>
+                细调阈值
+                <b v-if="advDirty" class="vd__advdot" title="已改过阈值（不是默认值）">已改</b>
+                <span class="vd__advsub">调完点下面「按新阈值重新识别」</span>
+              </button>
+              <div v-if="advOpen" class="vd__advbody">
+                <div v-for="g in ADV_GROUPS" :key="g.title" class="vd__advgrp">
+                  <div class="vd__advgt">{{ g.title }}</div>
+                  <label v-for="d in g.items" :key="d.k" class="vd__advrow" :title="d.hint + '（默认 ' + d.def + '）'">
+                    <span class="vd__advlab">{{ d.label }}</span>
+                    <input v-model.number="adv[d.k]" type="range" :min="d.min" :max="d.max" :step="d.step">
+                    <span class="vd__advval">{{ adv[d.k] }}</span>
+                  </label>
+                </div>
+                <div class="vd__row">
+                  <button class="vd__btn vd__btn--sm" :disabled="busy" @click="rerun(null)">按新阈值重新识别</button>
+                  <button class="vd__btn vd__btn--sm" :disabled="!advDirty" @click="advReset()">恢复默认</button>
+                </div>
+                <p class="vd__tip">只影响「重新识别」。数值会记住，重开应用还在。</p>
+              </div>
+            </div>
+
 
             <div v-if="selVs.length === 1" class="vd__coord">
               <span class="vd__coordlab">顶点 #{{ selVs[0] }} 位置</span>
@@ -1769,4 +1857,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .vd__tip--on { color: var(--brand-800); background: var(--brand-soft); border: 1px solid var(--brand-400); border-radius: var(--radius-sm); padding: 5px 8px; font-size: 12px; line-height: 1.5; }
 .vd__err { font-size: 13px; color: var(--danger); background: var(--danger-soft); border: 1px solid var(--danger-border); border-radius: var(--radius-sm); padding: 8px 10px; line-height: 1.5; }
 .vd__foot { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--panel-2, #fafafd); }
+.vd__adv { border-top: 1px solid var(--border); padding-top: 6px; }
+.vd__advhead { display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 0; background: none; border: 0; cursor: pointer; font-size: 12px; color: var(--gray-700); text-align: left; }
+.vd__advhead:hover { color: var(--brand-800); }
+.vd__advcaret { color: var(--gray-500); }
+.vd__advdot { color: var(--brand-800); background: var(--brand-soft); border: 1px solid var(--brand-400); border-radius: var(--radius-sm); padding: 0 4px; font-weight: 500; }
+.vd__advsub { margin-left: auto; color: var(--gray-500); }
+.vd__advbody { display: flex; flex-direction: column; gap: 7px; padding: 6px 0 2px; }
+.vd__advgt { font-size: 12px; font-weight: 600; color: var(--gray-600); }
+.vd__advrow { display: grid; grid-template-columns: 70px 1fr 42px; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: help; }
+.vd__advlab { color: var(--gray-600); }
+.vd__advrow input[type='range'] { width: 100%; min-width: 0; accent-color: var(--brand-600); }
+.vd__advval { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
 </style>
