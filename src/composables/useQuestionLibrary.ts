@@ -287,7 +287,9 @@ export async function importParsedQuestions(list: ParsedQuestion[]): Promise<{ a
     }
     const q = withDefaults({
       stem: p.stem, options: p.options, answer, solution: p.solution,
-      knowledge: p.knowledge, difficulty: p.difficulty, year: p.year, region: p.region,
+      knowledge: p.knowledge, difficulty: p.difficulty,
+      // ⚠ 年份有两个来源：【年份】标记（yearExplicit）与【来源】里抠出来的（year）—— 前者优先
+      year: (p as { yearExplicit?: string }).yearExplicit || p.year, region: p.region,
       qtype: (p as { qtype?: QType }).qtype,
       section: (p as { section?: string }).section,
       date: (p as { date?: string }).date,
