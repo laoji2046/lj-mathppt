@@ -359,7 +359,7 @@ export type MathFigureKind =
   | 'conicCircle' | 'ellipse' | 'hyperbola' | 'conicParabola' | 'conicFocusDir'
   | 'ellipseV' | 'hyperbolaV' | 'conicParabolaV' | 'conicCircleY'
   | 'ellipseDirectrix' | 'hyperbolaDirectrix' | 'ellipseFamily' | 'hyperbolaFamily' | 'eccAnim'
-  | 'conicCustomEllipse' | 'conicCustomHyperbola' | 'conicCustomParabola'
+  | 'conicCustomEllipse' | 'conicCustomEllipseV' | 'conicCustomHyperbola' | 'conicCustomParabola'
   // ---- 平面图形 ----
   | 'coordinate' | 'numberline' | 'venn' | 'righttriangle' | 'angle' | 'semicircle'
   | 'triangle' | 'rectangle' | 'circle' | 'pentagon' | 'hexagon' | 'rhombus' | 'kite' | 'angledrect'
@@ -411,9 +411,12 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   { v: 'ellipseFamily', label: '椭圆族（离心率 e 变化）', cat: '圆锥曲线' },
   { v: 'hyperbolaFamily', label: '双曲线族（离心率 e 变化）', cat: '圆锥曲线' },
   { v: 'eccAnim', label: '椭圆离心率变化（动画）', cat: '圆锥曲线' },
-  { v: 'conicCustomEllipse', label: '自定义椭圆（可调 a、b）', cat: '圆锥曲线' },
-  { v: 'conicCustomHyperbola', label: '自定义双曲线（可调 a、b）', cat: '圆锥曲线' },
-  { v: 'conicCustomParabola', label: '自定义抛物线（可调 p、开口方向）', cat: '圆锥曲线' },
+  // ⚠ 调色板卡片用的是**这里**的 label ✗，不是 CONICS[kind].label ✓ ——
+  //   上一轮只改了 mathPlot 里的标签，卡片上没变，所以用户找不到"能加直线"这件事（实测）。
+  { v: 'conicCustomEllipse', label: '自定义椭圆 + 直线/线段（可调 a、b）', cat: '圆锥曲线' },
+  { v: 'conicCustomEllipseV', label: '自定义椭圆·长轴在 y 轴 + 直线/线段（可调 a、b）', cat: '圆锥曲线' },
+  { v: 'conicCustomHyperbola', label: '自定义双曲线 + 直线/线段（可调 a、b）', cat: '圆锥曲线' },
+  { v: 'conicCustomParabola', label: '自定义抛物线 + 直线/线段（可调 p、方向）', cat: '圆锥曲线' },
   // ---- 平面图形 ----
   { v: 'coordinate', label: '坐标系', cat: '平面图形' },
   { v: 'numberline', label: '数轴', cat: '平面图形' },
