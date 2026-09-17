@@ -632,7 +632,7 @@ export const CONICS: Record<string, {
   conicCircleY: { label: '圆（圆心在 y 轴·与 x 轴相切）', view: { xmin: -4.4, xmax: 4.4, ymin: -1.8, ymax: 7 } },
   // —— 自定义：参数自己给，窗口随参数自适应 ——
   conicCustomEllipse: {
-    label: '自定义椭圆 x²/a²+y²/b²=1（可调 a、b）',
+    label: '自定义椭圆 + 直线/线段（可调 a、b 与多条线）',
     view: ellipseWindow(4, 3),
     params: [
       { key: 'a', label: 'a（半长轴）', def: 4, step: 0.5, min: 0.5, max: 20 },
@@ -642,7 +642,7 @@ export const CONICS: Record<string, {
     viewOf: (p) => ellipseWindow(p.a || 1, p.b || 1),
   },
   conicCustomEllipseV: {
-    label: '自定义椭圆 x²/b²+y²/a²=1（长轴在 y 轴，可调 a、b）',
+    label: '自定义椭圆（长轴在 y 轴）+ 直线/线段（可调 a、b 与多条线）',
     view: ellipseWindowV(4, 3),
     params: [
       { key: 'a', label: 'a（半长轴）', def: 4, step: 0.5, min: 0.5, max: 20 },
@@ -652,7 +652,7 @@ export const CONICS: Record<string, {
     viewOf: (p) => ellipseWindowV(p.a || 1, p.b || 1),
   },
   conicCustomHyperbola: {
-    label: '自定义双曲线 x²/a²−y²/b²=1（可调 a、b）',
+    label: '自定义双曲线 + 直线/线段（可调 a、b 与多条线）',
     view: { xmin: -6.5, xmax: 6.5, ymin: -4.9, ymax: 4.9 },
     params: [
       { key: 'a', label: 'a（实半轴）', def: 3, step: 0.5, min: 0.3, max: 20 },
@@ -661,7 +661,7 @@ export const CONICS: Record<string, {
     viewOf: (p) => windowFor(Math.max(p.a, p.b) * 1.7, Math.max(p.a, p.b) * 1.25),
   },
   conicCustomParabola: {
-    label: '自定义抛物线 y²=2px（可调 p、开口方向）',
+    label: '自定义抛物线 + 直线/线段（可调 p、开口方向与多条线）',
     // 静态 view 与 viewOf 都按 4:3 —— 不一致的话元素框会把图形拉伸
     view: { xmin: -8, xmax: 8, ymin: -6, ymax: 6 },
     params: [
