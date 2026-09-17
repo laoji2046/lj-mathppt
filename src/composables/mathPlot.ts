@@ -683,9 +683,12 @@ export const CONICS: Record<string, {
       { key: 'cr', label: '半径 r', def: 3, step: 0.5, min: 0.2, max: 20 },
     ],
     viewOf: (p) => {
-      // 取景跟着圆心走，**保持 4:3**（元素框是按静态 view 的纵横比给的，比例不一致会拉伸）
+      // 取景跟着圆心走，**保持 4:3**（元素框是按静态 view 的纵横比给的，比例不一致会拉伸）。
+      // ⚠ 宽度必须有**下界（= 静态 view 的 6）**：如果取景严格跟半径一起放大，
+      //   拖"半径"滑杆时**画面上什么都不会变** ✗（实测：r 从 3 调到 6，曲线像素尺寸一模一样）。
+      //   加上下界之后，小圆是"在固定比例的坐标系里长大" ✓，大圆才撑大取景 ✓。
       const rr = Math.max(0.2, p.cr || 3)
-      const hx = Math.max(rr * 1.45, 3)
+      const hx = Math.max(6, rr * 1.25)
       const hy = (hx * 3) / 4
       const cx = p.cx || 0, cy = p.cy || 0
       return { xmin: cx - hx, xmax: cx + hx, ymin: cy - hy, ymax: cy + hy }
