@@ -42,6 +42,13 @@ export interface VectorizeOpt {
   short?: number
   /** 交点精修的最大位移（图对角线的比例） */
   refine?: number
+  /**
+   * 虚线短划「到理想直线的垂距」上限（px，默认 12）。
+   * ⚠ 原来是写死的 7 —— 但源码注释自己写了「实测 A–E 那条线上各短块相对理想线偏了 2~12px」，
+   *   7 会让偏得多的短划全被拆断，凑不满就整条边消失（用户实测：原图里 D–E、A–E 丢了）。
+   *   放宽到 12 覆盖实测范围；太大则会把邻近别的直线的短划并进来，出多余的边。
+   */
+  dashPerp?: number
 }
 
 export interface VectorizeStats {
@@ -410,7 +417,7 @@ export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array
           const vx = B.cx - A.cx, vy = B.cy - A.cy
           const d = Math.hypot(vx, vy)
           if (d > 8 + 6 * Math.max(A.len, B.len)) continue
-          if (Math.abs(vx * -A.uy + vy * A.ux) > 7) continue      // 到 A 所在直线的垂距
+          if (Math.abs(vx * -A.uy + vy * A.ux) > (opt.dashPerp ?? 12)) continue   // 到 A 所在直线的垂距（见 dashPerp 注释）
           // 4px 太严：虚线本身画得略有抖动，实测 A–E 那条线上各短块相对理想线偏了 2~12px，
           // 一超限就被拆成孤立小块、凑不满 3 个 → 当字母抹掉 → 整条边消失
           const tB = vx * A.ux + vy * A.uy
