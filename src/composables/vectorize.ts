@@ -43,12 +43,21 @@ export interface VectorizeOpt {
   /** 交点精修的最大位移（图对角线的比例） */
   refine?: number
   /**
-   * 虚线短划「到理想直线的垂距」上限（px，默认 12）。
+   * 虚线短划「到理想直线的垂距」上限（px，默认 16）。
    * ⚠ 原来是写死的 7 —— 但源码注释自己写了「实测 A–E 那条线上各短块相对理想线偏了 2~12px」，
    *   7 会让偏得多的短划全被拆断，凑不满就整条边消失（用户实测：原图里 D–E、A–E 丢了）。
    *   放宽到 12 覆盖实测范围；太大则会把邻近别的直线的短划并进来，出多余的边。
    */
   dashPerp?: number
+  /**
+   * 虚线短划「方向对齐」的余弦门槛（默认 0.94 ≈ 20°）。
+   * ⚠ 原来是写死的 0.97（≈14°）。短划只有十几像素，主轴方向估计本来就有噪声，
+   *   14° 会把同一条虚线上的短划拆开 → 凑不满 2 个 → 被当字母抹掉 → 整条虚线消失。
+   *   调小 = 更松（更容易并起来）；太大则会把方向不同的短划也并进来。
+   */
+  dashCos?: number
+  /** 虚线短划「沿轴方向的间距」余量（px，默认 20）。碎片化严重时调大。 */
+  dashGap?: number
 }
 
 export interface VectorizeStats {
@@ -413,15 +422,15 @@ export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array
         for (const A of grp) {
           // 短划（十几像素）的**主轴方向估计有噪声**，10° 的对齐门槛会把同一条虚线上的短划拆开；
           // 拆散之后每堆不足 2 个就会被当字母抹掉 —— 整条虚线随之消失
-          if (Math.abs(A.ux * B.ux + A.uy * B.uy) < 0.97) continue
+          if (Math.abs(A.ux * B.ux + A.uy * B.uy) < (opt.dashCos ?? 0.94)) continue   // 方向对齐（见 dashCos 注释）
           const vx = B.cx - A.cx, vy = B.cy - A.cy
           const d = Math.hypot(vx, vy)
           if (d > 8 + 6 * Math.max(A.len, B.len)) continue
-          if (Math.abs(vx * -A.uy + vy * A.ux) > (opt.dashPerp ?? 12)) continue   // 到 A 所在直线的垂距（见 dashPerp 注释）
+          if (Math.abs(vx * -A.uy + vy * A.ux) > (opt.dashPerp ?? 16)) continue   // 到 A 所在直线的垂距（见 dashPerp 注释）
           // 4px 太严：虚线本身画得略有抖动，实测 A–E 那条线上各短块相对理想线偏了 2~12px，
           // 一超限就被拆成孤立小块、凑不满 3 个 → 当字母抹掉 → 整条边消失
           const tB = vx * A.ux + vy * A.uy
-          if (Math.abs(tB) > 0.5 * (A.len + B.len) + 14) continue  // 沿轴方向的间距
+          if (Math.abs(tB) > 0.5 * (A.len + B.len) + (opt.dashGap ?? 20)) continue  // 沿轴方向的间距
           grp.push(B); used[k] = true; grow = true; break
         }
         if (grow) break
