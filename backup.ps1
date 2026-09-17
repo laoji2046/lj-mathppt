@@ -1,4 +1,4 @@
-# LJ-MathSlides 备份脚本
+﻿# LJ-MathSlides 备份脚本
 #
 # 用法：在工程根目录执行  powershell -File backup.ps1
 #
