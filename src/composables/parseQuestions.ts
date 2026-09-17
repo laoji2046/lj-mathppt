@@ -124,6 +124,7 @@ function autoTitle(stem: string): string {
 const NOTE_WORDS = [
   '答题卡', '条形码', '准考证', '监考', '考生', '2B铅笔', '铅笔', '签字笔', '橡皮擦', '橡皮',
   '填涂', '答题区域', '超出答题区域', '草稿纸', '注意事项', '考生须知', '姓名', '学校', '毫米', '无效',
+  '考试结束', '一并交回', '交回', '本试卷', '试卷上', '考试时间', '监考老师', '密封', '启封',
 ]
 /** 这些开头直接判为说明段 */
 const RE_NOTE_HEAD = /^\s*(?:注意事项|考生须知|答题说明|说明|考试须知)\s*[:：]?\s*$/
@@ -140,10 +141,7 @@ const RE_TITLE_WORD2 = /(试卷|试题|考试|模拟|联考|一模|二模|三模
 function isTitleLine(t: string): boolean {
   if (t.length >= 40) return false
   if (!RE_TITLE_WORD2.test(t)) return false
-  const hasQuestionMark =
-    RE_OPT.test(t) || RE_ANSWER.test(t) || RE_SOLUTION.test(t) ||
-    /[=＋+≥≤<>＜＞√∑∫π²³]|_\{2,}|＿|（\s*）|\(\s*\)/.test(t)
-  return !hasQuestionMark
+  return !hasQuestionFeature(t)
 }
 
 /** 一行里须知类词的命中数 */
@@ -172,14 +170,47 @@ function stripNonQuestionLines(text: string): { text: string; skipped: number } 
     const t = l.trim()
     if (!t) { out.push(l); return }
     if (noteHits(t) >= 2) { skipped++; return }
+    if (isShortNote(t)) { skipped++; return }
     if (RE_NOTE_HEAD.test(t)) { skipped++; return }
     // 分段标题行（一、选择题）与「(12 分)」这种分值行 —— 都不是题目
-    if (/^[一二三四五六七八九十]+\s*[、.．]\s*\S{0,6}$/.test(t) && t.length < 20) { skipped++; return }
+    if (isSegmentHead(t)) { skipped++; return }
     if (/^[（(]\s*\d{1,3}\s*分\s*[)）]\s*$/.test(t)) { skipped++; return }
     if (i < 8 && isTitleLine(t)) { skipped++; return }
     out.push(l)
   })
   return { text: out.join('\n'), skipped }
+}
+
+/** 剥掉行首的 Markdown 记号与空白（试卷常以 ## 形式给出） */
+function stripMark(t: string): string {
+  return t.replace(/^[#>*\-\s]+/, '').replace(/^\d+[.、．)）]\s*/, '').trim()
+}
+
+/**
+ * 分段标题行：「一、选择题:本题共8小题,每小题5分,共40分.…」——
+ * **剥掉 Markdown 前缀后按开头匹配，且不限长度**（真实试卷里这行常常是一整句说明）。
+ */
+function isSegmentHead(t: string): boolean {
+  const s = stripMark(t)
+  return /^[一二三四五六七八九十]{1,3}\s*[、.．]\s*(选择题|填空题|解答题|多选题|单选题|判断题|计算题|证明题|应用题|选做题|必做题)/.test(s)
+}
+
+/** 这一段有没有「题目特征」（选项/答案/解析/数学符号/填空括号/下划线） */
+function hasQuestionFeature(t: string): boolean {
+  return (
+    RE_OPT.test(t) || RE_ANSWER.test(t) || RE_SOLUTION.test(t) ||
+    /[=＋+≥≤<>＜＞√∑∫π²³]|_\{2,}|＿|（\s*）|\(\s*\)/.test(t)
+  )
+}
+
+/**
+ * 短说明句：**短、提到试卷/答题卡、且没有任何题目特征** → 判为非题目。
+ * （「考试结束后, 将本试卷和答题卡一并交回.」只含一个须知词，靠这条兜住）
+ */
+function isShortNote(t: string): boolean {
+  if (t.length >= 45) return false
+  if (!/(试卷|答题卡|答题纸|考生|监考)/.test(t)) return false
+  return !hasQuestionFeature(t)
 }
 
 function isNonQuestionBlock(block: string): boolean {
