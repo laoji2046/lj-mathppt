@@ -115,6 +115,8 @@ export interface QuestionMeta {
   knowledge: string[]
   /** 1-5；界面按 易/中/难 呈现 */
   difficulty: number
+  /** 每题分值；0 或未设时按题型取默认（见 defaultScore） */
+  score: number
   /** 题型 */
   qtype: QType
   /** 板块（见 SECTIONS）；空串表示未分类 */
@@ -136,7 +138,7 @@ export interface QuestionEntry extends LibItem {
 
 const EMPTY_META: QuestionMeta = {
   stem: '', options: [], answer: '', solution: '',
-  knowledge: [], difficulty: 3, qtype: 'choice', section: '', date: '',
+  knowledge: [], difficulty: 3, score: 0, qtype: 'choice', section: '', date: '',
   year: '', paperName: '', region: '', answerFrom: '',
 }
 
@@ -154,6 +156,7 @@ function readMeta(raw: Record<string, unknown>): QuestionMeta {
     solution: String(m.solution || ''),
     knowledge: arr(m.knowledge),
     difficulty: Number(m.difficulty) || 3,
+    score: Number(m.score) || 0,
     qtype,
     section: String(m.section || ''),
     date: String(m.date || ''),
@@ -483,14 +486,8 @@ export function groupPapers(list: QuestionEntry[]): PaperGroup[] {
 
 /** 整套卷子的文本：抬头 + 按 选择→填空→解答 排序的题目 */
 export function paperGroupToText(g: PaperGroup, withSolution = false, startNo = 1): string {
-  const order: Record<string, number> = { choice: 0, multi: 1, blank: 2, answer: 3 }
-  const sorted = [...g.items].sort((a, b) => (order[a.q.qtype] ?? 9) - (order[b.q.qtype] ?? 9) || a.id - b.id)
   const head = (g.year ? g.year + ' 年 ' : '') + (g.paperName || '未命名试卷')
-  const body = sorted.map((x, i) => {
-    const t = questionToText(x, withSolution).replace(/^\s*\d{1,3}\s*[.、．)）]\s*/, '')
-    return (startNo + i) + '. ' + t
-  }).join('\n\n')
-  return head + '\n\n' + body
+  return buildPaperText(g.items, { withSolution, title: head, startNo })
 }
 
 /* ---------------- 整库导入导出（JSON） ---------------- */
@@ -570,6 +567,65 @@ export function autoTitle(q: QuestionMeta): string {
 }
 
 /** 组卷用文本（答案与解析可选）。选择题单独编号，解答题留作答空间 */
+/**
+ * 各题型的默认分值（按新高考常见配比）：单选/多选 5 分、填空 5 分、解答 12 分。
+ * 题目自己填了 score 就用它，没填才用默认。
+ */
+export const DEFAULT_SCORE: Record<QType, number> = { choice: 5, multi: 5, blank: 5, answer: 12 }
+
+export function defaultScore(t: QType | string): number {
+  return DEFAULT_SCORE[t as QType] ?? 5
+}
+
+/** 取某题的实际分值（题内优先，否则按题型默认） */
+export function scoreOf(x: QuestionEntry): number {
+  const n = Number(x.q.score)
+  return n > 0 ? n : defaultScore(x.q.qtype)
+}
+
+/* ---------------- 组卷排版（按题型分段 + 分值 + 总分） ---------------- */
+
+/** 分段：选择（单选与多选合并）/ 填空 / 解答 */
+const SEGMENTS: { label: string; types: QType[] }[] = [
+  { label: '选择题', types: ['choice', 'multi'] },
+  { label: '填空题', types: ['blank'] },
+  { label: '解答题', types: ['answer'] },
+]
+const CN_NUM = ['一', '二', '三', '四', '五', '六']
+
+/**
+ * 把一组题排成一份卷子：抬头 +（共 N 题，满分 M 分）+ 按题型分段 + 每题带（x分）。
+ * 规则组卷与整套插入**共用这一个函数**，保证两处排版完全一致。
+ */
+export function buildPaperText(
+  entries: QuestionEntry[],
+  opt: { withSolution?: boolean; title?: string; startNo?: number } = {}
+): string {
+  const arr = [...entries]
+  if (!arr.length) return ''
+  const total = arr.reduce((s, x) => s + scoreOf(x), 0)
+  const out: string[] = []
+  if (opt.title) out.push(opt.title, '')
+  out.push('（共 ' + arr.length + ' 题，满分 ' + total + ' 分）', '')
+  let no = opt.startNo ?? 1
+  let seg = 0
+  for (const sg of SEGMENTS) {
+    const items = arr.filter((x) => sg.types.indexOf(x.q.qtype) >= 0)
+    if (!items.length) continue
+    const segTotal = items.reduce((s, x) => s + scoreOf(x), 0)
+    const per = Array.from(new Set(items.map((x) => scoreOf(x))))
+    const perTxt = per.length === 1 ? '每题 ' + per[0] + ' 分，' : ''
+    out.push(CN_NUM[seg] + '、' + sg.label + '（' + perTxt + '共 ' + segTotal + ' 分）', '')
+    seg++
+    for (const x of items) {
+      const body = questionToText(x, opt.withSolution).replace(/^\s*\d{1,3}\s*[.、．)）]\s*/, '')
+      out.push(no + '.（' + scoreOf(x) + '分）' + body, '')
+      no++
+    }
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 export function questionToText(q: QuestionEntry, withSolution = false): string {
   const lines: string[] = []
   let stem = q.q.stem || q.body

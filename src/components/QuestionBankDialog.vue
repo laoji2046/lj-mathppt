@@ -6,6 +6,7 @@ import {
   listQuestionTags, autoTitle, questionToText, filterQuestions,
   importParsedQuestions, proposeAnswers, parseQuestionsJson, exportQuestionsJson,
   pickByRules, ruleText, findDuplicates, groupPapers, paperGroupToText,
+  buildPaperText, scoreOf, defaultScore,
   QTYPES, SECTIONS, LEVELS, levelOf, levelLabel, levelToDifficulty, qtypeLabel, withDefaults,
 } from '@/composables/useQuestionLibrary'
 import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup } from '@/composables/useQuestionLibrary'
@@ -36,6 +37,11 @@ watch(batchText, (v) => {
   if (d.year) batchYear.value = d.year
   if (d.paperName) batchPaper.value = d.paperName
 })
+/** 一组题的卷面总分（题内分值优先，否则按题型默认） */
+function paperTotal(arr: QuestionEntry[]): number {
+  return arr.reduce((s, x) => s + scoreOf(x), 0)
+}
+
 /** 整套插入：按「年份 + 试卷名」归组的卷子列表 */
 const paperGroups = computed(() => groupPapers(list.value))
 function insertPaperGroup(g: PaperGroup, withSolution: boolean) {
@@ -93,15 +99,9 @@ function doPick() {
 function sendPaper(withSolution: boolean) {
   const arr = paperResult.value ? paperResult.value.picked : []
   if (!arr.length) { flash('先点「一键挑题」'); return }
-  const order: Record<string, number> = { choice: 0, multi: 1, blank: 2, answer: 3 }
-  const sorted = [...arr].sort((a, b) => (order[a.q.qtype] ?? 9) - (order[b.q.qtype] ?? 9))
-  const parts = sorted.map((x, i) => {
-    const body = questionToText(x, withSolution).replace(/^\s*\d{1,3}\s*[.、．)）]\s*/, '')
-    return (i + 1) + '. ' + body
-  })
-  emit('insert', parts.join('\n\n'), 0)
-  sorted.forEach((x) => void touchQuestion(x.id))
-  flash('已把 ' + sorted.length + ' 道题送进 PDF 生成')
+  emit('insert', buildPaperText(arr, { withSolution }), 0)
+  arr.forEach((x) => void touchQuestion(x.id))
+  flash('已把 ' + arr.length + ' 道题送进 PDF 生成（共 ' + paperTotal(arr) + ' 分）')
 }
 
 /* ---- 整库导入导出：导入 MD / 导入 JSON / 导出 JSON ---- */
@@ -168,15 +168,10 @@ const pickedEntries = computed(() => list.value.filter((x) => pickedIds.value.in
 function insertPicked(withSolution: boolean) {
   const arr = pickedEntries.value
   if (!arr.length) { flash('先在左边勾选要出卷的题'); return }
-  const order: Record<string, number> = { choice: 0, multi: 1, blank: 2, answer: 3 }
-  const sorted = [...arr].sort((a, b) => (order[a.q.qtype] ?? 9) - (order[b.q.qtype] ?? 9))
-  const parts = sorted.map((x, i) => {
-    const body = questionToText(x, withSolution).replace(/^\s*\d{1,3}\s*[.、．)）]\s*/, '')
-    return (i + 1) + '. ' + body
-  })
-  emit('insert', parts.join('\n\n'), 0)
-  sorted.forEach((x) => void touchQuestion(x.id))
-  flash('已把 ' + sorted.length + ' 道题送进 PDF 生成（可继续改正文）')
+  // 统一走 buildPaperText：按题型分段 + 每题（x分）+ 卷面总分 —— 与整套插入排版一致
+  emit('insert', buildPaperText(arr, { withSolution }), 0)
+  arr.forEach((x) => void touchQuestion(x.id))
+  flash('已把 ' + arr.length + ' 道题送进 PDF 生成（共 ' + paperTotal(arr) + ' 分）')
 }
 /* ---- 答案自我完善：扫出「缺答案但解析里能反推」的题 ---- */
 const proposals = computed(() => proposeAnswers(list.value))
@@ -196,7 +191,7 @@ async function doComplete() {
 
 const emptyMeta = (): QuestionMeta => ({
   stem: '', options: [], answer: '', solution: '',
-  knowledge: [], difficulty: 3, qtype: 'choice', section: '', date: '',
+  knowledge: [], difficulty: 3, score: 0, qtype: 'choice', section: '', date: '',
   year: '', paperName: '', region: '', answerFrom: '',
 })
 const editing = ref(false)
@@ -415,7 +410,7 @@ function close() { emit('close') }
                   <div v-if="!paperGroups.length" class="qb__empty">题库里还没有带年份/试卷名的题 —— 批量导入时填「年份」「试卷名」，或在题里写【年份】【试卷】。</div>
                   <div v-for="(gp, i) in paperGroups" :key="i" class="qb__prow qb__prow--paper">
                     <span class="qb__ptitle">{{ gp.year || '未标年份' }} · {{ gp.paperName || '未标试卷名' }}</span>
-                    <span class="qb__pcount">{{ gp.count }} 道</span>
+                    <span class="qb__pcount">{{ gp.count }} 道 · 满分 {{ paperTotal(gp.items) }} 分</span>
                     <button class="qb__btn qb__btn--tiny" @click="insertPaperGroup(gp, false)">插入整套</button>
                     <button class="qb__btn qb__btn--tiny" @click="insertPaperGroup(gp, true)">含答案整套</button>
                   </div>
@@ -423,7 +418,7 @@ function close() { emit('close') }
                 </div>
 
                 <div v-if="paperResult" class="qb__pres">
-                  <div class="qb__bptitle">挑题结果：共 {{ paperResult.picked.length }} 道</div>
+                  <div class="qb__bptitle">挑题结果：共 {{ paperResult.picked.length }} 道 · 预计满分 {{ paperTotal(paperResult.picked) }} 分</div>
                   <div v-for="(x, i) in paperResult.results" :key="i" class="qb__prow" :class="{ 'qb__prow--short': x.short }">
                     {{ ruleText(x.rule) }} —— 命中 {{ x.got }} / {{ x.want }}
                     <b v-if="x.short">（库里只有这么多，少了 {{ x.want - x.got }} 道）</b>
@@ -504,6 +499,7 @@ B. 2
                 <div class="qb__row">
                   <label>题型<select v-model="form.qtype"><option v-for="t in QTYPES" :key="t.v" :value="t.v">{{ t.label }}</option></select></label>
                   <label>板块<select v-model="form.section"><option value="">（按关键词自动归类）</option><option v-for="s in SECTIONS" :key="s" :value="s">{{ s }}</option></select></label>
+                  <label>分值<input v-model.number="form.score" type="number" min="0" max="50" :placeholder="'默认 ' + defaultScore(form.qtype) + ' 分'" /></label>
                   <label>难度<select :value="levelOf(form.difficulty)" @change="form.difficulty = levelToDifficulty(($event.target as HTMLSelectElement).value as Level)"><option v-for="l in LEVELS" :key="l.v" :value="l.v">{{ l.label }}</option></select></label>
                 </div>
                 <div class="qb__row">
