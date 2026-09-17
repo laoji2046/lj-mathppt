@@ -17,6 +17,37 @@
  *  来源       —— 【来源】 或 来源：（顺带识别其中的年份）
  */
 
+/**
+ * 判断一段文本是不是「不是题目」的内容，并给出原因。
+ * **清理已入库条目时复用同一套判据** —— 保证「导入时不收」和「清理时能认出来」一致。
+ */
+export function judgeNonQuestion(text: string): { bad: boolean; reason: string } {
+  const t = (text || '').trim()
+  if (!t) return { bad: false, reason: '' }
+  const lines = t.split('\n').map((s) => s.trim()).filter(Boolean)
+  // 整条都很短：用行级规则逐行判（全行都是非题目 → 整条判为非题目）
+  if (t.length < 120 && lines.length <= 3) {
+    let allBad = lines.length > 0
+    let why = ''
+    for (const l of lines) {
+      if (RE_NOTE_HEAD.test(l)) { why = why || '说明小标题'; continue }
+      if (noteHits(l) >= 2) { why = why || '考生须知'; continue }
+      if (isShortNote(l)) { why = why || '收尾/说明句'; continue }
+      if (isSegmentHead(l)) { why = why || '分段标题行'; continue }
+      if (/^[（(]\s*\d{1,3}\s*分\s*[)）]\s*$/.test(l)) { why = why || '分值行'; continue }
+      if (isTitleLine(l)) { why = why || '试卷抬头'; continue }
+      allBad = false
+    }
+    if (allBad) return { bad: true, reason: why || '非题目内容' }
+  }
+  // 单独一条就是分值行 / 分段标题
+  if (/^[（(]\s*\d{1,3}\s*分\s*[)）]\s*$/.test(t)) return { bad: true, reason: '分值行' }
+  if (isSegmentHead(t)) return { bad: true, reason: '分段标题行' }
+  if (noteHits(t) >= 2) return { bad: true, reason: '考生须知' }
+  if (isShortNote(t)) return { bad: true, reason: '收尾/说明句' }
+  return { bad: false, reason: '' }
+}
+
 /** 上次解析时被判为「非题目」而跳过的**行数**（须知/抬头/注意事项），供界面提示用 */
 export let skippedNonQuestion = 0
 

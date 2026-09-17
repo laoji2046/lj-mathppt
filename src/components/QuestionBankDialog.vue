@@ -7,9 +7,10 @@ import {
   importParsedQuestions, proposeAnswers, parseQuestionsJson, exportQuestionsJson,
   pickByRules, ruleText, findDuplicates, groupPapers, paperGroupToText,
   buildPaperText, scoreOf, defaultScore, chaptersOf,
+  scanJunk, scanDuplicates, removeQuestions,
   QTYPES, SECTIONS, LEVELS, levelOf, levelLabel, levelToDifficulty, qtypeLabel, withDefaults,
 } from '@/composables/useQuestionLibrary'
-import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup } from '@/composables/useQuestionLibrary'
+import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup, JunkItem } from '@/composables/useQuestionLibrary'
 import { parseQuestionsWithInfo, PARSE_HELP, detectPaperInfo } from '@/composables/parseQuestions'
 import { saveTextFile } from '@/composables/useTauri'
 
@@ -297,6 +298,57 @@ async function insertOne(withSolution: boolean) {
   emit('insert', questionToText(x, withSolution), x.id)
   void touchQuestion(x.id)
 }
+/* ---- 清理与批量删除 ---- */
+const cleanOpen = ref(false)
+const junkList = ref<JunkItem[]>([])
+const junkPicked = ref<number[]>([])
+const scanned = ref(false)
+const confirmDelPicked = ref(false)   // 「删除选中」的两步确认
+
+function toggleJunk(id: number) {
+  const i = junkPicked.value.indexOf(id)
+  if (i >= 0) junkPicked.value = junkPicked.value.filter((x) => x !== id)
+  else junkPicked.value = [...junkPicked.value, id]
+}
+/** 扫描：kind = junk（非题目）| dup（重复）| all（两者） */
+function doScan(kind: 'junk' | 'dup' | 'all') {
+  const j = kind === 'dup' ? [] : scanJunk(list.value)
+  const d = kind === 'junk' ? [] : scanDuplicates(list.value)
+  const seen = new Set<number>()
+  const merged: JunkItem[] = []
+  for (const it of [...j, ...d]) {
+    if (seen.has(it.entry.id)) continue
+    seen.add(it.entry.id)
+    merged.push(it)
+  }
+  junkList.value = merged
+  junkPicked.value = merged.map((x) => x.entry.id)   // 默认全选，用户可取消
+  scanned.value = true
+  flash(merged.length ? '扫描完成：找到 ' + merged.length + ' 条可疑（已默认全选，请核对）' : '扫描完成：没有发现可疑条目')
+}
+async function deleteJunk() {
+  const ids = junkPicked.value.slice()
+  if (!ids.length) { flash('没有勾选任何条目'); return }
+  const n = await removeQuestions(ids)
+  await load()
+  junkList.value = []
+  junkPicked.value = []
+  scanned.value = false
+  flash('已删除 ' + n + ' 条')
+}
+/** 删除列表里勾选的题（多选用于出卷，这里也用来批量删） */
+async function deletePicked() {
+  const ids = pickedIds.value.slice()
+  if (!ids.length) { flash('先在列表里勾选'); return }
+  if (!confirmDelPicked.value) { confirmDelPicked.value = true; flash('再点一次确认删除 ' + ids.length + ' 条'); return }
+  const n = await removeQuestions(ids)
+  pickedIds.value = []
+  confirmDelPicked.value = false
+  if (selectedId.value && ids.indexOf(selectedId.value) >= 0) selectedId.value = 0
+  await load()
+  flash('已删除 ' + n + ' 条')
+}
+
 function close() { emit('close') }
 </script>
 
@@ -311,6 +363,7 @@ function close() { emit('close') }
           <div class="qb__tools">
             <button class="qb__btn" title="把整份试题粘贴进来，一次性识别并入库" @click="batchOpen = true; editing = false">批量导入</button>
             <button class="qb__btn" title="重新从内容库读取（外部改动后点它刷新列表）" @click="load()">刷新</button>
+            <button class="qb__btn qb__btn--danger" title="清理试题库：扫描「非题目」与「重复题」，确认后删除" @click="cleanOpen = true; editing = false; batchOpen = false; paperOpen = false">清理</button>
             <button class="qb__btn" title="按规则挑题（双向细目表）：设题型/板块/难度/题量，一键抽出整卷" @click="paperOpen = true; editing = false; batchOpen = false">规则组卷</button>
             <button class="qb__btn" title="导入 Markdown / 纯文本：读进来后先给你看识别结果，确认再入库" @click="pickFile('md')">导入 MD</button>
             <button class="qb__btn" title="导入题库 JSON（我们自己导出的、或 {questions:[…]} / 数组 都认）" @click="pickFile('json')">导入 JSON</button>
@@ -318,6 +371,7 @@ function close() { emit('close') }
             <button class="qb__btn" :title="'从解析里反推答案（认「故选B」这类明确写法），可补 ' + proposals.length + ' 道'" @click="doComplete">完善答案<template v-if="proposals.length">（{{ proposals.length }}）</template></button>
             <button class="qb__btn qb__btn--pri" title="新建一道试题" @click="startNew">＋ 新建试题</button>
             <button class="qb__btn qb__btn--pdf" :disabled="!pickedIds.length" title="把左边勾选的题按 选择→填空→解答 排序，一起送进 PDF 生成" @click="insertPicked(false)">生成 PDF（已选 {{ pickedIds.length }}）</button>
+            <button class="qb__btn qb__btn--danger" :disabled="!pickedIds.length" :title="confirmDelPicked ? '再点一次确认删除' : '删除左边勾选的题'" @click="deletePicked">{{ confirmDelPicked ? '确认删除 ' + pickedIds.length + ' 条' : '删除选中（' + pickedIds.length + '）' }}</button>
             <button class="qb__close" title="关闭" @click="close"><AppIcon name="close" :size="14" /></button>
           </div>
         </div>
@@ -385,6 +439,34 @@ function close() { emit('close') }
           </div>
 
           <div class="qb__detail">
+            <template v-if="cleanOpen">
+              <div class="qb__clean">
+                <div class="qb__bhead">清理试题库 —— 用「导入时的同一套判据」扫描；只给建议，点删除才真删</div>
+                <div class="qb__actions">
+                  <button class="qb__btn qb__btn--pri" @click="doScan('all')">一次全扫（非题目 + 重复题）</button>
+                  <button class="qb__btn" @click="doScan('junk')">只扫非题目</button>
+                  <button class="qb__btn" @click="doScan('dup')">只扫重复题</button>
+                  <button class="qb__btn" @click="cleanOpen = false; junkList = []; scanned = false">返回列表</button>
+                </div>
+                <div v-if="junkList.length" class="qb__junk">
+                  <div class="qb__bptitle">找到 {{ junkList.length }} 条可疑（已默认全选，请核对后再删）</div>
+                  <div v-for="(j, i) in junkList" :key="i" class="qb__jrow" @click="toggleJunk(j.entry.id)">
+                    <input type="checkbox" :checked="junkPicked.indexOf(j.entry.id) >= 0" @click.stop="toggleJunk(j.entry.id)" />
+                    <span class="qb__jid">#{{ j.entry.id }}</span>
+                    <span class="qb__jtitle">{{ j.entry.title }}</span>
+                    <span class="qb__jreason">{{ j.reason }}</span>
+                  </div>
+                  <div class="qb__actions">
+                    <button class="qb__btn qb__btn--danger" @click="deleteJunk">删除勾选的 {{ junkPicked.length }} 条</button>
+                    <button class="qb__btn" @click="junkPicked = []">全不选</button>
+                    <button class="qb__btn" @click="junkPicked = junkList.map((x) => x.entry.id)">全选</button>
+                  </div>
+                </div>
+                <div v-else-if="scanned" class="qb__empty">没有发现可疑条目。</div>
+                <div v-else class="qb__empty">先点上面的按钮扫描。</div>
+              </div>
+            </template>
+
             <template v-if="paperOpen">
               <div class="qb__paper">
                 <div class="qb__bhead">按规则挑题 —— 从「当前筛选结果」里抽；同一道题不会被抽两次</div>
@@ -579,6 +661,12 @@ B. 2
 .qb__rcount { width: 68px; padding: 5px 8px; border: 1px solid #dcdce6; border-radius: 8px; font-size: 12.5px; }
 .qb__btn--tiny { padding: 3px 9px; font-size: 14px; line-height: 1; }
 .qb__chk { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted, #888); }
+.qb__clean { display: flex; flex-direction: column; gap: 8px; }
+.qb__junk { border-top: 1px dashed #e4e4ee; padding-top: 8px; }
+.qb__jrow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 4px 8px; background: #fff7e6; border-radius: 6px; margin-bottom: 4px; cursor: pointer; }
+.qb__jid { color: var(--muted, #999); flex: none; }
+.qb__jtitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.qb__jreason { flex: none; color: #b25f00; }
 .qb__papers { border-top: 1px dashed #e4e4ee; padding-top: 8px; }
 .qb__prow--paper { display: flex; align-items: center; gap: 8px; }
 .qb__ptitle { flex: 1; min-width: 0; font-weight: 600; }

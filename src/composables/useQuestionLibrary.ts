@@ -12,6 +12,7 @@
  */
 import { libQuery, libSave, libRemove, libBump, libTags, libSaveMany } from './useLibrary'
 import type { ParsedQuestion } from './parseQuestions'
+import { judgeNonQuestion } from './parseQuestions'
 import type { LibDraft, LibItem } from './useLibrary'
 
 export type Difficulty = 1 | 2 | 3 | 4 | 5
@@ -519,6 +520,53 @@ export function groupPapers(list: QuestionEntry[]): PaperGroup[] {
 export function paperGroupToText(g: PaperGroup, withSolution = false, startNo = 1): string {
   const head = (g.year ? g.year + ' 年 ' : '') + (g.paperName || '未命名试卷')
   return buildPaperText(g.items, { withSolution, title: head, startNo })
+}
+
+/* ---------------- 清理与批量删除 ---------------- */
+
+export interface JunkItem {
+  entry: QuestionEntry
+  reason: string
+}
+
+/**
+ * 扫描全库，找出**疑似不是题目**的条目（复用导入时的同一套判据）。
+ * 只给出建议，**不自动删** —— 由用户勾选确认。
+ */
+export function scanJunk(list: QuestionEntry[]): JunkItem[] {
+  const out: JunkItem[] = []
+  for (const x of list) {
+    const j = judgeNonQuestion(x.q.stem || x.body)
+    if (j.bad) { out.push({ entry: x, reason: j.reason }); continue }
+    if (!(x.q.stem || x.body || '').trim()) out.push({ entry: x, reason: '题干为空' })
+  }
+  return out
+}
+
+/** 扫描全库，找出**重复题**（归一化后相同或高度相似） */
+export function scanDuplicates(list: QuestionEntry[]): JunkItem[] {
+  const { pairs } = findDuplicates(list)
+  const seen = new Set<number>()
+  const out: JunkItem[] = []
+  for (const p of pairs) {
+    // 一对重复里**保留一条**（id 小的留着），另一条建议删
+    const del = p.a.id < p.b.id ? p.b : p.a
+    if (seen.has(del.id)) continue
+    seen.add(del.id)
+    out.push({ entry: del, reason: p.same ? '与 #' + (del.id === p.a.id ? p.b.id : p.a.id) + ' 完全相同' : '与 #' + (del.id === p.a.id ? p.b.id : p.a.id) + ' 相似 ' + Math.round(p.sim * 100) + '%' })
+  }
+  return out
+}
+
+/** 批量删除（逐条调 Rust；返回成功条数） */
+export async function removeQuestions(ids: number[]): Promise<number> {
+  let n = 0
+  for (const id of ids) {
+    try {
+      if (await libRemove(id)) n++
+    } catch { /* 单条失败不影响其余 */ }
+  }
+  return n
 }
 
 /* ---------------- 整库导入导出（JSON） ---------------- */

@@ -11,6 +11,8 @@ import { MATH_FIGURE_OPTIONS } from '@/types'
 import { closeFigPalette, openFigPalette } from '@/ui/figPalette'
 import { geom3dSink, openGeom3D } from '@/ui/geom3d'
 import { vectorizeSink, openVectorize } from '@/ui/vectorize'
+import { parseQuestionsWithInfo } from '@/composables/parseQuestions'
+import { importParsedQuestions } from '@/composables/useQuestionLibrary'
 
 /**
  * PDF 生成（A4 分页 + 题号识别），移植自参考版 LJ-PPT 的 PaperMode。
@@ -1004,6 +1006,21 @@ function onQuestionInsert(text: string, id: number) {
   paperMsg.value = '已插入试题 #' + id + ' ✓（可继续选下一道）'
 }
 
+/**
+ * **把当前试卷正文存入试题库** ✓（与「组卷」相反的方向）。
+ * 用与批量导入**完全相同**的解析与过滤，且 Rust 侧按题干去重 —— 重复点也不会灌两份。
+ */
+async function savePaperToLibrary() {
+  const raw = input.value.trim()
+  if (!raw) { paperMsg.value = '正文是空的 —— 先在左边写点东西'; return }
+  const { list, skipped } = parseQuestionsWithInfo(raw)
+  if (!list.length) { paperMsg.value = '正文里没有识别出题目'; return }
+  const r = await importParsedQuestions(list)
+  paperMsg.value = '已存入试题库 ' + r.added + ' 道'
+    + (r.skipped ? '，跳过重复 ' + r.skipped + ' 道' : '')
+    + (skipped ? '（过滤掉 ' + skipped + ' 行说明）' : '')
+}
+
 async function insertFigure(id: string, slideIndex: number, label: string) {
   figOpen.value = false
 
@@ -1441,6 +1458,7 @@ watch([headerText, footerText], () => render())
       <button class="pm__btn" title="插入矢量描摹图（先选一张线稿图，在描摹窗口里调好后点插入）" @click="insertVectorize">
         <AppIcon name="graphic" :size="14" />矢量描摹图
       </button>
+      <button class="pm__btn" title="把左边正文里的题目存入试题库（用与批量导入相同的解析与过滤，自动去重）" @click="savePaperToLibrary">存入试题库</button>
       <button class="pm__btn" title="试题库：按标签筛选、组卷插入题干（可带答案与解析）" @click="qbOpen = true">
         <AppIcon name="graphic" :size="14" />试题库
       </button>
