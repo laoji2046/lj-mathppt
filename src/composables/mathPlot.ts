@@ -166,7 +166,11 @@ export function keyPointSvg(c: Ctx, x: number, y: number, text: string): string 
 }
 
 /** 可调参数的描述（属性面板据此生成输入框） */
-export interface ParamSpec { key: string; label: string; def: number; step?: number; min?: number; max?: number }
+export interface ParamSpec {
+  key: string; label: string; def: number; step?: number; min?: number; max?: number
+  /** 只在**满足条件**时才在属性面板里显示（例如"线2"的参数在条数设为 1 时先藏起来） */
+  showIf?: (p: Record<string, number>) => boolean
+}
 
 /** 分段函数的一段：f 在 [from, to] 上 */
 export interface Piece { f: (x: number, p: Record<string, number>) => number; from: number; to: number }
@@ -667,6 +671,71 @@ export const CONICS: Record<string, {
   },
 }
 
+/** 「圆锥曲线 + 直线 / 线段」：给所有**自定义**圆锥曲线补上的"多条线"参数。
+ *  n 默认 0 = 一条都不画 —— **老图元完全不变**；showIf 让属性面板只显示用得上的那几个。 */
+export const LINE_PARAMS: ParamSpec[] = [
+  { key: 'n', label: '直线 / 线段条数', def: 0, step: 1, min: 0, max: 4 },
+]
+for (let i = 1; i <= 4; i++) {
+  const on = (p: Record<string, number>) => (p.n || 0) >= i
+  LINE_PARAMS.push(
+    { key: 'k' + i, label: '线' + i + ' 斜率 k', def: i === 1 ? 0.6 : 0, step: 0.1, min: -10, max: 10, showIf: on },
+    { key: 'm' + i, label: '线' + i + ' 截距 m', def: i === 1 ? -1 : 0, step: 0.5, min: -20, max: 20, showIf: on },
+    { key: 's' + i, label: '线' + i + ' 起点 x', def: 0, step: 0.5, min: -20, max: 20, showIf: on },
+    { key: 'e' + i, label: '线' + i + ' 终点 x（与起点相同 = 整条直线）', def: 0, step: 0.5, min: -20, max: 20, showIf: on },
+  )
+}
+// 挂到所有自定义圆锥曲线上（挂在 conicFigure 之前，此时 CONICS 已完整定义）
+for (const kk of ['conicCustomEllipse', 'conicCustomEllipseV', 'conicCustomHyperbola', 'conicCustomParabola']) {
+  const dd = CONICS[kk]
+  if (dd) dd.params = [...(dd.params || []), ...LINE_PARAMS]
+}
+
+/** 把直线 y = kx + m 裁到显示窗口里（**窗口外不画多余线段**），返回可见段两端点。 */
+function clipLine(k: number, b2: number, view: View): [[number, number], [number, number]] | null {
+  const pts: [number, number][] = []
+  const add = (x: number, y: number) => {
+    if (x < view.xmin - 1e-9 || x > view.xmax + 1e-9 || y < view.ymin - 1e-9 || y > view.ymax + 1e-9) return
+    if (pts.some((p) => Math.abs(p[0] - x) < 1e-9 && Math.abs(p[1] - y) < 1e-9)) return
+    pts.push([x, y])
+  }
+  add(view.xmin, k * view.xmin + b2)
+  add(view.xmax, k * view.xmax + b2)
+  if (Math.abs(k) > 1e-9) {
+    add((view.ymin - b2) / k, view.ymin)
+    add((view.ymax - b2) / k, view.ymax)
+  }
+  if (pts.length < 2) return null
+  pts.sort((p, q) => (p[0] - q[0]) || (p[1] - q[1]))
+  return [pts[0], pts[pts.length - 1]]
+}
+
+/** 画「多条直线 / 线段」（参数见 LINE_PARAMS）。返回空串 = 没开。
+ *  线段按起终点 x 截断，直线铺满窗口；两者都先裁到窗口内，不会溢到元素框外面。 */
+function drawExtraLines(pv: Record<string, number>, view: View, w: number, h: number, stroke: string, sw: number): string {
+  const n = Math.max(0, Math.min(4, Math.round(pv.n || 0)))
+  if (!n) return ''
+  const mm = mapper(view, w, h)
+  const r = Math.max(2, Math.min(w, h) * 0.011)
+  let out = ''
+  for (let i = 1; i <= n; i++) {
+    const k = pv['k' + i] || 0, b2 = pv['m' + i] || 0
+    const sN = pv['s' + i] ?? 0, eN = pv['e' + i] ?? 0
+    const seg = Math.abs(eN - sN) > 1e-6                 // 起终点不同 = 线段
+    const span = clipLine(k, b2, view)
+    if (!span) continue
+    let lo = Math.min(span[0][0], span[1][0]), hi = Math.max(span[0][0], span[1][0])
+    if (seg) {
+      lo = Math.max(lo, Math.min(sN, eN))
+      hi = Math.min(hi, Math.max(sN, eN))
+      if (hi - lo < 1e-9) continue
+    }
+    out += lineSvg(mm.X(lo), mm.Y(k * lo + b2), mm.X(hi), mm.Y(k * hi + b2), stroke, sw)
+    if (seg) out += dotSvg(mm.X(lo), mm.Y(k * lo + b2), r, stroke) + dotSvg(mm.X(hi), mm.Y(k * hi + b2), r, stroke)
+  }
+  return out
+}
+
 export function conicFigure(kind: string, w: number, h: number, stroke: string, sw: number, fill = 'none', params?: Record<string, number>): string {
   const def = CONICS[kind]
   if (!def) return ''
@@ -684,6 +753,10 @@ export function conicFigure(kind: string, w: number, h: number, stroke: string, 
       '" stroke-linecap="round" stroke-linejoin="round"/>'
     : ''
   let s = axesSvg(view, w, h, stroke, sw, false)
+  // 「圆锥曲线 + 直线 / 线段」：在 s 的**最前面**加一次就够 —— 后面各分支只管往 s 上追加再 return s，
+  // 所以不需要改动任何一个分支（改四个分支结尾容易漏、也容易错）。
+  // 画在圆锥曲线**下面**，交点处线条不会互相压住。
+  s += drawExtraLines(pv, view, w, h, stroke, sw)
   const label = (x: number, y: number, t: string, dx = 0, dy = 0) => textSvg(X(x) + dx, Y(y) + dy, t, fs, stroke)
   const dot = (x: number, y: number, k = 1) => dotSvg(X(x), Y(y), r * k, stroke)
 

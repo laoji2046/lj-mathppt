@@ -18,7 +18,7 @@ import { layoutTable, mergeAt, unmergeAt } from '@/composables/tableLayout'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
 import { openShapeEdit } from '@/ui/shapeEditor'
-import { compileExpr, figureParams } from '@/composables/mathPlot'
+import { compileExpr, figureParams, withParams } from '@/composables/mathPlot'
 import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type EdgeStyle, type FaceStyle } from '@/composables/solid3d'
 import { solidSel } from '@/composables/solidSel'
 import { openImageEditor } from '@/ui/imageEditor'
@@ -91,7 +91,15 @@ async function saveFigToLibrary() {
 const figLibMsg = ref('')
 
 /** 当前数学图形的可调参数（正弦型的 A/ω/φ、含参二次的 a…），无参数则为空 */
-const figParams = computed(() => (mathfig.value ? figureParams(mathfig.value.kind) : []))
+const figParams = computed(() => {
+  const m = mathfig.value
+  if (!m) return []
+  const kind = String(m.kind || '')
+  // showIf：只显示当前**用得上**的参数（例如"线3/线4"在条数设为 2 时先藏起来，
+  // 否则圆锥曲线 + 4 条线会有近 20 个滑杆，面板没法看）
+  const cur = withParams(kind, m.params)
+  return figureParams(kind).filter((pr) => !pr.showIf || pr.showIf(cur))
+})
 function figParamVal(key: string, def: number) {
   const v = mathfig.value?.params?.[key]
   return typeof v === 'number' ? v : def
