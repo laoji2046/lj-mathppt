@@ -104,9 +104,23 @@ const figParams = computed(() => {
  *  未分组的参数保持"一行一个"的老样子（勾选框、滑杆等）。 */
 type FigCell = {
   key: string; label: string; short: string; bool?: boolean
-  /** 颜色格子：'line' = 第 ci 条线的颜色，'point' = 第 ci 个点的颜色 */
-  color?: 'line' | 'point'; ci?: number
+  /** 颜色格子：'line' = 第 ci 条线的颜色，'point' = 第 ci 个点的颜色，
+   *  'conic' = 曲线颜色，'axis' = 坐标轴颜色 */
+  color?: 'line' | 'point' | 'conic' | 'axis'; ci?: number
   step?: number; min?: number; max?: number; def: number
+}
+/** 颜色格子的当前值 / 写回（模板里就不用写一长串三元表达式了） */
+function cellColorVal(c: FigCell) {
+  if (c.color === 'line') return lineColorVal(c.ci ?? 0)
+  if (c.color === 'point') return pointColorVal(c.ci ?? 0)
+  if (c.color === 'axis') return axisColorVal.value
+  return conicColorVal.value
+}
+function setCellColor(c: FigCell, v: string) {
+  if (c.color === 'line') setLineColor(c.ci ?? 0, v)
+  else if (c.color === 'point') setPointColor(c.ci ?? 0, v)
+  else if (c.color === 'axis') patch({ axisColor: v } as Partial<SlideElement>)
+  else setConicColor(v)
 }
 const figRows = computed(() => {
   const rows: { key: string; title: string; cells: FigCell[] }[] = []
@@ -114,7 +128,7 @@ const figRows = computed(() => {
     const c: FigCell = { key: pr.key, label: pr.label, short: pr.short || pr.label, bool: pr.bool, step: pr.step, min: pr.min, max: pr.max, def: pr.def }
     const last = rows[rows.length - 1]
     if (pr.group && last && last.key === pr.group) { last.cells.push(c); continue }
-    rows.push({ key: pr.group || pr.key, title: String(pr.label).split(/\s+/)[0] || c.short, cells: [c] })
+    rows.push({ key: pr.group || pr.key, title: pr.groupTitle || String(pr.label).split(/\s+/)[0] || c.short, cells: [c] })
   }
   // 颜色也是"这个元素的属性" → 一并塞进同一个矩形框（省掉"线N 颜色""点N 颜色"两排单独的行）
   for (const row of rows) {
@@ -122,6 +136,8 @@ const figRows = computed(() => {
     const mp = /^点(\d+)$/.exec(row.title)
     if (ml && Number(ml[1]) <= lineN.value) row.cells.push({ key: 'lc' + ml[1], label: '线' + ml[1] + ' 颜色', short: '色', color: 'line', ci: Number(ml[1]) - 1, def: 0 })
     else if (mp && Number(mp[1]) <= pointN.value) row.cells.push({ key: 'pc' + mp[1], label: '点' + mp[1] + ' 颜色', short: '色', color: 'point', ci: Number(mp[1]) - 1, def: 0 })
+    else if (row.key === 'cv') row.cells.push({ key: 'ccv', label: '曲线颜色', short: '色', color: 'conic', def: 0 })
+    else if (row.key === 'ax') row.cells.push({ key: 'cax', label: '坐标轴颜色', short: '色', color: 'axis', def: 0 })
   }
   return rows
 })
@@ -1276,14 +1292,14 @@ function layerTypeLabel(type: string) {
           </label>
           <div v-else class="field fbox">
             <span class="fbox__t">{{ row.title }}</span>
-            <div class="fm">
+            <div class="fm" :class="{ 'fm--tight': !row.cells.some((c) => !c.bool && !c.color) }">
               <label v-for="c in row.cells" :key="c.key" class="fm__cell" :class="{ 'fm__cell--ck': c.bool }" :title="c.label">
                 <i>{{ c.short }}</i>
                 <ColorSwatches
                   v-if="c.color"
                   dot
-                  :model-value="c.color === 'line' ? lineColorVal(c.ci ?? 0) : pointColorVal(c.ci ?? 0)"
-                  @update:model-value="(v) => (c.color === 'line' ? setLineColor(c.ci ?? 0, v as string) : setPointColor(c.ci ?? 0, v as string))"
+                  :model-value="cellColorVal(c)"
+                  @update:model-value="(v) => setCellColor(c, v as string)"
                 />
                 <input
                   v-else-if="c.bool"
@@ -1313,12 +1329,7 @@ function layerTypeLabel(type: string) {
           <!-- 点N 的颜色同上，已进框 -->
         </template>
         <template v-if="hasLineParams">
-          <label class="field"><span>曲线颜色</span>
-            <ColorSwatches :model-value="conicColorVal" @update:model-value="(v) => setConicColor(v as string)" />
-          </label>
-          <label class="field"><span>坐标轴颜色</span>
-            <ColorSwatches :model-value="axisColorVal" @update:model-value="(v) => patch({ axisColor: v as string } as Partial<SlideElement>)" />
-          </label>
+          <!-- 曲线颜色 / 坐标轴颜色已经放进各自的矩形框里了（曲线框、坐标轴框） -->
           <!-- 线N / 点N 的颜色已经放进各自的矩形框里了（见上面的 .fbox） -->
         </template>
         <label class="field"><span>线条颜色<span v-if="edgeTarget != null" class="panel__tag">▶ 边{{ edgeTarget + 1 }}</span></span>
@@ -2007,11 +2018,13 @@ function layerTypeLabel(type: string) {
 .fbox__t { flex: 0 0 auto; font-weight: 600; color: var(--text); font-size: 10.5px; line-height: 22px; }
 .fm { display: flex; flex: 1 1 auto; align-items: flex-end; gap: 2px; min-width: 0; }
 .fm__cell { flex: 1 1 0; min-width: 0; display: block; }
+/* 整行只有勾选框/色点（没有数字）时别把它们摊开，靠左紧凑排 */
+.fm--tight > .fm__cell { flex: 0 0 auto; }
 .fm__cell--ck { flex: 0 0 auto; }
 .fm__cell > i { display: block; font-style: normal; font-size: 10px; color: var(--muted); margin-bottom: 1px; }
 /* 输入框**变窄**：一格只占 1/N（原来是整个面板宽）。
    ⚠ 这些格子里必须关掉 number 的上下箭头 —— 它会吃掉一格近一半宽度，数字被裁成"(" */
-.fm__cell input[type="number"] { width: 100%; padding: 0 3px; font-size: 11.5px; height: 24px; }
+.fm__cell input[type="number"] { width: 100%; max-width: 64px; padding: 0 3px; font-size: 11.5px; height: 24px; }
 .fm__cell input[type="number"]::-webkit-outer-spin-button,
 .fm__cell input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .fm__cell input[type="checkbox"] { display: block; margin: 5px 2px 6px 4px; }

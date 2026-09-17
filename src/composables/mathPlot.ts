@@ -178,6 +178,8 @@ export interface ParamSpec {
   group?: string
   /** 并成一行时用的**短标题**（如 "x"、"k"、"起x"） */
   short?: string
+  /** 并成一行时，**框左边的名字**（如"曲线"、"坐标轴"）；不给就从第一个参数的 label 里猜 */
+  groupTitle?: string
 }
 
 /** 分段函数的一段：f 在 [from, to] 上 */
@@ -641,11 +643,11 @@ export const CONICS: Record<string, {
     label: '自定义椭圆 + 直线/线段（可调 a、b 与多条线）',
     view: ellipseWindow(4, 3),
     params: [
-      { key: 'a', label: 'a（半长轴）', def: 4, step: 0.5, min: 0.5, max: 20 },
-      { key: 'b', label: 'b（半短轴）', def: 3, step: 0.5, min: 0.5, max: 20 },
-      { key: 'ab', label: '显示 a、b 标注', def: 1, bool: true },
+      { key: 'a', label: 'a（半长轴）', short: 'a', def: 4, step: 0.5, min: 0.5, max: 20 },
+      { key: 'b', label: 'b（半短轴）', short: 'b', def: 3, step: 0.5, min: 0.5, max: 20 },
+      { key: 'ab', label: '显示 a、b 标注', short: '标注', def: 1, bool: true },
       // 准线默认**关**：自定义椭圆原来没有准线，默认开会让老图元突然多两条线
-      { key: 'dline', label: '显示准线', def: 0, bool: true },
+      { key: 'dline', label: '显示准线', short: '准线', def: 0, bool: true },
     ],
     viewOf: (p) => ellipseWindow(p.a || 1, p.b || 1),
   },
@@ -653,10 +655,10 @@ export const CONICS: Record<string, {
     label: '自定义椭圆（长轴在 y 轴）+ 直线/线段（可调 a、b 与多条线）',
     view: ellipseWindowV(4, 3),
     params: [
-      { key: 'a', label: 'a（半长轴）', def: 4, step: 0.5, min: 0.5, max: 20 },
-      { key: 'b', label: 'b（半短轴）', def: 3, step: 0.5, min: 0.5, max: 20 },
-      { key: 'ab', label: '显示 a、b 标注', def: 1, bool: true },
-      { key: 'dline', label: '显示准线', def: 0, bool: true },
+      { key: 'a', label: 'a（半长轴）', short: 'a', def: 4, step: 0.5, min: 0.5, max: 20 },
+      { key: 'b', label: 'b（半短轴）', short: 'b', def: 3, step: 0.5, min: 0.5, max: 20 },
+      { key: 'ab', label: '显示 a、b 标注', short: '标注', def: 1, bool: true },
+      { key: 'dline', label: '显示准线', short: '准线', def: 0, bool: true },
     ],
     viewOf: (p) => ellipseWindowV(p.a || 1, p.b || 1),
   },
@@ -664,10 +666,10 @@ export const CONICS: Record<string, {
     label: '自定义双曲线 + 直线/线段（可调 a、b 与多条线）',
     view: { xmin: -6.5, xmax: 6.5, ymin: -4.9, ymax: 4.9 },
     params: [
-      { key: 'a', label: 'a（实半轴）', def: 3, step: 0.5, min: 0.3, max: 20 },
-      { key: 'b', label: 'b（虚半轴）', def: 2, step: 0.5, min: 0.3, max: 20 },
-      { key: 'dline', label: '显示准线', def: 0, bool: true },
-      { key: 'aline', label: '显示渐近线', def: 0, bool: true },
+      { key: 'a', label: 'a（实半轴）', short: 'a', def: 3, step: 0.5, min: 0.3, max: 20 },
+      { key: 'b', label: 'b（虚半轴）', short: 'b', def: 2, step: 0.5, min: 0.3, max: 20 },
+      { key: 'dline', label: '显示准线', short: '准线', def: 0, bool: true },
+      { key: 'aline', label: '显示渐近线', short: '渐近线', def: 0, bool: true },
     ],
     viewOf: (p) => {
       // **渐近线与支线的显示要协调**（用户实报：开口大的双曲线，支线成了小短弧、
@@ -684,9 +686,9 @@ export const CONICS: Record<string, {
     label: '自定义圆 + 直线/线段（可调圆心、半径与多条线）',
     view: { xmin: -6, xmax: 6, ymin: -4.5, ymax: 4.5 },     // 4:3，与 viewOf 一致
     params: [
-      { key: 'cx', label: '圆心 x', def: 0, step: 0.5, min: -20, max: 20 },
-      { key: 'cy', label: '圆心 y', def: 0, step: 0.5, min: -20, max: 20 },
-      { key: 'cr', label: '半径 r', def: 3, step: 0.5, min: 0.2, max: 20 },
+      { key: 'cx', label: '圆心 x', short: '圆心x', def: 0, step: 0.5, min: -20, max: 20 },
+      { key: 'cy', label: '圆心 y', short: '圆心y', def: 0, step: 0.5, min: -20, max: 20 },
+      { key: 'cr', label: '半径 r', short: 'r', def: 3, step: 0.5, min: 0.2, max: 20 },
     ],
     viewOf: (p) => {
       // 取景跟着圆心走，**保持 4:3**（元素框是按静态 view 的纵横比给的，比例不一致会拉伸）。
@@ -705,9 +707,9 @@ export const CONICS: Record<string, {
     // 静态 view 与 viewOf 都按 4:3 —— 不一致的话元素框会把图形拉伸
     view: { xmin: -8, xmax: 8, ymin: -6, ymax: 6 },
     params: [
-      { key: 'p', label: 'p（焦准距）', def: 4, step: 0.5, min: 0.2, max: 20 },
-      { key: 'dir', label: '开口：1右 2上 3左 4下', def: 1, step: 1, min: 1, max: 4 },
-      { key: 'dline', label: '显示准线', def: 1, bool: true },
+      { key: 'p', label: 'p（焦准距）', short: 'p', def: 4, step: 0.5, min: 0.2, max: 20 },
+      { key: 'dir', label: '开口：1右 2上 3左 4下', short: '开口', def: 1, step: 1, min: 1, max: 4 },
+      { key: 'dline', label: '显示准线', short: '准线', def: 1, bool: true },
     ],
     viewOf: (p) => {
       // 取景按**开口方向**整体偏移：图形朝开口的**反方向**靠，给开口那边留出空间
@@ -726,11 +728,12 @@ export const CONICS: Record<string, {
 /** 「圆锥曲线 + 直线 / 线段」：给所有**自定义**圆锥曲线补上的"多条线"参数。
  *  n 默认 0 = 一条都不画 —— **老图元完全不变**；showIf 让属性面板只显示用得上的那几个。 */
 export const LINE_PARAMS: ParamSpec[] = [
-  { key: 'n', label: '直线 / 线段条数', def: 0, step: 1, min: 0, max: 4 },
+  // 「直线」这一组（条数 + 两个开关）也装进一个矩形框
+  { key: 'n', label: '直线 / 线段条数', short: '条数', group: 'lset', groupTitle: '直线', def: 0, step: 1, min: 0, max: 4 },
   // 线段两端的圆点本来是"一眼区分线段 / 整条直线"用的；但教材图里常常不要，所以做成可选项。
   // 默认 1（显示）→ **老图元外观完全不变**。
-  { key: 'ldot', label: '线段端点圆点', def: 1, bool: true, showIf: (p) => (p.n || 0) >= 1 },
-  { key: 'chord', label: '显示弦长', def: 0, bool: true, showIf: (p) => (p.n || 0) >= 1 },
+  { key: 'ldot', label: '线段端点圆点', short: '端点', group: 'lset', def: 1, bool: true, showIf: (p) => (p.n || 0) >= 1 },
+  { key: 'chord', label: '显示弦长', short: '弦长', group: 'lset', def: 0, bool: true, showIf: (p) => (p.n || 0) >= 1 },
 ]
 for (let i = 1; i <= 4; i++) {
   const on = (p: Record<string, number>) => (p.n || 0) >= i
@@ -762,14 +765,20 @@ for (let i = 1; i <= 6; i++) {
 
 /** 圆锥曲线自己的"外观"参数：曲线要不要虚线、坐标轴要不要虚线（颜色是字符串 → 存在元素的 axisColor 上） */
 export const CONIC_LOOK_PARAMS: ParamSpec[] = [
-  { key: 'cdash', label: '曲线用虚线', def: 0, bool: true },
-  { key: 'axisd', label: '坐标轴用虚线', def: 0, bool: true },
+  // 「曲线」框里的那个开关：本框标题就叫"曲线"，所以小标题只写"虚线"
+  { key: 'cdash', label: '曲线用虚线', short: '虚线', group: 'cv', groupTitle: '曲线', def: 0, bool: true },
+  // 坐标轴是**另一个东西** → 单独一个「坐标轴」框（一行：虚线 + 颜色）
+  { key: 'axisd', label: '坐标轴用虚线', short: '虚线', group: 'ax', groupTitle: '坐标轴', def: 0, bool: true },
 ]
 
 // 挂到所有自定义圆锥曲线上（挂在 conicFigure 之前，此时 CONICS 已完整定义）
 for (const kk of ['conicCustomCircle', 'conicCustomEllipse', 'conicCustomEllipseV', 'conicCustomHyperbola', 'conicCustomParabola']) {
   const dd = CONICS[kk]
-  if (dd) dd.params = [...(dd.params || []), ...CONIC_LOOK_PARAMS, ...LINE_PARAMS, ...POINT_PARAMS]
+  if (!dd) continue
+  // **曲线自己的参数**（形状 + 显示开关）同组 → 面板里装进一个「曲线」矩形框、一行放完
+  // （用户要求：同一元素的所有属性放在一个矩形框内）
+  for (const pr of dd.params || []) { pr.group = 'cv'; pr.groupTitle = '曲线' }
+  dd.params = [...(dd.params || []), ...CONIC_LOOK_PARAMS, ...LINE_PARAMS, ...POINT_PARAMS]
 }
 
 /** 把直线 y = kx + m 裁到显示窗口里（**窗口外不画多余线段**），返回可见段两端点。 */
