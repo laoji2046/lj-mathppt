@@ -40,6 +40,8 @@ export interface ParsedQuestion {
   section?: string
   /** 显式章节（【章节】第二级）；没写留空 */
   chapter?: string
+  /** 题面上写明的分值（如「本小题满分 15 分」）；没写为 0 */
+  scoreExplicit?: number
   /** 日期 YYYY-MM-DD */
   date?: string
   /** 年份（如 2024） */
@@ -64,6 +66,8 @@ const RE_SECTION = /^\s*(?:【板块】|板块\s*[:：])\s*(.+?)\s*$/
 const RE_DATE = /^\s*(?:【日期】|日期\s*[:：])\s*(.+?)\s*$/
 const RE_YEAR = /^\s*(?:【年份】|年份\s*[:：])\s*(.+?)\s*$/
 const RE_CHAPTER = /^\s*(?:【章节】|章节\s*[:：])\s*(.+?)\s*$/
+/** 「（本小题满分 15 分）」这类 —— 既是说明，也是**这道题的分值** */
+const RE_FULL_SCORE = /[（(]\s*本小题满分\s*(\d{1,3})\s*分\s*[)）]/
 const RE_PAPER = /^\s*(?:【试卷】|【试卷名】|试卷\s*[:：]|试卷名\s*[:：])\s*(.+?)\s*$/
 
 /** 难度文字 → 1-5（易=2 / 中=3 / 难=5；也认 1-5 与「较难」这类说法） */
@@ -100,8 +104,13 @@ function splitTags(s: string): string[] {
   return s.split(/[，,、;；\s#]+/).map((x) => x.trim()).filter(Boolean)
 }
 
+/** 只由分值说明组成的行（如「（本小题满分 15 分）」）—— 不作为标题 */
+function isScoreOnlyLine(s: string): boolean {
+  return /^[（(]?\s*(?:本小题)?\s*满分\s*\d{1,3}\s*分\s*[)）]?\s*$/.test(s.trim())
+}
+
 function autoTitle(stem: string): string {
-  const first = (stem || '').split('\n').map((s) => s.trim()).filter(Boolean)[0] || '未命名试题'
+  const first = (stem || '').split('\n').map((s) => s.trim()).filter((s) => s && !isScoreOnlyLine(s))[0] || '未命名试题'
   const t = first.replace(/\s+/g, ' ')
   return t.length > 20 ? t.slice(0, 20) + '…' : t
 }
@@ -231,6 +240,10 @@ function splitBlocks(text: string): string[] {
   return blocks.map((b) => b.trim()).filter(Boolean)
 }
 
+function t_all(block: string): string {
+  return block.split('\n').join(' ')
+}
+
 export function parseQuestions(raw: string): ParsedQuestion[] {
   const stripped = stripNonQuestionLines(raw)
   skippedNonQuestion = stripped.skipped
@@ -314,6 +327,9 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
     }
     knowledge = Array.from(new Set(knowledge.filter(Boolean)))
 
+    const ms = t_all(block).match(RE_FULL_SCORE)
+    const scoreExplicit = ms ? Number(ms[1]) || 0 : 0
+
     if (!stem && !options.length) continue
     out.push({
       title: autoTitle(stem),
@@ -325,6 +341,7 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
       difficulty,
       qtype,
       section,
+      scoreExplicit,
       chapter,
       date,
       yearExplicit,

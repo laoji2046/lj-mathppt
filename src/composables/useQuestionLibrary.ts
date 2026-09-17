@@ -321,6 +321,8 @@ export async function importParsedQuestions(list: ParsedQuestion[]): Promise<{ a
       year: (p as { yearExplicit?: string }).yearExplicit || p.year, region: p.region,
       qtype: (p as { qtype?: QType }).qtype,
       section: (p as { section?: string }).section,
+      // ⭐ 题面上写了「本小题满分 15 分」就自动填分值
+      score: (p as { scoreExplicit?: number }).scoreExplicit || 0,
       chapter: (p as { chapter?: string }).chapter,
       date: (p as { date?: string }).date,
       paperName: (p as { paperName?: string }).paperName,
