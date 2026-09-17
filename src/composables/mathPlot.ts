@@ -716,7 +716,7 @@ function clipLine(k: number, b2: number, view: View): [[number, number], [number
 
 /** 画「多条直线 / 线段」（参数见 LINE_PARAMS）。返回空串 = 没开。
  *  线段按起终点 x 截断，直线铺满窗口；两者都先裁到窗口内，不会溢到元素框外面。 */
-function drawExtraLines(pv: Record<string, number>, view: View, w: number, h: number, stroke: string, sw: number): string {
+function drawExtraLines(pv: Record<string, number>, view: View, w: number, h: number, stroke: string, sw: number, colors?: (string | null)[]): string {
   const n = Math.max(0, Math.min(4, Math.round(pv.n || 0)))
   if (!n) return ''
   const mm = mapper(view, w, h)
@@ -734,16 +734,21 @@ function drawExtraLines(pv: Record<string, number>, view: View, w: number, h: nu
       hi = Math.min(hi, Math.max(sN, eN))
       if (hi - lo < 1e-9) continue
     }
-    out += lineSvg(mm.X(lo), mm.Y(k * lo + b2), mm.X(hi), mm.Y(k * hi + b2), stroke, sw)
-    if (seg) out += dotSvg(mm.X(lo), mm.Y(k * lo + b2), r, stroke) + dotSvg(mm.X(hi), mm.Y(k * hi + b2), r, stroke)
+    const col = colors && colors[i - 1] ? colors[i - 1]! : stroke     // 每条线可以有自己的颜色
+    out += lineSvg(mm.X(lo), mm.Y(k * lo + b2), mm.X(hi), mm.Y(k * hi + b2), col, sw)
+    if (seg) out += dotSvg(mm.X(lo), mm.Y(k * lo + b2), r, col) + dotSvg(mm.X(hi), mm.Y(k * hi + b2), r, col)
   }
   return out
 }
 
-export function conicFigure(kind: string, w: number, h: number, stroke: string, sw: number, fill = 'none', params?: Record<string, number>): string {
+export function conicFigure(kind: string, w: number, h: number, baseStroke: string, sw: number, fill = 'none', params?: Record<string, number>, opt?: { conicStroke?: string; lineColors?: (string | null)[] }): string {
   const def = CONICS[kind]
   if (!def) return ''
   const pv = withParams(kind, params)
+  // ⚠ 参数名从 stroke 改成 baseStroke，再让 stroke 指向"**圆锥曲线自己的颜色**" ——
+  //   这样下面各个绘制分支**一行都不用改**（它们本来就写 stroke）。
+  //   坐标轴仍用元素主色 baseStroke；多条线各自用 lineColors[i]（没给就回落主色）。
+  const stroke = opt?.conicStroke || baseStroke
   const view = def.viewOf ? def.viewOf(pv) : def.view
   const m = mapper(view, w, h)
   const { X, Y } = m
@@ -756,11 +761,11 @@ export function conicFigure(kind: string, w: number, h: number, stroke: string, 
     ? '<path d="' + d + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + n1(sw) +
       '" stroke-linecap="round" stroke-linejoin="round"/>'
     : ''
-  let s = axesSvg(view, w, h, stroke, sw, false)
+  let s = axesSvg(view, w, h, baseStroke, sw, false)
   // 「圆锥曲线 + 直线 / 线段」：在 s 的**最前面**加一次就够 —— 后面各分支只管往 s 上追加再 return s，
   // 所以不需要改动任何一个分支（改四个分支结尾容易漏、也容易错）。
   // 画在圆锥曲线**下面**，交点处线条不会互相压住。
-  s += drawExtraLines(pv, view, w, h, stroke, sw)
+  s += drawExtraLines(pv, view, w, h, baseStroke, sw, opt?.lineColors)
   const label = (x: number, y: number, t: string, dx = 0, dy = 0) => textSvg(X(x) + dx, Y(y) + dy, t, fs, stroke)
   const dot = (x: number, y: number, k = 1) => dotSvg(X(x), Y(y), r * k, stroke)
 

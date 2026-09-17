@@ -118,6 +118,21 @@ function setFigParamSoft(key: string, raw: string) {
   if (!Number.isFinite(v)) return
   setFigParam(key, v)
 }
+// ── 圆锥曲线 + 多条直线：**椭圆与每条线可以各自设颜色** ──
+/** 有几条线（0 表示这个图元没开"多条线"，颜色行就都不显示） */
+const lineN = computed(() => Math.max(0, Math.min(4, Math.round(figParamVal('n', 0)))))
+const hasLineParams = computed(() => figParams.value.some((p) => p.key === 'n'))
+const conicColorVal = computed(() => mathfig.value?.conicStroke || mathfig.value?.stroke || '#1a1a1a')
+function lineColorVal(i: number) {
+  return (mathfig.value?.lineColors || [])[i] || mathfig.value?.stroke || '#1a1a1a'
+}
+function setConicColor(v: string) { patch({ conicStroke: v } as Partial<SlideElement>) }
+function setLineColor(i: number, v: string) {
+  const a: (string | null)[] = [...(mathfig.value?.lineColors || [])]
+  while (a.length <= i) a.push(null)
+  a[i] = v
+  patch({ lineColors: a } as Partial<SlideElement>)
+}
 const isGraphic = computed(() => isShape.value || isLine.value || isArrow.value || isPen.value || isMathFig.value)
 function isCurrentGraphic(g: { v: string; cat: string }) {
   const t = el.value
@@ -1104,6 +1119,15 @@ function layerTypeLabel(type: string) {
           />
         </label>
         <p v-if="figParams.length" class="panel__hint">改参数后图形立即重绘（适合讲"图象变换 / 含参讨论"）。</p>
+        <template v-if="hasLineParams">
+          <label class="field"><span>椭圆（曲线）颜色</span>
+            <ColorSwatches :model-value="conicColorVal" @update:model-value="(v) => setConicColor(v as string)" />
+          </label>
+          <label v-for="i in lineN" :key="'lc' + i" class="field">
+            <span>线{{ i }} 颜色</span>
+            <ColorSwatches :model-value="lineColorVal(i - 1)" @update:model-value="(v) => setLineColor(i - 1, v as string)" />
+          </label>
+        </template>
         <label class="field"><span>线条颜色<span v-if="edgeTarget != null" class="panel__tag">▶ 边{{ edgeTarget + 1 }}</span></span>
           <ColorSwatches :model-value="strokeColorVal" @update:model-value="(v) => onStrokeColor(v as string)" />
         </label>

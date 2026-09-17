@@ -547,6 +547,10 @@ export interface MathFigureElement extends ElementBase {
   vlabels?: (string | null)[]
   /** 每条边的样式覆盖（实线/虚线/点线、粗细、颜色），索引与立体边表一致 */
   edgeStyles?: ({ dash?: 'solid' | 'dash' | 'dot'; width?: number; color?: string; arrow?: boolean } | null)[]
+  /** 圆锥曲线**自己的颜色**（不填 = 用元素主色）—— 让"椭圆一个色、每条线另一个色"成为可能 */
+  conicStroke?: string
+  /** 「圆锥曲线 + 多条直线/线段」里每条线的颜色覆盖，索引 = 第几条线 − 1 */
+  lineColors?: (string | null)[]
   /** 每个顶点字母相对默认位置(顶点上方)的拖拽偏移(归一化)，用于避免遮挡 */
   labelOffsets?: { dx: number; dy: number }[]
   /** 每个面的样式覆盖（填充色/透明度/隐藏该面），索引与面表一致 */

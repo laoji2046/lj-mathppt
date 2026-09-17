@@ -71,7 +71,10 @@ const innerHtml = computed(() => {
     return svg
   }
   if (FUNCTION_KINDS.includes(kind)) return functionFigure(kind, w, h, stroke, s, props.el.params)
-  if (CONIC_KINDS.includes(kind)) return conicFigure(kind, w, h, stroke, s, fillColor, props.el.params)
+  if (CONIC_KINDS.includes(kind)) {
+    return conicFigure(kind, w, h, stroke, s, fillColor, props.el.params,
+      { conicStroke: props.el.conicStroke, lineColors: props.el.lineColors })
+  }
 
   // 三维多面体统一走顶点模型渲染（支持拖拽顶点编辑）
   if (SOLID_VCOUNT[kind]) {
