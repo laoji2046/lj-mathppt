@@ -16,6 +16,7 @@ import { useDeckStore } from '@/stores/deck'
 import type { MathFigureElement, SlideElement, FigureArc } from '@/types'
 import { loadImageElement, type VectorizeOpt, type VectorizeResult } from '@/composables/vectorize'
 import { labelFontSize, labelGap, labelSvg, arcPolyline } from '@/composables/solid3d'
+import { renderFigureSvg } from '@/composables/figureRender'
 
 type VectorizeWorker = Worker & { __nextId?: number }
 let vectorWorker: VectorizeWorker | null = null
@@ -1488,25 +1489,46 @@ const findEl = (id: string) => store.currentSlide?.elements.find((e) => e.id ===
 /**
  * 给**试卷 / 讲义**用的 SVG ✓（纯新增 ✓ 不影响原路径 ✓）。
  *
- * 试卷只认图片 ✗，所以这里从顶点/边**直接拼一段 SVG** ✓，
- * 再交给试卷栅格化成 [图N] ✓（试卷已有 svgStringToPng ✓）。
- * 只画边（虚实用 stroke-dasharray ✓）—— 顶点圆点和字母标注暂不带 ✓，
- * 但线稿的几何信息是完整的 ✓。
+ * 试卷只认图片 ✗，所以这里把图形渲成一段 SVG ✓，再交给试卷栅格化成 [图N] ✓
+ * （试卷已有 svgStringToPng ✓）。
+ *
+ * ⚠ 这里**原来是自己手拼一段"只有线"的 SVG** ✗ —— 顶点圆点和字母标注都没带 ✗。
+ *   后果（用户实报 ✗）：**插进试卷 / PDF 的图形没有顶点字母，插进幻灯片的却有** ✓ ——
+ *   幻灯片走 buildPatch() 生成活元素（带 vlabels ✓），试卷走的是这段手拼 SVG ✗。
+ *   顺带把顶点小圆点也丢了 ✗（跟画布和幻灯片都不一致 ✗）。
+ *
+ *   现在改成跟画布**同一套渲染** ✓：renderFigureSvg() 挂真组件取它的 <svg> ✓，
+ *   点、线、虚实、字母一次全给 ✓ —— 不再维护第二份实现（v1229 就是"两份实现迟早漂移"栽的 ✓）。
+ *   下面仍保留旧的只画边版本当**兜底** ✓（真组件万一挂载失败，至少还有线稿 ✓）。
  */
 function buildSinkSvg(): string {
-  const w = 800
-  const h = 600
-  const px = (i: number) => ((pts.value[i * 2] ?? 0) * w).toFixed(1)
-  const py = (i: number) => ((pts.value[i * 2 + 1] ?? 0) * h).toFixed(1)
-  let out = ''
-  for (const e of edges.value) {
-    out +=
-      '<line x1="' + px(e[0]) + '" y1="' + py(e[0]) + '" x2="' + px(e[1]) + '" y2="' + py(e[1]) +
-      '" stroke="#1a1a1a" stroke-width="2.6"' + (e[2] ? ' stroke-dasharray="7 5"' : '') + '/>'
+  const onlyEdges = () => {
+    const w = 800
+    const h = 600
+    const px = (i: number) => ((pts.value[i * 2] ?? 0) * w).toFixed(1)
+    const py = (i: number) => ((pts.value[i * 2 + 1] ?? 0) * h).toFixed(1)
+    let out = ''
+    for (const e of edges.value) {
+      out +=
+        '<line x1="' + px(e[0]) + '" y1="' + py(e[0]) + '" x2="' + px(e[1]) + '" y2="' + py(e[1]) +
+        '" stroke="#1a1a1a" stroke-width="2.6"' + (e[2] ? ' stroke-dasharray="7 5"' : '') + '/>'
+    }
+    // ⚠ 必须返回**完整 SVG（带 viewBox）** ✗ —— 只给片段的话，试卷侧读不到尺寸 ✓
+    //   会按 480×320 兜底 ✓ 而这里是 800×600 ✓ → **图被裁** ✗（三维那边刚踩过同一个坑 ✓）。
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '">' + out + '</svg>'
   }
-  // ⚠ 必须返回**完整 SVG（带 viewBox）** ✗ —— 只给片段的话，试卷侧读不到尺寸 ✓
-  //   会按 480×320 兜底 ✓ 而这里是 800×600 ✓ → **图被裁** ✗（三维那边刚踩过同一个坑 ✓）。
-  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '">' + out + '</svg>'
+  try {
+    const patch = buildPatch()
+    if (patch) {
+      const svg = renderFigureSvg(patch as SlideElement)
+      if (svg && /<svg[\s>]/.test(svg)) {
+        // 摘掉组件带的 width/height="100%" ✗ —— 试卷侧 svgStringToPng 还会再插一对 width/height ✓，
+        // XML 里**重复属性直接解析失败** ✓（表现就是"图形转图片失败" ✓）。分辨率由试卷按 viewBox 定 ✓。
+        return svg.replace(/<svg\b[^>]*>/, (tag) => tag.replace(/\s(?:width|height)="[^"]*"/g, ''))
+      }
+    }
+  } catch { /* 落到下面的兜底 */ }
+  return onlyEdges()
 }
 
 /** 插入一个新图形（不动原图） */
