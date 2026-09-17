@@ -582,6 +582,12 @@ export function ellipseWindow(a: number, b: number): View {
   const k = Math.max(0.5, Math.max(a, b) * 1.28)
   return { xmin: -k * ELLIPSE_AR, xmax: k * ELLIPSE_AR, ymin: -k, ymax: k }
 }
+/** 长轴在 y 轴的自定义椭圆用的窗口 —— 把上面那个转 90°（纵横比取倒数）。
+ *  ⚠ 元素框的宽高比必须和窗口一致，否则图形会被拉伸（见 ellipseWindow 的注释）。 */
+export function ellipseWindowV(a: number, b: number): View {
+  const k = Math.max(0.5, Math.max(a, b) * 1.28)
+  return { xmin: -k, xmax: k, ymin: -k * ELLIPSE_AR, ymax: k * ELLIPSE_AR }
+}
 
 /** 按尺寸算出合适的显示窗口（留 25% 边距，且保持大致 4:3 的比例） */
 function windowFor(halfW: number, halfH: number): View {
@@ -627,6 +633,15 @@ export const CONICS: Record<string, {
       { key: 'b', label: 'b（半短轴）', def: 3, step: 0.5, min: 0.5, max: 20 },
     ],
     viewOf: (p) => ellipseWindow(p.a || 1, p.b || 1),
+  },
+  conicCustomEllipseV: {
+    label: '自定义椭圆 x²/b²+y²/a²=1（长轴在 y 轴，可调 a、b）',
+    view: ellipseWindowV(4, 3),
+    params: [
+      { key: 'a', label: 'a（半长轴）', def: 4, step: 0.5, min: 0.5, max: 20 },
+      { key: 'b', label: 'b（半短轴）', def: 3, step: 0.5, min: 0.5, max: 20 },
+    ],
+    viewOf: (p) => ellipseWindowV(p.a || 1, p.b || 1),
   },
   conicCustomHyperbola: {
     label: '自定义双曲线 x²/a²−y²/b²=1（可调 a、b）',
@@ -683,6 +698,19 @@ export function conicFigure(kind: string, w: number, h: number, stroke: string, 
     s += label(-c, 0, 'F₁', 0, fs * 1.15) + label(c, 0, 'F₂', 0, fs * 1.15)
     s += label(a, 0, 'a=' + a, fs * 0.5, -fs * 0.6)
     s += label(0, b, 'b=' + b, fs * 0.5, -fs * 0.6)
+    return s
+  }
+  if (kind === 'conicCustomEllipseV') {
+    // x²/b² + y²/a² = 1（长轴在 y 轴上），跟 conicCustomEllipse 上下对称
+    const a0 = Math.max(0.2, pv.a), b0 = Math.max(0.2, pv.b)
+    const a = Math.max(a0, b0), b = Math.min(a0, b0)      // a 是半长轴（竖着）
+    const c = Math.sqrt(Math.max(0, a * a - b * b))
+    s += curve(plotParametric((t) => b * Math.cos(t), (t) => a * Math.sin(t), 0, TAU, view, w, h))
+    s += lineSvg(X(0), Y(-a), X(0), Y(a), stroke, thin, dash)
+    s += dot(0, -c) + dot(0, c)
+    s += label(0, -c, 'F₁', fs * 1.25, 0) + label(0, c, 'F₂', fs * 1.25, 0)
+    s += label(0, a, 'a=' + a, fs * 0.5, -fs * 0.6)
+    s += label(b, 0, 'b=' + b, -fs * 1.6, -fs * 0.6)
     return s
   }
   if (kind === 'conicCustomHyperbola') {

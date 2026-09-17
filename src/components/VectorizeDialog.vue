@@ -17,6 +17,7 @@ import type { MathFigureElement, SlideElement, FigureArc } from '@/types'
 import { loadImageElement, type VectorizeOpt, type VectorizeResult } from '@/composables/vectorize'
 import { labelFontSize, labelGap, labelSvg, arcPolyline } from '@/composables/solid3d'
 import { renderFigureSvg } from '@/composables/figureRender'
+import { figureBox } from '@/composables/mathPlot'
 
 type VectorizeWorker = Worker & { __nextId?: number }
 let vectorWorker: VectorizeWorker | null = null
@@ -1533,6 +1534,53 @@ function buildSinkSvg(): string {
   return onlyEdges()
 }
 
+/** 用图里拟合出来的椭圆，生成一个**标准圆锥曲线椭圆图元**（x²/a²+y²/b²=1，a、b 之后还能在属性面板里调）。
+ *  这是「描摹」之外的另一条路：**不去描那条线，而是量出椭圆的形状，直接画一条标准椭圆**。
+ *  用户要的就是这个 —— 描摹出来的椭圆弧终究是一堆点，标准图元才是可编辑、可读参数的。 */
+function makeStdEllipse() {
+  const r = res.value
+  if (!r) return
+  const arcs = r.arcs || []
+  if (!arcs.length) {
+    note.value = '图里没认出圆/椭圆曲线 —— 线画清楚一点再试；也可能是**倾斜的椭圆**（当前模型是轴对齐的，不支持带旋转）'
+    return
+  }
+  const bw = r.box[2] - r.box[0], bh = r.box[3] - r.box[1]
+  let best = arcs[0], bestArea = -1
+  for (const a of arcs) {
+    const ar = (a.rx || 0) * bw * (a.ry || 0) * bh
+    if (ar > bestArea) { bestArea = ar; best = a }
+  }
+  const rx = (best.rx || 0) * bw, ry = (best.ry || 0) * bh   // 图像像素
+  const wide = rx >= ry
+  const aPix = wide ? rx : ry, bPix = wide ? ry : rx   // aPix = 半长轴
+  if (!(bPix > 3) || !(aPix > 3)) {
+    note.value = '拟合出来的椭圆太小 / 太扁，先看识别结果对不对'
+    return
+  }
+  const kind = wide ? 'conicCustomEllipse' : 'conicCustomEllipseV'
+  // a、b 是"数轴单位"：**只有比值决定形状**，取 a=10 便于读数，b 按图形比例换算
+  const A = 10
+  const B = +Math.max(0.3, (A * bPix) / aPix).toFixed(2)
+  const box = figureBox(kind) || { w: 420, h: 365 }
+  const patch = {
+    kind, params: { a: A, b: B }, w: box.w, h: box.h,
+    fill: 'transparent', stroke: '#1a1a1a', strokeWidth: 2.8,
+  } as Partial<SlideElement>
+  // 从试卷进来的 → 试卷只认图片：把标准椭圆渲成 SVG 交给它（跟三维 / 描摹同一条路）
+  if (vectorizeSink.value) {
+    const svg = renderFigureSvg(patch as SlideElement)
+    if (svg) {
+      vectorizeSink.value(svg, '标准椭圆')
+      vectorizeSink.value = null
+      emit('close')
+      return
+    }
+  }
+  store.addElement('mathfig', patch)
+  note.value = '已生成标准椭圆图元：a = ' + A + '，b = ' + B + '（半长轴在 ' + (wide ? 'x' : 'y') + ' 轴）—— 属性面板里可继续调 a、b'
+}
+
 /** 插入一个新图形（不动原图） */
 function insertNew() {
   // ⭐ 试卷登记了接收口 → 把描摹结果当图片交给它 ✓（用户要求 ✓）
@@ -1844,6 +1892,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               </button>
               <button class="vd__btn" title="同底字母配下标 1 的一对（C 和 C₁）之间一定有线，识别漏了就补上"
                 @click="refillByLetters()">按字母补线（侧棱 + 面的边）</button>
+              <button class="vd__btn" title="量出图里的椭圆形状，直接生成一个标准圆锥曲线椭圆图元 x²/a²+y²/b²=1（a、b 之后可在属性面板里调）"
+                @click="makeStdEllipse()">○ 拟合成标准椭圆</button>
               <button v-if="selE !== null" class="vd__btn" @click="toggleDash">实线 / 虚线 切换</button>
             </div>
             <p v-if="linkMode" class="vd__tip vd__tip--on">
