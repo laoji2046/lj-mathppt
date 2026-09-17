@@ -29,6 +29,8 @@ export interface ParsedQuestion {
   qtype?: string
   /** 显式板块（【板块】六大板块之一）；没写就留空，由库层归类 */
   section?: string
+  /** 显式章节（【章节】第二级）；没写留空 */
+  chapter?: string
   /** 日期 YYYY-MM-DD */
   date?: string
   /** 年份（如 2024） */
@@ -52,6 +54,7 @@ const RE_QTYPE = /^\s*(?:【题型】|题型\s*[:：])\s*(.+?)\s*$/
 const RE_SECTION = /^\s*(?:【板块】|板块\s*[:：])\s*(.+?)\s*$/
 const RE_DATE = /^\s*(?:【日期】|日期\s*[:：])\s*(.+?)\s*$/
 const RE_YEAR = /^\s*(?:【年份】|年份\s*[:：])\s*(.+?)\s*$/
+const RE_CHAPTER = /^\s*(?:【章节】|章节\s*[:：])\s*(.+?)\s*$/
 const RE_PAPER = /^\s*(?:【试卷】|【试卷名】|试卷\s*[:：]|试卷名\s*[:：])\s*(.+?)\s*$/
 
 /** 难度文字 → 1-5（易=2 / 中=3 / 难=5；也认 1-5 与「较难」这类说法） */
@@ -146,6 +149,7 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
     let region = ''
     let qtype = ''
     let section = ''
+    let chapter = ''
     let date = ''
     let yearExplicit = ''
     let paperName = ''
@@ -164,6 +168,8 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
       if (m) { section = m[1].trim(); continue }
       m = line.match(RE_DATE)
       if (m) { date = parseDate(m[1]); continue }
+      m = line.match(RE_CHAPTER)
+      if (m) { chapter = m[1].trim(); continue }
       m = line.match(RE_YEAR)
       if (m) { const y = (m[1].match(/(19|20)\d{2}/) || [])[0]; if (y) yearExplicit = y; continue }
       m = line.match(RE_PAPER)
@@ -219,6 +225,7 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
       difficulty,
       qtype,
       section,
+      chapter,
       date,
       yearExplicit,
       paperName,
@@ -292,6 +299,7 @@ export const PARSE_HELP: string[] = [
   '知识点写 【知识点】基本不等式, 最值，或直接在题干里写 #基本不等式。',
   '难度写 【难度】易 / 中 / 难（也认 1-5）；来源写 【来源】课本 P46 或 2024 某市模拟。',
   '题型写 【题型】单选 / 多选 / 填空 / 解答；不写会自动推断（有选项→选择，有下划线→填空）。',
+  '章节写 【章节】导数及其应用（板块之下第二级）。',
   '板块写 【板块】集合与逻辑 / 函数与导数 / 三角函数与向量 / 解析几何 / 立体几何 / 概率与统计；不写会按关键词自动归类。',
   '日期写 【日期】2024-05-20（也认 2024.5.20 / 2024年5月20日）。',
   '年份写 【年份】2024；试卷名写 【试卷】2024届某市一模 —— 这两项是「整套插入」的归组依据。',

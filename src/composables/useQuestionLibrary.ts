@@ -61,6 +61,29 @@ export function guessSection(text: string, knowledge: string[] = []): string {
   return ''
 }
 
+/* ---------------- 第二级：章节（板块之下） ---------------- */
+
+/**
+ * 章节体系（按人教A版顺序整理，作为**下拉建议**；也允许自己填）。
+ * 板块 → 章节列表。用途：逐级筛选 + 组卷时按章节挑题。
+ */
+export const CHAPTERS: Record<string, string[]> = {
+  '集合与逻辑': ['集合及其运算', '常用逻辑用语', '不等式与基本不等式'],
+  '函数与导数': ['函数及其表示', '函数的基本性质', '指数函数与对数函数', '幂函数', '函数的应用与零点', '导数及其应用'],
+  '三角函数与向量': ['三角函数', '三角恒等变换', '解三角形', '平面向量', '复数'],
+  '解析几何': ['直线与方程', '圆与方程', '椭圆', '双曲线', '抛物线', '直线与圆锥曲线'],
+  '立体几何': ['空间几何体', '点线面的位置关系', '空间向量与立体几何'],
+  '概率与统计': ['计数原理', '二项式定理', '概率', '随机变量及其分布', '统计与统计案例'],
+}
+
+/** 取某板块下的章节建议（板块为空则返回全部，去重） */
+export function chaptersOf(section: string): string[] {
+  if (section && CHAPTERS[section]) return CHAPTERS[section]
+  const all: string[] = []
+  for (const k of Object.keys(CHAPTERS)) for (const c of CHAPTERS[k]) if (all.indexOf(c) < 0) all.push(c)
+  return all
+}
+
 /* ---------------- 难度分级（易 / 中 / 难） ---------------- */
 
 export type Level = 'easy' | 'mid' | 'hard'
@@ -121,6 +144,8 @@ export interface QuestionMeta {
   qtype: QType
   /** 板块（见 SECTIONS）；空串表示未分类 */
   section: string
+  /** 章节（第二级，见 CHAPTERS）；空串表示未细分 */
+  chapter: string
   /** 录入/来源日期 YYYY-MM-DD */
   date: string
   /** 年份（如 2024）；整套插入时按它 + 试卷名归组 */
@@ -138,7 +163,7 @@ export interface QuestionEntry extends LibItem {
 
 const EMPTY_META: QuestionMeta = {
   stem: '', options: [], answer: '', solution: '',
-  knowledge: [], difficulty: 3, score: 0, qtype: 'choice', section: '', date: '',
+  knowledge: [], difficulty: 3, score: 0, qtype: 'choice', section: '', chapter: '', date: '',
   year: '', paperName: '', region: '', answerFrom: '',
 }
 
@@ -159,6 +184,7 @@ function readMeta(raw: Record<string, unknown>): QuestionMeta {
     score: Number(m.score) || 0,
     qtype,
     section: String(m.section || ''),
+    chapter: String(m.chapter || ''),
     date: String(m.date || ''),
     year: String(m.year || ''),
     paperName: String(m.paperName || ''),
@@ -295,6 +321,7 @@ export async function importParsedQuestions(list: ParsedQuestion[]): Promise<{ a
       year: (p as { yearExplicit?: string }).yearExplicit || p.year, region: p.region,
       qtype: (p as { qtype?: QType }).qtype,
       section: (p as { section?: string }).section,
+      chapter: (p as { chapter?: string }).chapter,
       date: (p as { date?: string }).date,
       paperName: (p as { paperName?: string }).paperName,
       answerFrom,
@@ -311,6 +338,7 @@ export interface PaperRule {
   id: number
   qtype: QType | ''
   section: string
+  chapter: string
   level: Level | ''
   count: number
 }
@@ -352,6 +380,7 @@ export function pickByRules(
       !used.has(x.id) &&
       (!r.qtype || x.q.qtype === r.qtype) &&
       (!r.section || x.q.section === r.section) &&
+      (!r.chapter || x.q.chapter === r.chapter) &&
       (!r.level || levelOf(x.q.difficulty) === r.level)
     )
     // 不按「引用次数」排序（用户明确不要这个属性）—— 默认随机，保证每次抽出的卷子不一样
@@ -367,7 +396,7 @@ export function pickByRules(
 export function ruleText(r: PaperRule): string {
   const parts: string[] = []
   parts.push(r.qtype ? qtypeLabel(r.qtype) : '不限题型')
-  parts.push(r.section || '不限板块')
+  parts.push(r.section ? r.section + (r.chapter ? ' / ' + r.chapter : '') : '不限板块')
   parts.push(r.level ? LEVELS.find((l) => l.v === r.level)?.label || '' : '不限难度')
   return parts.join(' · ') + ' × ' + (r.count || 0)
 }
@@ -646,6 +675,7 @@ export interface FilterOpt {
   difficulty?: number | null
   qtype?: QType | ''
   section?: string | ''
+  chapter?: string | ''
   level?: Level | ''
   onlyMissingAnswer?: boolean
   year?: string
@@ -659,6 +689,7 @@ export function filterQuestions(list: QuestionEntry[], opt: FilterOpt): Question
     if (opt.difficulty && x.q.difficulty !== opt.difficulty) return false
     if (opt.qtype && x.q.qtype !== opt.qtype) return false
     if (opt.section && x.q.section !== opt.section) return false
+    if (opt.chapter && x.q.chapter !== opt.chapter) return false
     if (opt.level && levelOf(x.q.difficulty) !== opt.level) return false
     if (opt.onlyMissingAnswer && x.q.answer.trim()) return false
     if (opt.year && x.q.year !== opt.year) return false
@@ -673,7 +704,8 @@ export function filterQuestions(list: QuestionEntry[], opt: FilterOpt): Question
       x.tags.toLowerCase().includes(k) ||
       x.q.section.toLowerCase().includes(k) ||
       x.q.year.toLowerCase().includes(k) ||
-      x.q.paperName.toLowerCase().includes(k)
+      x.q.paperName.toLowerCase().includes(k) ||
+      x.q.chapter.toLowerCase().includes(k)
     )
   })
 }

@@ -6,7 +6,7 @@ import {
   listQuestionTags, autoTitle, questionToText, filterQuestions,
   importParsedQuestions, proposeAnswers, parseQuestionsJson, exportQuestionsJson,
   pickByRules, ruleText, findDuplicates, groupPapers, paperGroupToText,
-  buildPaperText, scoreOf, defaultScore,
+  buildPaperText, scoreOf, defaultScore, chaptersOf,
   QTYPES, SECTIONS, LEVELS, levelOf, levelLabel, levelToDifficulty, qtypeLabel, withDefaults,
 } from '@/composables/useQuestionLibrary'
 import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup } from '@/composables/useQuestionLibrary'
@@ -66,20 +66,20 @@ async function doBatch() {
 }
 /* ---- 规则组卷（双向细目表）+ 组卷查重 ---- */
 const paperOpen = ref(false)
-const rules = ref<PaperRule[]>([{ id: 1, qtype: 'choice', section: '', level: '', count: 5 }])
+const rules = ref<PaperRule[]>([{ id: 1, qtype: 'choice', section: '', chapter: '', level: '', count: 5 }])
 let ruleSeq = 1
 const paperResult = ref<{ picked: QuestionEntry[]; results: RuleResult[] } | null>(null)
 const dupReport = ref<{ pairs: { a: QuestionEntry; b: QuestionEntry; same: boolean; sim: number }[]; skippedNear: boolean } | null>(null)
 
 function addRule() {
   ruleSeq++
-  rules.value = [...rules.value, { id: ruleSeq, qtype: '', section: '', level: '', count: 5 }]
+  rules.value = [...rules.value, { id: ruleSeq, qtype: '', section: '', chapter: '', level: '', count: 5 }]
 }
 function removeRule(id: number) {
   rules.value = rules.value.filter((r) => r.id !== id)
 }
 function resetRules() {
-  rules.value = [{ id: ++ruleSeq, qtype: 'choice', section: '', level: '', count: 5 }]
+  rules.value = [{ id: ++ruleSeq, qtype: 'choice', section: '', chapter: '', level: '', count: 5 }]
   paperResult.value = null
   dupReport.value = null
 }
@@ -154,6 +154,9 @@ const selectedId = ref(0)
 /* ---- 新增筛选维度（题型 / 板块 / 难度分级 / 只看缺答案） ---- */
 const pickedType = ref<QType | ''>('')
 const pickedSection = ref('')
+const pickedChapter = ref('')
+// 换了板块就把章节清掉 —— 否则会残留一个不属于新板块的章节，筛出来是空的
+watch(pickedSection, () => { pickedChapter.value = '' })
 const pickedLevel = ref<Level | ''>('')
 const onlyMissing = ref(false)
 /* ---- 多选出卷 ---- */
@@ -191,7 +194,7 @@ async function doComplete() {
 
 const emptyMeta = (): QuestionMeta => ({
   stem: '', options: [], answer: '', solution: '',
-  knowledge: [], difficulty: 3, score: 0, qtype: 'choice', section: '', date: '',
+  knowledge: [], difficulty: 3, score: 0, qtype: 'choice', section: '', chapter: '', date: '',
   year: '', paperName: '', region: '', answerFrom: '',
 })
 const editing = ref(false)
@@ -223,6 +226,7 @@ const shown = computed(() => filterQuestions(list.value, {
   difficulty: diff.value,
   qtype: pickedType.value,
   section: pickedSection.value,
+  chapter: pickedChapter.value,
   level: pickedLevel.value,
   onlyMissingAnswer: onlyMissing.value,
 }))
@@ -324,6 +328,11 @@ function close() { emit('close') }
 
         <!-- 筛选：题型 / 难度分级 / 板块 / 只看缺答案 -->
         <div class="qb__filters">
+          <span class="qb__fg" v-if="pickedSection || pickedChapter">章节
+            <button class="qb__f" :class="{ 'qb__f--on': pickedChapter === '' }" @click="pickedChapter = ''">全部</button>
+            <button v-for="c in chaptersOf(pickedSection)" :key="c" class="qb__f" :class="{ 'qb__f--on': pickedChapter === c }"
+              @click="pickedChapter = (pickedChapter === c ? '' : c)">{{ c }}</button>
+          </span>
           <span class="qb__fg">题型
             <button v-for="t in QTYPES" :key="t.v" class="qb__f" :class="{ 'qb__f--on': pickedType === t.v }"
               @click="pickedType = (pickedType === t.v ? '' : t.v)">{{ t.label }}</button>
@@ -386,6 +395,10 @@ function close() { emit('close') }
                   <select v-model="r.section" class="qb__rsel" title="板块">
                     <option value="">不限板块</option>
                     <option v-for="s in SECTIONS" :key="s" :value="s">{{ s }}</option>
+                  </select>
+                  <select v-model="r.chapter" class="qb__rsel" title="章节（第二级）">
+                    <option value="">不限章节</option>
+                    <option v-for="c in chaptersOf(r.section)" :key="c" :value="c">{{ c }}</option>
                   </select>
                   <select v-model="r.level" class="qb__rsel" title="难度">
                     <option value="">不限难度</option>
@@ -499,6 +512,7 @@ B. 2
                 <div class="qb__row">
                   <label>题型<select v-model="form.qtype"><option v-for="t in QTYPES" :key="t.v" :value="t.v">{{ t.label }}</option></select></label>
                   <label>板块<select v-model="form.section"><option value="">（按关键词自动归类）</option><option v-for="s in SECTIONS" :key="s" :value="s">{{ s }}</option></select></label>
+                  <label>章节<select v-model="form.chapter"><option value="">（未细分）</option><option v-for="c in chaptersOf(form.section)" :key="c" :value="c">{{ c }}</option></select></label>
                   <label>分值<input v-model.number="form.score" type="number" min="0" max="50" :placeholder="'默认 ' + defaultScore(form.qtype) + ' 分'" /></label>
                   <label>难度<select :value="levelOf(form.difficulty)" @change="form.difficulty = levelToDifficulty(($event.target as HTMLSelectElement).value as Level)"><option v-for="l in LEVELS" :key="l.v" :value="l.v">{{ l.label }}</option></select></label>
                 </div>
