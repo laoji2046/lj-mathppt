@@ -285,6 +285,7 @@ function close() { emit('close') }
           <div class="qb__title">试题库<em>（供 PDF 生成组卷：选定后插入题干，可带答案解析）</em></div>
           <div class="qb__tools">
             <button class="qb__btn" title="把整份试题粘贴进来，一次性识别并入库" @click="batchOpen = true; editing = false">批量导入</button>
+            <button class="qb__btn" title="重新从内容库读取（外部改动后点它刷新列表）" @click="load()">刷新</button>
             <button class="qb__btn" title="按规则挑题（双向细目表）：设题型/板块/难度/题量，一键抽出整卷" @click="paperOpen = true; editing = false; batchOpen = false">规则组卷</button>
             <button class="qb__btn" title="导入 Markdown / 纯文本：读进来后先给你看识别结果，确认再入库" @click="pickFile('md')">导入 MD</button>
             <button class="qb__btn" title="导入题库 JSON（我们自己导出的、或 {questions:[…]} / 数组 都认）" @click="pickFile('json')">导入 JSON</button>
