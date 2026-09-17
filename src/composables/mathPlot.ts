@@ -616,19 +616,19 @@ export const CONICS: Record<string, {
   // —— 焦点在 x 轴 ——
   conicCircle: { label: '圆 x²+y²=r²', view: { xmin: -3.6, xmax: 3.6, ymin: -3.2, ymax: 3.2 } },
   ellipse: { label: '椭圆（焦点在 x 轴）', view: ellipseWindow(4, 3) },
-  hyperbola: { label: '双曲线（焦点在 x 轴）', view: { xmin: -6.6, xmax: 6.6, ymin: -4.8, ymax: 4.8 } },
-  conicParabola: { label: '抛物线 y²=2px（焦点在 x 轴）', view: { xmin: -4.6, xmax: 8.2, ymin: -6, ymax: 6 } },
+  hyperbola: { label: '双曲线（焦点在 x 轴）', view: { xmin: -6.6, xmax: 6.6, ymin: -4.8, ymax: 4.8 }, params: [{ key: 'aline', label: '显示渐近线', def: 1, bool: true }] },
+  conicParabola: { label: '抛物线 y²=2px（焦点在 x 轴）', view: { xmin: -4.6, xmax: 8.2, ymin: -6, ymax: 6 }, params: [{ key: 'dline', label: '显示准线', def: 1, bool: true }] },
   conicFocusDir: { label: '圆锥曲线统一定义（焦点·准线）', view: { xmin: -4.6, xmax: 8.2, ymin: -6, ymax: 6 } },
   // —— 带准线 / 离心率 ——
   ellipseDirectrix: { label: '椭圆（焦点·准线）', view: { xmin: -7.6, xmax: 7.6, ymin: -4.1, ymax: 4.1 } },
-  hyperbolaDirectrix: { label: '双曲线（焦点·准线）', view: { xmin: -6.9, xmax: 6.9, ymin: -4.9, ymax: 4.9 } },
+  hyperbolaDirectrix: { label: '双曲线（焦点·准线）', view: { xmin: -6.9, xmax: 6.9, ymin: -4.9, ymax: 4.9 }, params: [{ key: 'aline', label: '显示渐近线', def: 1, bool: true }] },
   ellipseFamily: { label: '椭圆族（离心率 e 变化）', view: { xmin: -5, xmax: 5, ymin: -4.7, ymax: 4.7 } },
   hyperbolaFamily: { label: '双曲线族（离心率 e 变化）', view: { xmin: -6.2, xmax: 6.2, ymin: -6.2, ymax: 6.2 } },
   eccAnim: { label: '椭圆离心率变化（动画）', view: { xmin: -5.3, xmax: 5.3, ymin: -4.5, ymax: 4.5 } },
   // —— 焦点在 y 轴 ——
   ellipseV: { label: '椭圆（焦点在 y 轴）', view: { xmin: -4.4, xmax: 4.4, ymin: -5.6, ymax: 5.6 } },
-  hyperbolaV: { label: '双曲线（焦点在 y 轴）', view: { xmin: -5.6, xmax: 5.6, ymin: -6.4, ymax: 6.4 } },
-  conicParabolaV: { label: '抛物线 x²=2py（焦点在 y 轴）', view: { xmin: -5.4, xmax: 5.4, ymin: -3.6, ymax: 7.6 } },
+  hyperbolaV: { label: '双曲线（焦点在 y 轴）', view: { xmin: -5.6, xmax: 5.6, ymin: -6.4, ymax: 6.4 }, params: [{ key: 'aline', label: '显示渐近线', def: 1, bool: true }] },
+  conicParabolaV: { label: '抛物线 x²=2py（焦点在 y 轴）', view: { xmin: -5.4, xmax: 5.4, ymin: -3.6, ymax: 7.6 }, params: [{ key: 'dline', label: '显示准线', def: 1, bool: true }] },
   conicCircleY: { label: '圆（圆心在 y 轴·与 x 轴相切）', view: { xmin: -4.4, xmax: 4.4, ymin: -1.8, ymax: 7 } },
   // —— 自定义：参数自己给，窗口随参数自适应 ——
   conicCustomEllipse: {
@@ -638,6 +638,8 @@ export const CONICS: Record<string, {
       { key: 'a', label: 'a（半长轴）', def: 4, step: 0.5, min: 0.5, max: 20 },
       { key: 'b', label: 'b（半短轴）', def: 3, step: 0.5, min: 0.5, max: 20 },
       { key: 'ab', label: '显示 a、b 标注', def: 1, bool: true },
+      // 准线默认**关**：自定义椭圆原来没有准线，默认开会让老图元突然多两条线
+      { key: 'dline', label: '显示准线', def: 0, bool: true },
     ],
     viewOf: (p) => ellipseWindow(p.a || 1, p.b || 1),
   },
@@ -648,6 +650,7 @@ export const CONICS: Record<string, {
       { key: 'a', label: 'a（半长轴）', def: 4, step: 0.5, min: 0.5, max: 20 },
       { key: 'b', label: 'b（半短轴）', def: 3, step: 0.5, min: 0.5, max: 20 },
       { key: 'ab', label: '显示 a、b 标注', def: 1, bool: true },
+      { key: 'dline', label: '显示准线', def: 0, bool: true },
     ],
     viewOf: (p) => ellipseWindowV(p.a || 1, p.b || 1),
   },
@@ -657,6 +660,8 @@ export const CONICS: Record<string, {
     params: [
       { key: 'a', label: 'a（实半轴）', def: 3, step: 0.5, min: 0.3, max: 20 },
       { key: 'b', label: 'b（虚半轴）', def: 2, step: 0.5, min: 0.3, max: 20 },
+      { key: 'dline', label: '显示准线', def: 0, bool: true },
+      { key: 'aline', label: '显示渐近线', def: 0, bool: true },
     ],
     viewOf: (p) => windowFor(Math.max(p.a, p.b) * 1.7, Math.max(p.a, p.b) * 1.25),
   },
@@ -860,6 +865,12 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
       s += label(a, 0, 'a=' + a, fs * 0.5, -fs * 0.6)
       s += label(0, b, 'b=' + b, fs * 0.5, -fs * 0.6)
     }
+    // 准线 x = ±a²/c（c 是半焦距）。默认关 —— 老图元不会突然多两条线。
+    if (Math.round(pv.dline ?? 0) && a > b + 1e-6) {
+      const dxx = (a * a) / Math.sqrt(a * a - b * b)
+      s += lineSvg(X(dxx), Y(view.ymin), X(dxx), Y(view.ymax), stroke, thin, dash)
+      s += lineSvg(X(-dxx), Y(view.ymin), X(-dxx), Y(view.ymax), stroke, thin, dash)
+    }
     return s
   }
   if (kind === 'conicCustomEllipseV') {
@@ -875,6 +886,12 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
       s += label(0, a, 'a=' + a, fs * 0.5, -fs * 0.6)
       s += label(b, 0, 'b=' + b, -fs * 1.6, -fs * 0.6)
     }
+    // 长轴在 y 轴：准线是 y = ±a²/c
+    if (Math.round(pv.dline ?? 0) && c > 1e-6) {
+      const dyy = (a * a) / c
+      s += lineSvg(X(view.xmin), Y(dyy), X(view.xmax), Y(dyy), stroke, thin, dash)
+      s += lineSvg(X(view.xmin), Y(-dyy), X(view.xmax), Y(-dyy), stroke, thin, dash)
+    }
     return s
   }
   if (kind === 'conicCustomHyperbola') {
@@ -886,6 +903,17 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
     s += dot(-c, 0) + dot(c, 0)
     s += label(-c, 0, 'F₁', 0, fs * 1.15) + label(c, 0, 'F₂', 0, fs * 1.15)
     s += label(a, 0, 'a=' + a, fs * 0.5, -fs * 0.6)
+    // 渐近线 y = ±(b/a)x 与准线 x = ±a²/c —— 都默认关（原来没有，默认开会改老图元外观）
+    if (Math.round(pv.aline ?? 0)) {
+      const xa = view.xmax * 0.98
+      s += lineSvg(X(-xa), Y(-(b / a) * xa), X(xa), Y((b / a) * xa), stroke, thin, dash)
+      s += lineSvg(X(-xa), Y((b / a) * xa), X(xa), Y(-(b / a) * xa), stroke, thin, dash)
+    }
+    if (Math.round(pv.dline ?? 0)) {
+      const dxx = (a * a) / c
+      s += lineSvg(X(dxx), Y(view.ymin), X(dxx), Y(view.ymax), stroke, thin, dash)
+      s += lineSvg(X(-dxx), Y(view.ymin), X(-dxx), Y(view.ymax), stroke, thin, dash)
+    }
     return s
   }
   if (kind === 'conicCustomParabola') {
@@ -961,10 +989,12 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
     const u = 1.28                        // 曲线止于 x≈±5.2，坐标轴再长出去一截
     s += curve(plotParametric((t) => a * Math.cosh(t), (t) => b * Math.sinh(t), -u, u, view, w, h))
     s += curve(plotParametric((t) => -a * Math.cosh(t), (t) => b * Math.sinh(t), -u, u, view, w, h))
-    // 渐近线 y = ±(b/a)x
-    const xa = view.xmax * 0.98
-    s += lineSvg(X(-xa), Y(-(b / a) * -xa), X(xa), Y((b / a) * xa), stroke, thin, dash)
-    s += lineSvg(X(-xa), Y((b / a) * -xa), X(xa), Y(-(b / a) * xa), stroke, thin, dash)
+    // 渐近线 y = ±(b/a)x（可关，默认显示 → 老图元不变）
+    if (Math.round(pv.aline ?? 1)) {
+      const xa = view.xmax * 0.98
+      s += lineSvg(X(-xa), Y(-(b / a) * -xa), X(xa), Y((b / a) * xa), stroke, thin, dash)
+      s += lineSvg(X(-xa), Y((b / a) * -xa), X(xa), Y(-(b / a) * xa), stroke, thin, dash)
+    }
     s += dot(-c, 0) + dot(c, 0)
     s += label(-c, 0, 'F₁', 0, fs * 1.15) + label(c, 0, 'F₂', 0, fs * 1.15)
     s += dot(-a, 0, 0.9) + dot(a, 0, 0.9)
@@ -975,9 +1005,11 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
     const u = 1.42
     s += curve(plotParametric((t) => b * Math.sinh(t), (t) => a * Math.cosh(t), -u, u, view, w, h))
     s += curve(plotParametric((t) => b * Math.sinh(t), (t) => -a * Math.cosh(t), -u, u, view, w, h))
-    const xa = view.xmax * 0.98
-    s += lineSvg(X(-xa), Y(-(a / b) * -xa), X(xa), Y((a / b) * xa), stroke, thin, dash)
-    s += lineSvg(X(-xa), Y((a / b) * -xa), X(xa), Y(-(a / b) * xa), stroke, thin, dash)
+    if (Math.round(pv.aline ?? 1)) {
+      const xa = view.xmax * 0.98
+      s += lineSvg(X(-xa), Y(-(a / b) * -xa), X(xa), Y((a / b) * xa), stroke, thin, dash)
+      s += lineSvg(X(-xa), Y((a / b) * -xa), X(xa), Y(-(a / b) * xa), stroke, thin, dash)
+    }
     s += dot(0, -c) + dot(0, c)
     s += label(0, -c, 'F₁', fs * 1.25, 0) + label(0, c, 'F₂', fs * 1.25, 0)
     s += dot(0, -a, 0.9) + dot(0, a, 0.9)
@@ -986,7 +1018,7 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
     const p = 2                            // y² = 2px，焦点 (p/2, 0)，准线 x = −p/2
     const yMax = Math.min(view.ymax * 0.88, Math.sqrt(2 * p * view.xmax * 0.86))
     s += curve(plotParametric((t) => (t * t) / (2 * p), (t) => t, -yMax, yMax, view, w, h))
-    s += lineSvg(X(-p / 2), Y(view.ymin), X(-p / 2), Y(view.ymax), stroke, thin, dash)
+    if (Math.round(pv.dline ?? 1)) s += lineSvg(X(-p / 2), Y(view.ymin), X(-p / 2), Y(view.ymax), stroke, thin, dash)
     s += dot(p / 2, 0) + label(p / 2, 0, 'F', 0, fs * 1.25)
     if (kind === 'conicFocusDir') {
       const y0 = 1.7
@@ -995,16 +1027,18 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
       s += lineSvg(X(p / 2), Y(0), X(px), Y(py), stroke, thin)
       s += lineSvg(X(px), Y(py), X(-p / 2), Y(py), stroke, thin)
       s += dot(-p / 2, py, 0.85) + label(-p / 2, py, 'H', -fs * 0.85, -fs * 0.85)
-    } else {
+    } else if (Math.round(pv.dline ?? 1)) {
       s += label(-p / 2, view.ymax * 0.92, '准线', -fs * 1.6, 0)
     }
   } else if (kind === 'conicParabolaV') {
     const p = 2                            // x² = 2py，焦点 (0, p/2)，准线 y = −p/2
     const xMax = Math.min(view.xmax * 0.88, Math.sqrt(2 * p * view.ymax * 0.86))
     s += curve(plotParametric((t) => t, (t) => (t * t) / (2 * p), -xMax, xMax, view, w, h))
-    s += lineSvg(X(view.xmin), Y(-p / 2), X(view.xmax), Y(-p / 2), stroke, thin, dash)
+    if (Math.round(pv.dline ?? 1)) {
+      s += lineSvg(X(view.xmin), Y(-p / 2), X(view.xmax), Y(-p / 2), stroke, thin, dash)
+      s += label(view.xmax * 0.86, -p / 2, '准线', 0, -fs * 0.9)
+    }
     s += dot(0, p / 2) + label(0, p / 2, 'F', -fs * 0.95, fs * 0.2)
-    s += label(view.xmax * 0.86, -p / 2, '准线', 0, -fs * 0.9)
   } else if (kind === 'ellipseDirectrix') {
     // 椭圆 x²/a²+y²/b²=1：焦点 F(±c,0)、准线 x=±a²/c；第二定义 PF/PH = e（图中画出 PF₂ 与 PH）
     const a = 4, b = 3, c = Math.sqrt(a * a - b * b), dx = (a * a) / c
@@ -1027,9 +1061,11 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
     const u = 1.28
     s += curve(plotParametric((t) => a * Math.cosh(t), (t) => b * Math.sinh(t), -u, u, view, w, h))
     s += curve(plotParametric((t) => -a * Math.cosh(t), (t) => b * Math.sinh(t), -u, u, view, w, h))
-    const xa = view.xmax * 0.98
-    s += lineSvg(X(-xa), Y((b / a) * -xa), X(xa), Y((b / a) * xa), stroke, thin, dash)
-    s += lineSvg(X(-xa), Y(-(b / a) * -xa), X(xa), Y(-(b / a) * xa), stroke, thin, dash)
+    if (Math.round(pv.aline ?? 1)) {
+      const xa = view.xmax * 0.98
+      s += lineSvg(X(-xa), Y((b / a) * -xa), X(xa), Y((b / a) * xa), stroke, thin, dash)
+      s += lineSvg(X(-xa), Y(-(b / a) * -xa), X(xa), Y(-(b / a) * xa), stroke, thin, dash)
+    }
     s += lineSvg(X(dx), Y(view.ymin), X(dx), Y(view.ymax), stroke, thin, dash)
     s += lineSvg(X(-dx), Y(view.ymin), X(-dx), Y(view.ymax), stroke, thin, dash)
     s += dot(-c, 0) + dot(c, 0)
