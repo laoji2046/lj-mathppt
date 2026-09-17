@@ -359,7 +359,7 @@ export type MathFigureKind =
   | 'conicCircle' | 'ellipse' | 'hyperbola' | 'conicParabola' | 'conicFocusDir'
   | 'ellipseV' | 'hyperbolaV' | 'conicParabolaV' | 'conicCircleY'
   | 'ellipseDirectrix' | 'hyperbolaDirectrix' | 'ellipseFamily' | 'hyperbolaFamily' | 'eccAnim'
-  | 'conicCustomEllipse' | 'conicCustomEllipseV' | 'conicCustomHyperbola' | 'conicCustomParabola'
+  | 'conicCustomCircle' | 'conicCustomEllipse' | 'conicCustomEllipseV' | 'conicCustomHyperbola' | 'conicCustomParabola'
   // ---- 平面图形 ----
   | 'coordinate' | 'numberline' | 'venn' | 'righttriangle' | 'angle' | 'semicircle'
   | 'triangle' | 'rectangle' | 'circle' | 'pentagon' | 'hexagon' | 'rhombus' | 'kite' | 'angledrect'
@@ -415,6 +415,7 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   //   上一轮只改了 mathPlot 里的标签，卡片上没变，所以用户找不到"能加直线"这件事（实测）。
   { v: 'conicCustomEllipse', label: '自定义椭圆 + 直线/线段（可调 a、b）', cat: '圆锥曲线' },
   { v: 'conicCustomEllipseV', label: '自定义椭圆·长轴在 y 轴 + 直线/线段（可调 a、b）', cat: '圆锥曲线' },
+  { v: 'conicCustomCircle', label: '自定义圆 + 直线/线段（可调圆心、半径）', cat: '圆锥曲线' },
   { v: 'conicCustomHyperbola', label: '自定义双曲线 + 直线/线段（可调 a、b）', cat: '圆锥曲线' },
   { v: 'conicCustomParabola', label: '自定义抛物线 + 直线/线段（可调 p、方向）', cat: '圆锥曲线' },
   // ---- 平面图形 ----
@@ -554,6 +555,8 @@ export interface MathFigureElement extends ElementBase {
   conicStroke?: string
   /** 「圆锥曲线 + 多条直线/线段」里每条线的颜色覆盖，索引 = 第几条线 − 1 */
   lineColors?: (string | null)[]
+  /** 「圆锥曲线的标注点」的名字（点个数由 params.pn 控制）；名字是字符串，所以放这里而不是 params */
+  pointLabels?: (string | null)[]
   /** 每个顶点字母相对默认位置(顶点上方)的拖拽偏移(归一化)，用于避免遮挡 */
   labelOffsets?: { dx: number; dy: number }[]
   /** 每个面的样式覆盖（填充色/透明度/隐藏该面），索引与面表一致 */

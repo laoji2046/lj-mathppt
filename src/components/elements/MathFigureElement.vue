@@ -73,7 +73,7 @@ const innerHtml = computed(() => {
   if (FUNCTION_KINDS.includes(kind)) return functionFigure(kind, w, h, stroke, s, props.el.params)
   if (CONIC_KINDS.includes(kind)) {
     return conicFigure(kind, w, h, stroke, s, fillColor, props.el.params,
-      { conicStroke: props.el.conicStroke, lineColors: props.el.lineColors })
+      { conicStroke: props.el.conicStroke, lineColors: props.el.lineColors, pointLabels: props.el.pointLabels })
   }
 
   // 三维多面体统一走顶点模型渲染（支持拖拽顶点编辑）

@@ -127,6 +127,15 @@ function lineColorVal(i: number) {
   return (mathfig.value?.lineColors || [])[i] || mathfig.value?.stroke || '#1a1a1a'
 }
 function setConicColor(v: string) { patch({ conicStroke: v } as Partial<SlideElement>) }
+// ── 圆锥曲线的标注点：名称是字符串，所以存在元素的 pointLabels 里（点个数由 params.pn 控制）──
+const pointN = computed(() => Math.max(0, Math.min(6, Math.round(figParamVal('pn', 0)))))
+function pointLabelVal(i: number) { return (mathfig.value?.pointLabels || [])[i] || '' }
+function setPointLabel(i: number, v: string) {
+  const a: (string | null)[] = [...(mathfig.value?.pointLabels || [])]
+  while (a.length <= i) a.push(null)
+  a[i] = v.trim() ? v.trim() : null
+  patch({ pointLabels: a } as Partial<SlideElement>)
+}
 function setLineColor(i: number, v: string) {
   const a: (string | null)[] = [...(mathfig.value?.lineColors || [])]
   while (a.length <= i) a.push(null)
@@ -1119,6 +1128,12 @@ function layerTypeLabel(type: string) {
           />
         </label>
         <p v-if="figParams.length" class="panel__hint">改参数后图形立即重绘（适合讲"图象变换 / 含参讨论"）。</p>
+        <template v-if="pointN > 0">
+          <label v-for="i in pointN" :key="'pl' + i" class="field">
+            <span>点{{ i }} 名称</span>
+            <input type="text" :value="pointLabelVal(i - 1)" placeholder="如 P_1 / 留空则不标" @change="setPointLabel(i - 1, ($event.target as HTMLInputElement).value)">
+          </label>
+        </template>
         <template v-if="hasLineParams">
           <label class="field"><span>椭圆（曲线）颜色</span>
             <ColorSwatches :model-value="conicColorVal" @update:model-value="(v) => setConicColor(v as string)" />

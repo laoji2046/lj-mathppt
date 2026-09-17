@@ -663,7 +663,33 @@ export const CONICS: Record<string, {
       { key: 'dline', label: '显示准线', def: 0, bool: true },
       { key: 'aline', label: '显示渐近线', def: 0, bool: true },
     ],
-    viewOf: (p) => windowFor(Math.max(p.a, p.b) * 1.7, Math.max(p.a, p.b) * 1.25),
+    viewOf: (p) => {
+      // **渐近线与支线的显示要协调**（用户实报：开口大的双曲线，支线成了小短弧、
+      // 渐近线却一路画到框角 ✗）。做法：取景高度按"支线正好够到上下边"来定，
+      // 宽度再保证支线有伸展余量 —— 支线与渐近线就会几乎同时到达框边 ✓。
+      const a = Math.max(0.1, p.a || 3), b = Math.max(0.1, p.b || 2)
+      const tv = 1.45
+      const hy = b * Math.sinh(tv)
+      const hx = Math.max(a * Math.cosh(tv), (hy * 4) / 3)
+      return windowFor(hx, hy)
+    },
+  },
+  conicCustomCircle: {
+    label: '自定义圆 + 直线/线段（可调圆心、半径与多条线）',
+    view: { xmin: -6, xmax: 6, ymin: -4.5, ymax: 4.5 },     // 4:3，与 viewOf 一致
+    params: [
+      { key: 'cx', label: '圆心 x', def: 0, step: 0.5, min: -20, max: 20 },
+      { key: 'cy', label: '圆心 y', def: 0, step: 0.5, min: -20, max: 20 },
+      { key: 'cr', label: '半径 r', def: 3, step: 0.5, min: 0.2, max: 20 },
+    ],
+    viewOf: (p) => {
+      // 取景跟着圆心走，**保持 4:3**（元素框是按静态 view 的纵横比给的，比例不一致会拉伸）
+      const rr = Math.max(0.2, p.cr || 3)
+      const hx = Math.max(rr * 1.45, 3)
+      const hy = (hx * 3) / 4
+      const cx = p.cx || 0, cy = p.cy || 0
+      return { xmin: cx - hx, xmax: cx + hx, ymin: cy - hy, ymax: cy + hy }
+    },
   },
   conicCustomParabola: {
     label: '自定义抛物线 + 直线/线段（可调 p、开口方向与多条线）',
@@ -706,10 +732,23 @@ for (let i = 1; i <= 4; i++) {
     { key: 'e' + i, label: '线' + i + ' 终点 x（与起点相同 = 整条直线）', def: 0, step: 0.5, min: -50, max: 50, showIf: on },
   )
 }
+/** 「圆锥曲线的标注点」：圆点 + 名称。名称是字符串 ✗（params 只能放数字），
+ *  所以名字存在元素的 pointLabels 里（与 lineColors 同一套做法）。pn 默认 0 = 不画 → 老图元不变。 */
+export const POINT_PARAMS: ParamSpec[] = [
+  { key: 'pn', label: '标注点的个数', def: 0, step: 1, min: 0, max: 6 },
+]
+for (let i = 1; i <= 6; i++) {
+  const on = (p: Record<string, number>) => (p.pn || 0) >= i
+  POINT_PARAMS.push(
+    { key: 'px' + i, label: '点' + i + ' 横坐标 x', def: 0, step: 0.5, min: -50, max: 50, showIf: on },
+    { key: 'py' + i, label: '点' + i + ' 纵坐标 y', def: 0, step: 0.5, min: -50, max: 50, showIf: on },
+  )
+}
+
 // 挂到所有自定义圆锥曲线上（挂在 conicFigure 之前，此时 CONICS 已完整定义）
-for (const kk of ['conicCustomEllipse', 'conicCustomEllipseV', 'conicCustomHyperbola', 'conicCustomParabola']) {
+for (const kk of ['conicCustomCircle', 'conicCustomEllipse', 'conicCustomEllipseV', 'conicCustomHyperbola', 'conicCustomParabola']) {
   const dd = CONICS[kk]
-  if (dd) dd.params = [...(dd.params || []), ...LINE_PARAMS]
+  if (dd) dd.params = [...(dd.params || []), ...LINE_PARAMS, ...POINT_PARAMS]
 }
 
 /** 把直线 y = kx + m 裁到显示窗口里（**窗口外不画多余线段**），返回可见段两端点。 */
@@ -823,7 +862,28 @@ export function conicLineDrag(
   return patch
 }
 
-export function conicFigure(kind: string, w: number, h: number, baseStroke: string, sw: number, fill = 'none', params?: Record<string, number>, opt?: { conicStroke?: string; lineColors?: (string | null)[] }): string {
+/** 画「标注点」：圆点 + 名称（名称取自 pointLabels，没有就用 P_1、P_2…）。
+ *  先铺一层白底再画实心点 —— 它画在圆锥曲线**下面**（各分支都是往 s 上追加后 return，
+ *  只能加在前面），有白底才不会被曲线压住看不清。 */
+function drawExtraPoints(pv: Record<string, number>, view: View, w: number, h: number, stroke: string, labels?: (string | null)[]): string {
+  const n = Math.max(0, Math.min(6, Math.round(pv.pn || 0)))
+  if (!n) return ''
+  const mm = mapper(view, w, h)
+  const m0 = Math.min(w, h)
+  const rr = Math.max(2.2, m0 * 0.014)
+  const fs = Math.max(11, m0 * 0.055)
+  let out = ''
+  for (let i = 1; i <= n; i++) {
+    const px = mm.X(pv['px' + i] || 0), py = mm.Y(pv['py' + i] || 0)
+    out += dotSvg(px, py, rr * 1.75, '#ffffff')
+    out += dotSvg(px, py, rr, stroke)
+    const t = String((labels && labels[i - 1]) || ('P_' + i)).trim()
+    if (t) out += textSvg(px + fs * 0.8, py - fs * 0.75, t, fs, stroke)
+  }
+  return out
+}
+
+export function conicFigure(kind: string, w: number, h: number, baseStroke: string, sw: number, fill = 'none', params?: Record<string, number>, opt?: { conicStroke?: string; lineColors?: (string | null)[]; pointLabels?: (string | null)[] }): string {
   const def = CONICS[kind]
   if (!def) return ''
   const pv = withParams(kind, params)
@@ -848,10 +908,18 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
   // 所以不需要改动任何一个分支（改四个分支结尾容易漏、也容易错）。
   // 画在圆锥曲线**下面**，交点处线条不会互相压住。
   s += drawExtraLines(pv, view, w, h, baseStroke, sw, opt?.lineColors)
+  s += drawExtraPoints(pv, view, w, h, baseStroke, opt?.pointLabels)
   const label = (x: number, y: number, t: string, dx = 0, dy = 0) => textSvg(X(x) + dx, Y(y) + dy, t, fs, stroke)
   const dot = (x: number, y: number, k = 1) => dotSvg(X(x), Y(y), r * k, stroke)
 
   // —— 自定义圆锥曲线：a / b / p 由用户给，窗口跟着自适应 ——
+  if (kind === 'conicCustomCircle') {
+    const cx = pv.cx || 0, cy = pv.cy || 0
+    const rr = Math.max(0.2, pv.cr || 3)
+    s += curve(plotParametric((t) => cx + rr * Math.cos(t), (t) => cy + rr * Math.sin(t), 0, TAU, view, w, h))
+    s += dot(cx, cy)                       // 圆心
+    return s
+  }
   if (kind === 'conicCustomEllipse') {
     const a = Math.max(0.2, pv.a), b = Math.max(0.2, pv.b)
     const a2 = Math.max(a, b), b2 = Math.min(a, b)      // a 是半长轴（名不副实时自动纠正）
