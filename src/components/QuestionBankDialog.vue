@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import {
   listQuestions, addQuestion, updateQuestion, removeQuestion, touchQuestion,
@@ -9,7 +9,7 @@ import {
   QTYPES, SECTIONS, LEVELS, levelOf, levelLabel, levelToDifficulty, qtypeLabel, withDefaults,
 } from '@/composables/useQuestionLibrary'
 import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup } from '@/composables/useQuestionLibrary'
-import { parseQuestions, PARSE_HELP } from '@/composables/parseQuestions'
+import { parseQuestions, PARSE_HELP, detectPaperInfo } from '@/composables/parseQuestions'
 import { saveTextFile } from '@/composables/useTauri'
 
 const emit = defineEmits<{ (e: 'close'): void; (e: 'insert', text: string, id: number): void }>()
@@ -27,6 +27,15 @@ const parsed = computed(() => parseQuestions(batchText.value))
 /** 本批次统一套用的年份与试卷名（题内写了【年份】【试卷】则以题内为准） */
 const batchYear = ref('')
 const batchPaper = ref('')
+/** 自动识别结果（粘进来就填，用户可以改） */
+const detected = ref({ year: '', paperName: '', from: '' })
+// 正文一变就重新识别：认出来就填进去，认不出就保持原样（不覆盖用户手填的内容）
+watch(batchText, (v) => {
+  const d = detectPaperInfo(v || '')
+  detected.value = d
+  if (d.year) batchYear.value = d.year
+  if (d.paperName) batchPaper.value = d.paperName
+})
 /** 整套插入：按「年份 + 试卷名」归组的卷子列表 */
 const paperGroups = computed(() => groupPapers(list.value))
 function insertPaperGroup(g: PaperGroup, withSolution: boolean) {
@@ -444,6 +453,11 @@ function close() { emit('close') }
                 <div class="qb__batchtop">
                   <label class="qb__byl">年份<input v-model="batchYear" class="qb__byi" type="text" placeholder="2024（本批全部套用）" /></label>
                   <label class="qb__byl">试卷名<input v-model="batchPaper" class="qb__byi" type="text" placeholder="2024届某市一模（本批全部套用）" /></label>
+                  <span v-if="detected.year || detected.paperName" class="qb__autod">
+                    已自动识别：<b>{{ detected.year || '年份未认出' }}</b> · <b>{{ detected.paperName || '试卷名未认出' }}</b>
+                    <em>（{{ detected.from }}；可直接改）</em>
+                  </span>
+                  <span v-else-if="batchText" class="qb__autod qb__autod--none">没能从正文认出年份与试卷名 —— 请手填下面两项</span>
                 </div>
                 <textarea v-model="batchText" class="qb__btext" rows="15" placeholder="示例：
 1. 已知 x&gt;0，求 x+1/x 的最小值。
@@ -560,6 +574,9 @@ B. 2
 .qb__batchtop { display: flex; gap: 12px; flex-wrap: wrap; }
 .qb__byl { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted, #777); flex: 1; min-width: 160px; }
 .qb__byi { padding: 6px 9px; border: 1px solid #dcdce6; border-radius: 8px; font-size: 13px; }
+.qb__autod { font-size: 12px; color: #0f766e; align-self: flex-end; padding-bottom: 4px; }
+.qb__autod em { font-style: normal; color: var(--muted, #999); }
+.qb__autod--none { color: #b25f00; }
 .qb__pres { border-top: 1px dashed #e4e4ee; padding-top: 8px; }
 .qb__prow { font-size: 12.5px; padding: 4px 8px; border-radius: 6px; background: #fafafd; margin-bottom: 4px; }
 .qb__prow--short { background: #fff7e6; }

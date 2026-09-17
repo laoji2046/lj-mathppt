@@ -230,6 +230,59 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
   return out
 }
 
+/* ---------------- 从试卷正文里自动识别「年份」与「试卷名」 ---------------- */
+
+export interface DetectedPaper {
+  year: string
+  paperName: string
+  /** 识别依据（给用户看，让他知道为什么是这个名字） */
+  from: string
+}
+
+/** 标题里常见的词 —— 命中才认为这一行可能是试卷名 */
+const RE_TITLE_WORD = /(试卷|试题|考试|模拟|联考|一模|二模|三模|四模|五模|高考|学考|选考|期末|期中|月考|调研|统考|质检|质量检测|适应性|诊断|押题|真题|单元测试|章节测试)/
+/** 年份的强写法：2024年 / 2024届 */
+const RE_YEAR_STRONG = /((?:19|20)\d{2})\s*(?:年|届)/
+const RE_YEAR_ANY = /(?:19|20)\d{2}/
+
+/**
+ * 从试卷正文里尽量认出「年份」与「试卷名」。规则：
+ *
+ *  年份 —— 优先「20XX年 / 20XX届」这种强写法；否则全文第一个 19xx/20xx。
+ *  试卷名 —— 在**前 8 个非空行**里找最像标题的一行：
+ *            · 长度 6~60；
+ *            · 不以题号开头（避免把第一道题当标题）；
+ *            · 以问号结尾的不算；
+ *            · **必须命中试卷类关键词**（试卷/模拟/联考/一模/高考/期末…）—— 宁可不认，不要认错。
+ *
+ * 认不出就返回空串，由用户手填（**不瞎猜**）。
+ */
+export function detectPaperInfo(text: string): DetectedPaper {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n').map((s) => s.trim()).filter(Boolean)
+  let year = ''
+  const ms = text.match(RE_YEAR_STRONG)
+  if (ms) year = ms[1]
+
+  let paperName = ''
+  for (const raw of lines.slice(0, 8)) {
+    const t = raw.replace(/^[#>*\-\s]+/, '').replace(/[*_`]/g, '').trim()
+    if (t.length < 6 || t.length > 60) continue
+    if (RE_NUM.test(t)) continue
+    if (/[?？]$/.test(t)) continue
+    if (!RE_TITLE_WORD.test(t)) continue
+    paperName = t
+    break
+  }
+
+  if (!year) {
+    const src = paperName || text
+    const m = src.match(RE_YEAR_ANY)
+    if (m) year = m[0]
+  }
+  const from = paperName ? '正文开头找到疑似标题' : (year ? '全文里找到年份' : '没认出来')
+  return { year, paperName, from }
+}
+
 /** 界面上的格式说明 */
 export const PARSE_HELP: string[] = [
   '题与题之间用一行 --- 分隔；也可以不写，每道题以 1. 2. 3. 开头即可。',
