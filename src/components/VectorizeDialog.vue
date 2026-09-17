@@ -628,7 +628,9 @@ async function run(crop?: [number, number, number, number] | null) {
   await new Promise((r) => setTimeout(r, 30))   // 让"识别中"先画出来
   try {
     const r = await vectorizeInWorker(im, { ...advOpt(), ...(crop ? { crop } : {}) })
-    if (!r.stats.verts) throw new Error('没认出来东西 —— 可能不是线稿（灰度图 / 照片都不行）')
+    // ⚠ 判据要带上**弧** ✗：一个纯圆 / 纯椭圆弧**没有顶点**（没有交点就没有 junction），
+    //   verts=0 但不等于"没认出来" —— 原来这么写会把整张圆图打回成"不是线稿"（v1374 实测）。
+    if (!r.stats.verts && !(r.arcs && r.arcs.length)) throw new Error('没认出来东西 —— 可能不是线稿（灰度图 / 照片都不行）')
     res.value = r
     adopt(r)
     selVs.value = []
@@ -1757,7 +1759,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <div v-if="err" class="vd__err">{{ err }}</div>
           <template v-else-if="res">
             <div class="vd__stat">
-              顶点 <b>{{ nVerts }}</b> · 边 <b>{{ edges.length }}</b> · 虚线 <b>{{ edges.filter((e) => e[2]).length }}</b>
+              顶点 <b>{{ nVerts }}</b> · 边 <b>{{ edges.length }}</b> · 虚线 <b>{{ edges.filter((e) => e[2]).length }}</b><template v-if="arcs.length"> · 弧 <b>{{ arcs.length }}</b></template>
             </div>
             <div v-if="clipSides" class="vd__clip">
               识别框的<b>{{ clipSides }}</b>边切到了图形 —— 框里的线会断开、字母可能只剩半个。
