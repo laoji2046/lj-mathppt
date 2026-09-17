@@ -80,6 +80,12 @@ export interface VectorizeOpt {
    *   真实虚线边全都至少有一头搭在图形顶点上。所以这是个"想拉多紧都安全"的旋钮，专门用来扔掉悬空的杂点段。
    */
   dashMinEdge?: number
+  /**
+   * 「度 2 且几乎在一条直线上」的顶点判为假顶点的方向余弦门槛（默认 0.995 ≈ 5.7°）。
+   * 手绘/扫描的直线在中间会有微小折角，0.995 偏严时就会留下用户说的"直线上多出来的点"（例如点 9）。
+   * 调大 = 更容易把这种点并掉（0.99 ≈ 8°、0.98 ≈ 11°）。
+   */
+  collinearCos?: number
 }
 
 export interface VectorizeStats {
@@ -896,6 +902,10 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       const d = Math.hypot(dx, dy)
       if (d >= bd) continue
       if (Math.abs(dx * -uy + dy * ux) > perp) continue
+      // ⚠ 方向必须真的起作用：候选顶点应落在链端点的**外侧**（沿 dir 继续往外），而不是链自身跨度内。
+      //   原实现里 sgn 只进了上面那个垂距的绝对值里 → 符号被吃掉 → 这一条约束等于没有，
+      //   于是链两端可能吸到同一个顶点（再被 ai===bi 整条吞掉），或把端点拽回直线内部、凭空多出一个假顶点。
+      if (dx * ux + dy * uy < -perp) continue
       bd = d; bi = i
     }
     return bi
@@ -962,6 +972,8 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   dedupe()
 
   // 解消十字交叉：度为 4 且两两反向共线 = 两条线交叉，不是顶点
+  // 注意：它必须在 extendDashed() **之后**、并且能重复调用 —— 见文件末尾的说明
+  const dissolveCrossings = () => {
   for (let guard = 0; guard < 200; guard++) {
     const inc: number[][] = verts.map(() => [])
     outEdges.forEach((e, i) => { inc[e[0]].push(i); inc[e[1]].push(i) })
@@ -1008,6 +1020,8 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     }
     if (!acted) break
   }
+  }
+  dissolveCrossings()
   dedupe()
   mergeVerts(opt.mergeR ?? 8)
   dedupe()
@@ -1104,7 +1118,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
         const ux = verts[v].x - verts[a].x, uy = verts[v].y - verts[a].y
         const wx = verts[b].x - verts[v].x, wy = verts[b].y - verts[v].y
         const lu = Math.hypot(ux, uy) || 1, lw = Math.hypot(wx, wy) || 1
-        if ((ux / lu) * (wx / lw) + (uy / lu) * (wy / lw) < 0.995) continue   // 真有转折，保留
+        if ((ux / lu) * (wx / lw) + (uy / lu) * (wy / lw) < (opt.collinearCos ?? 0.995)) continue   // 真有转折，保留
         const dash = (e1[2] && e2[2]) ? 1 : 0
         const kept = outEdges.filter((_, i) => i !== inc[v][0] && i !== inc[v][1]).map((e) => e.slice() as [number, number, number])
         kept.push([a, b, dash])
@@ -1232,6 +1246,13 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   dropIsolated()
   dedupe()
   refineCorners((opt.refine ?? 0.03) * diag)
+  // ⚠ 图的一次性清理必须放在**所有会改动图形态的步骤之后**。实测漏掉这两个收尾会留下用户点名的假顶点：
+  //   · collinearSimplify 只在精修**之前**跑过 —— 而精修会挪顶点，挪完才变共线的"直线上的假顶点"（度 2）
+  //     就活到了最后；
+  //   · dissolveCrossings 只在 extendDashed **之前**跑过 —— 而 extendDashed 会把虚线的端点改指到
+  //     另一个顶点上，那个新接头若正好落在一条直线上就形成假交点（度 4），此前没人再复核它。
+  collinearSimplify()
+  dissolveCrossings()
   // 精修会把顶点挪位置，**挪完必须再合并一次** —— 否则可能留下两个几乎重合的顶点，
   // 它们的手柄叠在一起，用户会有一个点点不到也拖不动
   mergeVerts(opt.mergeR ?? 8)
