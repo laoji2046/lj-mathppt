@@ -221,9 +221,12 @@ async function runMineru(pdfPath: string) {
   const mode: 'precise' | 'agent' = token ? 'precise' : 'agent'
   mineruBusy.value = true
   mineruProg.value = mode === 'precise' ? '正在上传 PDF（精准解析）…' : '正在上传 PDF（轻量接口）…'
+  // 五个阶段：提交 → 上传 → 解析 → 下载 → 完成（Rust 侧按真实进度 emit，这里只做中文映射）
   const ZH: Record<string, string> = {
-    uploading: '上传中', pending: '排队中', running: '识别中', converting: '转换中',
-    waiting_file: '等待上传', done: '完成', failed: '失败',
+    submitting: '① 提交任务', waiting_file: '① 等待上传', uploading: '② 上传中',
+    pending: '③ 排队中', running: '③ 解析中', parsing: '③ 解析中', converting: '③ 转换中',
+    downloading: '④ 下载结果', extracting: '④ 解压中',
+    done: '⑤ 完成', failed: '失败',
   }
   const unlisten = await listenTauri<MineruProgress>('mineru://progress', (p) => {
     if (!p || !p.state) return
@@ -240,7 +243,9 @@ async function runMineru(pdfPath: string) {
     batchOpen.value = true
     editing.value = false
     const tip = '识别完成：' + (r.seconds ?? '?') + 's / ' + (r.pages || '?') + ' 页，'
-      + (mode === 'precise' ? '已存 md + json → ' + (r.mdPath || '') : '轻量接口只出 Markdown（未存 json）')
+      + (mode === 'precise'
+        ? '已存 md + json → ' + (r.mdPath || '') + (r.outDir ? '（产物目录：' + r.outDir + '）' : '')
+        : '轻量接口只出 Markdown（未存 json）')
       + ' —— 请核对下面识别结果，再点「识别并导入」'
     mineruProg.value = '✓ ' + tip
     flash('MinerU ' + tip)
@@ -518,7 +523,9 @@ function close() { emit('close') }
           <input v-model="mineruToken" class="qb__minput" type="password" autocomplete="off" spellcheck="false"
             placeholder="留空＝免 token 轻量接口（≤10MB / ≤20 页，只出 Markdown）" />
           <span class="qb__mhint" :class="{ 'qb__mhint--on': !!mineruToken.trim() }">
-            <template v-if="mineruToken.trim()">精准解析：≤200MB / ≤600 页，出 md + content_list.json（token 只存本机，不会写进源码）</template>
+            <template v-if="mineruToken.trim()">精准解析：≤200MB / ≤600 页，出 md + content_list.json（token 只存本机，不会写进源码）。
+        <b>不填 token 只能走免登录的轻量接口（≤10MB / ≤20 页，只出 Markdown）—— 实测公式会乱、不能用于数学卷，
+        请务必填 token。</b></template>
             <template v-else>没填 token：走 mineru.net 免登录轻量接口，≤10MB / ≤20 页，只出 Markdown</template>
           </span>
           <a class="qb__mlink" href="https://mineru.net/apiManage/token" target="_blank" rel="noreferrer">申请 token</a>
