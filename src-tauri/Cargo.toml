@@ -22,3 +22,8 @@ xcap = "0.9"
 image = { version = "0.25", default-features = false, features = ["png"] }
 # 内容库（公式/图形/试题/课件）：bundled = 自带 SQLite 源码编译，离线不依赖系统
 rusqlite = { version = "0.32", features = ["bundled"] }
+# 「试题库 → 导入 PDF（MinerU）」：**在 Rust 侧发 HTTP** —— 网页端直接 fetch mineru.net 会被 CORS 挡掉
+# （实测 webview 里 Failed to fetch，而 PowerShell 里 200）。blocking + rustls：不依赖系统 OpenSSL。
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "blocking"] }
+# MinerU 精准解析返回的是 zip（里面有 full.md / content_list.json / 图片）
+zip = { version = "2", default-features = false, features = ["deflate"] }

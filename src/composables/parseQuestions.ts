@@ -35,6 +35,8 @@ export function judgeNonQuestion(text: string): { bad: boolean; reason: string }
       if (isShortNote(l)) { why = why || '收尾/说明句'; continue }
       if (isSegmentHead(l)) { why = why || '分段标题行'; continue }
       if (/^[（(]\s*\d{1,3}\s*分\s*[)）]\s*$/.test(l)) { why = why || '分值行'; continue }
+      if (isMdHeadingLine(l)) { why = why || 'Markdown 标题'; continue }
+      if (isPaperInfoLine(l)) { why = why || '卷头信息'; continue }
       if (isTitleLine(l)) { why = why || '试卷抬头'; continue }
       allBad = false
     }
@@ -175,6 +177,25 @@ function isTitleLine(t: string): boolean {
   return !hasQuestionFeature(t)
 }
 
+/** Markdown 标题行（`# 2027 届高三 8 月` / `## 数学`）—— MinerU 识别产物的卷头就是这种写法 */
+function isMdHeadingLine(t: string): boolean {
+  return /^\s*#{1,6}(?:\s|$)/.test(t)
+}
+
+/** 卷头信息行：「满分150分，时间120分钟。」—— 同时含「满分…分」与「时间…分钟」 */
+function isPaperInfoLine(t: string): boolean {
+  return /满分\s*\d{1,3}\s*分/.test(t) && /时间\s*\d{1,3}\s*分钟/.test(t)
+}
+
+/**
+ * 「参考答案」小标题 —— MinerU 会把整份答案附在正文之后，
+ * 从这里开始（含）后面的逐题答案/详解都不是题目，必须整段截断。
+ */
+function isAnswerSectionHead(t: string): boolean {
+  const s = t.replace(/^\s*#{1,6}\s*/, '').trim()
+  return s.length <= 20 && /参考\s*答案/.test(s)
+}
+
 /** 一行里须知类词的命中数 */
 function noteHits(t: string): number {
   let n = 0
@@ -197,9 +218,18 @@ function stripNonQuestionLines(text: string): { text: string; skipped: number } 
   const lines = text.replace(/\r\n?/g, '\n').split('\n')
   const out: string[] = []
   let skipped = 0
+  /** 是否已进入「参考答案」区（MinerU 把逐题答案/详解附在正文之后） */
+  let inAnswerSection = false
   lines.forEach((l, i) => {
     const t = l.trim()
     if (!t) { out.push(l); return }
+    // 参考答案区一旦开始，后面所有行都不是题目
+    if (inAnswerSection) { skipped++; return }
+    if (isAnswerSectionHead(t)) { inAnswerSection = true; skipped++; return }
+    // Markdown 标题行（# 2027 届高三 8 月 / ## 数学）—— 卷头，不是题目
+    if (isMdHeadingLine(t)) { skipped++; return }
+    // 卷头信息行（满分150分，时间120分钟。）
+    if (isPaperInfoLine(t)) { skipped++; return }
     if (noteHits(t) >= 2) { skipped++; return }
     if (isShortNote(t)) { skipped++; return }
     if (RE_NOTE_HEAD.test(t)) { skipped++; return }
@@ -254,6 +284,8 @@ function isNonQuestionBlock(block: string): boolean {
   // 分段标题行：「一、选择题」「二、填空题」「三、解答题」这类 —— 也不是题目
   if (/^\s*[一二三四五六七八九十]+\s*[、.．]\s*(选择题|填空题|解答题|多选题|单选题|判断题|计算题|证明题|应用题)\s*$/.test(t)) return true
   const lines = t.split('\n').map((s) => s.trim()).filter(Boolean)
+  // 整个块只是「Markdown 标题 / 卷头信息 / 分段标题」—— 不是题目
+  if (lines.length && lines.every((l) => isMdHeadingLine(l) || isPaperInfoLine(l) || isSegmentHead(l))) return true
   if (lines.length === 1) {
     const l = lines[0]
     const hasQuestionMark =
@@ -262,6 +294,26 @@ function isNonQuestionBlock(block: string): boolean {
     if (!hasQuestionMark && l.length < 40 && RE_TITLE_WORD2.test(l)) return true
   }
   return false
+}
+
+/** 去掉 Markdown 记号（行首 `#`、成对的 `**`）—— LaTeX 的 `$` 与反斜杠原样保留 */
+function stripMd(t: string): string {
+  return t
+    .replace(/^\s*#{1,6}(?:\s+|$)/, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .trim()
+}
+
+/**
+ * 题干行里内嵌的选项标记（「…$x+y=(\quad)$ A. -5」这种把首个选项排在题干同一行的排版）。
+ * 只认明确的大写选项号（A. / A． / A、 / （A）），并把数学里的 `P(a)`、`f(x)`、`A(x)` 排除在外。
+ */
+const RE_OPT_INLINE = /(?<![\w$\\])(?:[A-H]\s*[.、．]|（\s*[A-H]\s*）)\s*\S/
+
+/** 找到题干行里内嵌选项标记的位置；找不到（或整行本来就是选项行）返回 -1 */
+function findInlineOptionMark(line: string): number {
+  const i = line.search(RE_OPT_INLINE)
+  return i > 0 ? i : -1
 }
 
 /** 一行里可能有多个选项：A．1　B．2　C．3 —— 拆成数组 */
@@ -368,11 +420,19 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
         const mo = line.match(RE_OPT)
         if (mo) {
           const many = splitOptionsLine(line)
-          if (many.length > 1) options.push(...many)
-          else options.push(mo[1].trim())
+          if (many.length > 1) options.push(...many.map(stripMd))
+          else options.push(stripMd(mo[1]))
           continue
         }
-        stemParts.push(line)
+        // 首个选项跟题干排在同一行（MinerU 混排）—— 从标记处切开：前半当题干，后半拆成选项
+        const mi = findInlineOptionMark(line)
+        if (mi > 0) {
+          const head = stripMd(line.slice(0, mi))
+          if (head) stemParts.push(head)
+          options.push(...splitOptionsLine(line.slice(mi)).map(stripMd))
+          continue
+        }
+        stemParts.push(stripMd(line))
         continue
       }
       if (mode === 'solution') solution += '\n' + line.trim()
