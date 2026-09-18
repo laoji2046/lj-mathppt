@@ -21,14 +21,24 @@ export function mapper(view: View, w: number, h: number): Mapper {
 const n1 = (n: number) => (Number.isFinite(n) ? n.toFixed(1) : '0')
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-/** 采样 y=f(x) 成 path 的 d（越出窗口 / NaN / ∞ 处断线，多段用空格连接） */
-export function plotFunction(f: (x: number) => number, view: View, w: number, h: number, steps = 360): string {
+/** 采样 y=f(x) 成 path 的 d（越出窗口 / NaN / ∞ 处断线，多段用空格连接）。
+ *
+ *  ⚠ **xRange**：只画 [x0,x1] 这一截，但**像素映射仍用 view**（plotFunction 的第 2 个参数）。
+ *  分段函数必须走这个参数 —— 以前是传 `{...view, xmin: a, xmax: b}`：
+ *  那样采样范围对了，可**像素映射也跟着变成 [a,b] → 整段被拉伸铺满整个画布** ✗
+ *  （用户实报"分段不正确"；内置的「分段函数（实心/空心点）」卡片其实一直是这个毛病）。
+ *  不传 xRange 时行为与原来完全一致。 */
+export function plotFunction(
+  f: (x: number) => number, view: View, w: number, h: number, steps = 360, xRange?: [number, number],
+): string {
   const { X, Y } = mapper(view, w, h)
+  const xs = xRange ? xRange[0] : view.xmin
+  const xe = xRange ? xRange[1] : view.xmax
   const margin = h * 0.06
   const out: string[] = []
   let d = ''
   for (let i = 0; i <= steps; i++) {
-    const x = view.xmin + ((view.xmax - view.xmin) * i) / steps
+    const x = xs + ((xe - xs) * i) / steps
     const y = f(x)
     const py = Number.isFinite(y) ? Y(y) : NaN
     if (!Number.isFinite(py) || py < -margin || py > h + margin) {
@@ -592,11 +602,15 @@ export interface PiecewiseFn {
 /** 插入「自定义分段函数」时的默认内容：经典两段（x² 在 x<0，x+1 在 x≥0）。
  *  区间的端点写很大（如 ±50）就等于 ±∞ —— 贴边的端点不会画点。 */
 export const DEFAULT_PIECEWISE: PiecewiseFn = {
+  // 区间写 ±50 = ±∞：图形自然画到取景框边，**端点不画圆点**（只在断点画实心/空心）
+  // —— 以前写的是 [-3,0] / [0,3.5]，右端会凭空多一个实心点，看着不像教科书
   lines: [
-    { expr: 'x^2', from: -3, to: 0, lc: true, rc: false },
-    { expr: 'x+1', from: 0, to: 3.5, lc: true, rc: true },
+    { expr: 'x^2', from: -50, to: 0, lc: true, rc: false },
+    { expr: 'x+1', from: 0, to: 50, lc: true, rc: true },
   ],
-  x0: -3.2, x1: 4, y0: -1.4, y1: 5,
+  // ⚠ 取景框的**宽高比要和插入时的元素框一致**（440×300 = 1.4667），否则图形会被水平压扁：
+  //   8.8 宽 × 6 高 = 1.4667 ✓（元素 SVG 是 preserveAspectRatio="none"，比例不一致就变形）
+  x0: -4.4, x1: 4.4, y0: -2, y1: 4,
   grid: false, axes: true, dots: true,
 }
 
@@ -631,7 +645,7 @@ export function piecewiseFigure(cfg: PiecewiseFn, w: number, h: number, stroke: 
     const b = Math.min(ln.to, view.xmax)
     if (b > a) {
       // 只采样**落在取景框内**的那截（各段端点各自取到，接缝处不断开）
-      const d = plotFunction(f, { ...view, xmin: a, xmax: b }, w, h, 600)
+      const d = plotFunction(f, view, w, h, 600, [a, b])
       if (d) {
         drawn = true
         s += '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' +
@@ -672,7 +686,8 @@ export function functionFigure(kind: string, w: number, h: number, stroke: strin
       '" stroke-linecap="round" stroke-linejoin="round"/>'
     : ''
   if (def.pieces) {
-    for (const pc of def.pieces) s += curve(plotFunction((x) => pc.f(x, p), { ...view, xmin: pc.from, xmax: pc.to }, w, h))
+    // 分段：采样窗口给 [from,to]，像素映射仍是整幅 view（见 plotFunction 的 xRange 说明）
+    for (const pc of def.pieces) s += curve(plotFunction((x) => pc.f(x, p), view, w, h, undefined, [pc.from, pc.to]))
   } else {
     s += curve(plotFunction((x) => def.f(x, p), view, w, h))
   }
