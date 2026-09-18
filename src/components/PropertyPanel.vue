@@ -408,7 +408,8 @@ const planeTitle = computed(() =>
   planeKind.value === 'parallelogram' ? '平行四边形'
     : planeKind.value === 'circleR' ? '圆'
       : planeKind.value === 'ellipseArc' ? '椭圆弧'
-        : '圆弧')
+        : planeKind.value === 'ellipseAB' ? '椭圆'
+          : '圆弧')
 const planeNums = computed<PlaneNum[]>(() => {
   const m = mathfig.value
   return m && planeKind.value ? planeNumbers(planeKind.value, m.w, m.h, m.ctrl, m.arcSweep) : []
@@ -1339,7 +1340,7 @@ function layerTypeLabel(type: string) {
           </div>
           <p v-if="planeKind === 'arc3pt' && !planeNums[0].value" class="cfn__err">三点共线 → 定不出圆，先画一条虚线；把控制点拖开就好。</p>
           <p class="cfn__hint">
-            选中图形后拖 <b>蓝色控制点</b> 就能改形状<template v-if="planeKind === 'parallelogram'">（A 点固定，两个控制点 B、D 就是两条邻边 —— 拖它们＝改边长与夹角）</template><template v-else-if="planeKind === 'arcAngle'">（圆心 / 起点 / 终点各一个；拖终点就是改圆心角）</template><template v-else-if="planeKind === 'circleR'">（圆心 + 圆上一点；拖圆上那点就是改半径，也可以直接输入半径）</template><template v-else-if="planeKind === 'ellipseArc'">（中心 / a 端点 / b 端点 / 起点 / 终点；θ 是参数角，Δθ 设 360° 就是整条椭圆）</template><template v-else>（三个控制点是圆弧经过的三点）</template>。
+            选中图形后拖 <b>蓝色控制点</b> 就能改形状<template v-if="planeKind === 'parallelogram'">（A 点固定，两个控制点 B、D 就是两条邻边 —— 拖它们＝改边长与夹角）</template><template v-else-if="planeKind === 'arcAngle'">（圆心 / 起点 / 终点各一个；拖终点就是改圆心角）</template><template v-else-if="planeKind === 'circleR'">（圆心 + 圆上一点；拖圆上那点就是改半径，也可以直接输入半径）</template><template v-else-if="planeKind === 'ellipseArc'">（中心 / a 端点 / b 端点 / 起点 / 终点；θ 是参数角，Δθ 设 360° 就是整条椭圆）</template><template v-else-if="planeKind === 'ellipseAB'">（中心 + a 端点 + b 端点，面板里可直接输入 a、b）</template><template v-else>（三个控制点是圆弧经过的三点）</template>。
           </p>
         </template>
 

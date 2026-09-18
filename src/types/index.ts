@@ -366,7 +366,7 @@ export type MathFigureKind =
   | 'coordinate' | 'numberline' | 'venn' | 'righttriangle' | 'angle' | 'semicircle'
   | 'triangle' | 'rectangle' | 'circle' | 'pentagon' | 'hexagon' | 'rhombus' | 'kite' | 'angledrect'
   | 'parallelogram' | 'trapezoid' | 'star' | 'bezier' | 'polygon'
-  | 'arcAngle' | 'arc3pt' | 'circleR' | 'ellipseArc'
+  | 'arcAngle' | 'arc3pt' | 'circleR' | 'ellipseArc' | 'ellipseAB'
   // ---- 3D 立体几何 ----
   | 'cube' | 'cuboid' | 'cylinder' | 'cone' | 'sphere' | 'pyramid' | 'prism' | 'tetrahedron'
   | 'frustum' | 'pyraFrustum' | 'dihedral' | 'isoaxis'
@@ -440,6 +440,7 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   { v: 'arc3pt', label: '圆弧（过三点）', cat: '平面图形' },
   { v: 'circleR', label: '圆（圆心 + 指定半径）', cat: '平面图形' },
   { v: 'ellipseArc', label: '椭圆弧（a、b、起始角 + 圆心角）', cat: '平面图形' },
+  { v: 'ellipseAB', label: '椭圆（a、b 可拖）', cat: '平面图形' },
   { v: 'trapezoid', label: '梯形', cat: '平面图形' },
   { v: 'star', label: '五角星', cat: '平面图形' },
   { v: 'bezier', label: '贝塞尔曲线', cat: '平面图形' },

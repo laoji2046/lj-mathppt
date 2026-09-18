@@ -12,7 +12,7 @@ export interface Pt { x: number; y: number }
 export type Ctrl = Pt[]
 
 /** 支持控制点的平面图形 */
-export const PLANE_CTRL_KINDS = ['parallelogram', 'arcAngle', 'arc3pt', 'circleR', 'ellipseArc'] as const
+export const PLANE_CTRL_KINDS = ['parallelogram', 'arcAngle', 'arc3pt', 'circleR', 'ellipseArc', 'ellipseAB'] as const
 export function isPlaneCtrlKind(kind: string): boolean {
   return (PLANE_CTRL_KINDS as readonly string[]).includes(kind)
 }
@@ -20,6 +20,7 @@ export function isPlaneCtrlKind(kind: string): boolean {
 function ctrlCount(kind: string): number {
   if (kind === 'parallelogram' || kind === 'circleR') return 2
   if (kind === 'ellipseArc') return 5      // 中心 / a 端点 / b 端点 / 起点 / 终点
+  if (kind === 'ellipseAB') return 3       // 中心 / a 端点 / b 端点
   return 3
 }
 
@@ -55,6 +56,12 @@ export function defaultPlaneCtrl(kind: string, w: number, h: number): Ctrl {
   if (kind === 'circleR') {
     const c = { x: 0.5, y: 0.5 }
     return [c, ptAt(c, m * 0.38, w, h, 0)]
+  }
+  if (kind === 'ellipseAB') {
+    // 整条椭圆：中心 + a 端点 + b 端点
+    const c = { x: 0.5, y: 0.5 }
+    const ea = m * 0.42, eb = m * 0.26
+    return [c, { x: R3(c.x + ea / w), y: c.y }, { x: c.x, y: R3(c.y + eb / h) }]
   }
   if (kind === 'ellipseArc') {
     // 中心 + a 端点 + b 端点 + 起点 + 终点；θ 从 −20° 扫 160°
@@ -120,6 +127,15 @@ export function arcInfo(w: number, h: number, ctrl?: Ctrl, sweepDeg?: number): A
   const a1 = Math.atan2(E.y - C.y, E.x - C.x) * DEG
   return { C, S, E, r, a0, a1, sweep: norm180(a1 - a0) }
 }
+/** **平面椭圆（整条）**：中心 + a 端点 + b 端点；a、b 都是像素 */
+export function ellipseInfo(w: number, h: number, ctrl?: Ctrl) {
+  const c = planeCtrl('ellipseAB', w, h, ctrl)
+  const C = PX(c[0], w, h)
+  const a = Math.abs(PX(c[1], w, h).x - C.x) || 1e-9
+  const b = Math.abs(PX(c[2], w, h).y - C.y) || 1e-9
+  return { C, a, b }
+}
+
 /**
  * **椭圆弧**：中心 + a 端点 + b 端点 + 起点 + 终点，圆心角走 `arcSweep`。
  * ⚠ 这里的 θ 是**参数角**（P = C + (a·cosθ, b·sinθ)），不是几何极角、也不是弧长 ——
@@ -185,6 +201,10 @@ export function planeHandles(kind: string, w: number, h: number, ctrl?: Ctrl, sw
     const c = circleInfo(w, h, ctrl)
     return [{ i: 0, ...c.C }, { i: 1, ...c.X }]
   }
+  if (kind === 'ellipseAB') {
+    const e = ellipseInfo(w, h, ctrl)
+    return [{ i: 0, ...e.C }, { i: 1, x: e.C.x + e.a, y: e.C.y }, { i: 2, x: e.C.x, y: e.C.y + e.b }]
+  }
   if (kind === 'ellipseArc') {
     const e = ellipseArcInfo(w, h, ctrl, sweepDeg)
     return [
@@ -221,6 +241,16 @@ export function planeDrag(
     const r2 = Math.max(2, Math.hypot(px - C.x, py - C.y))
     const a = Math.atan2(py - C.y, px - C.x) * DEG
     return { ctrl: [NORM(C.x, C.y, w, h), ptAt(NORM(C.x, C.y, w, h), r2, w, h, a)] }
+  }
+  if (kind === 'ellipseAB') {
+    const e = ellipseInfo(w, h, cur)
+    const C = NORM(e.C.x, e.C.y, w, h)
+    if (i === 0) {
+      const dx = px - e.C.x, dy = py - e.C.y
+      return { ctrl: cur.map((p) => ({ x: R3(p.x + dx / w), y: R3(p.y + dy / h) })) }
+    }
+    if (i === 1) return { ctrl: [C, { x: R3(C.x + Math.max(4, Math.abs(px - e.C.x)) / w), y: C.y }, { x: C.x, y: R3(C.y + e.b / h) }] }
+    return { ctrl: [C, { x: R3(C.x + e.a / w), y: C.y }, { x: C.x, y: R3(C.y + Math.max(4, Math.abs(py - e.C.y)) / h) }] }
   }
   if (kind === 'ellipseArc') {
     const e = ellipseArcInfo(w, h, cur, sweepDeg)
@@ -295,6 +325,13 @@ export function planeNumbers(kind: string, w: number, h: number, ctrl?: Ctrl, sw
     const c = circleInfo(w, h, ctrl)
     return [{ key: 'r', label: '半径 r', value: r0(c.r), unit: 'px', step: 5, editable: true }]
   }
+  if (kind === 'ellipseAB') {
+    const e = ellipseInfo(w, h, ctrl)
+    return [
+      { key: 'ea', label: '半长轴 a', value: r0(e.a), unit: 'px', step: 5, editable: true },
+      { key: 'eb', label: '半短轴 b', value: r0(e.b), unit: 'px', step: 5, editable: true },
+    ]
+  }
   if (kind === 'ellipseArc') {
     const e = ellipseArcInfo(w, h, ctrl, sweepDeg)
     return [
@@ -351,6 +388,13 @@ export function setPlaneNumber(
     return { ctrl: [C, ptAt(C, Math.max(2, v), w, h, a)] }
   }
   if (kind === 'arc3pt') return { ctrl: cur }   // 三点弧的半径是算出来的，改不了
+  if (kind === 'ellipseAB') {
+    const e = ellipseInfo(w, h, cur)
+    const C = NORM(e.C.x, e.C.y, w, h)
+    const a2 = key === 'ea' ? Math.max(4, v) : e.a
+    const b2 = key === 'eb' ? Math.max(4, v) : e.b
+    return { ctrl: [C, { x: R3(C.x + a2 / w), y: C.y }, { x: C.x, y: R3(C.y + b2 / h) }] }
+  }
   if (kind === 'ellipseArc') {
     const e = ellipseArcInfo(w, h, cur, sweepDeg)
     const C = NORM(e.C.x, e.C.y, w, h)
@@ -405,6 +449,11 @@ export function planeSvg(kind: string, w: number, h: number, ctrl: Ctrl | undefi
       return '<line x1="' + n1(a.A.x) + '" y1="' + n1(a.A.y) + '" x2="' + n1(a.C.x) + '" y2="' + n1(a.C.y) + '" ' + line + ' stroke-dasharray="6 5"/>'
     }
     return '<path d="' + arcPathD(a.A, a.C, a.r, a.sweep) + '" ' + line + '/>'
+  }
+  if (kind === 'ellipseAB') {
+    const e = ellipseInfo(w, h, ctrl)
+    return '<ellipse cx="' + n1(e.C.x) + '" cy="' + n1(e.C.y) + '" rx="' + n1(e.a) + '" ry="' + n1(e.b) + '" ' + s() + '/>' +
+      dot(e.C, Math.max(1.6, st.sw * 0.9))
   }
   if (kind === 'ellipseArc') {
     const e = ellipseArcInfo(w, h, ctrl, sweepDeg)
