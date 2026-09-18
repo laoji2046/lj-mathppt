@@ -597,6 +597,9 @@ export interface PiecewiseFn {
   axes?: boolean
   /** 断点画实心 / 空心点（默认画） */
   dots?: boolean
+  /** **区间端点**（整段函数的起、止）也画点。
+   *  默认 false = **只在断点画**（教科书就这么画：人为给的区间端点不点圆点） */
+  endDots?: boolean
 }
 
 /** 插入「自定义分段函数」时的默认内容：经典两段（x² 在 x<0，x+1 在 x≥0）。
@@ -633,6 +636,14 @@ export function piecewiseFigure(cfg: PiecewiseFn, w: number, h: number, stroke: 
     if (hit) { if (closed) hit.closed = true; return }   // 同一点既空心又实心 → 以实心为准
     dots.push({ x, y, closed, color })
   }
+  // **断点** = 两段共用的那个端点位（x 相同）。默认只在这些地方画实心/空心点，
+  // 区间端点（整段函数的起、止，如 sin(x) 的 −3.14）不画 —— 那是我们人为给的边界，不是函数的断点。
+  const ends: number[] = []
+  for (const ln of lines) {
+    if (ln.visible === false || !compileExpr(ln.expr || '')) continue
+    ends.push(ln.from, ln.to)
+  }
+  const isJunction = (x: number) => ends.filter((e) => Math.abs(e - x) <= 1e-6 * (1 + Math.abs(x))).length >= 2
   let compiled = false
   let drawn = false
   for (const ln of lines) {
@@ -655,8 +666,8 @@ export function piecewiseFigure(cfg: PiecewiseFn, w: number, h: number, stroke: 
     }
     if (cfg.dots !== false) {
       const yl = f(ln.from), yr = f(ln.to)
-      if (Number.isFinite(yl)) addDot(ln.from, yl, ln.lc !== false, col)
-      if (Number.isFinite(yr)) addDot(ln.to, yr, ln.rc !== false, col)
+      if (Number.isFinite(yl) && (cfg.endDots === true || isJunction(ln.from))) addDot(ln.from, yl, ln.lc !== false, col)
+      if (Number.isFinite(yr) && (cfg.endDots === true || isJunction(ln.to))) addDot(ln.to, yr, ln.rc !== false, col)
     }
   }
   if (!compiled && lines.length) return null

@@ -1370,7 +1370,8 @@ function layerTypeLabel(type: string) {
           </label>
           <label class="field field--row"><input type="checkbox" :checked="pwCfg.grid === true" @change="setPw({ grid: ($event.target as HTMLInputElement).checked })"> <span>网格</span></label>
           <label class="field field--row"><input type="checkbox" :checked="pwCfg.axes !== false" @change="setPw({ axes: ($event.target as HTMLInputElement).checked })"> <span>坐标轴</span></label>
-          <label class="field field--row"><input type="checkbox" :checked="pwCfg.dots !== false" @change="setPw({ dots: ($event.target as HTMLInputElement).checked })"> <span>端点圆点（实心=取到，空心=取不到）</span></label>
+          <label class="field field--row"><input type="checkbox" :checked="pwCfg.dots !== false" @change="setPw({ dots: ($event.target as HTMLInputElement).checked })"> <span>断点圆点（实心=取到，空心=取不到）</span></label>
+          <label v-if="pwCfg.dots !== false" class="field field--row"><input type="checkbox" :checked="pwCfg.endDots === true" @change="setPw({ endDots: ($event.target as HTMLInputElement).checked })"> <span>区间端点也画点（默认只画断点）</span></label>
           <p class="cfn__hint">区间端点写很大（如 ±50）就等于 ±∞；**贴着取景框边**的端点不画圆点。改完在画布上直接拖缩放即可调整大小。</p>
         </template>
         <!-- 可调参数（正弦型 A/ω/φ、含参二次的 a…） -->
