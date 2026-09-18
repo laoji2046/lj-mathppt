@@ -368,7 +368,8 @@ export type MathFigureKind =
   | 'parallelogram' | 'trapezoid' | 'star' | 'bezier' | 'polygon'
   | 'arcAngle' | 'arc3pt' | 'circleR' | 'ellipseArc' | 'ellipseAB'
   // ---- 3D 立体几何 ----
-  | 'cube' | 'cubeOblique' | 'cuboid' | 'cylinder' | 'cone' | 'sphere' | 'pyramid' | 'prism' | 'tetrahedron'
+  | 'cube' | 'cubeOblique' | 'cuboid' | 'cuboidOblique' | 'cylinder' | 'cone' | 'sphere'
+  | 'pyramid' | 'pyramidOblique' | 'prism' | 'prismOblique' | 'tetrahedron'
   | 'frustum' | 'pyraFrustum' | 'dihedral' | 'isoaxis'
   | 'octahedron' | 'hexPrism' | 'obliquePrism' | 'triFrustum'
   // ---- 辅助线 / 标注 ----
@@ -448,7 +449,10 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   // ---- 立体几何 ----
   { v: 'cube', label: '立方体', cat: '立体几何' },
   { v: 'cubeOblique', label: '正方体（斜二测画法·顶点可拖）', cat: '立体几何' },
+  { v: 'pyramidOblique', label: '四棱锥（斜二测画法·顶点可拖）', cat: '立体几何' },
+  { v: 'prismOblique', label: '三棱柱（斜二测画法·顶点可拖）', cat: '立体几何' },
   { v: 'cuboid', label: '长方体', cat: '立体几何' },
+  { v: 'cuboidOblique', label: '长方体（斜二测画法·顶点可拖）', cat: '立体几何' },
   { v: 'cylinder', label: '圆柱', cat: '立体几何' },
   { v: 'cone', label: '圆锥', cat: '立体几何' },
   { v: 'sphere', label: '球', cat: '立体几何' },

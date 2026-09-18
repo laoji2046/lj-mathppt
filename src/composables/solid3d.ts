@@ -194,9 +194,10 @@ export function arcsSvg(arcs: FigureArc[] | undefined, w: number, h: number, str
   return out
 }
 
-export const SOLID_KINDS = ['cube', 'cubeOblique', 'cuboid', 'pyramid', 'prism', 'tetrahedron', 'pyraFrustum', 'octahedron', 'hexPrism', 'obliquePrism', 'triFrustum'] as const
+export const SOLID_KINDS = ['cube', 'cubeOblique', 'cuboid', 'cuboidOblique', 'pyramid', 'pyramidOblique', 'prism', 'prismOblique', 'tetrahedron', 'pyraFrustum', 'octahedron', 'hexPrism', 'obliquePrism', 'triFrustum'] as const
 export const SOLID_VCOUNT: Record<string, number> = {
-  cube: 8, cubeOblique: 8, cuboid: 8, pyramid: 5, prism: 6, tetrahedron: 4, pyraFrustum: 8,
+  cube: 8, cubeOblique: 8, cuboid: 8, cuboidOblique: 8, pyramid: 5, pyramidOblique: 5, prism: 6, prismOblique: 6,
+  tetrahedron: 4, pyraFrustum: 8,
   octahedron: 6, hexPrism: 12, obliquePrism: 8, triFrustum: 6,
 }
 
@@ -209,8 +210,11 @@ const FACES: Record<string, number[][]> = {
   cube: [[0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],       // top / right / front
   cubeOblique: [[0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
   cuboid: [[0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
+  cuboidOblique: [[0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
   pyramid: [[1, 2, 4, 3], [0, 1, 3], [0, 4, 2], [0, 3, 4]], // bottom / left / right / front
+  pyramidOblique: [[1, 2, 4, 3], [0, 1, 3], [0, 4, 2], [0, 3, 4]],
   prism: [[0, 1, 2], [3, 4, 5]],
+  prismOblique: [[0, 1, 2], [3, 4, 5]],
   tetrahedron: [[0, 1, 2], [3, 0, 2], [3, 1, 0], [3, 2, 1]],
   pyraFrustum: [[0, 1, 2, 3], [3, 2, 6, 7], [0, 3, 7, 4], [1, 2, 6, 5], [4, 5, 6, 7], [0, 1, 5, 4]], // bottom / back / left / right / top / front
   obliquePrism: [[0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
@@ -222,9 +226,11 @@ const FACES: Record<string, number[][]> = {
   triFrustum: [[0, 1, 2], [0, 1, 4, 3], [2, 0, 3, 5], [1, 2, 5, 4], [3, 4, 5]],
 }
 const FOP: Record<string, number[]> = {
-  cube: [0.8, 0.62, 1], cubeOblique: [0.8, 0.62, 1], cuboid: [0.8, 0.62, 1],
+  cube: [0.8, 0.62, 1], cubeOblique: [0.8, 0.62, 1], cuboid: [0.8, 0.62, 1], cuboidOblique: [0.8, 0.62, 1],
   pyramid: [0.4, 0.75, 0.75, 0.9],
+  pyramidOblique: [0.4, 0.75, 0.75, 0.9],
   prism: [0.9, 0.5],
+  prismOblique: [0.9, 0.5],
   tetrahedron: [0.4, 0.86, 0.76, 0.66],
   pyraFrustum: [0.4, 0.5, 0.75, 0.75, 0.9, 0.85],
   obliquePrism: [0.8, 0.62, 1],
@@ -242,8 +248,10 @@ const MESH_FACES: Record<string, number[][]> = {
   cube: [[4, 5, 6, 7], [3, 2, 6, 7], [0, 3, 7, 4], [0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
   cubeOblique: [[4, 5, 6, 7], [3, 2, 6, 7], [0, 3, 7, 4], [0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
   cuboid: [[4, 5, 6, 7], [3, 2, 6, 7], [0, 3, 7, 4], [0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
+  cuboidOblique: [[4, 5, 6, 7], [3, 2, 6, 7], [0, 3, 7, 4], [0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
   obliquePrism: [[4, 5, 6, 7], [3, 2, 6, 7], [0, 3, 7, 4], [0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
   prism: [[3, 4, 5], [0, 1, 4, 3], [2, 0, 3, 5], [1, 2, 5, 4], [0, 1, 2]],
+  prismOblique: [[3, 4, 5], [0, 1, 4, 3], [2, 0, 3, 5], [1, 2, 5, 4], [0, 1, 2]],
 }
 /** 完整面表（自由建模初始化用） */
 export function solidFacesAll(kind: string): number[][] {
@@ -263,8 +271,13 @@ const EDGES: Record<string, Edge[]> = {
   cube: [[0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 0, 0], [0, 4, 0], [4, 5, 0], [1, 5, 0], [5, 6, 0], [6, 2, 0], [3, 7, 1], [7, 6, 1], [7, 4, 1]],
   cubeOblique: [[0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 0, 0], [0, 4, 0], [4, 5, 0], [1, 5, 0], [5, 6, 0], [6, 2, 0], [3, 7, 1], [7, 6, 1], [7, 4, 1]],
   cuboid: [[0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 0, 0], [0, 4, 0], [4, 5, 0], [1, 5, 0], [5, 6, 0], [6, 2, 0], [3, 7, 1], [7, 6, 1], [7, 4, 1]],
+  cuboidOblique: [[0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 0, 0], [0, 4, 0], [4, 5, 0], [1, 5, 0], [5, 6, 0], [6, 2, 0], [3, 7, 1], [7, 6, 1], [7, 4, 1]],
   pyramid: [[0, 3, 0], [0, 4, 0], [3, 4, 0], [3, 1, 0], [4, 2, 0], [1, 2, 1], [0, 1, 1], [0, 2, 1]],
+  // 斜二测四棱锥：1、2 是靠里的两个底角 → 它们那三条棱（含后底边）画虚线
+  pyramidOblique: [[0, 3, 0], [0, 4, 0], [3, 4, 0], [3, 1, 0], [4, 2, 0], [1, 2, 1], [0, 1, 1], [0, 2, 1]],
   prism: [[0, 1, 0], [1, 2, 0], [2, 0, 0], [0, 3, 0], [1, 4, 0], [2, 5, 0], [3, 4, 1], [4, 5, 1], [5, 3, 1]],
+  // 斜二测三棱柱：底在后（2 是后排那个顶点）→ 两条后底边 + 那条后竖棱画虚线；顶面完全可见
+  prismOblique: [[0, 1, 0], [1, 2, 1], [2, 0, 1], [0, 3, 0], [1, 4, 0], [2, 5, 1], [3, 4, 0], [4, 5, 0], [5, 3, 0]],
   tetrahedron: [[0, 1, 0], [3, 0, 0], [3, 1, 0], [0, 2, 1], [1, 2, 1], [3, 2, 1]],
   pyraFrustum: [[0, 1, 0], [1, 2, 0], [3, 0, 0], [4, 5, 0], [5, 6, 0], [7, 4, 0], [0, 4, 0], [1, 5, 0], [2, 3, 1], [6, 7, 1], [3, 7, 1], [2, 6, 1]],
   obliquePrism: [[0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 0, 0], [0, 4, 0], [4, 5, 0], [1, 5, 0], [5, 6, 0], [6, 2, 0], [3, 7, 1], [7, 6, 1], [7, 4, 1]],
@@ -274,6 +287,23 @@ const EDGES: Record<string, Edge[]> = {
   hexPrism: [[0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 4, 0], [4, 5, 0], [5, 0, 0], [6, 7, 0], [7, 8, 0], [8, 9, 0], [0, 6, 0], [1, 7, 0], [2, 8, 0], [3, 9, 0], [4, 10, 1], [5, 11, 1], [9, 10, 1], [10, 11, 1], [11, 6, 1]],
   // 正三棱台：底面后两条 + 后棱（0,1,2 底；3,4,5 顶）
   triFrustum: [[1, 2, 0], [3, 4, 0], [4, 5, 0], [5, 3, 0], [1, 4, 0], [2, 5, 0], [0, 1, 1], [2, 0, 1], [0, 3, 1]],
+}
+
+/** 斜二测投影系数：水平面里"往里"1 个单位，画成 45° 朝右上、长度减半 */
+const OBLIQ = 0.5 * Math.SQRT1_2
+/** 斜二测放置器：把"平面坐标 (x 横、y 进深) + 高度 z"映射到元素框里（自动缩放 + 居中）。
+ *  ⚠ 与"正面是真实大小的正方形/矩形"那套（cubeOblique）配合使用：这里管**水平面内的底板**，
+ *  竖直方向永远是**真实长度**（z 直接减 k）。 */
+function obliqPlacer(plane: [number, number][], hh: number, w: number, h: number) {
+  const sx = plane.map(([x, y]) => x + y * OBLIQ)
+  const sy = plane.map(([, y]) => -y * OBLIQ)
+  const minX = Math.min(...sx), maxX = Math.max(...sx)
+  const ys = [...sy, ...sy.map((v) => v - hh)]
+  const minY = Math.min(...ys), maxY = Math.max(...ys)
+  const k = Math.min((w * 0.92) / Math.max(1e-6, maxX - minX), (h * 0.92) / Math.max(1e-6, maxY - minY))
+  const ox = (w - (maxX - minX) * k) / 2 - minX * k
+  const oy = (h - (maxY - minY) * k) / 2 - minY * k
+  return (x: number, y: number, z = 0): [number, number] => [x * k + y * OBLIQ * k + ox, oy - y * OBLIQ * k - z * k]
 }
 
 /** 生成某立体在当前 w/h/depth 下的默认归一化顶点（与原几何一致） */
@@ -292,6 +322,26 @@ export function solidVerts(kind: string, w: number, h: number, depth?: number): 
       [fx, fy], [fx + s, fy], [fx + s, fy + s], [fx, fy + s],
       [fx + dx, fy + dy], [fx + s + dx, fy + dy], [fx + s + dx, fy + s + dy], [fx + dx, fy + s + dy],
     ]
+  } else if (kind === 'cuboidOblique') {
+    // 斜二测长方体：正面是**真实大小**的矩形 A×C，进深 D（真实）画成 45°、长度取一半
+    const A = 1.5, C = 1, D = (depth ?? 0.4) / 0.4
+    const k = Math.min((w * 0.92) / (A + D * OBLIQ), (h * 0.92) / (C + D * OBLIQ))
+    const aw = A * k, ch = C * k, dd = D * k
+    const dx = dd * OBLIQ, dy = -dx
+    const fx = (w - (aw + dx)) / 2, fy = (h - (ch + Math.abs(dy))) / 2 + Math.abs(dy)
+    c = [[fx, fy], [fx + aw, fy], [fx + aw, fy + ch], [fx, fy + ch],
+      [fx + dx, fy + dy], [fx + aw + dx, fy + dy], [fx + aw + dx, fy + ch + dy], [fx + dx, fy + ch + dy]]
+  } else if (kind === 'pyramidOblique') {
+    // 斜二测四棱锥：底面在水平面里（进深 45°、减半），顶点在底面中心正上方、高度真实
+    const A = 1, B = 0.9, H2 = 0.95
+    const at = obliqPlacer([[-A / 2, B], [A / 2, B], [-A / 2, 0], [A / 2, 0]], H2, w, h)
+    c = [at(0, B / 2, H2), at(-A / 2, B), at(A / 2, B), at(-A / 2, 0), at(A / 2, 0)]
+  } else if (kind === 'prismOblique') {
+    // 斜二测三棱柱：底面三角形在水平面里，三条竖棱真实长度（2 是后排那个底角）
+    const S = 1, H2 = 0.95
+    const at = obliqPlacer([[-S / 2, 0], [S / 2, 0], [0, S * 0.85]], H2, w, h)
+    c = [at(-S / 2, 0), at(S / 2, 0), at(0, S * 0.85),
+      at(-S / 2, 0, H2), at(S / 2, 0, H2), at(0, S * 0.85, H2)]
   } else if (kind === 'cube' || kind === 'cuboid') {
     const d = (depth ?? 0.4) * Math.min(w, h) * 0.4, dx = d, dy = -d * 0.8
     const side = kind === 'cube' ? Math.min(w, h) * 0.62 : 0
