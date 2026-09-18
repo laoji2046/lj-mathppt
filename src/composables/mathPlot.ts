@@ -561,6 +561,102 @@ export function customFigure(cfg: CustomFn, w: number, h: number, stroke: string
   if (!any && lines.length) return null
   return s
 }
+/** ── 自定义分段函数 ──────────────────────────────────────────────
+ *  与「自定义函数」同一套表达式解析（compileExpr），区别是**每段各自有区间与端点开闭**：
+ *  取到的端点画**实心点**、取不到的画**空心点** —— 这正是分段函数图的标准画法。 */
+export interface PiecewiseLine {
+  expr: string
+  /** 区间 [from, to] */
+  from: number
+  to: number
+  /** 左 / 右端点是否**取到**（实心）；默认都取到 */
+  lc?: boolean
+  rc?: boolean
+  /** 这一段的颜色 / 虚实 / 线宽（不填用元素自身的） */
+  color?: string
+  dash?: 'solid' | 'dash' | 'dot'
+  width?: number
+  visible?: boolean
+}
+
+export interface PiecewiseFn {
+  lines: PiecewiseLine[]
+  /** 取景框（x 就是显示的定义域，y 是显示的值域） */
+  x0: number; x1: number; y0: number; y1: number
+  grid?: boolean
+  axes?: boolean
+  /** 断点画实心 / 空心点（默认画） */
+  dots?: boolean
+}
+
+/** 插入「自定义分段函数」时的默认内容：经典两段（x² 在 x<0，x+1 在 x≥0）。
+ *  区间的端点写很大（如 ±50）就等于 ±∞ —— 贴边的端点不会画点。 */
+export const DEFAULT_PIECEWISE: PiecewiseFn = {
+  lines: [
+    { expr: 'x^2', from: -3, to: 0, lc: true, rc: false },
+    { expr: 'x+1', from: 0, to: 3.5, lc: true, rc: true },
+  ],
+  x0: -3.2, x1: 4, y0: -1.4, y1: 5,
+  grid: false, axes: true, dots: true,
+}
+
+/** 分段函数图：网格 / 坐标轴 / 每段曲线 / 端点实心·空心点。
+ *  全部表达式都解析不了 → 返回 null（调用方给红字提示），与 customFigure 一致。 */
+export function piecewiseFigure(cfg: PiecewiseFn, w: number, h: number, stroke: string, sw: number): string | null {
+  const lines = cfg.lines || []
+  const view: View = { xmin: cfg.x0, xmax: cfg.x1, ymin: cfg.y0, ymax: cfg.y1 }
+  const m = mapper(view, w, h)
+  let s = cfg.grid ? gridSvg(view, w, h, m) : ''
+  if (cfg.axes !== false) s += axesSvg(view, w, h, stroke, sw, true)
+  const r = Math.max(3, Math.min(w, h) * 0.012)
+  interface PwDot { x: number; y: number; closed: boolean; color: string }
+  const dots: PwDot[] = []
+  const addDot = (x: number, y: number, closed: boolean, color: string) => {
+    // 只在**图形内部**的端点画点：贴住取景框边的（通常代表 ±∞）不画
+    if (!(x > view.xmin + 1e-9 && x < view.xmax - 1e-9)) return
+    if (!(y >= view.ymin - 1e-9 && y <= view.ymax + 1e-9)) return
+    const hit = dots.find((d) => Math.abs(d.x - x) < 1e-9 && Math.abs(d.y - y) < 1e-9)
+    if (hit) { if (closed) hit.closed = true; return }   // 同一点既空心又实心 → 以实心为准
+    dots.push({ x, y, closed, color })
+  }
+  let compiled = false
+  let drawn = false
+  for (const ln of lines) {
+    if (ln.visible === false) continue
+    const f = compileExpr(ln.expr || '')
+    if (!f) continue
+    compiled = true
+    const col = ln.color || stroke
+    const a = Math.max(ln.from, view.xmin)
+    const b = Math.min(ln.to, view.xmax)
+    if (b > a) {
+      // 只采样**落在取景框内**的那截（各段端点各自取到，接缝处不断开）
+      const d = plotFunction(f, { ...view, xmin: a, xmax: b }, w, h, 600)
+      if (d) {
+        drawn = true
+        s += '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' +
+          n1(ln.width && ln.width > 0 ? ln.width : sw) + '"' + dashArrayOf(ln.dash) +
+          ' stroke-linecap="round" stroke-linejoin="round"/>'
+      }
+    }
+    if (cfg.dots !== false) {
+      const yl = f(ln.from), yr = f(ln.to)
+      if (Number.isFinite(yl)) addDot(ln.from, yl, ln.lc !== false, col)
+      if (Number.isFinite(yr)) addDot(ln.to, yr, ln.rc !== false, col)
+    }
+  }
+  if (!compiled && lines.length) return null
+  for (const d of dots) {
+    const px = m.X(d.x), py = m.Y(d.y)
+    if (d.closed) s += dotSvg(px, py, r, d.color)
+    else s += dotSvg(px, py, r, '#ffffff') +
+      '<circle cx="' + n1(px) + '" cy="' + n1(py) + '" r="' + n1(r) + '" fill="none" stroke="' + d.color +
+      '" stroke-width="' + n1(Math.max(1, sw * 0.8)) + '"/>'
+  }
+  void drawn
+  return s
+}
+
 export function functionFigure(kind: string, w: number, h: number, stroke: string, sw: number, params?: Record<string, number>): string {
   const def = FUNCTIONS[kind]
   if (!def) return ''

@@ -310,7 +310,8 @@ export async function importParsedQuestions(list: ParsedQuestion[]): Promise<{ a
   const drafts: LibDraft[] = list.map((p) => {
     // ⭐ 答案自我完善：没写答案但解析里说了「故选B」这类，就从解析里提出来 ✓
     let answer = p.answer
-    let answerFrom: QuestionMeta['answerFrom'] = answer ? 'manual' : ''
+    const keptFrom = (p as { answerFrom?: QuestionMeta['answerFrom'] }).answerFrom
+    let answerFrom: QuestionMeta['answerFrom'] = keptFrom || (answer ? 'manual' : '')
     if (!answer && p.solution) {
       const auto = extractAnswerFromSolution(p.solution, p.options)
       if (auto) { answer = auto; answerFrom = 'auto' }
@@ -618,7 +619,10 @@ export function parseQuestionsJson(text: string): { list: ParsedQuestion[]; erro
     const stem = String(o.stem || o.body || o.text || '').trim()
     if (!stem) continue
     const title = String(o.title || '').trim()
-    list.push({
+    // ⚠ 以前只回读题干/选项/答案/解析/知识点/难度/题型/板块/日期/年份/来源 ——
+    //    **试卷名 / 章节 / 分值 / 答案来源全丢了**：换台机器导入后，整套归组、章节筛选、
+    //    分值合计全错（用户实报"导出的再导入就不对了"）。这里按导出格式逐字回读。
+    const p: ParsedQuestion = {
       title: title || (stem.length > 20 ? stem.slice(0, 20) + '…' : stem),
       stem,
       options: arrOf(o.options),
@@ -628,10 +632,19 @@ export function parseQuestionsJson(text: string): { list: ParsedQuestion[]; erro
       difficulty: Number(o.difficulty) || 3,
       qtype: o.qtype ? String(o.qtype) : undefined,
       section: o.section ? String(o.section) : undefined,
+      chapter: o.chapter ? String(o.chapter) : undefined,
       date: o.date ? String(o.date) : undefined,
       year: String(o.year || ''),
+      yearExplicit: o.year ? String(o.year) : undefined,
+      paperName: o.paperName ? String(o.paperName) : undefined,
       region: String(o.region || o.source || ''),
-    })
+    }
+    const sc = Number(o.score)
+    if (Number.isFinite(sc) && sc > 0) p.scoreExplicit = sc
+    // 「答案从哪来」也要保住：否则自动提取（auto）的题导入后会被当成手填
+    const af = String(o.answerFrom || '')
+    if (af === 'auto' || af === 'manual' || af === 'bank') (p as { answerFrom?: string }).answerFrom = af
+    list.push(p)
   }
   if (!list.length) return { list: [], error: '没有解析出任何试题（每条至少要有题干）' }
   return { list }

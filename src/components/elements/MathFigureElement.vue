@@ -4,7 +4,7 @@ import type { MathFigureElement, SlideElement } from '@/types'
 import { lineDashCss } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
 import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg, vertexDotsSvg } from '@/composables/solid3d'
-import { CONIC_KINDS, FUNCTION_KINDS, conicFigure, conicLineDrag, conicLineHandles, conicPointDrag, conicPointHandles, customFigure, functionFigure } from '@/composables/mathPlot'
+import { CONIC_KINDS, DEFAULT_PIECEWISE, FUNCTION_KINDS, conicFigure, conicLineDrag, conicLineHandles, conicPointDrag, conicPointHandles, customFigure, functionFigure, piecewiseFigure } from '@/composables/mathPlot'
 import { solidSel, selectSolidVertex, selectSolidEdge, selectSolidFace, clearSolidSel } from '@/composables/solidSel'
 
 const props = defineProps<{ el: MathFigureElement; selected?: boolean; /** 预览用：等比缩放（contain）而不是拉伸（stretch） */ fit?: 'stretch' | 'contain' }>()
@@ -67,6 +67,16 @@ const innerHtml = computed(() => {
     if (svg === null) {
       const fs = Math.max(12, Math.min(w, h) * 0.05)
       return '<text x="' + w / 2 + '" y="' + h / 2 + '" text-anchor="middle" fill="#c0392b" font-size="' + fs.toFixed(1) + '">表达式无法解析</text>'
+    }
+    return svg
+  }
+  // 自定义分段函数：每段一个表达式 + 区间，端点实心/空心（与「自定义函数」同一套解析）
+  if (kind === 'piecewiseFn') {
+    const cfg = props.el.pw || DEFAULT_PIECEWISE
+    const svg = piecewiseFigure(cfg, w, h, stroke, s)
+    if (svg === null) {
+      const fs2 = Math.max(12, Math.min(w, h) * 0.05)
+      return '<text x="' + w / 2 + '" y="' + h / 2 + '" text-anchor="middle" fill="#c0392b" font-size="' + fs2.toFixed(1) + '">表达式无法解析</text>'
     }
     return svg
   }

@@ -14,7 +14,15 @@ import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, 
 import { parseQuestionsWithInfo, PARSE_HELP, detectPaperInfo } from '@/composables/parseQuestions'
 import { saveTextFile } from '@/composables/useTauri'
 
-const emit = defineEmits<{ (e: 'close'): void; (e: 'insert', text: string, id: number): void }>()
+const props = defineProps<{
+  /** **只管理、不插入**：从工具栏打开时用（那种入口背后没有"试卷正文"，插了就等于丢 ✗） */
+  manageOnly?: boolean
+}>()
+const emit = defineEmits<{
+  (e: 'close'): void
+  /** id：单题 = 题库 id；整套 / 组卷 = 0（没有单题 id）；label：告诉调用方"插了什么" */
+  (e: 'insert', text: string, id: number, label?: string): void
+}>()
 
 const list = ref<QuestionEntry[]>([])
 const tags = ref<{ name: string; count: number }[]>([])
@@ -36,8 +44,9 @@ const detected = ref({ year: '', paperName: '', from: '' })
 watch(batchText, (v) => {
   const d = detectPaperInfo(v || '')
   detected.value = d
-  if (d.year) batchYear.value = d.year
-  if (d.paperName) batchPaper.value = d.paperName
+  // ⚠ 只在老师**还没手填**的时候自动带入 —— 原来是无条件覆盖（注释写着"不覆盖用户手填"，实际会覆盖 ✗）
+  if (d.year && !batchYear.value.trim()) batchYear.value = d.year
+  if (d.paperName && !batchPaper.value.trim()) batchPaper.value = d.paperName
 })
 /** 一组题的卷面总分（题内分值优先，否则按题型默认） */
 function paperTotal(arr: QuestionEntry[]): number {
@@ -48,9 +57,15 @@ function paperTotal(arr: QuestionEntry[]): number {
 const paperGroups = computed(() => groupPapers(list.value))
 function insertPaperGroup(g: PaperGroup, withSolution: boolean) {
   if (!g.items.length) { flash('这一套里没有题'); return }
-  emit('insert', paperGroupToText(g, withSolution), 0)
+  if (blockIfManageOnly()) return
+  const name = (g.year ? g.year + ' ' : '') + (g.paperName || '未标试卷名的散题')
+  // 整套插入是"一次灌一整卷"：先让老师看到 **N 道 / M 分** 再决定
+  // （以前点一下就全灌进正文，散题组甚至会把整个"未归卷"都灌进来 ✗）
+  const warn = g.paperName ? '' : '\n\n⚠ 这些题没有试卷名 —— 这是「未归卷」的散题合集，一次会把它们全部插入'
+  if (!confirm('插入整套「' + name + '」？\n\n共 ' + g.count + ' 道，合计 ' + paperTotal(g.items) + ' 分' + warn)) return
+  emit('insert', paperGroupToText(g, withSolution), 0, '整套「' + name + '」共 ' + g.count + ' 道')
   g.items.forEach((x) => void touchQuestion(x.id))
-  flash('已整套插入「' + (g.year ? g.year + ' ' : '') + (g.paperName || '未命名试卷') + '」共 ' + g.count + ' 道')
+  flash('已整套插入「' + name + '」共 ' + g.count + ' 道')
 }
 async function doBatch() {
   if (!parsed.value.length) return
@@ -101,8 +116,12 @@ function doPick() {
 function sendPaper(withSolution: boolean) {
   const arr = paperResult.value ? paperResult.value.picked : []
   if (!arr.length) { flash('先点「一键挑题」'); return }
-  emit('insert', buildPaperText(arr, { withSolution }), 0)
+  if (blockIfManageOnly()) return
+  const sig = 'rule:' + arr.map((x) => x.id).join(',') + ':' + (withSolution ? 1 : 0)
+  if (!confirmRepeat(sig, '这套规则组卷')) return
+  emit('insert', buildPaperText(arr, { withSolution }), 0, '规则组卷 ' + arr.length + ' 道（' + paperTotal(arr) + ' 分）')
   arr.forEach((x) => void touchQuestion(x.id))
+  markSent(sig)
   flash('已把 ' + arr.length + ' 道题送进 PDF 生成（共 ' + paperTotal(arr) + ' 分）')
 }
 
@@ -142,16 +161,16 @@ async function onFilePicked(e: Event) {
     flash('已读入 ' + f.name + '（' + text.length + ' 字），请核对识别结果后再点导入')
   }
 }
-async function exportJson() {
-  const arr = shown.value.length ? shown.value : list.value
-  if (!arr.length) { flash('题库是空的，没有可导出的题'); return }
-  const name = '题库导出-' + new Date().toISOString().slice(0, 10) + '.json'
+/** 导出 JSON：默认只导**当前筛选出来的**（筛选结果为空时明确说一句，绝不偷偷导全库 ✗） */
+async function exportJson(all = false) {
+  const arr = all ? list.value : shown.value
+  if (!arr.length) { flash(all ? '题库是空的，没有可导出的题' : '当前筛选结果为空 —— 想导整个题库请点「导出全部」'); return }
+  const name = '题库' + (all ? '全部' : '筛选') + '-' + new Date().toISOString().slice(0, 10) + '.json'
   const path = await saveTextFile(name, exportQuestionsJson(arr))
   flash(path ? '已导出 ' + arr.length + ' 道题到：' + path : '已导出 ' + arr.length + ' 道题')
 }
 
 const pickedTags = ref<string[]>([])
-const diff = ref<number | null>(null)
 const selectedId = ref(0)
 /* ---- 新增筛选维度（题型 / 板块 / 难度分级 / 只看缺答案） ---- */
 const pickedType = ref<QType | ''>('')
@@ -173,11 +192,24 @@ const pickedEntries = computed(() => list.value.filter((x) => pickedIds.value.in
 function insertPicked(withSolution: boolean) {
   const arr = pickedEntries.value
   if (!arr.length) { flash('先在左边勾选要出卷的题'); return }
+  if (blockIfManageOnly()) return
+  const total = paperTotal(arr)
+  // 勾多了先问一声；同一批插过一次再插也问一声（以前点两下就重复灌两份 ✗）
+  if (arr.length >= 10 && !confirm('把已勾选的 ' + arr.length + ' 道题（共 ' + total + ' 分）插进试卷正文？')) return
+  const sig = 'pick:' + arr.map((x) => x.id).join(',') + ':' + (withSolution ? 1 : 0)
+  if (!confirmRepeat(sig, '这批 ' + arr.length + ' 道题')) return
   // 统一走 buildPaperText：按题型分段 + 每题（x分）+ 卷面总分 —— 与整套插入排版一致
-  emit('insert', buildPaperText(arr, { withSolution }), 0)
+  emit('insert', buildPaperText(arr, { withSolution }), 0, '已勾选 ' + arr.length + ' 道（共 ' + total + ' 分）')
   arr.forEach((x) => void touchQuestion(x.id))
-  flash('已把 ' + arr.length + ' 道题送进 PDF 生成（共 ' + paperTotal(arr) + ' 分）')
+  markSent(sig)
+  flash('已把 ' + arr.length + ' 道题送进 PDF 生成（共 ' + total + ' 分）')
 }
+/** 同一批题插过一次就记下来：再插同一批会先确认一下 */
+const sentSigs = ref<Record<string, boolean>>({})
+function confirmRepeat(sig: string, what: string): boolean {
+  return !sentSigs.value[sig] || confirm(what + '刚才已经插过一次了，再插一遍？')
+}
+function markSent(sig: string) { sentSigs.value = { ...sentSigs.value, [sig]: true } }
 /* ---- 答案自我完善：扫出「缺答案但解析里能反推」的题 ---- */
 const proposals = computed(() => proposeAnswers(list.value))
 async function doComplete() {
@@ -210,6 +242,13 @@ function flash(t: string) {
   msg.value = t
   window.setTimeout(() => { if (msg.value === t) msg.value = '' }, 2400)
 }
+/** 只能管理时，插入按钮点了要说清为什么没反应
+ *  （以前这里照样弹"已送进 PDF 生成"，内容其实进了 /dev/null ✗ —— 用户实报的"假成功"） */
+function blockIfManageOnly(): boolean {
+  if (!props.manageOnly) return false
+  flash('这个入口只能管理题库 —— 要把题插进试卷，请从「PDF 生成 → 试题库」打开')
+  return true
+}
 
 async function load() {
   loading.value = true
@@ -225,7 +264,6 @@ onMounted(load)
 const shown = computed(() => filterQuestions(list.value, {
   q: q.value,
   tags: pickedTags.value,
-  difficulty: diff.value,
   qtype: pickedType.value,
   section: pickedSection.value,
   chapter: pickedChapter.value,
@@ -273,7 +311,8 @@ async function save() {
     answer: form.value.answer.trim(),
     answerFrom: form.value.answer.trim() ? (form.value.answerFrom || 'manual') : '',
   })
-  const id = editingId.value > 0
+  const wasEdit = editingId.value > 0
+  const id = wasEdit
     ? await updateQuestion(editingId.value, meta, formTitle.value)
     : await addQuestion(meta, formTitle.value)
   if (!id) { flash('保存失败 —— 内容库不可用？'); return }
@@ -281,7 +320,8 @@ async function save() {
   selectedId.value = id
   editing.value = false
   editingId.value = 0
-  flash(editingId.value ? '已更新' : '已存入试题库')
+  // ⚠ 这里原来判的是 editingId.value（上面刚被清成 0）→ 永远显示"已存入"，改了题也这么说 ✗
+  flash(wasEdit ? '已更新（#' + id + '）' : '已存入试题库（#' + id + '）')
 }
 
 async function del(x: QuestionEntry) {
@@ -295,7 +335,8 @@ async function del(x: QuestionEntry) {
 async function insertOne(withSolution: boolean) {
   const x = selected.value
   if (!x) { flash('先在右边选一道题'); return }
-  emit('insert', questionToText(x, withSolution), x.id)
+  if (blockIfManageOnly()) return
+  emit('insert', questionToText(x, withSolution), x.id, '试题 #' + x.id)
   void touchQuestion(x.id)
 }
 /* ---- 清理与批量删除 ---- */
@@ -359,7 +400,7 @@ function close() { emit('close') }
     <div class="qb" @mousedown.self="close">
       <div class="qb__box">
         <div class="qb__head">
-          <div class="qb__title">试题库<em>（供 PDF 生成组卷：选定后插入题干，可带答案解析）</em></div>
+          <div class="qb__title">试题库<em v-if="!manageOnly">（供 PDF 生成组卷：选定后插入题干，可带答案解析）</em><em v-else>（管理：录入 / 导入 / 编辑 / 导出；插题请从「PDF 生成 → 试题库」打开）</em></div>
           <div class="qb__tools">
             <button class="qb__btn" title="把整份试题粘贴进来，一次性识别并入库" @click="batchOpen = true; editing = false">批量导入</button>
             <button class="qb__btn" title="重新从内容库读取（外部改动后点它刷新列表）" @click="load()">刷新</button>
@@ -367,10 +408,11 @@ function close() { emit('close') }
             <button class="qb__btn" title="按规则挑题（双向细目表）：设题型/板块/难度/题量，一键抽出整卷" @click="paperOpen = true; editing = false; batchOpen = false">规则组卷</button>
             <button class="qb__btn" title="导入 Markdown / 纯文本：读进来后先给你看识别结果，确认再入库" @click="pickFile('md')">导入 MD</button>
             <button class="qb__btn" title="导入题库 JSON（我们自己导出的、或 {questions:[…]} / 数组 都认）" @click="pickFile('json')">导入 JSON</button>
-            <button class="qb__btn" title="把当前筛选出的题导出成 JSON（题库为空时导出全部）" @click="exportJson">导出 JSON</button>
+            <button class="qb__btn" title="把**当前筛选出的**题导出成 JSON（筛选为空时会提示，不会偷偷导全库）" @click="exportJson()">导出筛选结果</button>
+          <button class="qb__btn" title="把整个题库导出成 JSON" @click="exportJson(true)">导出全部</button>
             <button class="qb__btn" :title="'从解析里反推答案（认「故选B」这类明确写法），可补 ' + proposals.length + ' 道'" @click="doComplete">完善答案<template v-if="proposals.length">（{{ proposals.length }}）</template></button>
             <button class="qb__btn qb__btn--pri" title="新建一道试题" @click="startNew">＋ 新建试题</button>
-            <button class="qb__btn qb__btn--pdf" :disabled="!pickedIds.length" title="把左边勾选的题按 选择→填空→解答 排序，一起送进 PDF 生成" @click="insertPicked(false)">生成 PDF（已选 {{ pickedIds.length }}）</button>
+            <button class="qb__btn qb__btn--pdf" :disabled="manageOnly || !pickedIds.length" :title="manageOnly ? '从工具栏打开时只能管理题库；插题请从「PDF 生成 → 试题库」打开' : '把左边勾选的题按 选择→填空→解答 排序，一起送进 PDF 生成'" @click="insertPicked(false)">生成 PDF（已选 {{ pickedIds.length }}）</button>
             <button class="qb__btn qb__btn--danger" :disabled="!pickedIds.length" :title="confirmDelPicked ? '再点一次确认删除' : '删除左边勾选的题'" @click="deletePicked">{{ confirmDelPicked ? '确认删除 ' + pickedIds.length + ' 条' : '删除选中（' + pickedIds.length + '）' }}</button>
             <button class="qb__close" title="关闭" @click="close"><AppIcon name="close" :size="14" /></button>
           </div>
@@ -496,8 +538,8 @@ function close() { emit('close') }
                 </div>
                 <div class="qb__actions">
                   <button class="qb__btn qb__btn--pri" @click="doPick">一键挑题</button>
-                  <button class="qb__btn" :disabled="!paperResult || !paperResult.picked.length" @click="sendPaper(false)">送进 PDF（仅题干）</button>
-                  <button class="qb__btn" :disabled="!paperResult || !paperResult.picked.length" @click="sendPaper(true)">送进 PDF（含答案）</button>
+                  <button class="qb__btn" :disabled="manageOnly || !paperResult || !paperResult.picked.length" @click="sendPaper(false)">送进 PDF（仅题干）</button>
+                  <button class="qb__btn" :disabled="manageOnly || !paperResult || !paperResult.picked.length" @click="sendPaper(true)">送进 PDF（含答案）</button>
                   <button class="qb__btn" @click="resetRules">清空规则</button>
                 </div>
 
@@ -505,9 +547,9 @@ function close() { emit('close') }
                   <div class="qb__bptitle">或按试卷整套插入（按「年份 + 试卷名」归组）</div>
                   <div v-if="!paperGroups.length" class="qb__empty">题库里还没有带年份/试卷名的题 —— 批量导入时填「年份」「试卷名」，或在题里写【年份】【试卷】。</div>
                   <div v-for="(gp, i) in paperGroups" :key="i" class="qb__prow qb__prow--paper">
-                    <span class="qb__ptitle">{{ gp.year || '未标年份' }} · {{ gp.paperName || '未标试卷名' }}</span>
+                    <span class="qb__ptitle">{{ gp.year || '未标年份' }} · {{ gp.paperName || '未标试卷名' }}<b v-if="!gp.paperName" class="qb__warn" title="这些题没有试卷名 —— 是『未归卷』的散题，整套插入会把它们全部插进正文">⚠ 散题合集</b></span>
                     <span class="qb__pcount">{{ gp.count }} 道 · 满分 {{ paperTotal(gp.items) }} 分</span>
-                    <button class="qb__btn qb__btn--tiny" @click="insertPaperGroup(gp, false)">插入整套</button>
+                    <button class="qb__btn qb__btn--tiny" :disabled="manageOnly" @click="insertPaperGroup(gp, false)">插入整套</button>
                     <button class="qb__btn qb__btn--tiny" @click="insertPaperGroup(gp, true)">含答案整套</button>
                   </div>
                   <button class="qb__btn" @click="paperOpen = false">返回列表</button>
@@ -608,6 +650,9 @@ B. 2
                   <label>年份<input v-model="form.year" type="text" placeholder="2024" /></label>
                   <label>来源<input v-model="form.region" type="text" placeholder="课本 P46 / 某市模拟" /></label>
                 </div>
+                <div class="qb__row">
+                  <label>试卷名<input v-model="form.paperName" type="text" placeholder="如 2024届某市一模（整套插入按它归组）" /></label>
+                </div>
                 <div class="qb__actions">
                   <button class="qb__btn qb__btn--pri" @click="save">保存</button>
                   <button class="qb__btn" @click="cancelEdit">取消</button>
@@ -633,8 +678,8 @@ B. 2
                   <template v-if="!selected.q.answer.trim()"> · <b class="qb__noans">缺答案</b></template>
                 </div>
                 <div class="qb__actions">
-                  <button class="qb__btn qb__btn--pri" @click="insertOne(false)">插入题干</button>
-                  <button class="qb__btn" @click="insertOne(true)">插入题干+答案+解析</button>
+                  <button class="qb__btn qb__btn--pri" :disabled="manageOnly" @click="insertOne(false)">插入题干</button>
+                  <button class="qb__btn" :disabled="manageOnly" @click="insertOne(true)">插入题干+答案+解析</button>
                   <button class="qb__btn" @click="startEdit(selected)">编辑</button>
                   <button class="qb__btn qb__btn--danger" @click="del(selected)">删除</button>
                 </div>
@@ -647,6 +692,7 @@ B. 2
 
         <div class="qb__foot">
           <span v-if="msg" class="qb__msg">{{ msg }}</span>
+          <span v-else-if="manageOnly" class="qb__hint">这里只管理题库 —— 要把题插进试卷，请关掉本窗口，从「PDF 生成 → 试题库」打开</span>
           <span v-else class="qb__hint">插入位置＝试卷正文末尾；插入后可在正文里继续编辑</span>
         </div>
       </div>
@@ -670,6 +716,7 @@ B. 2
 .qb__papers { border-top: 1px dashed #e4e4ee; padding-top: 8px; }
 .qb__prow--paper { display: flex; align-items: center; gap: 8px; }
 .qb__ptitle { flex: 1; min-width: 0; font-weight: 600; }
+.qb__warn { margin-left: 6px; font-weight: 400; font-size: 11.5px; color: #b25f00; }
 .qb__pcount { font-size: 11.5px; color: var(--muted, #888); }
 .qb__batchtop { display: flex; gap: 12px; flex-wrap: wrap; }
 .qb__byl { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted, #777); flex: 1; min-width: 160px; }
@@ -711,9 +758,6 @@ B. 2
 .qb__tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 16px 10px; }
 .qb__tag { border: 1px solid #e0e0ea; background: #fafafd; border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
 .qb__tag--on { background: #efeaff; border-color: #b9a9f0; color: #4b3fa8; }
-.qb__diff { margin-left: auto; font-size: 12px; color: var(--muted, #888); display: flex; align-items: center; gap: 4px; }
-.qb__d { width: 22px; height: 22px; border: 1px solid #e0e0ea; background: #fafafd; border-radius: 6px; font-size: 12px; cursor: pointer; }
-.qb__d--on { background: #efeaff; border-color: #b9a9f0; color: #4b3fa8; }
 .qb__body { flex: 1; display: flex; min-height: 0; border-top: 1px solid var(--border, #e8e8f0); }
 .qb__list { width: 340px; flex: none; overflow: auto; border-right: 1px solid var(--border, #e8e8f0); padding: 8px; }
 .qb__item { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; text-align: left; border: 1px solid transparent; background: none; padding: 8px 10px; border-radius: 8px; cursor: pointer; }

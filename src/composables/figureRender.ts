@@ -2,7 +2,7 @@ import { createApp, h } from 'vue'
 import MathFigureElement from '@/components/elements/MathFigureElement.vue'
 import { createElement } from '@/types'
 import type { MathFigureElement as MFigEl, MathFigureKind, SlideElement } from '@/types'
-import { figureBox } from '@/composables/mathPlot'
+import { DEFAULT_PIECEWISE, figureBox } from '@/composables/mathPlot'
 import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
 
 /**
@@ -17,7 +17,9 @@ import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
 export function mathFigureElOfKind(kind: MathFigureKind): MFigEl {
   const extra = kind === 'custom'
     ? { custom: { expr: 'x^2-2x+1', x0: -2, x1: 4, y0: -2, y1: 6, grid: true, axes: true }, w: 420, h: 300 }
-    : {}
+    : kind === 'piecewiseFn'
+      ? { pw: { ...DEFAULT_PIECEWISE, lines: DEFAULT_PIECEWISE.lines.map((l) => ({ ...l })) }, w: 440, h: 300 }
+      : {}
   const el = createElement('mathfig', { x: 0, y: 0 })
   Object.assign(el, { kind, ...(figureBox(kind) || {}), ...extra })
   return el as MFigEl

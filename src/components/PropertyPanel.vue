@@ -18,7 +18,7 @@ import { layoutTable, mergeAt, unmergeAt } from '@/composables/tableLayout'
 import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
 import { openShapeEdit } from '@/ui/shapeEditor'
-import { compileExpr, conicLineIntersections, conicPointPos, figureParams, withParams, type PointLink } from '@/composables/mathPlot'
+import { DEFAULT_PIECEWISE, compileExpr, conicLineIntersections, conicPointPos, figureParams, withParams, type PiecewiseLine, type PointLink } from '@/composables/mathPlot'
 import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type EdgeStyle, type FaceStyle } from '@/composables/solid3d'
 import { solidSel } from '@/composables/solidSel'
 import { openImageEditor } from '@/ui/imageEditor'
@@ -364,6 +364,41 @@ function removeLine(i: number) {
 function setCustom(p: Partial<NonNullable<MathFigureElement['custom']>>) {
   const cur = mathfig.value?.custom || { expr: 'x^2', x0: -4, x1: 4, y0: -2, y1: 6 }
   patch({ custom: { ...cur, ...p } } as Partial<SlideElement>)
+}
+
+/** ── 自定义分段函数：每段 = 表达式 + 区间 [from,to] + 两端点开闭 ── */
+const pwCfg = computed(() => mathfig.value?.pw || DEFAULT_PIECEWISE)
+const pwLines = computed<PiecewiseLine[]>(() => {
+  const c = mathfig.value?.pw
+  return c?.lines && c.lines.length ? c.lines : DEFAULT_PIECEWISE.lines
+})
+/** 有一段写错就提示（那段不画，其它段照画） */
+const pwBad = computed(() => {
+  if (mathfig.value?.kind !== 'piecewiseFn') return false
+  return pwLines.value.some((l) => l.visible !== false && compileExpr(l.expr || '') === null)
+})
+function setPw(p: Partial<NonNullable<MathFigureElement['pw']>>) {
+  const cur = mathfig.value?.pw || DEFAULT_PIECEWISE
+  patch({ pw: { ...cur, ...p } } as Partial<SlideElement>)
+}
+function setPwLines(next: PiecewiseLine[]) { setPw({ lines: next }) }
+function setPwLine(i: number, p: Partial<PiecewiseLine>) {
+  const list = pwLines.value.map((x) => ({ ...x }))
+  if (!list[i]) return
+  list[i] = { ...list[i], ...p }
+  setPwLines(list)
+}
+/** 加一段：默认接在最后一段右边，连续区间（省得每次都要手调端点） */
+function addPwLine() {
+  const list = pwLines.value.map((x) => ({ ...x }))
+  const last = list[list.length - 1]
+  const a = last ? last.to : 0
+  list.push({ expr: 'x', from: a, to: a + 2, lc: true, rc: true })
+  setPwLines(list)
+}
+function removePwLine(i: number) {
+  const list = pwLines.value.filter((_, k) => k !== i).map((x) => ({ ...x }))
+  setPwLines(list.length ? list : [{ expr: 'x', from: -1, to: 1, lc: true, rc: true }])
 }
 
 /** 「三维立体图」生成的元素：带着源模型回到那个弹窗，继续改视角 / 改模型 */
@@ -1263,6 +1298,81 @@ function layerTypeLabel(type: string) {
           <label class="field field--row"><input type="checkbox" :checked="mathfig.custom?.axes !== false" @change="setCustom({ axes: ($event.target as HTMLInputElement).checked })"> <span>坐标轴</span></label>
           <p class="cfn__hint">值域就是显示窗口的 y 范围；改完在画布上直接拖缩放即可调整大小。</p>
         </template>
+
+        <!-- 自定义分段函数：每段 = 表达式 + 区间 + 两端点开闭（取到=实心点，取不到=空心点） -->
+        <template v-if="mathfig?.kind === 'piecewiseFn'">
+          <div class="cfn__lines">
+            <div v-for="(ln, i) in pwLines" :key="i" class="pw__line">
+              <div class="pw__row">
+                <input
+                  class="cfn__expr"
+                  :value="ln.expr"
+                  placeholder="如 x^2、x+1、2x-1、1/x"
+                  @change="setPwLine(i, { expr: ($event.target as HTMLInputElement).value })"
+                />
+                <input
+                  class="cfn__color" type="color" :value="ln.color || mathfig?.stroke || '#1a1a1a'" title="这一段的颜色"
+                  @input="setPwLine(i, { color: ($event.target as HTMLInputElement).value })"
+                />
+                <select
+                  class="cfn__dash" :value="ln.dash || 'solid'" title="虚实"
+                  @change="setPwLine(i, { dash: ($event.target as HTMLSelectElement).value as 'solid' | 'dash' | 'dot' })"
+                >
+                  <option value="solid">实线</option>
+                  <option value="dash">虚线</option>
+                  <option value="dot">点线</option>
+                </select>
+                <button class="cfn__del" title="删掉这一段" @click="removePwLine(i)">×</button>
+              </div>
+              <div class="pw__row">
+                <span class="pw__t">区间</span>
+                <select
+                  class="pw__br" :value="ln.lc === false ? 'open' : 'close'"
+                  title="左端点的圆点：取到=实心，取不到=空心"
+                  @change="setPwLine(i, { lc: ($event.target as HTMLSelectElement).value === 'close' })"
+                >
+                  <option value="close">[</option>
+                  <option value="open">(</option>
+                </select>
+                <input
+                  class="pw__n" type="number" step="0.5" :value="ln.from" title="区间左端（写很大就等于 −∞）"
+                  @change="setPwLine(i, { from: num(($event.target as HTMLInputElement).value, 0) })"
+                />
+                <span class="pw__t">,</span>
+                <input
+                  class="pw__n" type="number" step="0.5" :value="ln.to" title="区间右端（写很大就等于 +∞）"
+                  @change="setPwLine(i, { to: num(($event.target as HTMLInputElement).value, 1) })"
+                />
+                <select
+                  class="pw__br" :value="ln.rc === false ? 'open' : 'close'"
+                  title="右端点的圆点：取到=实心，取不到=空心"
+                  @change="setPwLine(i, { rc: ($event.target as HTMLSelectElement).value === 'close' })"
+                >
+                  <option value="close">]</option>
+                  <option value="open">)</option>
+                </select>
+              </div>
+            </div>
+            <button class="quick__btn cfn__add" @click="addPwLine()">＋ 加一段</button>
+          </div>
+          <p v-if="pwBad" class="cfn__err">有一段表达式看不懂（那段不画，其它段照画）—— 支持 + − * / ^、括号、pi/e、sin/cos/tan/ln/sqrt/abs/exp…（2x 这种写法也认）</p>
+          <label class="field"><span>定义域（显示窗口 x）</span>
+            <span class="cfn__pair">
+              x ∈ [<input type="number" step="0.5" :value="pwCfg.x0" @change="setPw({ x0: num(($event.target as HTMLInputElement).value, -3) })" />,
+              <input type="number" step="0.5" :value="pwCfg.x1" @change="setPw({ x1: num(($event.target as HTMLInputElement).value, 4) })" />]
+            </span>
+          </label>
+          <label class="field"><span>值域（显示窗口 y）</span>
+            <span class="cfn__pair">
+              y ∈ [<input type="number" step="0.5" :value="pwCfg.y0" @change="setPw({ y0: num(($event.target as HTMLInputElement).value, -1) })" />,
+              <input type="number" step="0.5" :value="pwCfg.y1" @change="setPw({ y1: num(($event.target as HTMLInputElement).value, 5) })" />]
+            </span>
+          </label>
+          <label class="field field--row"><input type="checkbox" :checked="pwCfg.grid === true" @change="setPw({ grid: ($event.target as HTMLInputElement).checked })"> <span>网格</span></label>
+          <label class="field field--row"><input type="checkbox" :checked="pwCfg.axes !== false" @change="setPw({ axes: ($event.target as HTMLInputElement).checked })"> <span>坐标轴</span></label>
+          <label class="field field--row"><input type="checkbox" :checked="pwCfg.dots !== false" @change="setPw({ dots: ($event.target as HTMLInputElement).checked })"> <span>端点圆点（实心=取到，空心=取不到）</span></label>
+          <p class="cfn__hint">区间端点写很大（如 ±50）就等于 ±∞；**贴着取景框边**的端点不画圆点。改完在画布上直接拖缩放即可调整大小。</p>
+        </template>
         <!-- 可调参数（正弦型 A/ω/φ、含参二次的 a…） -->
         <button v-if="hasLineParams" class="figlib__btn" title="在曲线上加一个动点：拖动它只会沿曲线滑动（不会跑出曲线）" @click="addMovingPoint">＋ 在曲线上加动点</button>
         <button v-if="hasLineParams" class="figlib__btn" title="给最近的标注点作切线：切线会随该点自动转动（动点一滑、切线跟着转）" @click="addTangent">＋ 过标注点作切线</button>
@@ -2029,6 +2139,17 @@ function layerTypeLabel(type: string) {
 .fm__cell input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .fm__cell input[type="checkbox"] { display: block; margin: 5px 2px 6px 4px; }
 /* 多函数列表：每行 = 表达式 + 颜色 + 虚实 + 线宽 + 删除 */
+/* 分段函数：一段两行（表达式 / 区间）+ 颜色、虚实 */
+.pw__line { border: 1px solid var(--gray-300); background: var(--gray-50); border-radius: 7px; padding: 4px 5px; }
+.pw__row { display: flex; align-items: center; gap: 4px; }
+.pw__row + .pw__row { margin-top: 3px; }
+/* ⚠ 这一行里控件多（表达式/颜色/虚实/删除），必须**只让表达式伸缩**：
+   不然颜色框会被挤成一条线、删除按钮被挤出面板（截图才发现） */
+.pw__row > * { flex: none; }
+.pw__row > .cfn__expr { flex: 1 1 0; min-width: 0; }
+.pw__row > .pw__n { flex: 1 1 0; min-width: 40px; }
+.pw__t { color: var(--muted); font-size: 11px; }
+.pw__br { width: 34px; padding: 0 2px; }
 .cfn__lines { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .cfn__line { display: flex; align-items: center; gap: 6px; }
 .cfn__line .cfn__expr { flex: 1; min-width: 0; }

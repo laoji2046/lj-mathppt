@@ -356,7 +356,7 @@ export type MathFigureKind =
   | 'custom'
   | 'linear' | 'parabola' | 'cubic' | 'absolute' | 'sqrt' | 'reciprocal' | 'hook'
   | 'tangent' | 'sine' | 'cosine' | 'sinusoid' | 'exponential' | 'expDecay' | 'logarithm' | 'normal'
-  | 'piecewise' | 'paramQuadratic' | 'paramAbs'
+  | 'piecewise' | 'paramQuadratic' | 'paramAbs' | 'piecewiseFn'
   // ---- 圆锥曲线 ----
   | 'conicCircle' | 'ellipse' | 'hyperbola' | 'conicParabola' | 'conicFocusDir'
   | 'ellipseV' | 'hyperbolaV' | 'conicParabolaV' | 'conicCircleY'
@@ -390,6 +390,7 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   { v: 'cosine', label: '余弦 y=cos x', cat: '函数图像' },
   { v: 'sinusoid', label: '正弦型 y=Asin(ωx+φ)（可调参数）', cat: '函数图像' },
   { v: 'piecewise', label: '分段函数（实心/空心点）', cat: '函数图像' },
+  { v: 'piecewiseFn', label: '自定义分段函数（每段自己写）', cat: '函数图像' },
   { v: 'paramQuadratic', label: '含参二次 y=x²−2ax+1（可调 a）', cat: '函数图像' },
   { v: 'paramAbs', label: '含参绝对值 y=|x−a|（可调 a）', cat: '函数图像' },
   { v: 'custom', label: '自定义函数（空白）', cat: '函数图像' },
@@ -605,6 +606,9 @@ export interface MathFigureElement extends ElementBase {
     grid?: boolean
     axes?: boolean
   }
+  /** 自定义分段函数：每段一个表达式 + 一个区间，端点取到画实心点、取不到画空心点。
+   *  表达式语法同 custom（见 mathPlot.compileExpr） */
+  pw?: import('@/composables/mathPlot').PiecewiseFn
   /** 由「三维立体图」生成时的模型上下文 —— 用来「回到弹窗继续改视角 / 改模型」。
    *  投影结果（points / mesh / vlabels）本来就在本元素上，这里存的是**源模型**。 */
   geom3d?: {

@@ -914,7 +914,7 @@ onBeforeUnmount(() => {
   <VersionHistory v-if="versionOpen" @close="versionOpen = false" />
     <SaveAsDialog v-if="saveAsOpen" :name="saveAsName" :text="saveAsText" @close="saveAsOpen = false" @saved="onDeckSaved" />
   <DeckLibraryDialog v-if="deckLibOpen" @close="deckLibOpen = false" />
-  <QuestionBankDialog v-if="qbLibOpen" @close="qbLibOpen = false" @insert="onBankInsertFromToolbar" />
+  <QuestionBankDialog v-if="qbLibOpen" manage-only @close="qbLibOpen = false" @insert="onBankInsertFromToolbar" />
   <SettingsPanel v-if="settingsOpen" @close="settingsOpen = false" />
   <FormulaInserter v-if="formulaModalOpen" @close="formulaModalOpen = false" />
   <FormulaLibrary v-if="formulaLib.open" @close="closeFormulaLibrary()" />

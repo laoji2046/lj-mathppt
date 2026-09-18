@@ -998,12 +998,16 @@ const qbOpen = ref(false)
  * 试题库 → 组卷：把选题文本插到试卷正文末尾。
  * 插完**不关窗** —— 组卷通常是连续选好几道题。
  */
-function onQuestionInsert(text: string, id: number) {
-  const sep = input.value && !input.value.endsWith('\n') ? '\n\n' : ''
-  input.value += sep + text + '\n'
+function onQuestionInsert(text: string, id: number, label?: string) {
+  const body = input.value
+  const sep = body && !body.endsWith('\n') ? '\n\n' : ''
+  // 整套 / 组卷（id=0）插到**已经有内容**的正文后面时，先手动分页：
+  // 每套卷子各自从新的一页开始，题号各从 1 起才讲得通（否则两套 1.2.3. 混在一页 ✗）
+  const brk = id === 0 && body.trim() ? '[分页]\n' : ''
+  input.value += sep + brk + text + '\n'
   render()
   saveDraftSoon()
-  paperMsg.value = '已插入试题 #' + id + ' ✓（可继续选下一道）'
+  paperMsg.value = '已插入' + (label ? ' ' + label : id ? ' 试题 #' + id : '') + ' ✓（可继续选下一道）'
 }
 
 /**

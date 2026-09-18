@@ -7,7 +7,7 @@ import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type { MathFigureCat, MathFigureElement, MathFigureKind, SlideElement } from '@/types'
 import { createElement, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS } from '@/types'
-import { figureBox, viewAspect } from '@/composables/mathPlot'
+import { DEFAULT_PIECEWISE, figureBox, viewAspect } from '@/composables/mathPlot'
 import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
 import { openVectorize } from '@/ui/vectorize'
 import { openGeom3D } from '@/ui/geom3d'
@@ -47,6 +47,23 @@ function previewFit(kind: MathFigureKind): 'stretch' | 'contain' {
   return viewAspect(kind) ? 'contain' : 'stretch'
 }
 
+/** 插入（或按"真元素"渲染供 PDF 用）时每个 kind 要带的**额外字段**。
+ *  ⚠ 以前这份默认值在这里写了两遍（insert 与 realElOfKind 各一份）——
+ *     加了新 kind 只改一处，画布插入的元素就**少了配置**（面板靠兜底默认值才没露馅）✗。
+ *     现在两个入口共用这一份。 */
+function extraOfKind(kind: MathFigureKind): Record<string, unknown> {
+  if (kind === 'custom') {
+    return { custom: { expr: 'x^2-2x+1', x0: -2, x1: 4, y0: -2, y1: 6, grid: true, axes: true }, w: 420, h: 300 }
+  }
+  if (kind === 'piecewiseFn') {
+    // 分段函数：默认给"经典两段"（x² 在 x<0、x+1 在 x≥0），线条数据要**深拷一份**，
+    // 否则改一个元素的段会顺手改掉 DEFAULT_PIECEWISE，后面插入的都跟着变 ✗
+    return { pw: { ...DEFAULT_PIECEWISE, lines: DEFAULT_PIECEWISE.lines.map((l) => ({ ...l })) }, w: 440, h: 300 }
+  }
+  if (kind === 'normal') return { w: 460, h: 300 }
+  return {}
+}
+
 /** 面板里每张卡片自己的图形名（给"插入到 PDF 文档"当图注用） */
 function labelOf(kind: MathFigureKind): string {
   return MATH_FIGURE_OPTIONS.find((o) => o.v === kind)?.label || String(kind)
@@ -81,9 +98,7 @@ async function grabByRealRender(e: SlideElement): Promise<SVGSVGElement | null> 
 
 /** 按"真正插入"的参数造元素（kind 与复刻图各一条） */
 function realElOfKind(kind: MathFigureKind): SlideElement {
-  const extra = kind === 'custom'
-    ? { custom: { expr: 'x^2-2x+1', x0: -2, x1: 4, y0: -2, y1: 6, grid: true, axes: true }, w: 420, h: 300 }
-    : {}
+  const extra = extraOfKind(kind)
   const el = createElement('mathfig', { x: 0, y: 0 })
   Object.assign(el, { kind, ...(figureBox(kind) || {}), ...extra })
   return el
@@ -113,11 +128,7 @@ function insert(kind: MathFigureKind) {
   // C 方案：正态密度曲线给固定框 460x300 ✓（照 custom 的先例 ✓）
   //   它的视图宽高比约 5:0.5 ✓ → figureBox 被 minH 顶成极宽极矮的元素 ✗
   //   曲线忠实画进去就显扁 ✓。固定后竖直方向略作夸张 ✓ 接近教科书示意 ✓。
-  const extra = kind === 'custom'
-    ? { custom: { expr: 'x^2-2x+1', x0: -2, x1: 4, y0: -2, y1: 6, grid: true, axes: true }, w: 420, h: 300 }
-    : kind === 'normal'
-      ? { w: 460, h: 300 }
-      : {}
+  const extra = extraOfKind(kind)
   store.addElement('mathfig', { kind, ...(box || {}), ...extra } as any)
   emit('close')
 }
