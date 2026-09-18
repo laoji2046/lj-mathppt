@@ -5,6 +5,7 @@ import { lineDashCss } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
 import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg, vertexDotsSvg } from '@/composables/solid3d'
 import { CONIC_KINDS, DEFAULT_PIECEWISE, FUNCTION_KINDS, conicFigure, conicLineDrag, conicLineHandles, conicPointDrag, conicPointHandles, customFigure, functionFigure, piecewiseFigure } from '@/composables/mathPlot'
+import { isPlaneCtrlKind, planeDrag, planeHandles, planeSvg } from '@/composables/planeCtrl'
 import { solidSel, selectSolidVertex, selectSolidEdge, selectSolidFace, clearSolidSel } from '@/composables/solidSel'
 
 const props = defineProps<{ el: MathFigureElement; selected?: boolean; /** 预览用：等比缩放（contain）而不是拉伸（stretch） */ fit?: 'stretch' | 'contain' }>()
@@ -79,6 +80,13 @@ const innerHtml = computed(() => {
       return '<text x="' + w / 2 + '" y="' + h / 2 + '" text-anchor="middle" fill="#c0392b" font-size="' + fs2.toFixed(1) + '">表达式无法解析</text>'
     }
     return svg
+  }
+  // 带控制点的平面图形：平行四边形（边长/夹角）、圆弧（圆心+圆心角 / 过三点）、指定半径的圆。
+  // 没有 ctrl 时用默认控制点 —— 默认值与老版"平行四边形"的顶点**完全一致**，老图元外观不变。
+  if (isPlaneCtrlKind(kind)) {
+    return planeSvg(kind, w, h, props.el.ctrl, {
+      stroke, sw: s, dash, fill: kind === 'parallelogram' || kind === 'circleR' ? fillColor : 'none',
+    }, props.el.arcSweep)
   }
   if (FUNCTION_KINDS.includes(kind)) return functionFigure(kind, w, h, stroke, s, props.el.params)
   if (CONIC_KINDS.includes(kind)) {
@@ -450,6 +458,32 @@ function onPointHandleMove(e: PointerEvent) {
 }
 function onPointHandleUp() { dragPointIdx = -1; dragPointPos.value = null; dragging.value = false }
 
+// ---- 平面图形的**控制点**拖拽（平行四边形 / 圆弧 / 指定半径的圆） ----
+const ctrlHandles = computed(() =>
+  isPlaneCtrlKind(props.el.kind) ? planeHandles(props.el.kind, props.el.w, props.el.h, props.el.ctrl, props.el.arcSweep) : [])
+const showCtrlHandles = computed(() => !!props.selected && ctrlHandles.value.length > 0)
+let dragCtrlIdx = -1
+function onCtrlHandleDown(e: PointerEvent, i: number) {
+  e.stopPropagation()
+  const t = e.currentTarget as HTMLElement
+  try { t.setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
+  dragCtrlIdx = i
+  dragging.value = true
+}
+function onCtrlHandleMove(e: PointerEvent) {
+  if (dragCtrlIdx < 0 || !dragging.value) return
+  const r = box.value?.getBoundingClientRect()
+  if (!r || !r.width || !r.height) return
+  // 不夹在元素框内：控制点拖出去也行（形状会跟到框外，与圆锥曲线的端点一致）
+  const px = ((e.clientX - r.left) / r.width) * props.el.w
+  const py = ((e.clientY - r.top) / r.height) * props.el.h
+  const p = planeDrag(props.el.kind, props.el.w, props.el.h, props.el.ctrl, dragCtrlIdx, px, py, props.el.arcSweep)
+  const patch: Partial<SlideElement> = { ctrl: p.ctrl }
+  if (p.arcSweep !== undefined) patch.arcSweep = p.arcSweep
+  emit('update', patch)
+}
+function onCtrlHandleUp() { dragCtrlIdx = -1; dragging.value = false }
+
 
 
 function segDist(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
@@ -594,6 +628,19 @@ function onSvgDbl(e: MouseEvent) {
         @pointercancel="onLineHandleUp"
       ></span>
     </template>
+    <template v-if="showCtrlHandles">
+      <span
+        v-for="(h, hi) in ctrlHandles"
+        :key="'ch' + hi"
+        class="mf-handle mf-handle--ctrl"
+        :style="{ left: h.x + 'px', top: h.y + 'px' }"
+        :title="'拖动控制点 ' + (hi + 1)"
+        @pointerdown.stop="onCtrlHandleDown($event, h.i)"
+        @pointermove="onCtrlHandleMove"
+        @pointerup="onCtrlHandleUp"
+        @pointercancel="onCtrlHandleUp"
+      ></span>
+    </template>
     <template v-if="showPointHandles">
       <span
         v-for="(h, hi) in pointHandles"
@@ -633,6 +680,9 @@ function onSvgDbl(e: MouseEvent) {
 .mf-handle--line:hover { background: #e8f8f0; }
 /* 「标注点」的手柄：橙色实心，跟绿方（线端点）、蓝圆（顶点）区分 */
 .mf-handle--pt { background: #ff8f1f; border-color: #fff; cursor: grab; }
+/* 平面图形的控制点：蓝色，与圆锥曲线的橙色标注点区分开 */
+.mf-handle--ctrl { background: #1668e0; border-color: #fff; cursor: grab; }
+.mf-handle--ctrl:hover { background: #3a86ff; transform: scale(1.18); }
 .mf-handle--pt:hover { background: #ffab52; transform: scale(1.15); }
 .mf-vlabel {
   position: absolute; z-index: 5;

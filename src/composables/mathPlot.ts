@@ -1622,8 +1622,10 @@ export const CONIC_KINDS = Object.keys(CONICS)
 /** 视图宽高比（宽/高） */
 export function viewAspect(kind: string): number | null {
   const v = FUNCTIONS[kind]?.view ?? CONICS[kind]?.view
-  if (!v) return null
-  return (v.xmax - v.xmin) / (v.ymax - v.ymin)
+  if (v) return (v.xmax - v.xmin) / (v.ymax - v.ymin)
+  // 带控制点的平面图形（圆弧 / 指定半径圆）：给 6:5 的框 —— 圆与圆弧才不会被压成椭圆
+  if (kind === 'arcAngle' || kind === 'arc3pt' || kind === 'circleR') return 1.2
+  return null
 }
 
 /**

@@ -366,6 +366,7 @@ export type MathFigureKind =
   | 'coordinate' | 'numberline' | 'venn' | 'righttriangle' | 'angle' | 'semicircle'
   | 'triangle' | 'rectangle' | 'circle' | 'pentagon' | 'hexagon' | 'rhombus' | 'kite' | 'angledrect'
   | 'parallelogram' | 'trapezoid' | 'star' | 'bezier' | 'polygon'
+  | 'arcAngle' | 'arc3pt' | 'circleR'
   // ---- 3D 立体几何 ----
   | 'cube' | 'cuboid' | 'cylinder' | 'cone' | 'sphere' | 'pyramid' | 'prism' | 'tetrahedron'
   | 'frustum' | 'pyraFrustum' | 'dihedral' | 'isoaxis'
@@ -434,7 +435,10 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   { v: 'pentagon', label: '五边形', cat: '平面图形' },
   { v: 'hexagon', label: '正六边形', cat: '平面图形' },
   { v: 'rhombus', label: '菱形', cat: '平面图形' },
-  { v: 'parallelogram', label: '平行四边形', cat: '平面图形' },
+  { v: 'parallelogram', label: '平行四边形（可拖边长/夹角）', cat: '平面图形' },
+  { v: 'arcAngle', label: '圆弧（圆心 + 圆心角）', cat: '平面图形' },
+  { v: 'arc3pt', label: '圆弧（过三点）', cat: '平面图形' },
+  { v: 'circleR', label: '圆（圆心 + 指定半径）', cat: '平面图形' },
   { v: 'trapezoid', label: '梯形', cat: '平面图形' },
   { v: 'star', label: '五角星', cat: '平面图形' },
   { v: 'bezier', label: '贝塞尔曲线', cat: '平面图形' },
@@ -606,6 +610,15 @@ export interface MathFigureElement extends ElementBase {
     grid?: boolean
     axes?: boolean
   }
+  /** **平面图形的控制点**（归一化 0..1，随元素框缩放）：
+   *  平行四边形 = [B, D]（A 固定，两条邻边 → 边长与夹角）；
+   *  圆弧（圆心+圆心角）= [圆心, 起点, 终点]；过三点的弧 = [A, B, C]；
+   *  指定半径的圆 = [圆心, 圆上一点]。半径/长度一律在**像素**里算，圆不会被压扁。
+   *  不填 → 用 planeCtrl 里那套默认值（老图元外观与以前逐字相同）。 */
+  ctrl?: { x: number; y: number }[]
+  /** 圆弧的**圆心角**（度，带符号，可到 ±360）：两个端点定不出"长弧还是短弧"，所以单独存一个数。
+   *  不填 → 按 (−180,180] 的短弧解释。 */
+  arcSweep?: number
   /** 自定义分段函数：每段一个表达式 + 一个区间，端点取到画实心点、取不到画空心点。
    *  表达式语法同 custom（见 mathPlot.compileExpr） */
   pw?: import('@/composables/mathPlot').PiecewiseFn

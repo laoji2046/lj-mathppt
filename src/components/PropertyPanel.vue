@@ -19,6 +19,7 @@ import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
 import { openShapeEdit } from '@/ui/shapeEditor'
 import { DEFAULT_PIECEWISE, compileExpr, conicLineIntersections, conicPointPos, figureParams, withParams, type PiecewiseLine, type PointLink } from '@/composables/mathPlot'
+import { isPlaneCtrlKind, planeNumbers, setPlaneNumber, type PlaneNum } from '@/composables/planeCtrl'
 import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type EdgeStyle, type FaceStyle } from '@/composables/solid3d'
 import { solidSel } from '@/composables/solidSel'
 import { openImageEditor } from '@/ui/imageEditor'
@@ -399,6 +400,22 @@ function addPwLine() {
 function removePwLine(i: number) {
   const list = pwLines.value.filter((_, k) => k !== i).map((x) => ({ ...x }))
   setPwLines(list.length ? list : [{ expr: 'x', from: -1, to: 1, lc: true, rc: true }])
+}
+
+/** ── 平面图形控制点：平行四边形（边长/夹角）、圆弧（半径/起始角/圆心角）、指定半径的圆 ── */
+const planeKind = computed(() => (isPlaneCtrlKind(String(mathfig.value?.kind || '')) ? String(mathfig.value?.kind) : ''))
+const planeTitle = computed(() => (planeKind.value === 'parallelogram' ? '平行四边形' : planeKind.value === 'circleR' ? '圆' : '圆弧'))
+const planeNums = computed<PlaneNum[]>(() => {
+  const m = mathfig.value
+  return m && planeKind.value ? planeNumbers(planeKind.value, m.w, m.h, m.ctrl, m.arcSweep) : []
+})
+function setPlaneNum(key: PlaneNum['key'], val: number) {
+  const m = mathfig.value
+  if (!m) return
+  const p = setPlaneNumber(String(m.kind), m.w, m.h, m.ctrl, key, val, m.arcSweep)
+  const next: Partial<SlideElement> = { ctrl: p.ctrl }
+  if (p.arcSweep !== undefined) next.arcSweep = p.arcSweep
+  patch(next)
 }
 
 /** 「三维立体图」生成的元素：带着源模型回到那个弹窗，继续改视角 / 改模型 */
@@ -1297,6 +1314,29 @@ function layerTypeLabel(type: string) {
           <label class="field field--row"><input type="checkbox" :checked="mathfig.custom?.grid !== false" @change="setCustom({ grid: ($event.target as HTMLInputElement).checked })"> <span>网格</span></label>
           <label class="field field--row"><input type="checkbox" :checked="mathfig.custom?.axes !== false" @change="setCustom({ axes: ($event.target as HTMLInputElement).checked })"> <span>坐标轴</span></label>
           <p class="cfn__hint">值域就是显示窗口的 y 范围；改完在画布上直接拖缩放即可调整大小。</p>
+        </template>
+
+        <!-- 平面图形控制点：平行四边形（边长/夹角）、圆弧（半径/起始角/圆心角）、指定半径的圆 -->
+        <template v-if="planeKind">
+          <div class="fbox">
+            <span class="fbox__t">{{ planeTitle }}</span>
+            <div class="fm">
+              <label
+                v-for="n in planeNums" :key="n.key" class="fm__cell"
+                :title="n.editable ? '可以直接输入数值（单位 ' + n.unit + '）' : '由三点算出来的，不能直接改'"
+              >
+                <i>{{ n.label }}</i>
+                <input
+                  type="number" :step="n.step" :value="n.value" :disabled="!n.editable"
+                  @change="setPlaneNum(n.key, num(($event.target as HTMLInputElement).value, n.value))"
+                />
+              </label>
+            </div>
+          </div>
+          <p v-if="planeKind === 'arc3pt' && !planeNums[0].value" class="cfn__err">三点共线 → 定不出圆，先画一条虚线；把控制点拖开就好。</p>
+          <p class="cfn__hint">
+            选中图形后拖 <b>蓝色控制点</b> 就能改形状<template v-if="planeKind === 'parallelogram'">（A 点固定，两个控制点 B、D 就是两条邻边 —— 拖它们＝改边长与夹角）</template><template v-else-if="planeKind === 'arcAngle'">（圆心 / 起点 / 终点各一个；拖终点就是改圆心角）</template><template v-else-if="planeKind === 'circleR'">（圆心 + 圆上一点；拖圆上那点就是改半径，也可以直接输入半径）</template><template v-else>（三个控制点是圆弧经过的三点）</template>。
+          </p>
         </template>
 
         <!-- 自定义分段函数：每段 = 表达式 + 区间 + 两端点开闭（取到=实心点，取不到=空心点） -->
