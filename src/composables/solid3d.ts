@@ -194,11 +194,14 @@ export function arcsSvg(arcs: FigureArc[] | undefined, w: number, h: number, str
   return out
 }
 
-export const SOLID_KINDS = ['cube', 'cubeOblique', 'cuboid', 'cuboidOblique', 'pyramid', 'pyramidOblique', 'prism', 'prismOblique', 'tetrahedron', 'pyraFrustum', 'octahedron', 'hexPrism', 'obliquePrism', 'triFrustum', 'hexPrismOblique'] as const
+export const SOLID_KINDS = ['cube', 'cubeOblique', 'cuboid', 'cuboidOblique', 'pyramid', 'pyramidOblique', 'prism', 'prismOblique', 'tetrahedron', 'pyraFrustum', 'octahedron', 'hexPrism', 'obliquePrism', 'triFrustum', 'hexPrismOblique',
+  // 必修二 立体几何定理图形（线面平行判定/性质、面面垂直判定/性质）
+  'thmLinePlanePara', 'thmLinePlaneProp', 'thmPlanePlanePerp', 'thmPlanePlaneProp'] as const
 export const SOLID_VCOUNT: Record<string, number> = {
   cube: 8, cubeOblique: 8, cuboid: 8, cuboidOblique: 8, pyramid: 5, pyramidOblique: 5, prism: 6, prismOblique: 6,
   tetrahedron: 4, pyraFrustum: 8,
   octahedron: 6, hexPrism: 12, hexPrismOblique: 12, obliquePrism: 8, triFrustum: 6,
+  thmLinePlanePara: 8, thmLinePlaneProp: 10, thmPlanePlanePerp: 8, thmPlanePlaneProp: 12,
 }
 
 type Edge = [number, number, 0 | 1]
@@ -226,6 +229,11 @@ const FACES: Record<string, number[][]> = {
   triFrustum: [[0, 1, 2], [0, 1, 4, 3], [2, 0, 3, 5], [1, 2, 5, 4], [3, 4, 5]],
   // 斜二测正六棱柱：0-5 顶环、6-11 底环；可见面 = 顶面 + 三个"朝前"的侧面
   hexPrismOblique: [[0, 1, 2, 3, 4, 5], [3, 4, 10, 9], [4, 5, 11, 10], [5, 0, 6, 11]],
+  // 定理图形：把"平面 α / 平面 β"作为可填充的四边形（其余是线，见 EDGES）
+  thmLinePlanePara: [[0, 1, 2, 3]],
+  thmLinePlaneProp: [[0, 1, 2, 3], [4, 5, 6, 7]],
+  thmPlanePlanePerp: [[0, 1, 2, 3], [4, 6, 7, 5]],
+  thmPlanePlaneProp: [[0, 1, 2, 3], [4, 5, 6, 7]],
 }
 const FOP: Record<string, number[]> = {
   cube: [0.8, 0.62, 1], cubeOblique: [0.8, 0.62, 1], cuboid: [0.8, 0.62, 1], cuboidOblique: [0.8, 0.62, 1],
@@ -240,6 +248,10 @@ const FOP: Record<string, number[]> = {
   hexPrism: [0.35, 0.5, 0.6, 0.6, 0.85, 0.85, 0.9, 0.9],
   triFrustum: [0.35, 0.7, 0.7, 0.9, 0.9],
   hexPrismOblique: [1, 0.62, 0.8, 0.9],
+  thmLinePlanePara: [0.22],
+  thmLinePlaneProp: [0.22, 0.16],
+  thmPlanePlanePerp: [0.22, 0.16],
+  thmPlanePlaneProp: [0.22, 0.16],
 }
 /** 某立体的边表 [起,止,隐藏(1=图形中被遮挡)] —— 编辑器命中检测与渲染共用 */
 export function solidEdges(kind: string): Edge[] { return EDGES[kind] || [] }
@@ -298,6 +310,17 @@ const EDGES: Record<string, Edge[]> = {
     [0, 6, 0], [1, 7, 1], [2, 8, 1], [3, 9, 0], [4, 10, 0], [5, 11, 0],
     [6, 7, 1], [7, 8, 1], [8, 9, 1], [9, 10, 0], [10, 11, 0], [11, 6, 0],
   ],
+  // ① 线面平行判定：平面 α(0-3) + α 内的直线 a(4,5) + α 外的直线 b(6,7)，a ∥ b ∥ AB
+  thmLinePlanePara: [[0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 0, 0], [4, 5, 0], [6, 7, 0]],
+  // ② 线面平行性质：平面 α(0-3)、交线 b(4,5)、过 b 的平面 β(4,5,6,7)、β 内与 b 平行的 a(8,9)
+  thmLinePlaneProp: [[0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 0, 0], [4, 5, 0], [5, 6, 0], [6, 7, 0], [7, 4, 0], [8, 9, 0]],
+  // ③ 面面垂直判定：平面 α(0-3)、α 的垂线 l(4-5)、过 l 的平面 β(4,6,7,5)
+  thmPlanePlanePerp: [[0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 0, 0], [4, 5, 0], [4, 6, 0], [6, 7, 0], [7, 5, 0]],
+  // ④ 面面垂直性质：平面 α(0-3)、交线 m(4-5)、平面 β(4,5,6,7)、β 内垂直 m 的 a(8,9) + 直角记号(10,11)
+  thmPlanePlaneProp: [
+    [0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 0, 0], [4, 5, 0], [5, 6, 0], [6, 7, 0], [7, 4, 0],
+    [8, 9, 0], [8, 10, 0], [10, 11, 0],
+  ],
 }
 
 /** 斜二测投影系数：水平面里"往里"1 个单位，画成 45° 朝右上、长度减半 */
@@ -315,6 +338,25 @@ function obliqPlacer(plane: [number, number][], hh: number, w: number, h: number
   const ox = (w - (maxX - minX) * k) / 2 - minX * k
   const oy = (h - (maxY - minY) * k) / 2 - minY * k
   return (x: number, y: number, z = 0): [number, number] => [x * k + y * OBLIQ * k + ox, oy - y * OBLIQ * k - z * k]
+}
+
+/** 定理图形里的"平面"：一个平行四边形（俯视平面）。x0,y0 = 前左下角；w2 宽；d2 进深（朝右上 45°） */
+function planeQuad(x0: number, y0: number, w2: number, d2: number): [number, number][] {
+  const dx = d2 * Math.SQRT1_2, dy = -d2 * Math.SQRT1_2
+  return [[x0, y0], [x0 + w2, y0], [x0 + w2 + dx, y0 + dy], [x0 + dx, y0 + dy]]
+}
+
+/** 必修二立体几何**定理图形的默认字母**（插进来就带着，可再改）。
+ *  索引 = 顶点序号；null = 不标。α / β 标在平面角上，a / b / l / m 标在直线的端点。 */
+export const THM_LABELS: Record<string, (string | null)[]> = {
+  // ① 线面平行判定：α(2)、a(5)、b(7)
+  thmLinePlanePara: [null, null, 'α', null, null, 'a', null, 'b'],
+  // ② 线面平行性质：α(2)、b(5)、β(6)、a(9)
+  thmLinePlaneProp: [null, null, 'α', null, null, 'b', 'β', null, null, 'a'],
+  // ③ 面面垂直判定：α(2)、O(4)、l(5)、β(7)
+  thmPlanePlanePerp: [null, null, 'α', null, 'O', 'l', null, 'β'],
+  // ④ 面面垂直性质：α(2)、m(5)、β(6)、a(9)
+  thmPlanePlaneProp: [null, null, 'α', null, null, 'm', 'β', null, null, 'a', null, null],
 }
 
 /** 生成某立体在当前 w/h/depth 下的默认归一化顶点（与原几何一致） */
@@ -365,6 +407,30 @@ export function solidVerts(kind: string, w: number, h: number, depth?: number): 
     }
     const at = obliqPlacer(plane, HH, w, h)
     c = [...plane.map(([x, y]) => at(x, y, HH)), ...plane.map(([x, y]) => at(x, y))]
+  } else if (kind === 'thmLinePlanePara') {
+    // ① 线面平行判定：平面 α(0-3)、α 内的直线 a(4,5)、α 外的直线 b(6,7)；a ∥ b ∥ AB
+    const q = planeQuad(w * 0.06, h * 0.84, w * 0.60, h * 0.34)
+    c = [...q, [w * 0.24, h * 0.70], [w * 0.56, h * 0.70], [w * 0.30, h * 0.24], [w * 0.62, h * 0.24]]
+  } else if (kind === 'thmLinePlaneProp') {
+    // ② 线面平行性质：α(0-3)、交线 b(4,5)、过 b 的平面 β(4,5,6,7)、β 内与 b 平行的 a(8,9)
+    const q = planeQuad(w * 0.04, h * 0.86, w * 0.60, h * 0.30)
+    const bx0 = w * 0.34, bx1 = w * 0.66, by = h * 0.70, ty = h * 0.18
+    // a 与 b **同向平行**、整条落在 β 内（平行四边形的上边与下边等长，所以 a 只能比 b 略短）
+    c = [...q, [bx0, by], [bx1, by], [bx1, ty], [bx0, ty], [bx0 + w * 0.05, h * 0.34], [bx1 - w * 0.05, h * 0.34]]
+  } else if (kind === 'thmPlanePlanePerp') {
+    // ③ 面面垂直判定：α(0-3)、α 的垂线 l(4→5)、过 l 的平面 β(4,6,7,5)
+    const q = planeQuad(w * 0.04, h * 0.86, w * 0.58, h * 0.30)
+    const ox = w * 0.38, oy = h * 0.72, rx = w * 0.64, uy = h * 0.62
+    const ly = h * 0.16
+    c = [...q, [ox, oy], [ox, ly], [rx, uy], [rx, uy - (oy - ly)]]
+  } else if (kind === 'thmPlanePlaneProp') {
+    // ④ 面面垂直性质：α(0-3)、交线 m(4,5)、平面 β(4,5,6,7)、β 内垂直 m 的 a(8,9)、直角记号(10,11)
+    const q = planeQuad(w * 0.04, h * 0.88, w * 0.56, h * 0.28)
+    const mx0 = w * 0.32, mx1 = w * 0.62, my = h * 0.72, ty = h * 0.16
+    const ax = w * 0.44
+    c = [...q, [mx0, my], [mx1, my], [mx1, ty], [mx0, ty],
+      [ax, my], [ax, h * 0.30],
+      [ax + w * 0.03, my], [ax + w * 0.03, my - h * 0.04]]
   } else if (kind === 'cube' || kind === 'cuboid') {
     const d = (depth ?? 0.4) * Math.min(w, h) * 0.4, dx = d, dy = -d * 0.8
     const side = kind === 'cube' ? Math.min(w, h) * 0.62 : 0

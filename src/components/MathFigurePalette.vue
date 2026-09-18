@@ -8,6 +8,7 @@ import { useDeckStore } from '@/stores/deck'
 import type { MathFigureCat, MathFigureElement, MathFigureKind, SlideElement } from '@/types'
 import { createElement, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS } from '@/types'
 import { DEFAULT_PIECEWISE, figureBox, viewAspect } from '@/composables/mathPlot'
+import { THM_LABELS } from '@/composables/solid3d'
 import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
 import { openVectorize } from '@/ui/vectorize'
 import { openGeom3D } from '@/ui/geom3d'
@@ -61,6 +62,9 @@ function extraOfKind(kind: MathFigureKind): Record<string, unknown> {
     return { pw: { ...DEFAULT_PIECEWISE, lines: DEFAULT_PIECEWISE.lines.map((l) => ({ ...l })) }, w: 440, h: 300 }
   }
   if (kind === 'normal') return { w: 460, h: 300 }
+  // 必修二定理图形：插进来就带默认字母（α、β、a、b、l、m），并且给个宽一点的框
+  const thm = THM_LABELS[kind as string]
+  if (thm) return { vlabels: [...thm], w: 420, h: 260 }
   return {}
 }
 
