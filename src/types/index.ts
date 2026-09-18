@@ -371,7 +371,7 @@ export type MathFigureKind =
   | 'cube' | 'cubeOblique' | 'cuboid' | 'cuboidOblique' | 'cylinder' | 'cone' | 'sphere'
   | 'pyramid' | 'pyramidOblique' | 'prism' | 'prismOblique' | 'tetrahedron'
   | 'frustum' | 'pyraFrustum' | 'dihedral' | 'isoaxis'
-  | 'octahedron' | 'hexPrism' | 'obliquePrism' | 'triFrustum'
+  | 'octahedron' | 'hexPrism' | 'hexPrismOblique' | 'obliquePrism' | 'triFrustum'
   // ---- 辅助线 / 标注 ----
   | 'auxLine' | 'rightAngle' | 'equalMark' | 'parallelMark' | 'angleArc' | 'section'
 
@@ -451,6 +451,7 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   { v: 'cubeOblique', label: '正方体（斜二测画法·顶点可拖）', cat: '立体几何' },
   { v: 'pyramidOblique', label: '四棱锥（斜二测画法·顶点可拖）', cat: '立体几何' },
   { v: 'prismOblique', label: '三棱柱（斜二测画法·顶点可拖）', cat: '立体几何' },
+  { v: 'hexPrismOblique', label: '正六棱柱（斜二测画法·顶点可拖）', cat: '立体几何' },
   { v: 'cuboid', label: '长方体', cat: '立体几何' },
   { v: 'cuboidOblique', label: '长方体（斜二测画法·顶点可拖）', cat: '立体几何' },
   { v: 'cylinder', label: '圆柱', cat: '立体几何' },

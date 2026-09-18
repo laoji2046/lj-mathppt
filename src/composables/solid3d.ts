@@ -194,11 +194,11 @@ export function arcsSvg(arcs: FigureArc[] | undefined, w: number, h: number, str
   return out
 }
 
-export const SOLID_KINDS = ['cube', 'cubeOblique', 'cuboid', 'cuboidOblique', 'pyramid', 'pyramidOblique', 'prism', 'prismOblique', 'tetrahedron', 'pyraFrustum', 'octahedron', 'hexPrism', 'obliquePrism', 'triFrustum'] as const
+export const SOLID_KINDS = ['cube', 'cubeOblique', 'cuboid', 'cuboidOblique', 'pyramid', 'pyramidOblique', 'prism', 'prismOblique', 'tetrahedron', 'pyraFrustum', 'octahedron', 'hexPrism', 'obliquePrism', 'triFrustum', 'hexPrismOblique'] as const
 export const SOLID_VCOUNT: Record<string, number> = {
   cube: 8, cubeOblique: 8, cuboid: 8, cuboidOblique: 8, pyramid: 5, pyramidOblique: 5, prism: 6, prismOblique: 6,
   tetrahedron: 4, pyraFrustum: 8,
-  octahedron: 6, hexPrism: 12, obliquePrism: 8, triFrustum: 6,
+  octahedron: 6, hexPrism: 12, hexPrismOblique: 12, obliquePrism: 8, triFrustum: 6,
 }
 
 type Edge = [number, number, 0 | 1]
@@ -224,6 +224,8 @@ const FACES: Record<string, number[][]> = {
   hexPrism: [[6, 7, 8, 9, 10, 11], [4, 5, 11, 10], [3, 4, 10, 9], [5, 0, 6, 11], [0, 1, 7, 6], [2, 3, 9, 8], [1, 2, 8, 7], [0, 1, 2, 3, 4, 5]],
   // 正三棱台：底 / 左后侧 / 右后侧 / 前面 / 顶
   triFrustum: [[0, 1, 2], [0, 1, 4, 3], [2, 0, 3, 5], [1, 2, 5, 4], [3, 4, 5]],
+  // 斜二测正六棱柱：0-5 顶环、6-11 底环；可见面 = 顶面 + 三个"朝前"的侧面
+  hexPrismOblique: [[0, 1, 2, 3, 4, 5], [3, 4, 10, 9], [4, 5, 11, 10], [5, 0, 6, 11]],
 }
 const FOP: Record<string, number[]> = {
   cube: [0.8, 0.62, 1], cubeOblique: [0.8, 0.62, 1], cuboid: [0.8, 0.62, 1], cuboidOblique: [0.8, 0.62, 1],
@@ -237,6 +239,7 @@ const FOP: Record<string, number[]> = {
   octahedron: [0.5, 0.5, 0.4, 0.4, 0.9, 0.9, 0.8, 0.8],
   hexPrism: [0.35, 0.5, 0.6, 0.6, 0.85, 0.85, 0.9, 0.9],
   triFrustum: [0.35, 0.7, 0.7, 0.9, 0.9],
+  hexPrismOblique: [1, 0.62, 0.8, 0.9],
 }
 /** 某立体的边表 [起,止,隐藏(1=图形中被遮挡)] —— 编辑器命中检测与渲染共用 */
 export function solidEdges(kind: string): Edge[] { return EDGES[kind] || [] }
@@ -252,6 +255,8 @@ const MESH_FACES: Record<string, number[][]> = {
   obliquePrism: [[4, 5, 6, 7], [3, 2, 6, 7], [0, 3, 7, 4], [0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
   prism: [[3, 4, 5], [0, 1, 4, 3], [2, 0, 3, 5], [1, 2, 5, 4], [0, 1, 2]],
   prismOblique: [[3, 4, 5], [0, 1, 4, 3], [2, 0, 3, 5], [1, 2, 5, 4], [0, 1, 2]],
+  // 斜二测正六棱柱：底 / 六个侧面 / 顶（自由建模用；远面先画）
+  hexPrismOblique: [[6, 7, 8, 9, 10, 11], [2, 3, 9, 8], [1, 2, 8, 7], [3, 4, 10, 9], [0, 1, 7, 6], [4, 5, 11, 10], [5, 0, 6, 11], [0, 1, 2, 3, 4, 5]],
 }
 /** 完整面表（自由建模初始化用） */
 export function solidFacesAll(kind: string): number[][] {
@@ -287,6 +292,12 @@ const EDGES: Record<string, Edge[]> = {
   hexPrism: [[0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 4, 0], [4, 5, 0], [5, 0, 0], [6, 7, 0], [7, 8, 0], [8, 9, 0], [0, 6, 0], [1, 7, 0], [2, 8, 0], [3, 9, 0], [4, 10, 1], [5, 11, 1], [9, 10, 1], [10, 11, 1], [11, 6, 1]],
   // 正三棱台：底面后两条 + 后棱（0,1,2 底；3,4,5 顶）
   triFrustum: [[1, 2, 0], [3, 4, 0], [4, 5, 0], [5, 3, 0], [1, 4, 0], [2, 5, 0], [0, 1, 1], [2, 0, 1], [0, 3, 1]],
+  // 斜二测正六棱柱（0-5 顶、6-11 底）：靠里的两条底边 + 两条后竖棱画虚线；顶面 6 条全可见
+  hexPrismOblique: [
+    [0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 4, 0], [4, 5, 0], [5, 0, 0],
+    [0, 6, 0], [1, 7, 1], [2, 8, 1], [3, 9, 0], [4, 10, 0], [5, 11, 0],
+    [6, 7, 1], [7, 8, 1], [8, 9, 1], [9, 10, 0], [10, 11, 0], [11, 6, 0],
+  ],
 }
 
 /** 斜二测投影系数：水平面里"往里"1 个单位，画成 45° 朝右上、长度减半 */
@@ -333,15 +344,27 @@ export function solidVerts(kind: string, w: number, h: number, depth?: number): 
       [fx + dx, fy + dy], [fx + aw + dx, fy + dy], [fx + aw + dx, fy + ch + dy], [fx + dx, fy + ch + dy]]
   } else if (kind === 'pyramidOblique') {
     // 斜二测四棱锥：底面在水平面里（进深 45°、减半），顶点在底面中心正上方、高度真实
-    const A = 1, B = 0.9, H2 = 0.95
+    const A = 1, B = 0.9, H2 = 0.95 * ((depth ?? 0.4) / 0.4)   // 深度参数 = 高矮
     const at = obliqPlacer([[-A / 2, B], [A / 2, B], [-A / 2, 0], [A / 2, 0]], H2, w, h)
     c = [at(0, B / 2, H2), at(-A / 2, B), at(A / 2, B), at(-A / 2, 0), at(A / 2, 0)]
   } else if (kind === 'prismOblique') {
     // 斜二测三棱柱：底面三角形在水平面里，三条竖棱真实长度（2 是后排那个底角）
-    const S = 1, H2 = 0.95
+    const S = 1, H2 = 0.95 * ((depth ?? 0.4) / 0.4)          // 深度参数 = 高矮
     const at = obliqPlacer([[-S / 2, 0], [S / 2, 0], [0, S * 0.85]], H2, w, h)
     c = [at(-S / 2, 0), at(S / 2, 0), at(0, S * 0.85),
       at(-S / 2, 0, H2), at(S / 2, 0, H2), at(0, S * 0.85, H2)]
+  } else if (kind === 'hexPrismOblique') {
+    // 斜二测正六棱柱：底面正六边形（上下两条边水平）在水平面里按斜二测压（45°、减半），
+    //   六条侧棱竖直且长度真实。0-5 = 顶环、6-11 = 底环（与老 hexPrism 同一套编号）
+    const R = 1
+    const HH = 1.5 * ((depth ?? 0.4) / 0.4)                    // 深度参数 = 高矮
+    const plane: [number, number][] = []
+    for (let i = 0; i < 6; i++) {
+      const a2 = (i * Math.PI) / 3
+      plane.push([R * Math.cos(a2), R * Math.sin(a2)])
+    }
+    const at = obliqPlacer(plane, HH, w, h)
+    c = [...plane.map(([x, y]) => at(x, y, HH)), ...plane.map(([x, y]) => at(x, y))]
   } else if (kind === 'cube' || kind === 'cuboid') {
     const d = (depth ?? 0.4) * Math.min(w, h) * 0.4, dx = d, dy = -d * 0.8
     const side = kind === 'cube' ? Math.min(w, h) * 0.62 : 0
