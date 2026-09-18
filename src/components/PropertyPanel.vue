@@ -1338,6 +1338,29 @@ function layerTypeLabel(type: string) {
               </label>
             </div>
           </div>
+          <!-- 线型 / 线宽：圆弧、椭圆弧最常用（弧走的是纯描边，没有填充） -->
+          <div class="fbox">
+            <span class="fbox__t">线型</span>
+            <div class="fm">
+              <label class="fm__cell" title="实线 / 虚线 / 点线…（与形状、直线的线型是同一套）">
+                <i>线型</i>
+                <select
+                  class="fm__sel"
+                  :value="el.strokeDash || 'solid'"
+                  @change="patch({ strokeDash: ($event.target as HTMLSelectElement).value } as Partial<SlideElement>)"
+                >
+                  <option v-for="s in LINE_STYLES" :key="s.v" :value="s.v">{{ s.label }}</option>
+                </select>
+              </label>
+              <label class="fm__cell" title="线宽（像素）">
+                <i>线宽</i>
+                <input
+                  type="number" min="0" max="20" step="0.5" :value="strokeWidthVal"
+                  @input="onStrokeWidth(num(($event.target as HTMLInputElement).value, 3))"
+                />
+              </label>
+            </div>
+          </div>
           <p v-if="planeKind === 'arc3pt' && !planeNums[0].value" class="cfn__err">三点共线 → 定不出圆，先画一条虚线；把控制点拖开就好。</p>
           <p class="cfn__hint">
             选中图形后拖 <b>蓝色控制点</b> 就能改形状<template v-if="planeKind === 'parallelogram'">（A 点固定，两个控制点 B、D 就是两条邻边 —— 拖它们＝改边长与夹角）</template><template v-else-if="planeKind === 'arcAngle'">（圆心 / 起点 / 终点各一个；拖终点就是改圆心角）</template><template v-else-if="planeKind === 'circleR'">（圆心 + 圆上一点；拖圆上那点就是改半径，也可以直接输入半径）</template><template v-else-if="planeKind === 'ellipseArc'">（中心 / a 端点 / b 端点 / 起点 / 终点；θ 是参数角，Δθ 设 360° 就是整条椭圆）</template><template v-else-if="planeKind === 'ellipseAB'">（中心 + a 端点 + b 端点，面板里可直接输入 a、b）</template><template v-else>（三个控制点是圆弧经过的三点）</template>。
@@ -2193,6 +2216,8 @@ function layerTypeLabel(type: string) {
    不然颜色框会被挤成一条线、删除按钮被挤出面板（截图才发现） */
 .pw__row > * { flex: none; }
 .pw__row > .cfn__expr { flex: 1 1 0; min-width: 0; }
+/* 框里的下拉（线型）也按格子宽度走 */
+.fm__cell .fm__sel { width: 100%; height: 24px; padding: 0 3px; font-size: 11.5px; }
 .pw__row > .pw__n { flex: 1 1 0; min-width: 40px; }
 .pw__t { color: var(--muted); font-size: 11px; }
 .pw__br { width: 34px; padding: 0 2px; }

@@ -430,7 +430,9 @@ export function arcPathD(S: Pt, E: Pt, r: number, sweep: number): string {
 export function planeSvg(kind: string, w: number, h: number, ctrl: Ctrl | undefined, st: PlaneStyle, sweepDeg?: number): string {
   const s = (extra = '') =>
     'stroke="' + st.stroke + '" stroke-width="' + n1(st.sw) + '" fill="' + st.fill + '" stroke-linecap="round" stroke-linejoin="round"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + extra
-  const line = 'stroke="' + st.stroke + '" stroke-width="' + n1(st.sw) + '" fill="none" stroke-linecap="round"'
+  // ⚠ 弧/椭圆弧走的是 line 这条属性串 —— 以前**没带 stroke-dasharray**，于是"线型"设了也不生效 ✗
+  const line = 'stroke="' + st.stroke + '" stroke-width="' + n1(st.sw) + '" fill="none" stroke-linecap="round"' +
+    (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '')
   const dot = (p: Pt, r: number) => '<circle cx="' + n1(p.x) + '" cy="' + n1(p.y) + '" r="' + n1(r) + '" fill="' + st.stroke + '"/>'
   if (kind === 'parallelogram') {
     const p = paraPts(w, h, ctrl)
