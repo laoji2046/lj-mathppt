@@ -194,9 +194,9 @@ export function arcsSvg(arcs: FigureArc[] | undefined, w: number, h: number, str
   return out
 }
 
-export const SOLID_KINDS = ['cube', 'cuboid', 'pyramid', 'prism', 'tetrahedron', 'pyraFrustum', 'octahedron', 'hexPrism', 'obliquePrism', 'triFrustum'] as const
+export const SOLID_KINDS = ['cube', 'cubeOblique', 'cuboid', 'pyramid', 'prism', 'tetrahedron', 'pyraFrustum', 'octahedron', 'hexPrism', 'obliquePrism', 'triFrustum'] as const
 export const SOLID_VCOUNT: Record<string, number> = {
-  cube: 8, cuboid: 8, pyramid: 5, prism: 6, tetrahedron: 4, pyraFrustum: 8,
+  cube: 8, cubeOblique: 8, cuboid: 8, pyramid: 5, prism: 6, tetrahedron: 4, pyraFrustum: 8,
   octahedron: 6, hexPrism: 12, obliquePrism: 8, triFrustum: 6,
 }
 
@@ -207,6 +207,7 @@ export type SolidMesh = { edges: [number, number, number][]; faces: number[][] }
 
 const FACES: Record<string, number[][]> = {
   cube: [[0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],       // top / right / front
+  cubeOblique: [[0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
   cuboid: [[0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
   pyramid: [[1, 2, 4, 3], [0, 1, 3], [0, 4, 2], [0, 3, 4]], // bottom / left / right / front
   prism: [[0, 1, 2], [3, 4, 5]],
@@ -221,7 +222,7 @@ const FACES: Record<string, number[][]> = {
   triFrustum: [[0, 1, 2], [0, 1, 4, 3], [2, 0, 3, 5], [1, 2, 5, 4], [3, 4, 5]],
 }
 const FOP: Record<string, number[]> = {
-  cube: [0.8, 0.62, 1], cuboid: [0.8, 0.62, 1],
+  cube: [0.8, 0.62, 1], cubeOblique: [0.8, 0.62, 1], cuboid: [0.8, 0.62, 1],
   pyramid: [0.4, 0.75, 0.75, 0.9],
   prism: [0.9, 0.5],
   tetrahedron: [0.4, 0.86, 0.76, 0.66],
@@ -239,6 +240,7 @@ export function solidFaces(kind: string): number[][] { return FACES[kind] || [] 
 const MESH_FACES: Record<string, number[][]> = {
   // 顺序：远面先画、前面最后（半透明叠加更自然）
   cube: [[4, 5, 6, 7], [3, 2, 6, 7], [0, 3, 7, 4], [0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
+  cubeOblique: [[4, 5, 6, 7], [3, 2, 6, 7], [0, 3, 7, 4], [0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
   cuboid: [[4, 5, 6, 7], [3, 2, 6, 7], [0, 3, 7, 4], [0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
   obliquePrism: [[4, 5, 6, 7], [3, 2, 6, 7], [0, 3, 7, 4], [0, 1, 5, 4], [1, 2, 6, 5], [0, 1, 2, 3]],
   prism: [[3, 4, 5], [0, 1, 4, 3], [2, 0, 3, 5], [1, 2, 5, 4], [0, 1, 2]],
@@ -259,6 +261,7 @@ export function meshFaces(kind: string, mesh?: SolidMesh | null): number[][] {
 
 const EDGES: Record<string, Edge[]> = {
   cube: [[0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 0, 0], [0, 4, 0], [4, 5, 0], [1, 5, 0], [5, 6, 0], [6, 2, 0], [3, 7, 1], [7, 6, 1], [7, 4, 1]],
+  cubeOblique: [[0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 0, 0], [0, 4, 0], [4, 5, 0], [1, 5, 0], [5, 6, 0], [6, 2, 0], [3, 7, 1], [7, 6, 1], [7, 4, 1]],
   cuboid: [[0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 0, 0], [0, 4, 0], [4, 5, 0], [1, 5, 0], [5, 6, 0], [6, 2, 0], [3, 7, 1], [7, 6, 1], [7, 4, 1]],
   pyramid: [[0, 3, 0], [0, 4, 0], [3, 4, 0], [3, 1, 0], [4, 2, 0], [1, 2, 1], [0, 1, 1], [0, 2, 1]],
   prism: [[0, 1, 0], [1, 2, 0], [2, 0, 0], [0, 3, 0], [1, 4, 0], [2, 5, 0], [3, 4, 1], [4, 5, 1], [5, 3, 1]],
@@ -276,7 +279,20 @@ const EDGES: Record<string, Edge[]> = {
 /** 生成某立体在当前 w/h/depth 下的默认归一化顶点（与原几何一致） */
 export function solidVerts(kind: string, w: number, h: number, depth?: number): number[] {
   let c: number[][] = []
-  if (kind === 'cube' || kind === 'cuboid') {
+  if (kind === 'cubeOblique') {
+    // **斜二测画法**：正面画成**真实边长**的正方形；深度方向严格 **45°**、长度取边长的**一半**
+    //   （人教版直观图画法）。depth 默认 0.4 就是标准斜二测；面板里调"深度"会按比例加长/缩短。
+    const k = ((depth ?? 0.4) / 0.4) * 0.5            // 深度 = 边长 × k（默认 0.5 = 一半）
+    const s = (Math.min(w, h) / (1 + k * Math.SQRT1_2)) * 0.92
+    const dx = s * k * Math.SQRT1_2
+    const dy = -dx                                     // 45° 朝右上
+    const fx = (w - (s + dx)) / 2
+    const fy = (h - (s + Math.abs(dy))) / 2 + Math.abs(dy)
+    c = [
+      [fx, fy], [fx + s, fy], [fx + s, fy + s], [fx, fy + s],
+      [fx + dx, fy + dy], [fx + s + dx, fy + dy], [fx + s + dx, fy + s + dy], [fx + dx, fy + s + dy],
+    ]
+  } else if (kind === 'cube' || kind === 'cuboid') {
     const d = (depth ?? 0.4) * Math.min(w, h) * 0.4, dx = d, dy = -d * 0.8
     const side = kind === 'cube' ? Math.min(w, h) * 0.62 : 0
     const fw = kind === 'cube' ? side : w * 0.78, fh = kind === 'cube' ? side : h * 0.64
