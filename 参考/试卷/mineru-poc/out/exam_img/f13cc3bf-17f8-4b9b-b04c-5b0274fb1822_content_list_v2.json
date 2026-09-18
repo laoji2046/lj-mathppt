@@ -1,0 +1,509 @@
+[
+    [
+        {
+            "type": "title",
+            "content": {
+                "title_content": [
+                    {
+                        "type": "text",
+                        "content": "2026 届高三数学第一次模拟考试"
+                    }
+                ],
+                "level": 1
+            },
+            "bbox": [
+                300,
+                51,
+                697,
+                75
+            ]
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "满分 150 分 考试时间 120 分钟"
+                    }
+                ]
+            },
+            "bbox": [
+                367,
+                89,
+                629,
+                107
+            ]
+        },
+        {
+            "type": "title",
+            "content": {
+                "title_content": [
+                    {
+                        "type": "text",
+                        "content": "一、选择题（每小题5分，共40分）"
+                    }
+                ],
+                "level": 2
+            },
+            "bbox": [
+                63,
+                141,
+                437,
+                162
+            ]
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "1. 已知集合  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "A = \\{x \\mid x^2 - 3x + 2 \\leqslant 0\\}"
+                    },
+                    {
+                        "type": "text",
+                        "content": ",  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "B = \\{x \\mid x > 1\\}"
+                    },
+                    {
+                        "type": "text",
+                        "content": ", 则  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "A \\cap B = A"
+                    },
+                    {
+                        "type": "text",
+                        "content": " (1, 2) B. [1, 2] C. (1, 2] D. [1, 2)"
+                    }
+                ]
+            },
+            "bbox": [
+                63,
+                178,
+                746,
+                228
+            ]
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "2. 若复数  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "z"
+                    },
+                    {
+                        "type": "text",
+                        "content": " 满足  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "z(1 + i) = 2i"
+                    },
+                    {
+                        "type": "text",
+                        "content": "，则  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "|z| = A.1"
+                    },
+                    {
+                        "type": "text",
+                        "content": " B.  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "\\sqrt{2}"
+                    },
+                    {
+                        "type": "text",
+                        "content": " C. 2 D.  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "2\\sqrt{2}"
+                    }
+                ]
+            },
+            "bbox": [
+                63,
+                250,
+                732,
+                299
+            ]
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "3. 函数  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "f(x) = \\sin(2x + \\pi/3)"
+                    },
+                    {
+                        "type": "text",
+                        "content": " 的最小正周期为\nA.  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "\\pi/2"
+                    },
+                    {
+                        "type": "text",
+                        "content": " B.  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "\\pi"
+                    },
+                    {
+                        "type": "text",
+                        "content": " C.  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "2\\pi"
+                    },
+                    {
+                        "type": "text",
+                        "content": " D.  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "4\\pi"
+                    }
+                ]
+            },
+            "bbox": [
+                63,
+                319,
+                722,
+                368
+            ]
+        },
+        {
+            "type": "title",
+            "content": {
+                "title_content": [
+                    {
+                        "type": "text",
+                        "content": "二、填空题（每小题5分，共20分）"
+                    }
+                ],
+                "level": 2
+            },
+            "bbox": [
+                63,
+                398,
+                437,
+                419
+            ]
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "4. 函数  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "f(x) = \\sqrt{(x - 1)} / (x - 3)"
+                    },
+                    {
+                        "type": "text",
+                        "content": " 的定义域为 ____."
+                    }
+                ]
+            },
+            "bbox": [
+                63,
+                436,
+                651,
+                455
+            ]
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "5. 已知  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "\\sin \\theta + \\cos \\theta = 1/2"
+                    },
+                    {
+                        "type": "text",
+                        "content": "，则  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "\\sin 2\\theta ="
+                    },
+                    {
+                        "type": "text",
+                        "content": " ____."
+                    }
+                ]
+            },
+            "bbox": [
+                62,
+                477,
+                630,
+                498
+            ]
+        },
+        {
+            "type": "title",
+            "content": {
+                "title_content": [
+                    {
+                        "type": "text",
+                        "content": "三、解答题（共60分）"
+                    }
+                ],
+                "level": 2
+            },
+            "bbox": [
+                63,
+                526,
+                297,
+                547
+            ]
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "6. 已知数列  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "\\{a_{n}\\}"
+                    },
+                    {
+                        "type": "text",
+                        "content": " 满足  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "a_1 = 1, a_{n+1} = 2a_n + 1 (n \\in N*)"
+                    },
+                    {
+                        "type": "text",
+                        "content": "."
+                    }
+                ]
+            },
+            "bbox": [
+                63,
+                566,
+                609,
+                585
+            ]
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "（1）证明：数列   "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "\\{a_{n} + 1\\}"
+                    },
+                    {
+                        "type": "text",
+                        "content": "  是等比数列；"
+                    }
+                ]
+            },
+            "bbox": [
+                99,
+                595,
+                444,
+                614
+            ]
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "(2) 求数列   "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "\\{a_{n}\\}"
+                    },
+                    {
+                        "type": "text",
+                        "content": "  的通项公式."
+                    }
+                ]
+            },
+            "bbox": [
+                99,
+                625,
+                364,
+                643
+            ]
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "7. 已知函数  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "f(x) = x^3 - 3ax^2 + 3x + 1"
+                    },
+                    {
+                        "type": "text",
+                        "content": "."
+                    }
+                ]
+            },
+            "bbox": [
+                63,
+                669,
+                447,
+                686
+            ]
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "（1）当  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "a = 1"
+                    },
+                    {
+                        "type": "text",
+                        "content": " 时，求曲线  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "\\mathbf{y} = \\mathbf{f}(\\mathbf{x})"
+                    },
+                    {
+                        "type": "text",
+                        "content": " 在点（1，f(1)）处的切线方程；"
+                    }
+                ]
+            },
+            "bbox": [
+                98,
+                696,
+                700,
+                715
+            ]
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "（2）若  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "f(x)"
+                    },
+                    {
+                        "type": "text",
+                        "content": " 在区间（0，+∞）上单调递增，求实数  "
+                    },
+                    {
+                        "type": "equation_inline",
+                        "content": "a"
+                    },
+                    {
+                        "type": "text",
+                        "content": " 的取值范围."
+                    }
+                ]
+            },
+            "bbox": [
+                99,
+                723,
+                683,
+                743
+            ]
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "答题卡"
+                    }
+                ]
+            },
+            "bbox": [
+                63,
+                773,
+                135,
+                794
+            ]
+        },
+        {
+            "type": "table",
+            "content": {
+                "image_source": {
+                    "path": "images/ca95ff6ce0bc8e81079ed14e6d86b7763837b7beefad0eef234db7d796a3d72f.jpg"
+                },
+                "table_caption": [],
+                "table_footnote": [],
+                "html": "<table><tr><td>题号</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr><tr><td>答案</td><td></td><td></td><td></td><td></td><td></td></tr></table>",
+                "table_type": "simple_table",
+                "table_nest_level": 1
+            },
+            "bbox": [
+                68,
+                806,
+                411,
+                877
+            ]
+        }
+    ],
+    []
+]

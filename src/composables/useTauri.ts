@@ -197,6 +197,84 @@ export async function userDirs(): Promise<DirEntry[]> {
   }
 }
 
+
+/* ------------------------------------------------------------------ *
+ * MinerU（导入 PDF 识别试题）：HTTP 只能在 Rust 侧发 —— 网页端直接
+ * fetch mineru.net 会被 CORS 挡（webview 里 Failed to fetch）。
+ * 这里只负责：暂存 PDF、调命令、订阅进度事件。
+ * ------------------------------------------------------------------ */
+
+/** MinerU 识别进度（Rust 侧 emit 的 "mineru://progress"） */
+export interface MineruProgress {
+  state: string
+  extractedPages?: number
+  totalPages?: number
+  seconds?: number
+}
+
+export interface MineruResult {
+  ok?: boolean
+  /** full.md 落盘路径（%APPDATA%\lj-mathslides\mineru\<时间戳>\full.md） */
+  mdPath?: string
+  /** content_list.json 落盘路径；轻量接口为空串 */
+  jsonPath?: string
+  /** Markdown 正文 —— 直接灌进批量导入面板 */
+  mdText?: string
+  pages?: number
+  seconds?: number
+  mode?: string
+  outDir?: string
+}
+
+/**
+ * 订阅 Tauri 事件。
+ * 不引 @tauri-apps/api：withGlobalTauri 已经把 event 命名空间注入到 window.__TAURI__，
+ * 与本项目 useTauri.ts 的一贯做法保持一致（浏览器 dev 下静默降级成空函数）。
+ */
+export async function listenTauri<T>(
+  event: string,
+  handler: (payload: T) => void,
+): Promise<() => void> {
+  const w = window as unknown as {
+    __TAURI__?: {
+      event?: {
+        listen?: (e: string, cb: (ev: { payload: T }) => void) => Promise<() => void>
+      }
+    }
+  }
+  const listen = w.__TAURI__?.event?.listen
+  if (typeof listen !== 'function') return () => {}
+  try {
+    return await listen(event, (ev) => handler(ev?.payload))
+  } catch {
+    return () => {}
+  }
+}
+
+/**
+ * 暂存用户选中的 PDF，返回磁盘路径。
+ * WebView2 的 <input type="file"> 拿不到磁盘路径（File.path 实测 undefined），
+ * 所以把字节交给 Rust 落到临时目录，再交给 mineru_parse。
+ */
+export async function mineruStagePdf(file: File): Promise<string> {
+  const buf = new Uint8Array(await file.arrayBuffer())
+  const path = await invoke<string>('mineru_stage_pdf', {
+    dataBase64: bytesToBase64(buf),
+    fileName: file.name || 'upload.pdf',
+  })
+  if (!path) throw new Error('暂存 PDF 失败')
+  return path
+}
+
+/** 调 Rust 侧的 MinerU 解析；mode = precise（需 token）| agent（免 token 轻量接口）。 */
+export async function mineruParse(
+  pdfPath: string,
+  token: string,
+  mode: 'precise' | 'agent',
+): Promise<MineruResult> {
+  return invoke<MineruResult>('mineru_parse', { pdfPath, token, mode })
+}
+
 /** 把文本写到指定目录下的指定文件名（桌面端"另存为"用），返回完整路径 */
 export async function saveTextToDir(dir: string, name: string, text: string): Promise<string> {
   const b64 = bytesToBase64(new TextEncoder().encode(text))

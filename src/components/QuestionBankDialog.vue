@@ -12,7 +12,8 @@ import {
 } from '@/composables/useQuestionLibrary'
 import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup, JunkItem } from '@/composables/useQuestionLibrary'
 import { parseQuestionsWithInfo, PARSE_HELP, detectPaperInfo } from '@/composables/parseQuestions'
-import { saveTextFile } from '@/composables/useTauri'
+import { saveTextFile, isTauri, listenTauri, mineruStagePdf, mineruParse } from '@/composables/useTauri'
+import type { MineruProgress } from '@/composables/useTauri'
 
 const props = defineProps<{
   /** **只管理、不插入**：从工具栏打开时用（那种入口背后没有"试卷正文"，插了就等于丢 ✗） */
@@ -127,12 +128,14 @@ function sendPaper(withSolution: boolean) {
 
 /* ---- 整库导入导出：导入 MD / 导入 JSON / 导出 JSON ---- */
 const fileInput = ref<HTMLInputElement | null>(null)
-const fileMode = ref<'md' | 'json'>('md')
-function pickFile(mode: 'md' | 'json') {
+const fileMode = ref<'md' | 'json' | 'pdf'>('md')
+function pickFile(mode: 'md' | 'json' | 'pdf') {
   fileMode.value = mode
   const el = fileInput.value
   if (!el) return
-  el.accept = mode === 'json' ? '.json,application/json' : '.md,.markdown,.txt,text/plain'
+  el.accept = mode === 'json' ? '.json,application/json'
+    : mode === 'pdf' ? '.pdf,application/pdf'
+    : '.md,.markdown,.txt,text/plain'
   el.value = ''
   el.click()
 }
@@ -140,6 +143,11 @@ async function onFilePicked(e: Event) {
   const input = e.target as HTMLInputElement
   const f = input.files && input.files[0]
   if (!f) return
+  // PDF 走 MinerU 云端识别，不能按文本读（二进制读成字符串既没意义又占内存）
+  if (fileMode.value === 'pdf') {
+    await importPdfToBatch(f)
+    return
+  }
   let text = ''
   try {
     text = await f.text()
@@ -161,6 +169,91 @@ async function onFilePicked(e: Event) {
     flash('已读入 ' + f.name + '（' + text.length + ' 字），请核对识别结果后再点导入')
   }
 }
+/* ---- 导入 PDF（MinerU）：HTTP 在 Rust 侧发（网页端直连被 CORS 挡） ----
+ * token 只存本机 localStorage，绝不写进源码/仓库；不填 token 就走免登录轻量接口。
+ * ------------------------------------------------------------------ */
+const MINERU_TOKEN_KEY = 'lj-mathslides:mineru-token'
+const mineruToken = ref('')
+try { mineruToken.value = localStorage.getItem(MINERU_TOKEN_KEY) || '' } catch { /* 隐私模式等忽略 */ }
+watch(mineruToken, (v) => {
+  try {
+    const t = (v || '').trim()
+    if (t) localStorage.setItem(MINERU_TOKEN_KEY, t)
+    else localStorage.removeItem(MINERU_TOKEN_KEY)
+  } catch { /* 忽略 */ }
+})
+const mineruBusy = ref(false)
+const mineruProg = ref('')
+
+/** 把任意异常（Tauri 命令 Err 是字符串）转成一行可读文本 */
+function errText(e: unknown): string {
+  if (typeof e === 'string') return e
+  if (e && typeof e === 'object' && 'message' in e) return String((e as { message?: unknown }).message)
+  return String(e)
+}
+
+/** 选中的 PDF → 交给 Rust 暂存成路径 → 云端识别 → 结果灌进批量导入面板 */
+async function importPdfToBatch(f: File) {
+  if (!isTauri()) { flash('导入 PDF（MinerU）只在桌面端可用'); return }
+  if (mineruBusy.value) { flash('上一次识别还没结束，请稍候…'); return }
+  mineruBusy.value = true
+  mineruProg.value = '正在暂存 PDF…'
+  try {
+    const path = await mineruStagePdf(f)
+    mineruProg.value = ''
+    // ⚠ 必须先把 busy 放掉：runMineru 开头也有"忙就返回"的守卫，
+    //   这里若不放，runMineru 会立刻 return（只 flash 一句"正在识别，请稍候…"），
+    //   于是命令根本没发出去、界面永远停在"识别中…"、也不报错（实测就是这个）。
+    mineruBusy.value = false
+    await runMineru(path)
+  } catch (e) {
+    mineruBusy.value = false
+    mineruProg.value = ''
+    flash('暂存 PDF 失败：' + errText(e))
+  }
+}
+
+/** 真正的识别流程：订阅进度事件 → 调 mineru_parse → 填进批量导入面板 */
+async function runMineru(pdfPath: string) {
+  if (mineruBusy.value) { flash('正在识别，请稍候…'); return }
+  const token = mineruToken.value.trim()
+  // 填了 token → 精准解析（md+json）；没填 → 免 token 轻量接口（只有 md）
+  const mode: 'precise' | 'agent' = token ? 'precise' : 'agent'
+  mineruBusy.value = true
+  mineruProg.value = mode === 'precise' ? '正在上传 PDF（精准解析）…' : '正在上传 PDF（轻量接口）…'
+  const ZH: Record<string, string> = {
+    uploading: '上传中', pending: '排队中', running: '识别中', converting: '转换中',
+    waiting_file: '等待上传', done: '完成', failed: '失败',
+  }
+  const unlisten = await listenTauri<MineruProgress>('mineru://progress', (p) => {
+    if (!p || !p.state) return
+    let line = 'MinerU ' + (ZH[p.state] || p.state)
+    if (p.extractedPages != null) line += ' ' + p.extractedPages + '/' + (p.totalPages ?? '?') + ' 页'
+    if (p.seconds != null) line += ' · 已 ' + p.seconds + 's'
+    mineruProg.value = line
+  })
+  try {
+    const r = await mineruParse(pdfPath, token, mode)
+    const md = r?.mdText || ''
+    if (!md.trim()) { throw new Error('MinerU 没有返回 Markdown 内容') }
+    batchText.value = md
+    batchOpen.value = true
+    editing.value = false
+    const tip = '识别完成：' + (r.seconds ?? '?') + 's / ' + (r.pages || '?') + ' 页，'
+      + (mode === 'precise' ? '已存 md + json → ' + (r.mdPath || '') : '轻量接口只出 Markdown（未存 json）')
+      + ' —— 请核对下面识别结果，再点「识别并导入」'
+    mineruProg.value = '✓ ' + tip
+    flash('MinerU ' + tip)
+  } catch (e) {
+    const m = errText(e)
+    mineruProg.value = '✗ ' + m
+    flash('MinerU 识别失败：' + m)
+  } finally {
+    mineruBusy.value = false
+    unlisten()
+  }
+}
+
 /** 导出 JSON：默认只导**当前筛选出来的**（筛选结果为空时明确说一句，绝不偷偷导全库 ✗） */
 async function exportJson(all = false) {
   const arr = all ? list.value : shown.value
@@ -396,7 +489,7 @@ function close() { emit('close') }
 <template>
   <Teleport to="body">
     <!-- 整库导入用的隐藏文件选择器（accept 在 pickFile 里按模式设置） -->
-    <input ref="fileInput" type="file" style="display:none" @change="onFilePicked" />
+    <input ref="fileInput" class="qb__file" type="file" style="display:none" @change="onFilePicked" />
     <div class="qb" @mousedown.self="close">
       <div class="qb__box">
         <div class="qb__head">
@@ -408,6 +501,7 @@ function close() { emit('close') }
             <button class="qb__btn" title="按规则挑题（双向细目表）：设题型/板块/难度/题量，一键抽出整卷" @click="paperOpen = true; editing = false; batchOpen = false">规则组卷</button>
             <button class="qb__btn" title="导入 Markdown / 纯文本：读进来后先给你看识别结果，确认再入库" @click="pickFile('md')">导入 MD</button>
             <button class="qb__btn" title="导入题库 JSON（我们自己导出的、或 {questions:[…]} / 数组 都认）" @click="pickFile('json')">导入 JSON</button>
+            <button class="qb__btn" :disabled="mineruBusy" title="导入 PDF：调 MinerU 云端识别成 Markdown（HTTP 在 Rust 侧发，绕开网页 CORS；识别结果先灌进「批量导入」面板，核对后再入库）" @click="pickFile('pdf')">{{ mineruBusy ? '识别中…' : '导入 PDF（MinerU）' }}</button>
             <button class="qb__btn" title="把**当前筛选出的**题导出成 JSON（筛选为空时会提示，不会偷偷导全库）" @click="exportJson()">导出筛选结果</button>
           <button class="qb__btn" title="把整个题库导出成 JSON" @click="exportJson(true)">导出全部</button>
             <button class="qb__btn" :title="'从解析里反推答案（认「故选B」这类明确写法），可补 ' + proposals.length + ' 道'" @click="doComplete">完善答案<template v-if="proposals.length">（{{ proposals.length }}）</template></button>
@@ -416,6 +510,19 @@ function close() { emit('close') }
             <button class="qb__btn qb__btn--danger" :disabled="!pickedIds.length" :title="confirmDelPicked ? '再点一次确认删除' : '删除左边勾选的题'" @click="deletePicked">{{ confirmDelPicked ? '确认删除 ' + pickedIds.length + ' 条' : '删除选中（' + pickedIds.length + '）' }}</button>
             <button class="qb__close" title="关闭" @click="close"><AppIcon name="close" :size="14" /></button>
           </div>
+        </div>
+
+        <!-- MinerU：token 只存本机 localStorage（不填就走免登录轻量接口）；进度由 Rust 的 mineru://progress 事件推来 -->
+        <div class="qb__mineru">
+          <span class="qb__mlabel">MinerU token</span>
+          <input v-model="mineruToken" class="qb__minput" type="password" autocomplete="off" spellcheck="false"
+            placeholder="留空＝免 token 轻量接口（≤10MB / ≤20 页，只出 Markdown）" />
+          <span class="qb__mhint" :class="{ 'qb__mhint--on': !!mineruToken.trim() }">
+            <template v-if="mineruToken.trim()">精准解析：≤200MB / ≤600 页，出 md + content_list.json（token 只存本机，不会写进源码）</template>
+            <template v-else>没填 token：走 mineru.net 免登录轻量接口，≤10MB / ≤20 页，只出 Markdown</template>
+          </span>
+          <a class="qb__mlink" href="https://mineru.net/apiManage/token" target="_blank" rel="noreferrer">申请 token</a>
+          <span v-if="mineruProg" class="qb__mprog" :class="{ 'qb__mprog--err': mineruProg.charAt(0) === '✗' }">{{ mineruProg }}</span>
         </div>
 
         <div class="qb__bar">
@@ -742,6 +849,15 @@ B. 2
 .qb__tools { display: flex; align-items: center; gap: 8px; }
 .qb__close { border: 0; background: none; cursor: pointer; color: var(--muted, #888); }
 .qb__bar { display: flex; align-items: center; gap: 10px; padding: 10px 16px 6px; }
+/* MinerU：token 输入 + 模式说明 + 进度 */
+.qb__mineru { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 16px; background: #f7f5ff; border-bottom: 1px solid var(--border, #e8e8f0); font-size: 12px; }
+.qb__mlabel { color: #4b3fa8; font-weight: 600; }
+.qb__minput { width: 230px; padding: 5px 9px; border: 1px solid #d8d2f0; border-radius: 8px; font-size: 12.5px; background: #fff; }
+.qb__mhint { color: var(--muted, #888); flex: 1; min-width: 220px; }
+.qb__mhint--on { color: #0f766e; }
+.qb__mlink { color: #4b3fa8; text-decoration: none; border-bottom: 1px dashed #b9a9f0; }
+.qb__mprog { color: #0f766e; font-weight: 600; max-width: 100%; word-break: break-all; }
+.qb__mprog--err { color: #c0392b; }
 .qb__search { flex: 1; padding: 7px 10px; border: 1px solid #dcdce6; border-radius: 8px; font-size: 13px; }
 .qb__count { font-size: 12px; color: var(--muted, #888); }
 .qb__filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 6px 16px 2px; }

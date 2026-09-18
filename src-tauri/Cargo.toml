@@ -27,3 +27,6 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "blocking"] }
 # MinerU 精准解析返回的是 zip（里面有 full.md / content_list.json / 图片）
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# 直接把 rustls 拉成直接依赖：reqwest 用 rustls 时必须安装进程级 CryptoProvider，
+# 否则第一次请求 panic（命令里 panic 不会回给前端 → 看着像"永远不返回"）。
+rustls = { version = "0.23", default-features = false, features = ["ring"] }

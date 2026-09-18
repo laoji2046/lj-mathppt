@@ -1,0 +1,236 @@
+{
+  "exam_title": "2026 届高三数学第五次模拟考试",
+  "preamble": [
+    "满分 150 分 考试时间 120 分钟"
+  ],
+  "sections": [
+    {
+      "title": "一、选择题（每小题5分，共40分）",
+      "questions": [
+        {
+          "id": "q1",
+          "number": "1",
+          "type": "choice",
+          "stem": "已知集合 $A = \\{x \\mid x^2 - 3x + 2 \\leqslant 0\\}$ , $B = \\{x \\mid x > 1\\}$ , 则 $A \\cap B =$",
+          "options": [
+            {
+              "label": "A",
+              "content": "(1, 2)"
+            },
+            {
+              "label": "B",
+              "content": "[1, 2]"
+            },
+            {
+              "label": "C",
+              "content": "(1, 2]"
+            },
+            {
+              "label": "D",
+              "content": "[1, 2)"
+            }
+          ],
+          "subquestions": [],
+          "figures": [],
+          "page": 0,
+          "bbox": [
+            102,
+            196,
+            725,
+            243
+          ],
+          "warnings": [
+            "选项 A 的标记被并入公式，已按位置还原，需人工核对"
+          ],
+          "status": "pending"
+        },
+        {
+          "id": "q2",
+          "number": "2",
+          "type": "choice",
+          "stem": "如图，在正方体 ABCD-A1B1C1D1 中，E 为棱 BB1 的中点，则异面直线 AE 与 CD 所成角的正切值为",
+          "options": [
+            {
+              "label": "A",
+              "content": "$\\sqrt{2}/2$"
+            },
+            {
+              "label": "B",
+              "content": "$\\sqrt{3}/3$"
+            },
+            {
+              "label": "C",
+              "content": "$\\sqrt{5}/5$"
+            },
+            {
+              "label": "D",
+              "content": "$2\\sqrt{5}/5$"
+            }
+          ],
+          "subquestions": [],
+          "figures": [
+            {
+              "type": "image",
+              "img_path": "images/9328c5b8264b0b9ffec647e03b3dfaa9d3909462c5cc2f5183f1626154e9355a.jpg",
+              "bbox": [
+                150,
+                349,
+                364,
+                513
+              ],
+              "page": 0,
+              "caption": []
+            }
+          ],
+          "page": 0,
+          "bbox": [
+            101,
+            263,
+            877,
+            334
+          ],
+          "warnings": [],
+          "status": "pending"
+        },
+        {
+          "id": "q3",
+          "number": "3",
+          "type": "choice",
+          "stem": "函数 $f(x) = \\sin (2x + \\pi / 3)$ 的最小正周期为",
+          "options": [
+            {
+              "label": "A",
+              "content": "$\\pi / 2$"
+            },
+            {
+              "label": "B",
+              "content": "$\\pi$"
+            },
+            {
+              "label": "C",
+              "content": "$2\\pi$"
+            },
+            {
+              "label": "D",
+              "content": "$4\\pi$"
+            }
+          ],
+          "subquestions": [],
+          "figures": [],
+          "page": 0,
+          "bbox": [
+            102,
+            546,
+            697,
+            590
+          ],
+          "warnings": [],
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "title": "二、填空题（每小题 5 分，共 20 分）",
+      "questions": [
+        {
+          "id": "q4",
+          "number": "4",
+          "type": "blank",
+          "stem": "函数 $f(x) = \\sqrt{(x - 1)} / (x - 3)$ 的定义域为 \\_\\_\\_\\_.",
+          "options": [],
+          "subquestions": [],
+          "figures": [],
+          "page": 0,
+          "bbox": [
+            101,
+            652,
+            635,
+            669
+          ],
+          "warnings": [],
+          "status": "pending"
+        },
+        {
+          "id": "q5",
+          "number": "5",
+          "type": "blank",
+          "stem": "已知 $\\sin \\theta + \\cos \\theta = 1/2$ ，则 $\\sin 2\\theta =$ \\_\\_\\_\\_.",
+          "options": [],
+          "subquestions": [],
+          "figures": [],
+          "page": 0,
+          "bbox": [
+            102,
+            691,
+            617,
+            709
+          ],
+          "warnings": [],
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "title": "三、解答题（共60分）",
+      "questions": [
+        {
+          "id": "q6",
+          "number": "6",
+          "type": "solution",
+          "stem": "已知数列 $\\{a_{n}\\}$ 满足 $a_{1} = 1, a_{n+1} = 2a_{n} + 1 (n \\in N*)$ .",
+          "options": [],
+          "subquestions": [
+            "（1）证明：数列 $\\{a_{n} + 1\\}$ 是等比数列；",
+            "(2) 求数列 $\\{a_{n}\\}$ 的通项公式."
+          ],
+          "figures": [],
+          "page": 0,
+          "bbox": [
+            101,
+            771,
+            598,
+            790
+          ],
+          "warnings": [],
+          "status": "pending"
+        },
+        {
+          "id": "q7",
+          "number": "7",
+          "type": "solution",
+          "stem": "已知函数 $f(x) = x^3 - 3ax^2 + 3x + 1$ .",
+          "options": [],
+          "subquestions": [
+            "（1）当 a = 1 时，求曲线 $y = f(x)$ 在点 $(1, f(1))$ 处的切线方程；",
+            "（2）若 $f(x)$ 在区间 $(0, +\\infty)$ 上单调递增，求实数 $a$ 的取值范围."
+          ],
+          "figures": [],
+          "page": 0,
+          "bbox": [
+            102,
+            866,
+            447,
+            883
+          ],
+          "warnings": [],
+          "status": "pending"
+        }
+      ]
+    }
+  ],
+  "loose_blocks": [
+    {
+      "type": "table",
+      "img_path": "images/14e0be509930d7bc48559e4464b755ab11f9fb933e46a57b66486bfd22ebfee5.jpg",
+      "bbox": [
+        107,
+        66,
+        419,
+        133
+      ],
+      "page": 1,
+      "table_body": "<table><tr><td>题号</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr><tr><td>答案</td><td></td><td></td><td></td><td></td><td></td></tr></table>",
+      "caption": []
+    }
+  ]
+}

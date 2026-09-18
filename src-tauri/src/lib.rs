@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use tauri::Emitter;
 
 // ////////////////////////////////////////////////////////////////////////////
 // LJ-MathSlides (Vue 版) — Tauri 2 后端。
@@ -869,6 +870,399 @@ fn lib_save_many(items: Vec<serde_json::Value>) -> serde_json::Value {
     }
     serde_json::json!({ "ok": true, "added": added, "skipped": skipped })
 }
+// ////////////////////////////////////////////////////////////////////////////
+// 「试题库 → 导入 PDF（MinerU）」：HTTP 必须在 Rust 侧发。
+//
+// 网页端直接 fetch mineru.net 会被 CORS 挡（webview 里 Failed to fetch，
+// 而 PowerShell/Node 里 200），所以申请上传 → PUT → 轮询 → 下载 zip 全在这里做。
+//
+// 命令声明成 #[tauri::command(async)]：对**同步**函数来说它会让 Tauri 把整个函数
+// 丢到线程池执行（内部 kind = "sync_threadpool"），所以 blocking reqwest 不会卡 UI 线程；
+// 进度用 app.emit("mineru://progress", …) 发给前端。
+//
+//   mode = "precise"（需 token）：/api/v4 精准解析，出 md + content_list.json；
+//   mode = "agent"  （免 token）：/api/v1/agent 轻量接口，只出 md（≤10MB / ≤20 页）。
+// ////////////////////////////////////////////////////////////////////////////
+
+const MINERU_V4: &str = "https://mineru.net/api/v4";
+const MINERU_AGENT: &str = "https://mineru.net/api/v1/agent";
+const MINERU_MAX_WAIT_SECS: u64 = 600; // 最多等 10 分钟
+
+/// 毫秒时间戳 —— 秒级在连续两次导入时会撞名，加毫秒。
+fn now_ms_stamp() -> String {
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    format!("{}", ms)
+}
+
+/// MinerU 产物目录：%APPDATA%\lj-mathslides\mineru\<毫秒时间戳>\
+fn mineru_out_dir() -> PathBuf {
+    let base = std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("USERPROFILE")
+                .map(|h| PathBuf::from(h).join("AppData").join("Roaming"))
+        })
+        .unwrap_or_else(program_dir);
+    let dir = base.join("lj-mathslides").join("mineru").join(now_ms_stamp());
+    let _ = fs::create_dir_all(&dir);
+    dir
+}
+
+/// 截断长文本，错误信息里别把整个响应糊上去。
+fn mineru_short(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
+}
+
+/// 从 MinerU 响应里抽可读错误：业务层 {code,msg} 与网关层 {success:false,msgCode,msg} 都认。
+fn mineru_error_of(v: &serde_json::Value, fallback: &str) -> String {
+    if let Some(m) = v.get("msg").and_then(|x| x.as_str()) {
+        if !m.is_empty() {
+            return m.to_string();
+        }
+    }
+    if let Some(m) = v
+        .get("error")
+        .and_then(|e| e.get("message"))
+        .and_then(|x| x.as_str())
+    {
+        if !m.is_empty() {
+            return m.to_string();
+        }
+    }
+    if let Some(m) = v.get("err_msg").and_then(|x| x.as_str()) {
+        if !m.is_empty() {
+            return m.to_string();
+        }
+    }
+    fallback.to_string()
+}
+
+/// 暂存前端选中的 PDF。
+///
+/// 为什么需要它：WebView2 的 <input type="file"> 给不到磁盘路径（实测 File.path 是 undefined），
+/// 而 mineru_parse 要的是路径。所以前端把字节发过来，这里落到临时目录再交给 mineru_parse。
+#[tauri::command]
+fn mineru_stage_pdf(data_base64: String, file_name: String) -> Result<String, String> {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+    let bytes = B64
+        .decode(data_base64.as_bytes())
+        .map_err(|e| format!("PDF base64 解码失败: {}", e))?;
+    if bytes.is_empty() {
+        return Err("PDF 内容为空".to_string());
+    }
+    let mut name = file_name.trim().replace('\\', "/");
+    if let Some(pos) = name.rfind('/') {
+        name = name[pos + 1..].to_string();
+    }
+    if name.is_empty() {
+        name = "upload.pdf".to_string();
+    }
+    let dir = std::env::temp_dir().join("lj-mathslides-mineru");
+    fs::create_dir_all(&dir).map_err(|e| format!("临时目录创建失败: {}", e))?;
+    let full = dir.join(format!("{}-{}", now_ms_stamp(), name));
+    fs::write(&full, &bytes).map_err(|e| format!("暂存 PDF 失败: {}", e))?;
+    Ok(full.to_string_lossy().into_owned())
+}
+
+/// MinerU 远程解析：上传 PDF → 轮询 → 下载产物 → 解压出 full.md / content_list.json。
+/// 返回 { mdPath, jsonPath, mdText, pages, seconds, mode, outDir }。
+// ⚠ 不要写 #[tauri::command(async)]：那会让它在 **async runtime 线程**上跑，而里面用的是
+//   reqwest::blocking —— 从 runtime 线程里阻塞会"卡住不返回也不报错"（实测 100 秒无进度无错误）。
+//   普通 #[tauri::command] 会被 Tauri 放到**阻塞线程池**上执行，blocking 客户端才安全。
+#[tauri::command]
+fn mineru_parse(
+    app: tauri::AppHandle,
+    pdf_path: String,
+    token: String,
+    mode: String,
+) -> Result<serde_json::Value, String> {
+    use std::io::Read;
+
+    let t0 = std::time::Instant::now();
+    let path = PathBuf::from(pdf_path.trim());
+    if !path.is_file() {
+        return Err(format!("找不到 PDF 文件：{}", path.to_string_lossy()));
+    }
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("paper.pdf")
+        .to_string();
+    let bytes = fs::read(&path).map_err(|e| format!("读取 PDF 失败: {}", e))?;
+    let token = token.trim().to_string();
+    let effective = if mode == "agent" { "agent" } else { "precise" };
+    if effective == "precise" && token.is_empty() {
+        return Err(
+            "精准解析需要 MinerU token —— 请在题库顶部「MinerU token」里填入（mineru.net 可免费申请），或改用免 token 的轻量接口（≤10MB / ≤20 页，只出 Markdown）。"
+                .to_string(),
+        );
+    }
+
+    // ⚠ reqwest 用的是 rustls：**必须先安装进程级 CryptoProvider**，否则第一次 .send() 会 panic
+    //   "no process-level CryptoProvider available" —— 而命令里 panic 不会回给前端，
+    //   表现就是"命令永远不返回、无进度、无报错"（实测 100 秒如此）。这行是幂等的。
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    let client = reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(45))
+        .build()
+        .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
+
+    let emit = |state: &str, ep: Option<u64>, tp: Option<u64>| {
+        let _ = app.emit(
+            "mineru://progress",
+            serde_json::json!({
+                "state": state,
+                "extractedPages": ep,
+                "totalPages": tp,
+                "seconds": t0.elapsed().as_secs(),
+            }),
+        );
+    };
+
+    emit("uploading", None, None);
+
+    // ---------- ① 申请上传地址（两种接口都要） ----------
+    let (task_ref, upload_url, endpoint): (String, String, &str) = if effective == "agent" {
+        let body = serde_json::json!({
+            "file_name": file_name,
+            "language": "ch",
+            "enable_formula": true,
+            "enable_table": true,
+        });
+        let resp = client
+            .post(format!("{}/parse/file", MINERU_AGENT))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("MinerU 轻量接口建任务失败: {}", e))?;
+        let status = resp.status();
+        let text = resp.text().map_err(|e| e.to_string())?;
+        let v: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|_| format!("MinerU 返回非 JSON（HTTP {}）：{}", status, mineru_short(&text, 200)))?;
+        let empty = serde_json::Value::Null;
+        let data = v.get("data").unwrap_or(&empty);
+        let tid = data.get("task_id").and_then(|x| x.as_str()).unwrap_or("");
+        let url = data.get("file_url").and_then(|x| x.as_str()).unwrap_or("");
+        if tid.is_empty() || url.is_empty() {
+            return Err(format!(
+                "MinerU 轻量接口没有返回上传地址（HTTP {}）：{}",
+                status,
+                mineru_error_of(&v, &mineru_short(&text, 200))
+            ));
+        }
+        (tid.to_string(), url.to_string(), MINERU_AGENT)
+    } else {
+        let body = serde_json::json!({
+            "files": [{ "name": file_name, "data_id": "q1", "is_ocr": true }],
+            "model_version": "vlm",
+            "enable_formula": true,
+            "enable_table": true,
+        });
+        let resp = client
+            .post(format!("{}/file-urls/batch", MINERU_V4))
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("MinerU 建任务失败: {}", e))?;
+        let status = resp.status();
+        let text = resp.text().map_err(|e| e.to_string())?;
+        let v: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|_| format!("MinerU 返回非 JSON（HTTP {}）：{}", status, mineru_short(&text, 200)))?;
+        let empty = serde_json::Value::Null;
+        let data = v.get("data").unwrap_or(&empty);
+        let bid = data.get("batch_id").and_then(|x| x.as_str()).unwrap_or("");
+        let url = data
+            .get("file_urls")
+            .and_then(|x| x.as_array())
+            .and_then(|a| a.first())
+            .and_then(|x| x.as_str())
+            .unwrap_or("");
+        if bid.is_empty() || url.is_empty() {
+            return Err(format!(
+                "MinerU 没有返回上传地址（HTTP {}）：{}",
+                status,
+                mineru_error_of(&v, &mineru_short(&text, 200))
+            ));
+        }
+        (bid.to_string(), url.to_string(), MINERU_V4)
+    };
+
+    // ---------- ② PUT 上传 PDF 原始字节（不额外带头） ----------
+    let up = client
+        .put(&upload_url)
+        .body(bytes)
+        .send()
+        .map_err(|e| format!("上传 PDF 到 MinerU 失败: {}", e))?;
+    if !up.status().is_success() {
+        return Err(format!("上传 PDF 到 MinerU 失败：HTTP {}", up.status()));
+    }
+
+    // ---------- ③ 轮询（每 ~4 秒，最多 10 分钟） ----------
+    let mut total_pages: Option<u64> = None;
+    let mut zip_url: Option<String> = None;
+    let mut md_url: Option<String> = None;
+    loop {
+        if t0.elapsed().as_secs() > MINERU_MAX_WAIT_SECS {
+            return Err(format!(
+                "MinerU 解析超时（已等 {} 秒）—— 可稍后在 mineru.net 上查看任务状态",
+                t0.elapsed().as_secs()
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_secs(4));
+
+        let (state, ep, tp, zu, mu, err) = if effective == "agent" {
+            let resp = client
+                .get(format!("{}/parse/{}", endpoint, task_ref))
+                .send()
+                .map_err(|e| format!("MinerU 轻量接口轮询失败: {}", e))?;
+            let v: serde_json::Value = resp
+                .json()
+                .map_err(|e| format!("MinerU 轻量接口返回非 JSON: {}", e))?;
+            let empty = serde_json::Value::Null;
+            let d = v.get("data").unwrap_or(&empty);
+            (
+                d.get("state").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                None,
+                None,
+                None,
+                d.get("markdown_url").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                mineru_error_of(&v, ""),
+            )
+        } else {
+            let resp = client
+                .get(format!("{}/extract-results/batch/{}", endpoint, task_ref))
+                .header("Authorization", format!("Bearer {}", token))
+                .send()
+                .map_err(|e| format!("MinerU 轮询失败: {}", e))?;
+            let v: serde_json::Value = resp
+                .json()
+                .map_err(|e| format!("MinerU 轮询返回非 JSON: {}", e))?;
+            let empty = serde_json::Value::Null;
+            let it = v
+                .get("data")
+                .and_then(|d| d.get("extract_result"))
+                .and_then(|a| a.as_array())
+                .and_then(|a| a.first())
+                .unwrap_or(&empty);
+            let prog = it.get("extract_progress").unwrap_or(&empty);
+            (
+                it.get("state").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                prog.get("extracted_pages").and_then(|x| x.as_u64()),
+                prog.get("total_pages").and_then(|x| x.as_u64()),
+                it.get("full_zip_url").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                None,
+                it.get("err_msg").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            )
+        };
+
+        if tp.is_some() {
+            total_pages = tp;
+        }
+        emit(&state, ep, tp);
+        if state == "failed" {
+            return Err(format!(
+                "MinerU 解析失败：{}",
+                if err.is_empty() { "（未给出原因）".to_string() } else { err }
+            ));
+        }
+        if let Some(z) = zu {
+            zip_url = Some(z);
+            break;
+        }
+        if let Some(m) = mu {
+            md_url = Some(m);
+            break;
+        }
+    }
+
+    // ---------- ④ 下载产物并落到 %APPDATA%\lj-mathslides\mineru\<时间戳>\ ----------
+    let dir = mineru_out_dir();
+    let out_dir = dir.to_string_lossy().into_owned();
+    let (md_path, json_path, md_text) = if effective == "agent" {
+        let url = md_url.ok_or_else(|| "MinerU 未返回 Markdown 地址".to_string())?;
+        let resp = client
+            .get(&url)
+            .send()
+            .map_err(|e| format!("下载 Markdown 失败: {}", e))?;
+        let text = resp.text().map_err(|e| format!("读取 Markdown 失败: {}", e))?;
+        let p = dir.join("full.md");
+        fs::write(&p, text.as_bytes()).map_err(|e| format!("写入 full.md 失败: {}", e))?;
+        (p, PathBuf::new(), text)
+    } else {
+        let url = zip_url.ok_or_else(|| "MinerU 未返回 zip 地址".to_string())?;
+        let resp = client.get(&url).send().map_err(|e| format!("下载 zip 失败: {}", e))?;
+        if !resp.status().is_success() {
+            return Err(format!("下载 zip 失败：HTTP {}", resp.status()));
+        }
+        let zb = resp.bytes().map_err(|e| format!("读取 zip 失败: {}", e))?;
+        let mut ar = zip::ZipArchive::new(std::io::Cursor::new(zb))
+            .map_err(|e| format!("解析 zip 失败: {}", e))?;
+        let mut found_md: Option<PathBuf> = None;
+        let mut found_json: Option<PathBuf> = None;
+        for i in 0..ar.len() {
+            let mut f = ar
+                .by_index(i)
+                .map_err(|e| format!("读取 zip 条目失败: {}", e))?;
+            // enclosed_name 会挡掉 ../ 与绝对路径，返回 None 的条目直接跳过
+            let safe = match f.enclosed_name() {
+                Some(p) => p.to_path_buf(),
+                None => continue,
+            };
+            let dest = dir.join(&safe);
+            if f.is_dir() {
+                let _ = fs::create_dir_all(&dest);
+                continue;
+            }
+            if let Some(parent) = dest.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf)
+                .map_err(|e| format!("解压 {:?} 失败: {}", safe, e))?;
+            fs::write(&dest, &buf).map_err(|e| format!("写入 {:?} 失败: {}", safe, e))?;
+            let base = safe
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            if base == "full.md" && found_md.is_none() {
+                found_md = Some(dest.clone());
+            }
+            if base.ends_with("_content_list.json")
+                && !base.ends_with("_v2.json")
+                && found_json.is_none()
+            {
+                found_json = Some(dest.clone());
+            }
+        }
+        let md = found_md.ok_or_else(|| format!("zip 里没有 full.md（已解压到 {}）", out_dir))?;
+        let text = fs::read_to_string(&md).map_err(|e| format!("读取 full.md 失败: {}", e))?;
+        (md, found_json.unwrap_or_default(), text)
+    };
+
+    let seconds = t0.elapsed().as_secs();
+    emit("done", total_pages, total_pages);
+    Ok(serde_json::json!({
+        "ok": true,
+        // 产物落盘位置，前端提示与「后续做插图」都用得上
+        "mdPath": md_path.to_string_lossy(),
+        "jsonPath": json_path.to_string_lossy(),
+        // mdText：前端直接灌进批量导入面板
+        "mdText": md_text,
+        "pages": total_pages.unwrap_or(0),
+        "seconds": seconds,
+        "mode": effective,
+        "outDir": out_dir,
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -892,7 +1286,9 @@ pub fn run() {
             lib_meta_get,
             lib_meta_set,
             lib_tags,
-            lib_save_many
+            lib_save_many,
+            mineru_parse,
+            mineru_stage_pdf
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

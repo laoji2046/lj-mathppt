@@ -1,0 +1,7 @@
+name = "mineru-proxy"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# MINERU_TOKEN 不要写在这里，用 wrangler secret put MINERU_TOKEN 设置
+[vars]
+ALLOWED_ORIGIN = "*"

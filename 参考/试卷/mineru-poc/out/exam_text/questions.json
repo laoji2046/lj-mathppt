@@ -1,0 +1,232 @@
+{
+  "exam_title": "2026 届高三数学第一次模拟考试",
+  "preamble": [
+    "满分 150 分　考试时间 120 分钟"
+  ],
+  "sections": [
+    {
+      "title": "一<sub>、</sub>选择题（每小题 5 分，共 40 分）",
+      "questions": [
+        {
+          "id": "q1",
+          "number": "1",
+          "type": "choice",
+          "stem": "已知集合 $\\mathrm { ~ { ~ \\cal ~ A ~ } ~ } = \\mathrm { ~ \\{ ~ { ~ \\bf ~ x ~ } ~ \\left| ~ { ~ \\bf ~ x ~ } ^ { 2 } ~ - ~ 3 { ~ \\bf ~ x ~ } ~ + ~ 2 ~ \\leqslant ~ 0 \\right\\} } , \\mathrm { ~ { ~ \\cal ~ B ~ } ~ } = \\mathrm { ~ \\{ ~ { ~ \\bf ~ x ~ } ~ \\left| ~ { ~ \\bf ~ x ~ } ~ > ~ 1 \\right\\} ~ }$ ，则 $\\begin{array} { r l } { \\mathrm { ~ A ~ } } & { { } \\cap \\mathrm { ~ B ~ } = } \\end{array}$",
+          "options": [
+            {
+              "label": "A",
+              "content": "(1, 2)"
+            },
+            {
+              "label": "B",
+              "content": "[1, 2]"
+            },
+            {
+              "label": "C",
+              "content": "(1, 2]"
+            },
+            {
+              "label": "D",
+              "content": "[1, 2)"
+            }
+          ],
+          "subquestions": [],
+          "figures": [],
+          "page": 0,
+          "bbox": [
+            102,
+            196,
+            725,
+            242
+          ],
+          "warnings": [],
+          "status": "pending"
+        },
+        {
+          "id": "q2",
+          "number": "2",
+          "type": "choice",
+          "stem": "若复数 z 满足 z(1 + i) = 2i，则 $| \\mathbf { \\tau } _ { \\mathrm { Z } } | \\mathbf { \\tau } =$",
+          "options": [
+            {
+              "label": "A",
+              "content": "1"
+            },
+            {
+              "label": "B",
+              "content": "√2"
+            },
+            {
+              "label": "C",
+              "content": "2"
+            },
+            {
+              "label": "D",
+              "content": "$2 \\surd 2$"
+            }
+          ],
+          "subquestions": [],
+          "figures": [],
+          "page": 0,
+          "bbox": [
+            101,
+            261,
+            710,
+            306
+          ],
+          "warnings": [],
+          "status": "pending"
+        },
+        {
+          "id": "q3",
+          "number": "3",
+          "type": "choice",
+          "stem": "函数 $\\mathrm { ~ f ~ ( x ) ~ } = \\mathrm { ~ s ~ i ~ n ~ ( 2 x ~ + ~ } \\pi / 3 \\mathrm { ) }$ 的最小正周期为",
+          "options": [
+            {
+              "label": "A",
+              "content": "π/2"
+            },
+            {
+              "label": "B",
+              "content": "π"
+            },
+            {
+              "label": "C",
+              "content": "2π"
+            },
+            {
+              "label": "D",
+              "content": "4π"
+            }
+          ],
+          "subquestions": [],
+          "figures": [],
+          "page": 0,
+          "bbox": [
+            101,
+            325,
+            700,
+            369
+          ],
+          "warnings": [],
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "title": "二<sub>、</sub>填空题（每小题 5 分，共 20 分）",
+      "questions": [
+        {
+          "id": "q4",
+          "number": "4",
+          "type": "blank",
+          "stem": "函数 $\\mathrm { ~ f ~ } ( \\mathrm { ~ x ~ } ) ~ = ~ \\mathrm { ~ \\surd ~ { ~ ( ~ x ~ - ~ 1 ) ~ } ~ / ~ \\xi ~ ( ~ x ~ - ~ 3 ) ~ }$ 的定义域为",
+          "options": [],
+          "subquestions": [],
+          "figures": [],
+          "page": 0,
+          "bbox": [
+            101,
+            431,
+            635,
+            449
+          ],
+          "warnings": [],
+          "status": "pending"
+        },
+        {
+          "id": "q5",
+          "number": "5",
+          "type": "blank",
+          "stem": "已知 $\\sin \\theta + \\cos \\theta = 1 / 2$ ，则 $\\begin{array} { r l } { \\mathrm { ~ s ~ i ~ n ~ } \\ 2 \\ \\theta } & { { } = } \\end{array}$",
+          "options": [],
+          "subquestions": [],
+          "figures": [],
+          "page": 0,
+          "bbox": [
+            102,
+            470,
+            617,
+            487
+          ],
+          "warnings": [],
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "title": "三<sub>、</sub>解答题（共 60 分）",
+      "questions": [
+        {
+          "id": "q6",
+          "number": "6",
+          "type": "solution",
+          "stem": "已知数列 $\\{ \\mathrm { a _ { n } } \\}$ 满足 ${ \\mathrm { a } } _ { 1 } \\ = \\ 1 , \\ { \\mathrm { a } } _ { { \\mathrm { n } } + 1 } \\ = \\ 2 { \\mathrm { a } } _ { \\mathrm { n } } \\ + \\ 1 \\ { \\mathrm { ( n ~ } } \\in \\ { \\mathrm { N } } * { \\mathrm { ) } }$",
+          "options": [],
+          "subquestions": [
+            "（1）证明：数列 $\\{ \\mathrm { a } _ { \\mathrm { n } } ~ + ~ 1 \\}$ 是等比数列；",
+            "（2）求数列 $\\{ \\mathrm { a _ { n } } \\}$ 的通项公式"
+          ],
+          "figures": [],
+          "page": 0,
+          "bbox": [
+            101,
+            549,
+            596,
+            569
+          ],
+          "warnings": [],
+          "status": "pending"
+        },
+        {
+          "id": "q7",
+          "number": "7",
+          "type": "solution",
+          "stem": "已知函数 $\\mathrm { ~ f ~ ( ~ x ~ ) ~ \\ = ~ \\ x ^ { 3 } ~ - ~ 3 a x ^ { 2 } ~ + ~ 3 x ~ + ~ 1 ~ }$",
+          "options": [],
+          "subquestions": [
+            "（1）当 a = 1 时，求曲线 $\\mathrm { ~ y ~ } = \\mathrm { ~ f ~ } ( \\mathrm { x } )$ 在点 (1, f(1)) 处的切线方程；",
+            "（2）若 f(x) 在区间 (0, +∞) 上单调递增，求实数 a 的取值范围"
+          ],
+          "figures": [],
+          "page": 0,
+          "bbox": [
+            102,
+            643,
+            447,
+            659
+          ],
+          "warnings": [],
+          "status": "pending"
+        }
+      ]
+    }
+  ],
+  "loose_blocks": [
+    {
+      "type": "text",
+      "text": "答题卡",
+      "page": 0,
+      "bbox": [
+        104,
+        739,
+        169,
+        756
+      ]
+    },
+    {
+      "type": "table",
+      "img_path": "images/6c3d29a1de14b0c78f195e6992b59d507bfadcbccd7c4ddf38541be6e10b4de5.jpg",
+      "bbox": [
+        106,
+        768,
+        419,
+        833
+      ],
+      "page": 0,
+      "table_body": "<table><tr><td>题号</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr><tr><td>答案</td><td></td><td></td><td></td><td></td><td></td></tr></table>",
+      "caption": []
+    }
+  ]
+}

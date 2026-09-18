@@ -1,0 +1,2330 @@
+{
+    "pdf_info": [
+        {
+            "preproc_blocks": [
+                {
+                    "bbox": [
+                        195,
+                        64,
+                        416,
+                        83
+                    ],
+                    "type": "title",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                195,
+                                64,
+                                416,
+                                83
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        195,
+                                        64,
+                                        416,
+                                        83
+                                    ],
+                                    "type": "text",
+                                    "content": "2026 届高三数学第五次模拟考试"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 0,
+                    "level": 1
+                },
+                {
+                    "bbox": [
+                        233,
+                        93,
+                        378,
+                        106
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                233,
+                                93,
+                                378,
+                                106
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        233,
+                                        93,
+                                        378,
+                                        106
+                                    ],
+                                    "type": "text",
+                                    "content": "满分 150 分 考试时间 120 分钟"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 1,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        63,
+                        129,
+                        272,
+                        144
+                    ],
+                    "type": "title",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                63,
+                                129,
+                                272,
+                                144
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        63,
+                                        129,
+                                        272,
+                                        144
+                                    ],
+                                    "type": "text",
+                                    "content": "一、选择题（每小题5分，共40分）"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 2,
+                    "level": 2
+                },
+                {
+                    "bbox": [
+                        63,
+                        156,
+                        444,
+                        193
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                63,
+                                156,
+                                444,
+                                193
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        63,
+                                        156,
+                                        444,
+                                        193
+                                    ],
+                                    "type": "text",
+                                    "content": "1. 已知集合 "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        156,
+                                        444,
+                                        193
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "A = \\{x \\mid x^2 - 3x + 2 \\leqslant 0\\}"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        156,
+                                        444,
+                                        193
+                                    ],
+                                    "type": "text",
+                                    "content": ", "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        156,
+                                        444,
+                                        193
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "B = \\{x \\mid x > 1\\}"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        156,
+                                        444,
+                                        193
+                                    ],
+                                    "type": "text",
+                                    "content": ", 则 "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        156,
+                                        444,
+                                        193
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "A \\cap B = A"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        156,
+                                        444,
+                                        193
+                                    ],
+                                    "type": "text",
+                                    "content": " (1, 2) B. [1, 2] C. (1, 2] D. [1, 2)"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 3,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        62,
+                        209,
+                        537,
+                        265
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                62,
+                                209,
+                                537,
+                                265
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "text",
+                                    "content": "2. 如图，在正方体 ABCD-A1B1C1D1 中，E 为棱 BB1 的中点，则异面直线 AE 与 CD 所成角的正切值为\nA. "
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\sqrt{2}/2"
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "text",
+                                    "content": " B. "
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\sqrt{3}/3"
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "text",
+                                    "content": " C. "
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\sqrt{5}/5"
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "text",
+                                    "content": " D. "
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "2\\sqrt{5}/5"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 4,
+                    "merge_prev": false
+                },
+                {
+                    "type": "image",
+                    "bbox": [
+                        92,
+                        277,
+                        223,
+                        407
+                    ],
+                    "blocks": [
+                        {
+                            "bbox": [
+                                92,
+                                277,
+                                223,
+                                407
+                            ],
+                            "type": "image_body",
+                            "angle": 0,
+                            "lines": [
+                                {
+                                    "bbox": [
+                                        92,
+                                        277,
+                                        223,
+                                        407
+                                    ],
+                                    "spans": [
+                                        {
+                                            "bbox": [
+                                                92,
+                                                277,
+                                                223,
+                                                407
+                                            ],
+                                            "type": "image",
+                                            "image_path": "9328c5b8264b0b9ffec647e03b3dfaa9d3909462c5cc2f5183f1626154e9355a.jpg"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "index": 5
+                        }
+                    ],
+                    "index": 5
+                },
+                {
+                    "bbox": [
+                        63,
+                        433,
+                        427,
+                        468
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                63,
+                                433,
+                                427,
+                                468
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "text",
+                                    "content": "3. 函数 "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "f(x) = \\sin (2x + \\pi / 3)"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "text",
+                                    "content": " 的最小正周期为\nA. "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\pi / 2"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "text",
+                                    "content": " B. "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\pi"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "text",
+                                    "content": " C. "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "2\\pi"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "text",
+                                    "content": " D. "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "4\\pi"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 6,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        63,
+                        489,
+                        272,
+                        504
+                    ],
+                    "type": "title",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                63,
+                                489,
+                                272,
+                                504
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        63,
+                                        489,
+                                        272,
+                                        504
+                                    ],
+                                    "type": "text",
+                                    "content": "二、填空题（每小题 5 分，共 20 分）"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 7,
+                    "level": 2
+                },
+                {
+                    "bbox": [
+                        62,
+                        517,
+                        389,
+                        530
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                62,
+                                517,
+                                389,
+                                530
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        62,
+                                        517,
+                                        389,
+                                        530
+                                    ],
+                                    "type": "text",
+                                    "content": "4. 函数 "
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        517,
+                                        389,
+                                        530
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "f(x) = \\sqrt{(x - 1)} / (x - 3)"
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        517,
+                                        389,
+                                        530
+                                    ],
+                                    "type": "text",
+                                    "content": " 的定义域为 ____."
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 8,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        63,
+                        548,
+                        378,
+                        562
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                63,
+                                548,
+                                378,
+                                562
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        63,
+                                        548,
+                                        378,
+                                        562
+                                    ],
+                                    "type": "text",
+                                    "content": "5. 已知 "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        548,
+                                        378,
+                                        562
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\sin \\theta + \\cos \\theta = 1/2"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        548,
+                                        378,
+                                        562
+                                    ],
+                                    "type": "text",
+                                    "content": "，则 "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        548,
+                                        378,
+                                        562
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\sin 2\\theta ="
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        548,
+                                        378,
+                                        562
+                                    ],
+                                    "type": "text",
+                                    "content": " ____."
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 9,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        63,
+                        582,
+                        194,
+                        597
+                    ],
+                    "type": "title",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                63,
+                                582,
+                                194,
+                                597
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        63,
+                                        582,
+                                        194,
+                                        597
+                                    ],
+                                    "type": "text",
+                                    "content": "三、解答题（共60分）"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 10,
+                    "level": 2
+                },
+                {
+                    "bbox": [
+                        62,
+                        611,
+                        366,
+                        626
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                62,
+                                611,
+                                366,
+                                626
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        62,
+                                        611,
+                                        366,
+                                        626
+                                    ],
+                                    "type": "text",
+                                    "content": "6. 已知数列 "
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        611,
+                                        366,
+                                        626
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\{a_{n}\\}"
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        611,
+                                        366,
+                                        626
+                                    ],
+                                    "type": "text",
+                                    "content": " 满足 "
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        611,
+                                        366,
+                                        626
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "a_{1} = 1, a_{n+1} = 2a_{n} + 1 (n \\in N*)"
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        611,
+                                        366,
+                                        626
+                                    ],
+                                    "type": "text",
+                                    "content": "."
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 11,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        83,
+                        632,
+                        274,
+                        647
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                83,
+                                632,
+                                274,
+                                647
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        83,
+                                        632,
+                                        274,
+                                        647
+                                    ],
+                                    "type": "text",
+                                    "content": "（1）证明：数列 "
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        632,
+                                        274,
+                                        647
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\{a_{n} + 1\\}"
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        632,
+                                        274,
+                                        647
+                                    ],
+                                    "type": "text",
+                                    "content": " 是等比数列；"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 12,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        83,
+                        653,
+                        230,
+                        668
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                83,
+                                653,
+                                230,
+                                668
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        83,
+                                        653,
+                                        230,
+                                        668
+                                    ],
+                                    "type": "text",
+                                    "content": "(2) 求数列  "
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        653,
+                                        230,
+                                        668
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\{a_{n}\\}"
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        653,
+                                        230,
+                                        668
+                                    ],
+                                    "type": "text",
+                                    "content": "  的通项公式."
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 13,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        63,
+                        686,
+                        274,
+                        700
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                63,
+                                686,
+                                274,
+                                700
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        63,
+                                        686,
+                                        274,
+                                        700
+                                    ],
+                                    "type": "text",
+                                    "content": "7. 已知函数 "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        686,
+                                        274,
+                                        700
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "f(x) = x^3 - 3ax^2 + 3x + 1"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        686,
+                                        274,
+                                        700
+                                    ],
+                                    "type": "text",
+                                    "content": "."
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 14,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        83,
+                        707,
+                        416,
+                        720
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                83,
+                                707,
+                                416,
+                                720
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        83,
+                                        707,
+                                        416,
+                                        720
+                                    ],
+                                    "type": "text",
+                                    "content": "（1）当 a = 1 时，求曲线  "
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        707,
+                                        416,
+                                        720
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "y = f(x)"
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        707,
+                                        416,
+                                        720
+                                    ],
+                                    "type": "text",
+                                    "content": "  在点  "
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        707,
+                                        416,
+                                        720
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "(1, f(1))"
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        707,
+                                        416,
+                                        720
+                                    ],
+                                    "type": "text",
+                                    "content": "  处的切线方程；"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 15,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        83,
+                        726,
+                        406,
+                        740
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                83,
+                                726,
+                                406,
+                                740
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        83,
+                                        726,
+                                        406,
+                                        740
+                                    ],
+                                    "type": "text",
+                                    "content": "（2）若 "
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        726,
+                                        406,
+                                        740
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "f(x)"
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        726,
+                                        406,
+                                        740
+                                    ],
+                                    "type": "text",
+                                    "content": " 在区间 "
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        726,
+                                        406,
+                                        740
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "(0, +\\infty)"
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        726,
+                                        406,
+                                        740
+                                    ],
+                                    "type": "text",
+                                    "content": " 上单调递增，求实数 "
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        726,
+                                        406,
+                                        740
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "a"
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        726,
+                                        406,
+                                        740
+                                    ],
+                                    "type": "text",
+                                    "content": " 的取值范围."
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 16,
+                    "merge_prev": false
+                }
+            ],
+            "discarded_blocks": [],
+            "page_size": [
+                612,
+                792
+            ],
+            "page_idx": 0,
+            "para_blocks": [
+                {
+                    "bbox": [
+                        195,
+                        64,
+                        416,
+                        83
+                    ],
+                    "type": "title",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                195,
+                                64,
+                                416,
+                                83
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        195,
+                                        64,
+                                        416,
+                                        83
+                                    ],
+                                    "type": "text",
+                                    "content": "2026 届高三数学第五次模拟考试"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 0,
+                    "level": 1
+                },
+                {
+                    "bbox": [
+                        233,
+                        93,
+                        378,
+                        106
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                233,
+                                93,
+                                378,
+                                106
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        233,
+                                        93,
+                                        378,
+                                        106
+                                    ],
+                                    "type": "text",
+                                    "content": "满分 150 分 考试时间 120 分钟"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 1,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        63,
+                        129,
+                        272,
+                        144
+                    ],
+                    "type": "title",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                63,
+                                129,
+                                272,
+                                144
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        63,
+                                        129,
+                                        272,
+                                        144
+                                    ],
+                                    "type": "text",
+                                    "content": "一、选择题（每小题5分，共40分）"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 2,
+                    "level": 2
+                },
+                {
+                    "bbox": [
+                        63,
+                        156,
+                        444,
+                        193
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                63,
+                                156,
+                                444,
+                                193
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        63,
+                                        156,
+                                        444,
+                                        193
+                                    ],
+                                    "type": "text",
+                                    "content": "1. 已知集合 "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        156,
+                                        444,
+                                        193
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "A = \\{x \\mid x^2 - 3x + 2 \\leqslant 0\\}"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        156,
+                                        444,
+                                        193
+                                    ],
+                                    "type": "text",
+                                    "content": ", "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        156,
+                                        444,
+                                        193
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "B = \\{x \\mid x > 1\\}"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        156,
+                                        444,
+                                        193
+                                    ],
+                                    "type": "text",
+                                    "content": ", 则 "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        156,
+                                        444,
+                                        193
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "A \\cap B = A"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        156,
+                                        444,
+                                        193
+                                    ],
+                                    "type": "text",
+                                    "content": " (1, 2) B. [1, 2] C. (1, 2] D. [1, 2)"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 3,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        62,
+                        209,
+                        537,
+                        265
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                62,
+                                209,
+                                537,
+                                265
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "text",
+                                    "content": "2. 如图，在正方体 ABCD-A1B1C1D1 中，E 为棱 BB1 的中点，则异面直线 AE 与 CD 所成角的正切值为\nA. "
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\sqrt{2}/2"
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "text",
+                                    "content": " B. "
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\sqrt{3}/3"
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "text",
+                                    "content": " C. "
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\sqrt{5}/5"
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "text",
+                                    "content": " D. "
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        209,
+                                        537,
+                                        265
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "2\\sqrt{5}/5"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 4,
+                    "merge_prev": false
+                },
+                {
+                    "type": "image",
+                    "bbox": [
+                        92,
+                        277,
+                        223,
+                        407
+                    ],
+                    "blocks": [
+                        {
+                            "bbox": [
+                                92,
+                                277,
+                                223,
+                                407
+                            ],
+                            "type": "image_body",
+                            "angle": 0,
+                            "lines": [
+                                {
+                                    "bbox": [
+                                        92,
+                                        277,
+                                        223,
+                                        407
+                                    ],
+                                    "spans": [
+                                        {
+                                            "bbox": [
+                                                92,
+                                                277,
+                                                223,
+                                                407
+                                            ],
+                                            "type": "image",
+                                            "image_path": "9328c5b8264b0b9ffec647e03b3dfaa9d3909462c5cc2f5183f1626154e9355a.jpg"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "index": 5
+                        }
+                    ],
+                    "index": 5
+                },
+                {
+                    "bbox": [
+                        63,
+                        433,
+                        427,
+                        468
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                63,
+                                433,
+                                427,
+                                468
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "text",
+                                    "content": "3. 函数 "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "f(x) = \\sin (2x + \\pi / 3)"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "text",
+                                    "content": " 的最小正周期为\nA. "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\pi / 2"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "text",
+                                    "content": " B. "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\pi"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "text",
+                                    "content": " C. "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "2\\pi"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "text",
+                                    "content": " D. "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        433,
+                                        427,
+                                        468
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "4\\pi"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 6,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        63,
+                        489,
+                        272,
+                        504
+                    ],
+                    "type": "title",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                63,
+                                489,
+                                272,
+                                504
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        63,
+                                        489,
+                                        272,
+                                        504
+                                    ],
+                                    "type": "text",
+                                    "content": "二、填空题（每小题 5 分，共 20 分）"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 7,
+                    "level": 2
+                },
+                {
+                    "bbox": [
+                        62,
+                        517,
+                        389,
+                        530
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                62,
+                                517,
+                                389,
+                                530
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        62,
+                                        517,
+                                        389,
+                                        530
+                                    ],
+                                    "type": "text",
+                                    "content": "4. 函数 "
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        517,
+                                        389,
+                                        530
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "f(x) = \\sqrt{(x - 1)} / (x - 3)"
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        517,
+                                        389,
+                                        530
+                                    ],
+                                    "type": "text",
+                                    "content": " 的定义域为 ____."
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 8,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        63,
+                        548,
+                        378,
+                        562
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                63,
+                                548,
+                                378,
+                                562
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        63,
+                                        548,
+                                        378,
+                                        562
+                                    ],
+                                    "type": "text",
+                                    "content": "5. 已知 "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        548,
+                                        378,
+                                        562
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\sin \\theta + \\cos \\theta = 1/2"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        548,
+                                        378,
+                                        562
+                                    ],
+                                    "type": "text",
+                                    "content": "，则 "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        548,
+                                        378,
+                                        562
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\sin 2\\theta ="
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        548,
+                                        378,
+                                        562
+                                    ],
+                                    "type": "text",
+                                    "content": " ____."
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 9,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        63,
+                        582,
+                        194,
+                        597
+                    ],
+                    "type": "title",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                63,
+                                582,
+                                194,
+                                597
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        63,
+                                        582,
+                                        194,
+                                        597
+                                    ],
+                                    "type": "text",
+                                    "content": "三、解答题（共60分）"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 10,
+                    "level": 2
+                },
+                {
+                    "bbox": [
+                        62,
+                        611,
+                        366,
+                        626
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                62,
+                                611,
+                                366,
+                                626
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        62,
+                                        611,
+                                        366,
+                                        626
+                                    ],
+                                    "type": "text",
+                                    "content": "6. 已知数列 "
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        611,
+                                        366,
+                                        626
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\{a_{n}\\}"
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        611,
+                                        366,
+                                        626
+                                    ],
+                                    "type": "text",
+                                    "content": " 满足 "
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        611,
+                                        366,
+                                        626
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "a_{1} = 1, a_{n+1} = 2a_{n} + 1 (n \\in N*)"
+                                },
+                                {
+                                    "bbox": [
+                                        62,
+                                        611,
+                                        366,
+                                        626
+                                    ],
+                                    "type": "text",
+                                    "content": "."
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 11,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        83,
+                        632,
+                        274,
+                        647
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                83,
+                                632,
+                                274,
+                                647
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        83,
+                                        632,
+                                        274,
+                                        647
+                                    ],
+                                    "type": "text",
+                                    "content": "（1）证明：数列 "
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        632,
+                                        274,
+                                        647
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\{a_{n} + 1\\}"
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        632,
+                                        274,
+                                        647
+                                    ],
+                                    "type": "text",
+                                    "content": " 是等比数列；"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 12,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        83,
+                        653,
+                        230,
+                        668
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                83,
+                                653,
+                                230,
+                                668
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        83,
+                                        653,
+                                        230,
+                                        668
+                                    ],
+                                    "type": "text",
+                                    "content": "(2) 求数列  "
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        653,
+                                        230,
+                                        668
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "\\{a_{n}\\}"
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        653,
+                                        230,
+                                        668
+                                    ],
+                                    "type": "text",
+                                    "content": "  的通项公式."
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 13,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        63,
+                        686,
+                        274,
+                        700
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                63,
+                                686,
+                                274,
+                                700
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        63,
+                                        686,
+                                        274,
+                                        700
+                                    ],
+                                    "type": "text",
+                                    "content": "7. 已知函数 "
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        686,
+                                        274,
+                                        700
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "f(x) = x^3 - 3ax^2 + 3x + 1"
+                                },
+                                {
+                                    "bbox": [
+                                        63,
+                                        686,
+                                        274,
+                                        700
+                                    ],
+                                    "type": "text",
+                                    "content": "."
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 14,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        83,
+                        707,
+                        416,
+                        720
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                83,
+                                707,
+                                416,
+                                720
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        83,
+                                        707,
+                                        416,
+                                        720
+                                    ],
+                                    "type": "text",
+                                    "content": "（1）当 a = 1 时，求曲线  "
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        707,
+                                        416,
+                                        720
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "y = f(x)"
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        707,
+                                        416,
+                                        720
+                                    ],
+                                    "type": "text",
+                                    "content": "  在点  "
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        707,
+                                        416,
+                                        720
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "(1, f(1))"
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        707,
+                                        416,
+                                        720
+                                    ],
+                                    "type": "text",
+                                    "content": "  处的切线方程；"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 15,
+                    "merge_prev": false
+                },
+                {
+                    "bbox": [
+                        83,
+                        726,
+                        406,
+                        740
+                    ],
+                    "type": "text",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                83,
+                                726,
+                                406,
+                                740
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        83,
+                                        726,
+                                        406,
+                                        740
+                                    ],
+                                    "type": "text",
+                                    "content": "（2）若 "
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        726,
+                                        406,
+                                        740
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "f(x)"
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        726,
+                                        406,
+                                        740
+                                    ],
+                                    "type": "text",
+                                    "content": " 在区间 "
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        726,
+                                        406,
+                                        740
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "(0, +\\infty)"
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        726,
+                                        406,
+                                        740
+                                    ],
+                                    "type": "text",
+                                    "content": " 上单调递增，求实数 "
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        726,
+                                        406,
+                                        740
+                                    ],
+                                    "type": "inline_equation",
+                                    "content": "a"
+                                },
+                                {
+                                    "bbox": [
+                                        83,
+                                        726,
+                                        406,
+                                        740
+                                    ],
+                                    "type": "text",
+                                    "content": " 的取值范围."
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 16,
+                    "merge_prev": false
+                }
+            ]
+        },
+        {
+            "preproc_blocks": [
+                {
+                    "bbox": [
+                        65,
+                        31,
+                        102,
+                        45
+                    ],
+                    "type": "title",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                65,
+                                31,
+                                102,
+                                45
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        65,
+                                        31,
+                                        102,
+                                        45
+                                    ],
+                                    "type": "text",
+                                    "content": "答题卡"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 0,
+                    "level": 2
+                },
+                {
+                    "type": "table",
+                    "bbox": [
+                        66,
+                        53,
+                        257,
+                        106
+                    ],
+                    "blocks": [
+                        {
+                            "bbox": [
+                                66,
+                                53,
+                                257,
+                                106
+                            ],
+                            "type": "table_body",
+                            "angle": 0,
+                            "lines": [
+                                {
+                                    "bbox": [
+                                        66,
+                                        53,
+                                        257,
+                                        106
+                                    ],
+                                    "spans": [
+                                        {
+                                            "bbox": [
+                                                66,
+                                                53,
+                                                257,
+                                                106
+                                            ],
+                                            "type": "table",
+                                            "html": "<table><tr><td>题号</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr><tr><td>答案</td><td></td><td></td><td></td><td></td><td></td></tr></table>",
+                                            "image_path": "14e0be509930d7bc48559e4464b755ab11f9fb933e46a57b66486bfd22ebfee5.jpg"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "index": 1
+                        }
+                    ],
+                    "index": 1
+                }
+            ],
+            "discarded_blocks": [],
+            "page_size": [
+                612,
+                792
+            ],
+            "page_idx": 1,
+            "para_blocks": [
+                {
+                    "bbox": [
+                        65,
+                        31,
+                        102,
+                        45
+                    ],
+                    "type": "title",
+                    "angle": 0,
+                    "lines": [
+                        {
+                            "bbox": [
+                                65,
+                                31,
+                                102,
+                                45
+                            ],
+                            "spans": [
+                                {
+                                    "bbox": [
+                                        65,
+                                        31,
+                                        102,
+                                        45
+                                    ],
+                                    "type": "text",
+                                    "content": "答题卡"
+                                }
+                            ]
+                        }
+                    ],
+                    "index": 0,
+                    "level": 2
+                },
+                {
+                    "type": "table",
+                    "bbox": [
+                        66,
+                        53,
+                        257,
+                        106
+                    ],
+                    "blocks": [
+                        {
+                            "bbox": [
+                                66,
+                                53,
+                                257,
+                                106
+                            ],
+                            "type": "table_body",
+                            "angle": 0,
+                            "lines": [
+                                {
+                                    "bbox": [
+                                        66,
+                                        53,
+                                        257,
+                                        106
+                                    ],
+                                    "spans": [
+                                        {
+                                            "bbox": [
+                                                66,
+                                                53,
+                                                257,
+                                                106
+                                            ],
+                                            "type": "table",
+                                            "html": "<table><tr><td>题号</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr><tr><td>答案</td><td></td><td></td><td></td><td></td><td></td></tr></table>",
+                                            "image_path": "14e0be509930d7bc48559e4464b755ab11f9fb933e46a57b66486bfd22ebfee5.jpg"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "index": 1
+                        }
+                    ],
+                    "index": 1
+                }
+            ]
+        }
+    ],
+    "_backend": "hybrid",
+    "_effort": "medium",
+    "_ocr_enable": true,
+    "_version_name": "3.4.4"
+}
