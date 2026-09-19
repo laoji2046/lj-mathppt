@@ -458,8 +458,13 @@ export function pickByRules(
       (!r.chapter || x.q.chapter === r.chapter) &&
       (!r.level || levelOf(x.q.difficulty) === r.level)
     )
-    // 不按「引用次数」排序（用户明确不要这个属性）—— 默认随机，保证每次抽出的卷子不一样
-    cands = shuffle(cands)
+    // 「优先挑没出过的题」：**先按有没有用过分成两档**，档内仍然随机 —— 既保证每次卷子不一样，
+    //   又优先把新题用掉（老师要求"排除最近用过的"）；全用过时退化成纯随机 ✓
+    if (cands.some((x) => !(Number(x.usedCount) || 0))) {
+      cands = [...shuffle(cands.filter((x) => !(Number(x.usedCount) || 0))), ...shuffle(cands.filter((x) => (Number(x.usedCount) || 0) > 0))]
+    } else {
+      cands = shuffle(cands)   // 不按「引用次数」排（用户明确不要这个属性）→ 全用过就纯随机
+    }
     const take = cands.slice(0, want)
     for (const x of take) { used.add(x.id); picked.push(x) }
     results.push({ rule: r, got: take.length, want, short: take.length < want })
