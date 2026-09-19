@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-/** 试题库弹窗：按需加载（只有点「试题库」才下载这段代码） */
-const QuestionBankDialog = defineAsyncComponent(() => import('@/components/QuestionBankDialog.vue'))
 import AppIcon from './AppIcon.vue'
 import { loadMathJax } from '@/composables/useMathJax'
 import { imagesDir, isTauri, readLocalImage } from '@/composables/useTauri'
@@ -12,8 +10,6 @@ import { MATH_FIGURE_OPTIONS } from '@/types'
 import { closeFigPalette, openFigPalette } from '@/ui/figPalette'
 import { geom3dSink, openGeom3D } from '@/ui/geom3d'
 import { vectorizeSink, openVectorize } from '@/ui/vectorize'
-import { parseQuestionsWithInfo } from '@/composables/parseQuestions'
-import { importParsedQuestions } from '@/composables/useQuestionLibrary'
 
 /**
  * PDF 生成（A4 分页 + 题号识别），移植自参考版 LJ-PPT 的 PaperMode。
@@ -993,55 +989,6 @@ function insertVectorize() {
   fi.click()
 }
 
-/** 试题库弹窗开关 */
-const qbOpen = ref(false)
-/**
- * 试题库 → 组卷：把选题文本插到试卷正文末尾。
- * 插完**不关窗** —— 组卷通常是连续选好几道题。
- */
-function onQuestionInsert(text: string, id: number, label?: string, imgs?: { n: number; src: string; caption?: string }[]) {
-  // 题库里的 [图N] 是**题目自己的编号**，跟本试卷的图号（images 映射）无关 ——
-  // 直接插进来就会指到同号的别的图（用户实报的「红字：图片缺失图N」/ 指错图）。
-  // 所以这里先把题带来的图**注册进本试卷的 images 映射**（同一张图复用同一个图号，
-  // 与 normalizeMdImages 的规则一致），再把文本里的 [图N] 换成新号。
-  let body = text
-  for (const im of imgs || []) {
-    if (!im || !im.src || !(im.n > 0)) continue
-    const exist = Object.keys(images.value).find(
-      (k) => images.value[Number(k)] && images.value[Number(k)].src === im.src,
-    )
-    let n = exist ? Number(exist) : ++imgSeq.value
-    if (!exist) images.value[n] = { src: im.src, address: im.caption || '题库插图', caption: im.caption }
-    // 只换号，不动后面的参数（[图1:center] → [图7:center]）；
-    // 负向先行断言保证 [图1] 不会误伤 [图12]
-    body = body.replace(new RegExp('\\[图' + im.n + '(?=[\\]:])', 'g'), '[图' + n)
-  }
-  const cur = input.value
-  const sep = cur && !cur.endsWith('\n') ? '\n\n' : ''
-  // 整套 / 组卷（id=0）插到**已经有内容**的正文后面时，先手动分页：
-  // 每套卷子各自从新的一页开始，题号各从 1 起才讲得通（否则两套 1.2.3. 混在一页 ✗）
-  const brk = id === 0 && cur.trim() ? '[分页]\n' : ''
-  input.value += sep + brk + body + '\n'
-  render()
-  saveDraftSoon()
-  paperMsg.value = '已插入' + (label ? ' ' + label : id ? ' 试题 #' + id : '')
-    + ((imgs || []).length ? '，配图 ' + (imgs || []).length + ' 张' : '') + ' ✓（可继续选下一道）'
-}
-
-/**
- * **把当前试卷正文存入试题库** ✓（与「组卷」相反的方向）。
- * 用与批量导入**完全相同**的解析与过滤，且 Rust 侧按题干去重 —— 重复点也不会灌两份。
- */
-async function savePaperToLibrary() {
-  const raw = input.value.trim()
-  if (!raw) { paperMsg.value = '正文是空的 —— 先在左边写点东西'; return }
-  const { list, skipped } = parseQuestionsWithInfo(raw)
-  if (!list.length) { paperMsg.value = '正文里没有识别出题目'; return }
-  const r = await importParsedQuestions(list)
-  paperMsg.value = '已存入试题库 ' + r.added + ' 道'
-    + (r.skipped ? '，跳过重复 ' + r.skipped + ' 道' : '')
-    + (skipped ? '（过滤掉 ' + skipped + ' 行说明）' : '')
-}
 
 async function insertFigure(id: string, slideIndex: number, label: string) {
   figOpen.value = false
@@ -1526,10 +1473,6 @@ watch([headerText, footerText], () => render())
       <button class="pm__btn" title="插入矢量描摹图（先选一张线稿图，在描摹窗口里调好后点插入）" @click="insertVectorize">
         <AppIcon name="graphic" :size="14" />矢量描摹图
       </button>
-      <button class="pm__btn" title="把左边正文里的题目存入试题库（用与批量导入相同的解析与过滤，自动去重）" @click="savePaperToLibrary">存入试题库</button>
-      <button class="pm__btn" title="试题库：按标签筛选、组卷插入题干（可带答案与解析）" @click="qbOpen = true">
-        <AppIcon name="graphic" :size="14" />试题库
-      </button>
     <!-- 图形选择面板：带真实缩略图（选图形得看得见图形） -->
     <div v-if="figOpen" class="pm__figpanel">
       <div class="pm__fighead">文稿里的数学图形（{{ figList.length }} 个）</div>
@@ -1637,7 +1580,6 @@ watch([headerText, footerText], () => render())
     </div>
     </div>
   </Teleport>
-  <QuestionBankDialog v-if="qbOpen" @close="qbOpen = false" @insert="onQuestionInsert" />
 </template>
 
 <style scoped>

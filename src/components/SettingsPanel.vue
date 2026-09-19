@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
 import { useDeckStore } from '@/stores/deck'
 import AppIcon from './AppIcon.vue'
 import { APP_NAME, APP_VERSION, COPYRIGHT, COPYRIGHT_NOTE } from '@/ui/appInfo'
@@ -6,6 +7,19 @@ import { REVEAL_SPEEDS, REVEAL_THEMES, REVEAL_TRANSITIONS } from '@/types'
 
 const store = useDeckStore()
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+// ── AI 助手（v1439：从「试题库」搬到这里 —— 旧题库整体移除后，Key 得有个正经的家）──
+// 只存本机 localStorage，不写进源码、不上传；AI 功能（一句话生成 3D 等）读的就是这个 Key ✓
+const AI_KEY = 'lj-mathslides:ai-key'
+const aiKey = ref('')
+onMounted(() => { try { aiKey.value = localStorage.getItem(AI_KEY) || '' } catch { /* 隐私模式忽略 */ } })
+function saveAiKey(v: string) {
+  aiKey.value = v
+  try {
+    if (v.trim()) localStorage.setItem(AI_KEY, v.trim())
+    else localStorage.removeItem(AI_KEY)
+  } catch { /* 忽略 */ }
+}
 </script>
 
 <template>
@@ -51,6 +65,23 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
       <p class="hint">主题 / 字体 / 过渡 / 速度用于「▶ 演示」与导出；标题、描述为文稿元信息。改完点演示即生效。</p>
 
+      <!-- AI 助手：DeepSeek Key（本机保存） -->
+      <div class="ai">
+        <div class="ai__title">AI 助手（DeepSeek）</div>
+        <label class="field"><span>API Key（sk-…）</span>
+          <input
+            class="prop-input"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="sk-…"
+            :value="aiKey"
+            @input="saveAiKey(($event.target as HTMLInputElement).value)"
+          />
+        </label>
+        <p class="hint">只保存在本机（不上传、不写进源码）；用于「一句话生成 3D 场景」等 AI 功能。留空＝不用 AI，其它功能照常。</p>
+      </div>
+
       <!-- 关于 / 版权：只在设置面板里出现，「演示」与导出的 HTML / PDF 都不带 -->
       <div class="about">
         <span class="about__name">{{ APP_NAME }}</span>
@@ -75,6 +106,8 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 .prop-textarea { resize: vertical; line-height: 1.5; }
 .prop-input { font-size: 13px; }
 .hint { margin-top: 10px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.ai { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.ai__title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
 .about { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 12px; color: var(--muted); }
 .about__name { font-size: 13px; font-weight: 600; color: var(--text); }
 .about__ver { font-variant-numeric: tabular-nums; opacity: 0.8; }
