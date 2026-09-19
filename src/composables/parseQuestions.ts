@@ -279,8 +279,10 @@ function isSegmentHead(t: string): boolean {
  *  返回 '' = 认不出（那就退回结构推断）。 */
 export function typeOfSegmentHead(t: string): string {
   const s = t.replace(/[#*`_\s]/g, '')
-  if (/多选|多项选择|有多项符合题目要求|至少有两项/.test(s)) return 'multi'
-  if (/单项选择|选择题|只有一项符合题目要求/.test(s)) return 'choice'
+  if (/多选|多项选择|有多项符合/.test(s)) return 'multi'
+  // ⚠ 「单选题」「单项选择题」也要认（实测真卷写的是「单选题：…只有一项是符合题目要求的」——
+  //   原来只写了"选择题/只有一项符合题目要求"，一个都对不上 ✗）
+  if (/单选|单项选择|选择题|只有一项/.test(s)) return 'choice'
   if (/填空/.test(s)) return 'blank'
   if (/解答|证明题|计算题|应用题|必做题|选做题/.test(s)) return 'answer'
   return ''
@@ -416,7 +418,6 @@ function t_all(block: string): string {
 }
 
 export function parseQuestions(raw: string): ParsedQuestion[] {
-  const out: ParsedQuestion[] = []
   // ⚠⚠ 顺序很关键：**先整篇剥掉"非题目行"（其中「参考答案」要整段截断），再按小节切段**。
   //   反过来（先切段再剥）会踩一个大坑：答案区里也有「## 四、解答题」这种小节标题 →
   //   它被当成新一段的开始，而这一段的文本里已经没有「参考答案」那行标题了 →
@@ -424,7 +425,30 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
   const stripped = stripNonQuestionLines(raw)
   skippedNonQuestion = stripped.skipped
   // 小节标题（一、选择题…）由 splitBlocks 当成分块边界、在块内循环里被识别成题型 ✓
-  out.push(...parseSegment(stripped.text, ''))
+  const out = parseSegment(stripped.text, '')
+  // ⭐ 再用"**区段题号计数**"回填一次题型：在**原始文本**上数每个小节里有几个题号，
+  //   按顺序把该段的题型发给对应的题。这条不依赖"标题有没有被当成分块边界"，
+  //   所以标题行怎么被剥、被合块都不影响结果 ✓（实测原来 multi/blank 一个都出不来）
+  let qi = 0
+  for (const seg of segmentTypesOf(raw)) {
+    for (let k = 0; k < seg.nums && qi < out.length; k++, qi++) {
+      if (seg.type) out[qi].qtype = seg.type
+    }
+  }
+  return out
+}
+
+/** 在**原始文本**上按小节标题切区段，并数出每段里有几个「题号行」——用来把题型按顺序发给题。
+ *  ⚠ 到「参考答案」就停（答案区里也有小节标题和"13. 24"这种行，会把计数搞乱 ✗） */
+function segmentTypesOf(raw: string): { type: string; nums: number }[] {
+  const out: { type: string; nums: number }[] = []
+  let cur: { type: string; nums: number } | null = null
+  for (const line of raw.replace(/\r\n?/g, '\n').split('\n')) {
+    const t = line.trim()
+    if (isAnswerSectionHead(t)) break
+    if (isSegmentHead(t)) { cur = { type: typeOfSegmentHead(t), nums: 0 }; out.push(cur); continue }
+    if (cur && RE_NUM.test(t)) cur.nums++
+  }
   return out
 }
 
@@ -529,7 +553,8 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
     if (!qtype) {
       const all = stem + ' ' + options.join(' ')
       qtype = options.length >= 1 ? 'choice'
-        : /_{3,}|＿{3,}/.test(all) ? 'blank' : 'answer'
+        // MinerU 的空是**转义下划线** ____ → 别忘了带反斜杠那种
+        : /_{3,}|＿{3,}|\\_{2,}/.test(all) ? 'blank' : 'answer'
     }
     out.push({
       title: autoTitle(stem),
@@ -548,7 +573,12 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
       paperName,
       year,
       region,
-      warn: !answer && !options.length ? '没有识别到答案' : undefined,
+      warn: !answer && !options.length ? '没有识别到答案'
+        // 选择题/多选题却切不出 4 个选项 → 大概率是 MinerU 把某个选项吃进公式/版式里了
+        // （实测：某题 A 选项被并进 $P = A$，只剩 B/C/D 三个）→ **标出来让人核对**，不要假装没事
+        : (qtype === 'choice' || qtype === 'multi') && options.length < 4
+          ? '选择题但只切出 ' + options.length + ' 个选项，请核对（可能是识别时选项被并进公式）'
+          : undefined,
     })
   }
   return out

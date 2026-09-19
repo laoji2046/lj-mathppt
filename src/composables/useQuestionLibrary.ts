@@ -37,32 +37,66 @@ export function qtypeLabel(t: QType | string): string {
 
 export const SECTIONS = [
   '集合与逻辑',
+  '不等式',
   '函数与导数',
-  '三角函数与向量',
-  '解析几何',
+  '三角函数与解三角形',
+  '平面向量与复数',
+  '数列',
   '立体几何',
-  '概率与统计',
+  '解析几何',
+  '计数原理与概率统计',
+  '成对数据与统计案例',
+  '未分类',          // ⚠ 必须有这一项：猜不出板块的题也得**看得见**（否则点了任何板块都看不到它 ✗）
 ]
 
-/** 板块关键词 → 板块（用于解析器/自动归类；命中多个取第一个） */
-export const SECTION_HINTS: { section: string; words: string[] }[] = [
-  { section: '集合与逻辑', words: ['集合', '子集', '交集', '并集', '补集', '充分', '必要', '充要', '命题', '量词', '逻辑'] },
-  { section: '函数与导数', words: ['函数', '定义域', '值域', '单调', '奇偶', '周期', '指数', '对数', '幂函数', '导数', '切线', '极值', '最值', '零点'] },
-  { section: '三角函数与向量', words: ['三角', '正弦', '余弦', '正切', '弧度', '解三角形', '向量', '数量积', '共线', '夹角'] },
-  { section: '解析几何', words: ['直线', '圆', '椭圆', '双曲线', '抛物线', '焦点', '离心率', '准线', '渐近线', '斜率'] },
-  { section: '立体几何', words: ['空间', '立体', '棱柱', '棱锥', '棱台', '圆柱', '圆锥', '球', '异面', '二面角', '体积', '表面积', '三视图'] },
-  { section: '概率与统计', words: ['概率', '随机', '分布', '期望', '方差', '统计', '抽样', '回归', '独立性', '排列', '组合', '二项式'] },
+/** 旧板块名 → 新板块名（老库里存的是旧名，筛选/展示时归一化，免得老题"消失"） */
+export const SECTION_ALIAS: Record<string, string> = {
+  '三角函数与向量': '三角函数与解三角形',
+  '概率与统计': '计数原理与概率统计',
+}
+
+/** 板块名归一化：空 → '未分类'；旧名 → 新名；不认识的名字 → '未分类' */
+export function normSection(s: string | undefined): string {
+  const v = (s || '').trim()
+  if (!v) return '未分类'
+  if (SECTIONS.indexOf(v) >= 0) return v
+  return SECTION_ALIAS[v] || '未分类'
+}
+
+/** 板块关键词 + **权重**（用于自动归类）。
+ *  ⚠ 老做法是"命中即返回、看顺序" → 「已知函数 f(x)=sin2x−√3cos2x…」命中"函数"就被判成
+ *    **函数与导数** ✗（实测真卷就这样）。改成**打分**：专有名词(5) > 结构词(3) > 泛词(1)，
+ *    泛词只加分、不足以单独定类；最高分太低或并列 → **未分类**（宁可不判，也不判错）。 */
+export const SECTION_HINTS: { section: string; words: [string, number][] }[] = [
+  { section: '集合与逻辑', words: [['集合', 5], ['子集', 4], ['交集', 4], ['并集', 4], ['补集', 4], ['充要', 5], ['充分', 3], ['必要', 3], ['量词', 4], ['命题', 2], ['逻辑', 3]] },
+  { section: '不等式', words: [['基本不等式', 5], ['不等式', 5], ['恒成立', 3], ['取值范围', 1]] },
+  { section: '函数与导数', words: [['导数', 5], ['\\log', 4], ['\\ln', 4], ['\\sqrt', 1], ['展开式', 4], ['项的系数', 4], ['二项', 5], ['单调性', 3], ['单调', 3], ['奇偶', 4], ['周期', 3], ['定义域', 3], ['值域', 3], ['指数函数', 4], ['对数函数', 4], ['幂函数', 4], ['零点', 3], ['极值', 4], ['切线', 3], ['最值', 2], ['函数', 1]] },
+  { section: '三角函数与解三角形', words: [['\\sin', 4], ['\\cos', 4], ['\\tan', 4], ['\\triangle', 3], ['三角函数', 5], ['解三角形', 5], ['正弦定理', 5], ['余弦定理', 5], ['三角恒等', 5], ['正弦', 4], ['余弦', 4], ['正切', 4], ['弧度', 3], ['图像变换', 3]] },
+  { section: '平面向量与复数', words: [['overrightarrow', 5], ['\\vec', 5], ['向量', 5], ['数量积', 4], ['共线', 3], ['夹角', 2], ['复数', 5], ['共轭', 4], ['虚部', 4], ['实部', 4]] },
+  { section: '数列', words: [['等差数列', 5], ['等比数列', 5], ['数列', 5], ['通项', 4], ['前n项和', 5], ['递推', 4]] },
+  { section: '立体几何', words: [['二面角', 5], ['异面', 5], ['棱柱', 4], ['棱锥', 4], ['棱台', 4], ['圆柱', 4], ['圆锥', 4], ['三视图', 4], ['表面积', 3], ['立体', 4], ['体积', 2], ['空间', 2]] },
+  { section: '解析几何', words: [['椭圆', 5], ['双曲线', 5], ['抛物线', 5], ['离心率', 5], ['渐近线', 5], ['准线', 4], ['焦点', 3], ['斜率', 2], ['圆', 2], ['直线', 1]] },
+  { section: '计数原理与概率统计', words: [['分布列', 5], ['二项式', 5], ['条件概率', 5], ['独立性检验', 5], ['概率', 5], ['期望', 4], ['方差', 4], ['抽样', 4], ['随机', 3], ['排列', 3], ['组合', 3]] },
+  { section: '成对数据与统计案例', words: [['相关系数', 5], ['成对数据', 5], ['回归', 5], ['残差', 4], ['散点图', 4], ['列联表', 4]] },
 ]
 
-/** 按关键词猜板块（题干 + 知识点一起看） */
+/** 按关键词**打分**猜板块（题干 + 知识点一起看）；判不准返回 '未分类' */
 export function guessSection(text: string, knowledge: string[] = []): string {
   const hay = (text + ' ' + knowledge.join(' ')).toLowerCase()
+  const score: Record<string, number> = {}
   for (const h of SECTION_HINTS) {
-    for (const w of h.words) {
-      if (hay.includes(w.toLowerCase())) return h.section
+    for (const [w, wt] of h.words) {
+      const key = w.toLowerCase()
+      let idx = hay.indexOf(key)
+      let n = 0
+      while (idx >= 0 && n < 5) { n++; idx = hay.indexOf(key, idx + key.length) }
+      if (n) score[h.section] = (score[h.section] || 0) + wt * Math.min(n, 3)
     }
   }
-  return ''
+  const rank = Object.entries(score).sort((a, b) => b[1] - a[1])
+  if (!rank.length || rank[0][1] < 4) return '未分类'            // 只命中泛词 → 不判
+  if (rank[1] && rank[1][1] === rank[0][1]) return '未分类'       // 并列第一 → 不判
+  return rank[0][0]
 }
 
 /* ---------------- 第二级：章节（板块之下） ---------------- */
@@ -78,6 +112,13 @@ export const CHAPTERS: Record<string, string[]> = {
   '解析几何': ['直线与方程', '圆与方程', '椭圆', '双曲线', '抛物线', '直线与圆锥曲线'],
   '立体几何': ['空间几何体', '点线面的位置关系', '空间向量与立体几何'],
   '概率与统计': ['计数原理', '二项式定理', '概率', '随机变量及其分布', '统计与统计案例'],
+  '不等式': ['一元二次不等式', '基本不等式', '恒成立问题'],
+  '平面向量与复数': ['平面向量', '复数'],
+  '数列': ['等差数列', '等比数列', '数列求和', '递推数列'],
+  '计数原理与概率统计': ['计数原理', '二项式定理', '概率', '随机变量及其分布', '统计'],
+  '成对数据与统计案例': ['成对数据的统计分析', '回归分析', '独立性检验'],
+  '三角函数与解三角形': ['三角函数', '三角恒等变换', '解三角形', '三角函数的图像与性质'],
+  '未分类': [],
 }
 
 /** 取某板块下的章节建议（板块为空则返回全部，去重） */
@@ -783,7 +824,8 @@ export function filterQuestions(list: QuestionEntry[], opt: FilterOpt): Question
   return list.filter((x) => {
     if (opt.difficulty && x.q.difficulty !== opt.difficulty) return false
     if (opt.qtype && x.q.qtype !== opt.qtype) return false
-    if (opt.section && x.q.section !== opt.section) return false
+    // ⚠ 老题库里存的是旧板块名 / 空 → 这里**归一化**再比，否则老题在"新分类"下永远筛不到 ✗
+    if (opt.section && normSection(x.q.section) !== opt.section) return false
     if (opt.chapter && x.q.chapter !== opt.chapter) return false
     if (opt.level && levelOf(x.q.difficulty) !== opt.level) return false
     if (opt.onlyMissingAnswer && x.q.answer.trim()) return false
