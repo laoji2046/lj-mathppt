@@ -135,10 +135,10 @@ const figRows = computed(() => {
   for (const row of rows) {
     const ml = /^线(\d+)$/.exec(row.title)
     const mp = /^点(\d+)$/.exec(row.title)
-    if (ml && Number(ml[1]) <= lineN.value) row.cells.push({ key: 'lc' + ml[1], label: '线' + ml[1] + ' 颜色', short: '色', color: 'line', ci: Number(ml[1]) - 1, def: 0 })
-    else if (mp && Number(mp[1]) <= pointN.value) row.cells.push({ key: 'pc' + mp[1], label: '点' + mp[1] + ' 颜色', short: '色', color: 'point', ci: Number(mp[1]) - 1, def: 0 })
-    else if (row.key === 'cv') row.cells.push({ key: 'ccv', label: '曲线颜色', short: '色', color: 'conic', def: 0 })
-    else if (row.key === 'ax') row.cells.push({ key: 'cax', label: '坐标轴颜色', short: '色', color: 'axis', def: 0 })
+    if (ml && Number(ml[1]) <= lineN.value) row.cells.push({ key: 'lc' + ml[1], label: '线' + ml[1] + ' 颜色', short: '', color: 'line', ci: Number(ml[1]) - 1, def: 0 })
+    else if (mp && Number(mp[1]) <= pointN.value) row.cells.push({ key: 'pc' + mp[1], label: '点' + mp[1] + ' 颜色', short: '', color: 'point', ci: Number(mp[1]) - 1, def: 0 })
+    else if (row.key === 'cv') row.cells.push({ key: 'ccv', label: '曲线颜色', short: '', color: 'conic', def: 0 })
+    else if (row.key === 'ax') row.cells.push({ key: 'cax', label: '坐标轴颜色', short: '', color: 'axis', def: 0 })
   }
   return rows
 })
@@ -1502,7 +1502,7 @@ function layerTypeLabel(type: string) {
             <span class="fbox__t">{{ row.title }}</span>
             <div class="fm" :class="{ 'fm--tight': !row.cells.some((c) => !c.bool && !c.color) }">
               <label v-for="c in row.cells" :key="c.key" class="fm__cell" :class="{ 'fm__cell--ck': c.bool }" :title="c.label">
-                <i>{{ c.short }}</i>
+                <i v-if="c.short">{{ c.short }}</i>
                 <ColorSwatches
                   v-if="c.color"
                   dot
