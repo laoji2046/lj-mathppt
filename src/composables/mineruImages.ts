@@ -53,14 +53,14 @@ function toDataUrl(raw: MineruRawImage): string {
 export function linkMineruImages(
   md: string,
   raw: MineruRawImage[] | undefined,
-): { text: string; images: QuestionImage[] } {
+): { text: string; images: QuestionImage[]; marks: Record<number, number> } {
   const text0 = String(md || '')
   const byPath = new Map<string, MineruRawImage>()
   for (const r of raw || []) {
     const k = normPath(r && r.path)
     if (k && r && r.dataBase64) byPath.set(k, r)
   }
-  if (!byPath.size) return { text: text0, images: [] }
+  if (!byPath.size) return { text: text0, images: [], marks: {} }
 
   // 正文里已有的 [图N] 全部占位，避免新号撞上去
   const taken = new Set<number>()
@@ -73,8 +73,10 @@ export function linkMineruImages(
   }
 
   const images: QuestionImage[] = []
+  /** 图号 → 它在正文里的字符位置（【v1451】兜底归属时要用：图落在哪道题之后，就挂给哪道题 ✓） */
+  const marks: Record<number, number> = {}
   const numOf = new Map<string, number>() // 地址 → 已编的号
-  const text = text0.replace(MD_IMG, (whole: string, cap: string, url: string) => {
+  const text = text0.replace(MD_IMG, (whole: string, cap: string, url: string, offset: number) => {
     const key = normPath(url)
     const hit = byPath.get(key)
     if (!hit) return whole
@@ -82,12 +84,13 @@ export function linkMineruImages(
     if (!n) {
       n = alloc()
       numOf.set(key, n)
+      marks[n] = offset
       images.push({ n, src: toDataUrl(hit), caption: (cap || '').trim() || undefined })
     }
     return '[图' + n + ']'
   })
   images.sort((a, b) => a.n - b.n)
-  return { text, images }
+  return { text, images, marks }
 }
 
 /** 文本里引用到的图号 */
@@ -115,6 +118,43 @@ export function imagesForText(text: string, images: QuestionImage[] | undefined)
     if (hit) out.push({ n: hit.n, src: hit.src, caption: hit.caption })
   }
   return out
+}
+/**
+ * 【v1451 修】没被任何题引用的图 → **按位置兜底挂到它前面最近的那道题**，并在这道题上标 warn。
+ *
+ * 为什么需要：MinerU 把图形判成 table、把公式裁成图时，图的引用可能落在**卷头 / 题与题之间**，
+ * 于是 imagesForText 谁都不认领，图就静默消失了（实测 15 张只收到 4 张 ✗）。
+ * 纪律：**不许悄悄丢** —— 挂错也比丢了强，但要**标出来让人核对** ✓
+ */
+export function attachOrphans(
+  text: string,
+  list: { stem?: string; options?: string[]; solution?: string; images?: QuestionImage[]; warn?: string }[],
+  all: QuestionImage[],
+  marks: Record<number, number>,
+): { attached: number; orphans: number[] } {
+  if (!list.length || !all.length) return { attached: 0, orphans: [] }
+  const used = new Set<number>()
+  for (const q of list) for (const im of imagesForText(questionTextOf(q), all)) used.add(im.n)
+  const left = all.filter((im) => !used.has(im.n))
+  if (!left.length) return { attached: 0, orphans: [] }
+  // 每道题在正文里的起点（拿题干头 12 个字去找；找不到记 -1）
+  const at = list.map((q) => {
+    const head = String(q.stem || q.solution || '').trim().slice(0, 12)
+    return head ? String(text || '').indexOf(head) : -1
+  })
+  let attached = 0
+  for (const im of left) {
+    const off = marks[im.n] ?? -1
+    let pick = 0
+    if (off >= 0) {
+      for (let i = 0; i < list.length; i++) if (at[i] >= 0 && at[i] <= off) pick = i
+    }
+    const q = list[pick]
+    q.images = [...(q.images || []), { n: im.n, src: im.src, caption: im.caption }]
+    q.warn = [q.warn, '第 ' + im.n + ' 张图没找到所属题，已按位置挂到这里，请核对'].filter(Boolean).join('；')
+    attached++
+  }
+  return { attached, orphans: left.map((x) => x.n) }
 }
 
 /** 题干 + 选项 + 解析（判断一道题引用了哪些图时的检索范围） */

@@ -2470,6 +2470,9 @@ fn lib_export_vault(dir: String) -> serde_json::Value {
                 r.get::<_, i64>(7)?,
                 r.get::<_, String>(8)?,
                 r.get::<_, String>(9)?,
+                // 【v1451 修】声明的是 11 元组，这里必须读第 11 列 —— v1450 漏了这一行，
+                //   当时 cargo 其实没编过（我误读了退出码），探针跑的是旧 exe ✓ 现补上
+                r.get::<_, String>(10)?,
             ))
         })
         .map(|it| it.filter_map(|x| x.ok()).collect())
@@ -3317,6 +3320,50 @@ fn mineru_collect_images(dir: &std::path::Path, md: &str) -> Vec<serde_json::Val
     let mut out: Vec<serde_json::Value> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut total = 0usize;
+    // 【v1451 修】先把 images/ 目录**全读**一遍：MinerU 会把图形判成 table、把公式裁成图，
+    //   这些块的 img_path 未必出现在 full.md 里 —— 只扫正文引用会**漏图** ✗（实测 15 张只收到 4 张）
+    //   多读几张不会被绑进题（前端 linkMineruImages 只认正文里真引用到的），代价极小（全部缓存也就几十 KB）
+    if let Ok(rd) = std::fs::read_dir(dir.join("images")) {
+        for e in rd.filter_map(|x| x.ok()) {
+            let p = e.path();
+            if !p.is_file() {
+                continue;
+            }
+            let name = p.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            if name.is_empty() {
+                continue;
+            }
+            let rel = format!("images/{}", name);
+            if seen.contains(&rel) {
+                continue;
+            }
+            let bytes = match std::fs::read(&p) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            if bytes.is_empty() || bytes.len() > MAX_IMG_BYTES || total + bytes.len() > MAX_TOTAL_BYTES {
+                continue;
+            }
+            let low = name.to_ascii_lowercase();
+            let mime = if low.ends_with(".png") {
+                "image/png"
+            } else if low.ends_with(".webp") {
+                "image/webp"
+            } else if low.ends_with(".gif") {
+                "image/gif"
+            } else {
+                "image/jpeg"
+            };
+            total += bytes.len();
+            seen.insert(rel.clone());
+            out.push(serde_json::json!({
+                "path": rel,
+                "mime": mime,
+                "bytes": bytes.len(),
+                "dataBase64": B64.encode(&bytes),
+            }));
+        }
+    }
     let mut i = 0usize;
     while i < md.len() {
         let rel = match md[i..].find("](") {

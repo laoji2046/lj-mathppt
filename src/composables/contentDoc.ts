@@ -89,6 +89,12 @@ export function assembleContentDoc(rawJson: string): string {
     if (ty === 'image') { const p = String(b.img_path || ''); if (p) out += '![](' + p + ')\n'; continue }
     const t = String(b.text || b.table_body || '')
     if (t) out += t + '\n'
+    // 【v1451 修】表格 / 公式块**没有可用文本**但带了图（MinerU 常把图形判成 table、把公式裁成图）：
+    //   必须把图放进来 —— 否则这块的图既不在正文、也绑不到题上，**静默丢失** ✗
+    if (!t && (ty === 'table' || ty === 'equation')) {
+      const p = String(b.img_path || '')
+      if (p) out += '![](' + p + ')\n'
+    }
   }
   return out
 }

@@ -18,7 +18,7 @@ import AppIcon from './AppIcon.vue'
 import { isTauri, listenTauri, mineruParse, mineruStagePdf } from '@/composables/useTauri'
 import type { MineruProgress } from '@/composables/useTauri'
 import { assembleContentDoc } from '@/composables/contentDoc'
-import { imagesForText, linkMineruImages, questionTextOf } from '@/composables/mineruImages'
+import { attachOrphans, imagesForText, linkMineruImages, questionTextOf } from '@/composables/mineruImages'
 import type { QuestionImage } from '@/composables/parseQuestions'
 import { setContentList } from '@/composables/parseQuestions'
 import type { ParsedQuestion } from '@/composables/parseQuestions'
@@ -46,6 +46,9 @@ const totalInBank = ref(0)
 
 /** 本批次（一次 MinerU 识别）的插图表：编号 N 对应正文里的 [图N]，入库时**按题拆开** ✓ */
 const pendingImages = ref<QuestionImage[]>([])
+/** 【v1451】兜底归属要用：装配后的正文 + 每个图号在正文里的位置 ✓ */
+const pendingText = ref('')
+const pendingMarks = ref<Record<number, number>>({})
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const fileMode = ref<'md' | 'json' | 'pdf'>('md')
@@ -122,15 +125,22 @@ async function onFilePicked(e: Event) {
 
 function loadRows(list: ParsedQuestion[], tip: string) {
   // MinerU 的插图：整卷共用一个表，**按题拆**（不能让第 3 题背上整卷的图 ✗）
+  let orphans: number[] = []
   if (pendingImages.value.length) {
     for (const q of list) {
       const imgs = imagesForText(questionTextOf(q), pendingImages.value)
       if (imgs.length) q.images = imgs
     }
+    // 【v1451 修】没被任何题引用的图 → 按位置兜底挂到最近的一道题并标 warn，**不许静默丢** ✓
+    orphans = attachOrphans(pendingText.value, list, pendingImages.value, pendingMarks.value).orphans
   }
   rows.value = list.map((q) => ({ on: true, q }))
   report.value = ''
-  flash(tip + '：识别出 ' + list.length + ' 道 —— 请核对后点「入库」')
+  const bound = list.filter((q) => (q.images || []).length).length
+  const imgNote = pendingImages.value.length
+    ? '，图 ' + pendingImages.value.length + ' 张（绑到 ' + bound + ' 道' + (orphans.length ? '，其中 ' + orphans.length + ' 张没找到所属题、已按位置兜底请核对' : '') + '）'
+    : ''
+  flash(tip + '：识别出 ' + list.length + ' 道' + imgNote + ' —— 请核对后点「入库」')
   void renderCardStems()
 }
 
@@ -336,6 +346,8 @@ async function runMineru(pdfPath: string) {
     const linked = linkMineruImages(doc, r?.images)
     setContentList(doc)
     pendingImages.value = linked.images
+    pendingMarks.value = linked.marks
+    pendingText.value = linked.text
     text.value = linked.text
     parseMd(linked.text, 'MinerU 识别完成（' + (r.seconds ?? '?') + 's / ' + (r.pages || '?') + ' 页，插图 ' + linked.images.length + ' 张）')
     mineruProg.value = '✓ ' + (mode === 'precise' ? '精准解析' : '轻量接口') + ' 完成，已填进校对表'
