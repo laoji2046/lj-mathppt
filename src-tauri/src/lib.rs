@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::Emitter;
 
+mod import_gate;
 mod source_normalize;
 
 // ////////////////////////////////////////////////////////////////////////////
@@ -553,7 +554,7 @@ fn lib_open() -> Result<rusqlite::Connection, String> {
 }
 
 /// 当前库结构版本（新库建表即 v1；打开时自动升到最新 ✓）
-const LIB_SCHEMA_VERSION: i64 = 4;
+const LIB_SCHEMA_VERSION: i64 = 5;
 
 /// 读库结构版本：library_meta 里没有这行 → 当 v1（老库）✓
 fn lib_schema_get(conn: &rusqlite::Connection) -> i64 {
@@ -960,6 +961,75 @@ fn lib_migrate(conn: &rusqlite::Connection) -> Result<(), String> {
         v = 4;
     }
 
+    // ---- v4 → v5：录入加固（批次 / 草稿 / 修订快照）+ batch_id / sha256 两个真列 ----
+    //  为什么：AI / OCR 的输出**不能直接进正式库**（§5.1）—— 必须先落草稿、过质量闸门、人工确认；
+    //          来源与告警要随批次走；每题改动要能回溯（修订快照）。
+    if v == 4 {
+        lib_backup_before(5)?;
+        for (name, ddl) in [("batch_id", "TEXT DEFAULT ''"), ("sha256", "TEXT DEFAULT ''")] {
+            let has: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('library_item') WHERE name = ?1",
+                    [name],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if has == 0 {
+                conn.execute_batch(&format!("ALTER TABLE library_item ADD COLUMN {} {}", name, ddl))
+                    .map_err(|e| format!("迁移 v4→v5 加列 {} 失败: {}", name, e))?;
+            }
+        }
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_asset_sha ON library_item(type, sha256);
+             CREATE INDEX IF NOT EXISTS idx_q_batch ON library_item(type, batch_id);
+             CREATE TABLE IF NOT EXISTS question_revision (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               qid INTEGER NOT NULL,
+               version INTEGER NOT NULL,
+               snapshot TEXT NOT NULL,
+               reason TEXT DEFAULT '',
+               created_at TEXT NOT NULL,
+               UNIQUE(qid, version)
+             );
+             CREATE INDEX IF NOT EXISTS idx_rev_qid ON question_revision(qid, version DESC);
+             CREATE TABLE IF NOT EXISTS import_batch (
+               id TEXT PRIMARY KEY,
+               source_type TEXT DEFAULT '',
+               source_path TEXT DEFAULT '',
+               source_label TEXT DEFAULT '',
+               summary TEXT DEFAULT '',
+               question_count INTEGER NOT NULL DEFAULT 0,
+               status TEXT DEFAULT 'running',
+               idem_key TEXT,
+               extra TEXT DEFAULT '',
+               created_at TEXT NOT NULL,
+               finished_at TEXT
+             );
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_batch_idem ON import_batch(idem_key) WHERE idem_key IS NOT NULL;
+             CREATE TABLE IF NOT EXISTS import_draft (
+               id TEXT PRIMARY KEY,
+               batch_id TEXT DEFAULT '',
+               source_item_id TEXT DEFAULT '',
+               source_label TEXT DEFAULT '',
+               page INTEGER,
+               bbox TEXT DEFAULT '',
+               confidence REAL,
+               needs_review INTEGER NOT NULL DEFAULT 1,
+               stem TEXT DEFAULT '', options TEXT DEFAULT '', answer TEXT DEFAULT '', solution TEXT DEFAULT '',
+               qtype TEXT DEFAULT '', section TEXT DEFAULT '', difficulty INTEGER DEFAULT 0, knowledge TEXT DEFAULT '',
+               year INTEGER DEFAULT 0, paper TEXT DEFAULT '', source_kind TEXT DEFAULT '',
+               raw_text TEXT DEFAULT '', warn TEXT DEFAULT '',
+               status TEXT NOT NULL DEFAULT 'needs_review',
+               target_qid INTEGER DEFAULT 0,
+               extra TEXT DEFAULT '',
+               created_at TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_draft_batch ON import_draft(batch_id, status);",
+        )
+        .map_err(|e| format!("迁移 v4→v5 建表失败: {}", e))?;
+        v = 5;
+    }
+
     conn.execute(
         "INSERT INTO library_meta(k, v) VALUES('schema_version', ?1) ON CONFLICT(k) DO UPDATE SET v = ?1",
         [v.to_string()],
@@ -1311,6 +1381,8 @@ fn lib_q_patch(id: i64, patch: serde_json::Value) -> serde_json::Value {
     if let Err(e) = lib_sync_qcols(&conn, id, "question", &meta2) {
         return serde_json::json!({ "ok": false, "error": e });
     }
+    // 【v5】每次改动留一份修订快照（改坏了能回溯）
+    let _ = lib_snapshot_revision(&conn, id, "patch");
     // 取回新的真列（界面即时更新用 ✓）
     let row = conn
         .query_row(
@@ -1413,6 +1485,7 @@ fn lib_q_batch(ops: Vec<serde_json::Value>) -> serde_json::Value {
         if let Err(e) = lib_sync_qcols(&tx, id, "question", &meta2) {
             return serde_json::json!({ "ok": false, "error": e });
         }
+        let _ = lib_snapshot_revision(&tx, id, "batch");
         let row = tx
             .query_row(
                 "SELECT section, qtype, level, difficulty, year, paper, COALESCE(code,''), COALESCE(status,''), COALESCE(source_kind,''), COALESCE(warn,'') FROM library_item WHERE id = ?1",
@@ -1441,6 +1514,610 @@ fn lib_q_batch(ops: Vec<serde_json::Value>) -> serde_json::Value {
         return serde_json::json!({ "ok": false, "error": format!("提交失败: {}", e) });
     }
     serde_json::json!({ "ok": true, "updated": updated, "deleted": deleted, "backup": backup, "rows": rows })
+}
+
+/* ================= 【v5 · P1a】录入加固：批次 / 草稿 / 闸门 / 修订快照 ================= */
+
+/// 草稿的哪些状态**允许**写进正式库（方案 §5.1：只有 ready / approved / published）
+fn lib_draft_ok_for_commit(status: &str) -> bool {
+    matches!(status, "ready" | "approved" | "published")
+}
+
+/// 给一道题存一份修订快照（version = 该题现有最大版本 + 1）。
+/// 为什么要：批量改 / 导入 / AI 改都可能改错，**得能回溯**（对齐 deck 已有的版本历史）。
+fn lib_snapshot_revision(conn: &rusqlite::Connection, qid: i64, reason: &str) -> Result<(), String> {
+    let meta: String = conn
+        .query_row("SELECT meta FROM library_item WHERE id = ?1", [qid], |r| r.get(0))
+        .unwrap_or_else(|_| "{}".to_string());
+    let next: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) + 1 FROM question_revision WHERE qid = ?1",
+            [qid],
+            |r| r.get(0),
+        )
+        .unwrap_or(1);
+    conn.execute(
+        "INSERT INTO question_revision(qid, version, snapshot, reason, created_at) VALUES(?1,?2,?3,?4,?5)",
+        rusqlite::params![qid, next, meta, reason, now_stamp()],
+    )
+    .map_err(|e| format!("写修订快照失败: {}", e))?;
+    Ok(())
+}
+
+/// 草稿里的 options / knowledge 是 **JSON 数组字符串**（TEXT 列）；坏了给空表，绝不让一条脏草稿卡住整批
+fn lib_draft_arr(s: &str) -> Vec<String> {
+    serde_json::from_str::<serde_json::Value>(if s.trim().is_empty() { "[]" } else { s })
+        .ok()
+        .and_then(|v| v.as_array().cloned())
+        .map(|a| {
+            a.iter()
+                .map(|x| match x {
+                    serde_json::Value::String(t) => t.clone(),
+                    other => other.to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// JSON 值（前端传来的数组）→ Vec<String>
+fn lib_json_arr(v: Option<&serde_json::Value>) -> Vec<String> {
+    v.and_then(|x| x.as_array())
+        .map(|a| {
+            a.iter()
+                .map(|x| match x {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 开一个导入批次。**幂等**：同一 idem_key 直接回老批次（不重复建、不重复计费）。
+#[tauri::command]
+fn lib_import_begin(payload: serde_json::Value) -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let gs = |k: &str| {
+        payload
+            .get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let row_of = |id: &str| -> Option<serde_json::Value> {
+        conn.query_row(
+            "SELECT id, source_type, source_label, status, question_count, idem_key FROM import_batch WHERE id = ?1",
+            [id],
+            |r| {
+                Ok(serde_json::json!({
+                    "id": r.get::<_, String>(0)?,
+                    "sourceType": r.get::<_, String>(1)?,
+                    "sourceLabel": r.get::<_, String>(2)?,
+                    "status": r.get::<_, String>(3)?,
+                    "questionCount": r.get::<_, i64>(4)?,
+                    "idemKey": r.get::<_, String>(5)?,
+                }))
+            },
+        )
+        .ok()
+    };
+    let idem = gs("idemKey");
+    if !idem.is_empty() {
+        let found: Option<String> = conn
+            .query_row("SELECT id FROM import_batch WHERE idem_key = ?1", [&idem], |r| r.get(0))
+            .ok();
+        if let Some(id) = found {
+            return serde_json::json!({ "ok": true, "reused": true, "code": "IDEM_HIT", "batch": row_of(&id) });
+        }
+    }
+    let base = format!("B-{}", now_stamp());
+    let mut id = base.clone();
+    let mut n = 1;
+    while row_of(&id).is_some() {
+        n += 1;
+        id = format!("{}-{}", base, n);
+    }
+    if let Err(e) = conn.execute(
+        "INSERT INTO import_batch(id, source_type, source_path, source_label, summary, question_count, status, idem_key, extra, created_at) VALUES(?1,?2,?3,?4,'',0,'running',?5,?6,?7)",
+        rusqlite::params![id, gs("sourceType"), gs("sourcePath"), gs("sourceLabel"), idem, gs("extra"), now_stamp()],
+    ) {
+        return serde_json::json!({ "ok": false, "error": format!("建批次失败: {}", e) });
+    }
+    serde_json::json!({ "ok": true, "reused": false, "code": "BATCH_NEW", "batch": row_of(&id) })
+}
+
+/// 往批次里灌草稿。**每条都过质量闸门**；expectedCount 与实际道数不符 → 整组转人工。
+#[tauri::command]
+fn lib_import_add_drafts(payload: serde_json::Value) -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let batch = payload.get("batchId").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let expected = payload.get("expectedCount").and_then(|v| v.as_i64()).unwrap_or(-1);
+    let drafts = payload.get("drafts").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    if batch.is_empty() || drafts.is_empty() {
+        return serde_json::json!({ "ok": false, "error": "batchId 与 drafts 不能为空" });
+    }
+    let exists: i64 = conn
+        .query_row("SELECT COUNT(*) FROM import_batch WHERE id = ?1", [&batch], |r| r.get(0))
+        .unwrap_or(0);
+    if exists == 0 {
+        return serde_json::json!({ "ok": false, "error": format!("批次 {} 不存在（草稿不能挂在不存在的批次上）", batch) });
+    }
+    let total = drafts.len() as i64;
+    let now = now_stamp();
+    let mut ids: Vec<String> = Vec::new();
+    let mut need: i64 = 0;
+    for (i, d) in drafts.iter().enumerate() {
+        let dgs = |k: &str| d.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let sid = d.get("sourceItemId").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        let id = if sid.is_empty() {
+            format!("{}-{:03}", batch, i + 1)
+        } else {
+            format!("{}-{}", batch, sid)
+        };
+        let stem = dgs("stem");
+        let options = lib_json_arr(d.get("options"));
+        let qtype = dgs("qtype");
+        let image_refs: usize = import_gate::count_image_refs(&stem)
+            + options.iter().map(|o| import_gate::count_image_refs(o)).sum::<usize>();
+        let images = d.get("images").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+        let g = import_gate::GateInput {
+            stem: &stem,
+            options: &options,
+            qtype: &qtype,
+            answer: &dgs("answer"),
+            solution: &dgs("solution"),
+            raw_text: &dgs("rawText"),
+            image_refs,
+            images,
+            expected_count: expected,
+            actual_count: total,
+        };
+        let res = import_gate::check(&g);
+        if res.needs_review {
+            need += 1;
+        }
+        let nr: i64 = if res.needs_review { 1 } else { 0 };
+        let opts_json = serde_json::to_string(&options).unwrap_or_else(|_| "[]".to_string());
+        let kp_json = serde_json::to_string(&lib_json_arr(d.get("knowledge"))).unwrap_or_else(|_| "[]".to_string());
+        if let Err(e) = conn.execute(
+            "INSERT INTO import_draft(id,batch_id,source_item_id,source_label,page,bbox,confidence,needs_review,stem,options,answer,solution,qtype,section,difficulty,knowledge,year,paper,source_kind,raw_text,warn,status,target_qid,extra,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,'needs_review',0,?22,?23) ON CONFLICT(id) DO UPDATE SET stem=excluded.stem, options=excluded.options, answer=excluded.answer, solution=excluded.solution, qtype=excluded.qtype, section=excluded.section, difficulty=excluded.difficulty, knowledge=excluded.knowledge, year=excluded.year, paper=excluded.paper, source_kind=excluded.source_kind, raw_text=excluded.raw_text, warn=excluded.warn, needs_review=excluded.needs_review, page=excluded.page, bbox=excluded.bbox, confidence=excluded.confidence, source_label=excluded.source_label",
+            rusqlite::params![
+                id,
+                batch,
+                sid,
+                dgs("sourceLabel"),
+                d.get("page").and_then(|v| v.as_i64()),
+                dgs("bbox"),
+                d.get("confidence").and_then(|v| v.as_f64()),
+                nr,
+                stem,
+                opts_json,
+                dgs("answer"),
+                dgs("solution"),
+                qtype,
+                dgs("section"),
+                d.get("difficulty").and_then(|v| v.as_i64()).unwrap_or(0),
+                kp_json,
+                d.get("year").and_then(|v| v.as_i64()).unwrap_or(0),
+                dgs("paper"),
+                dgs("sourceKind"),
+                dgs("rawText"),
+                res.warn,
+                dgs("extra"),
+                now
+            ],
+        ) {
+            return serde_json::json!({ "ok": false, "error": format!("写草稿 {} 失败: {}", id, e) });
+        }
+        ids.push(id);
+    }
+    serde_json::json!({ "ok": true, "added": total, "needReview": need, "ids": ids })
+}
+
+/// 读一批草稿（界面「草稿箱」用）
+#[tauri::command]
+fn lib_import_drafts(batch: String) -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let mut st = match conn.prepare(
+        "SELECT id, source_item_id, source_label, page, confidence, needs_review, stem, options, answer, solution, qtype, section, difficulty, knowledge, year, paper, source_kind, raw_text, warn, status, target_qid, bbox FROM import_draft WHERE batch_id = ?1 ORDER BY created_at, id",
+    ) {
+        Ok(x) => x,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("读草稿失败: {}", e) }),
+    };
+    let items: Vec<serde_json::Value> = st
+        .query_map([&batch], |r| {
+            Ok(serde_json::json!({
+                "id": r.get::<_, String>(0)?,
+                "sourceItemId": r.get::<_, String>(1)?,
+                "sourceLabel": r.get::<_, String>(2)?,
+                "page": r.get::<_, Option<i64>>(3)?,
+                "confidence": r.get::<_, Option<f64>>(4)?,
+                "needsReview": r.get::<_, i64>(5)?,
+                "stem": r.get::<_, String>(6)?,
+                "options": r.get::<_, String>(7)?,
+                "answer": r.get::<_, String>(8)?,
+                "solution": r.get::<_, String>(9)?,
+                "qtype": r.get::<_, String>(10)?,
+                "section": r.get::<_, String>(11)?,
+                "difficulty": r.get::<_, i64>(12)?,
+                "knowledge": r.get::<_, String>(13)?,
+                "year": r.get::<_, i64>(14)?,
+                "paper": r.get::<_, String>(15)?,
+                "sourceKind": r.get::<_, String>(16)?,
+                "rawText": r.get::<_, String>(17)?,
+                "warn": r.get::<_, String>(18)?,
+                "status": r.get::<_, String>(19)?,
+                "targetQid": r.get::<_, i64>(20)?,
+                "bbox": r.get::<_, String>(21)?,
+            }))
+        })
+        .map(|it| it.filter_map(|x| x.ok()).collect())
+        .unwrap_or_default();
+    serde_json::json!({ "ok": true, "items": items })
+}
+
+/// 人工改草稿。把 status 改成 ready/approved/published 是**唯一**能放行进正式库的动作。
+#[tauri::command]
+fn lib_import_draft_patch(ids: Vec<String>, patch: serde_json::Value) -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let p = match patch.as_object() {
+        Some(o) => o.clone(),
+        None => Default::default(),
+    };
+    if p.is_empty() {
+        return serde_json::json!({ "ok": false, "error": "patch 是空的" });
+    }
+    let col_of = |k: &str| -> Option<&'static str> {
+        Some(match k {
+            "status" => "status",
+            "stem" => "stem",
+            "options" => "options",
+            "answer" => "answer",
+            "solution" => "solution",
+            "qtype" => "qtype",
+            "section" => "section",
+            "difficulty" => "difficulty",
+            "knowledge" => "knowledge",
+            "year" => "year",
+            "paper" => "paper",
+            "sourceKind" => "source_kind",
+            "rawText" => "raw_text",
+            "warn" => "warn",
+            "needsReview" => "needs_review",
+            "confidence" => "confidence",
+            "page" => "page",
+            "bbox" => "bbox",
+            _ => return None,
+        })
+    };
+    let mut n = 0i64;
+    for id in ids.iter() {
+        for (k, v) in p.iter() {
+            let col = match col_of(k) {
+                Some(c) => c,
+                None => {
+                    return serde_json::json!({ "ok": false, "error": format!("不允许改草稿字段 {}（白名单之外）", k) })
+                }
+            };
+            let val = match v {
+                serde_json::Value::Null => rusqlite::types::Value::Null,
+                serde_json::Value::Bool(b) => rusqlite::types::Value::Integer(if *b { 1 } else { 0 }),
+                serde_json::Value::Number(num) => match num.as_i64() {
+                    Some(i) => rusqlite::types::Value::Integer(i),
+                    None => rusqlite::types::Value::Real(num.as_f64().unwrap_or(0.0)),
+                },
+                // ⚠ JSON 字符串要取**里面的**字符串：Value::to_string() 会带上双引号，
+                //   会把 status 写成 "approved"（带引号）→ 入库闸门 fail-closed 直接拒掉。
+                //   v1447 第一次探针就是这么抓到的。
+                serde_json::Value::String(t) => rusqlite::types::Value::Text(t.clone()),
+                other => rusqlite::types::Value::Text(other.to_string()),
+            };
+            if let Err(e) = conn.execute(
+                &format!("UPDATE import_draft SET {} = ?1 WHERE id = ?2", col),
+                rusqlite::params![val, id],
+            ) {
+                return serde_json::json!({ "ok": false, "error": format!("改草稿 {} 失败: {}", id, e) });
+            }
+        }
+        // 状态改成能入库的那几档 = 人工已经看过了 → 顺手清掉 needs_review
+        if let Some(st) = p.get("status").and_then(|v| v.as_str()) {
+            if lib_draft_ok_for_commit(st) {
+                let _ = conn.execute("UPDATE import_draft SET needs_review = 0 WHERE id = ?1", [id]);
+            }
+        }
+        n += 1;
+    }
+    serde_json::json!({ "ok": true, "updated": n })
+}
+
+/// 草稿**确认入库**。fail-closed：只要有一条不在 ready/approved/published，**整批拒绝**（不写一半）。
+#[tauri::command]
+fn lib_import_commit(ids: Vec<String>) -> serde_json::Value {
+    let mut conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    if ids.is_empty() {
+        return serde_json::json!({ "ok": false, "error": "没有选中草稿" });
+    }
+    let mut rows: Vec<serde_json::Value> = Vec::new();
+    let mut blocked: Vec<serde_json::Value> = Vec::new();
+    for id in ids.iter() {
+        let got = conn.query_row(
+            "SELECT id, batch_id, stem, options, answer, solution, qtype, section, difficulty, knowledge, year, paper, warn, status, needs_review FROM import_draft WHERE id = ?1",
+            [id],
+            |r| {
+                Ok(serde_json::json!({
+                    "id": r.get::<_, String>(0)?,
+                    "batchId": r.get::<_, String>(1)?,
+                    "stem": r.get::<_, String>(2)?,
+                    "options": r.get::<_, String>(3)?,
+                    "answer": r.get::<_, String>(4)?,
+                    "solution": r.get::<_, String>(5)?,
+                    "qtype": r.get::<_, String>(6)?,
+                    "section": r.get::<_, String>(7)?,
+                    "difficulty": r.get::<_, i64>(8)?,
+                    "knowledge": r.get::<_, String>(9)?,
+                    "year": r.get::<_, i64>(10)?,
+                    "paper": r.get::<_, String>(11)?,
+                    "warn": r.get::<_, String>(12)?,
+                    "status": r.get::<_, String>(13)?,
+                    "needsReview": r.get::<_, i64>(14)?,
+                }))
+            },
+        );
+        match got {
+            Ok(v) => {
+                let st = v.get("status").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                if !lib_draft_ok_for_commit(&st) {
+                    blocked.push(serde_json::json!({
+                        "id": id,
+                        "status": st,
+                        "warn": v.get("warn").and_then(|x| x.as_str()).unwrap_or(""),
+                    }));
+                }
+                rows.push(v);
+            }
+            Err(e) => return serde_json::json!({ "ok": false, "error": format!("找不到草稿 {}: {}", id, e) }),
+        }
+    }
+    if !blocked.is_empty() {
+        return serde_json::json!({
+            "ok": false,
+            "code": "NEEDS_REVIEW",
+            "blocked": blocked,
+            "error": format!("有 {} 条草稿还没人工确认，整批都不入（只有 ready/approved/published 能进正式库）", blocked.len()),
+        });
+    }
+    let sn_map = source_normalize::load_map();
+    let now = now_stamp();
+    let tx = match conn.transaction() {
+        Ok(t) => t,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("事务失败: {}", e) }),
+    };
+    let mut created: Vec<serde_json::Value> = Vec::new();
+    let mut batches: Vec<String> = Vec::new();
+    for v in rows.iter() {
+        let draft_id = v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let batch_id = v.get("batchId").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let stem = v.get("stem").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let title: String = {
+            let t: String = stem.chars().take(40).collect();
+            if t.trim().is_empty() { "（无题干）".to_string() } else { t }
+        };
+        let mut m = serde_json::json!({
+            "stem": stem.clone(),
+            "options": lib_draft_arr(v.get("options").and_then(|x| x.as_str()).unwrap_or("[]")),
+            "answer": v.get("answer").and_then(|x| x.as_str()).unwrap_or(""),
+            "solution": v.get("solution").and_then(|x| x.as_str()).unwrap_or(""),
+            "qtype": v.get("qtype").and_then(|x| x.as_str()).unwrap_or(""),
+            "difficulty": v.get("difficulty").and_then(|x| x.as_i64()).unwrap_or(0),
+            "knowledge": lib_draft_arr(v.get("knowledge").and_then(|x| x.as_str()).unwrap_or("[]")),
+            "year": v.get("year").and_then(|x| x.as_i64()).unwrap_or(0),
+            "section": v.get("section").and_then(|x| x.as_str()).unwrap_or(""),
+            "paperName": v.get("paper").and_then(|x| x.as_str()).unwrap_or(""),
+            "status": "published",
+        });
+        // ⚠ section 真列有 AFTER INSERT 触发器从 meta 抽（v1→v2 建的），
+        //   所以章节**必须同时进 meta**，只写列会被触发器覆盖成空 ✗（v1447 探针抓到的）
+        let warn = v.get("warn").and_then(|x| x.as_str()).unwrap_or("");
+        if !warn.is_empty() {
+            m["warn"] = serde_json::json!(warn);
+        }
+        if !batch_id.is_empty() {
+            m["batchId"] = serde_json::json!(batch_id);
+        }
+        let meta = lib_prepare_qmeta(&tx, &m.to_string(), &sn_map);
+        let section = v.get("section").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        if let Err(e) = tx.execute(
+            "INSERT INTO library_item (type,title,body,meta,tags,source,builtin,created_at,updated_at,used_count,section,batch_id) VALUES (?1,?2,?3,?4,'','',0,?5,?6,0,?7,?8)",
+            rusqlite::params!["question", title, stem, meta, now, now, section, batch_id],
+        ) {
+            return serde_json::json!({ "ok": false, "error": format!("写题失败: {}", e) });
+        }
+        let qid = tx.last_insert_rowid();
+        if let Err(e) = lib_sync_qcols(&tx, qid, "question", &meta) {
+            return serde_json::json!({ "ok": false, "error": e });
+        }
+        // 入库即留一份修订快照（reason=import）—— 以后改坏了能回溯
+        if let Err(e) = lib_snapshot_revision(&tx, qid, "import") {
+            return serde_json::json!({ "ok": false, "error": e });
+        }
+        if let Err(e) = tx.execute(
+            "UPDATE import_draft SET status = 'published', target_qid = ?1, needs_review = 0 WHERE id = ?2",
+            rusqlite::params![qid, draft_id],
+        ) {
+            return serde_json::json!({ "ok": false, "error": format!("回写草稿失败: {}", e) });
+        }
+        if !batch_id.is_empty() && !batches.contains(&batch_id) {
+            batches.push(batch_id.clone());
+        }
+        created.push(serde_json::json!({ "draftId": draft_id, "qid": qid }));
+    }
+    // 批次计数 + running / done / partial（还有没确认的草稿就是 partial）
+    for b in batches.iter() {
+        if let Err(e) = tx.execute(
+            "UPDATE import_batch SET question_count = question_count + 1 WHERE id = ?1",
+            [b],
+        ) {
+            return serde_json::json!({ "ok": false, "error": format!("更新批次计数失败: {}", e) });
+        }
+        let left: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM import_draft WHERE batch_id = ?1 AND status NOT IN ('published','rejected')",
+                [b],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        let st = if left > 0 { "partial" } else { "done" };
+        let _ = tx.execute(
+            "UPDATE import_batch SET status = ?1, finished_at = ?2 WHERE id = ?3",
+            rusqlite::params![st, now, b],
+        );
+    }
+    if let Err(e) = tx.commit() {
+        return serde_json::json!({ "ok": false, "error": format!("提交失败: {}", e) });
+    }
+    serde_json::json!({ "ok": true, "created": created.len(), "items": created })
+}
+
+/// 弃用草稿（明确不入库，**保留审计**）
+#[tauri::command]
+fn lib_import_discard(ids: Vec<String>) -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let mut n = 0i64;
+    for id in ids.iter() {
+        match conn.execute("UPDATE import_draft SET status = 'rejected' WHERE id = ?1", [id]) {
+            Ok(k) => n += k as i64,
+            Err(e) => return serde_json::json!({ "ok": false, "error": format!("弃用草稿 {} 失败: {}", id, e) }),
+        }
+    }
+    serde_json::json!({ "ok": true, "rejected": n })
+}
+
+/// 识别历史（批次列表）
+#[tauri::command]
+fn lib_import_batches(limit: i64) -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let lim = limit.clamp(1, 200);
+    let mut st = match conn.prepare(
+        "SELECT id, source_type, source_label, status, question_count, idem_key, created_at, finished_at FROM import_batch ORDER BY created_at DESC, id DESC LIMIT ?1",
+    ) {
+        Ok(x) => x,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("读批次失败: {}", e) }),
+    };
+    let items: Vec<serde_json::Value> = st
+        .query_map([lim], |r| {
+            Ok(serde_json::json!({
+                "id": r.get::<_, String>(0)?,
+                "sourceType": r.get::<_, String>(1)?,
+                "sourceLabel": r.get::<_, String>(2)?,
+                "status": r.get::<_, String>(3)?,
+                "questionCount": r.get::<_, i64>(4)?,
+                "idemKey": r.get::<_, String>(5)?,
+                "createdAt": r.get::<_, String>(6)?,
+                "finishedAt": r.get::<_, Option<String>>(7)?,
+            }))
+        })
+        .map(|it| it.filter_map(|x| x.ok()).collect())
+        .unwrap_or_default();
+    serde_json::json!({ "ok": true, "items": items })
+}
+
+/// 从识别历史**重建草稿**（§5.4：重建**只生成待审核草稿，绝不重调 OCR / LLM** —— 这条直接省钱）
+#[tauri::command]
+fn lib_import_rebuild(batch: String) -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let src: i64 = conn
+        .query_row("SELECT COUNT(*) FROM import_batch WHERE id = ?1", [&batch], |r| r.get(0))
+        .unwrap_or(0);
+    if src == 0 {
+        return serde_json::json!({ "ok": false, "error": format!("批次 {} 不存在", batch) });
+    }
+    let n: i64 = conn
+        .query_row("SELECT COUNT(*) FROM import_draft WHERE batch_id = ?1", [&batch], |r| r.get(0))
+        .unwrap_or(0);
+    if n == 0 {
+        return serde_json::json!({ "ok": false, "error": "这一批没有草稿可重建" });
+    }
+    let base = format!("B-{}", now_stamp());
+    let mut nid = base.clone();
+    let mut k = 1;
+    while conn
+        .query_row("SELECT COUNT(*) FROM import_batch WHERE id = ?1", [&nid], |r| r.get::<_, i64>(0))
+        .unwrap_or(0)
+        > 0
+    {
+        k += 1;
+        nid = format!("{}-{}", base, k);
+    }
+    let now = now_stamp();
+    let extra_json = serde_json::json!({ "rebuiltFrom": batch.clone() }).to_string();
+    if let Err(e) = conn.execute(
+        "INSERT INTO import_batch(id, source_type, source_path, source_label, summary, question_count, status, idem_key, extra, created_at) SELECT ?1, source_type, source_path, source_label, summary, 0, 'running', NULL, ?2, ?3 FROM import_batch WHERE id = ?4",
+        rusqlite::params![nid, extra_json, now, batch],
+    ) {
+        return serde_json::json!({ "ok": false, "error": format!("建重建批次失败: {}", e) });
+    }
+    // 草稿整批复制到新批次（id 前缀换掉）；**不碰 library_item，也不调任何 OCR**
+    let copied = conn.execute(
+        "INSERT INTO import_draft(id,batch_id,source_item_id,source_label,page,bbox,confidence,needs_review,stem,options,answer,solution,qtype,section,difficulty,knowledge,year,paper,source_kind,raw_text,warn,status,target_qid,extra,created_at) SELECT ?1 || substr(id, length(?2) + 1), ?1, source_item_id, source_label, page, bbox, confidence, needs_review, stem, options, answer, solution, qtype, section, difficulty, knowledge, year, paper, source_kind, raw_text, warn, status, target_qid, extra, ?3 FROM import_draft WHERE batch_id = ?2",
+        rusqlite::params![nid, batch, now],
+    );
+    match copied {
+        Ok(c) => serde_json::json!({ "ok": true, "batch": nid, "copied": c, "from": batch, "ocrCalls": 0 }),
+        Err(e) => serde_json::json!({ "ok": false, "error": format!("复制草稿失败: {}", e) }),
+    }
+}
+
+/// 某道题的修订历史（新→旧）
+#[tauri::command]
+fn lib_q_revisions(qid: i64) -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let mut st = match conn.prepare(
+        "SELECT version, snapshot, reason, created_at FROM question_revision WHERE qid = ?1 ORDER BY version DESC",
+    ) {
+        Ok(x) => x,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("读修订失败: {}", e) }),
+    };
+    let items: Vec<serde_json::Value> = st
+        .query_map([qid], |r| {
+            Ok(serde_json::json!({
+                "version": r.get::<_, i64>(0)?,
+                "snapshot": r.get::<_, String>(1)?,
+                "reason": r.get::<_, String>(2)?,
+                "createdAt": r.get::<_, String>(3)?,
+            }))
+        })
+        .map(|it| it.filter_map(|x| x.ok()).collect())
+        .unwrap_or_default();
+    serde_json::json!({ "ok": true, "items": items })
 }
 
 /// 【v4】知识点 / 方法受控词表（**板块级**）：给前端渲染分类与选择用 ✓
@@ -1683,6 +2360,10 @@ fn lib_save(item: serde_json::Value) -> serde_json::Value {
             // （非 question 类型直接返回 Ok，公式/图形/课件走这里不受影响 ✓）
             if let Err(e) = lib_sync_qcols(&conn, saved_id, &kind, &meta) {
                 return serde_json::json!({ "ok": false, "error": e });
+            }
+            // 【v5】题目改动留一份修订快照（公式 / 图形等其他类型不动）
+            if kind == "question" {
+                let _ = lib_snapshot_revision(&conn, saved_id, "patch");
             }
             serde_json::json!({ "ok": true, "id": saved_id })
         }
@@ -2516,6 +3197,15 @@ pub fn run() {
         lib_q_search,
         lib_q_patch,
         lib_q_batch,
+        lib_import_begin,
+        lib_import_add_drafts,
+        lib_import_drafts,
+        lib_import_draft_patch,
+        lib_import_commit,
+        lib_import_discard,
+        lib_import_batches,
+        lib_import_rebuild,
+        lib_q_revisions,
         lib_kp_catalog,
         lib_source_report,
         ai_chat,
