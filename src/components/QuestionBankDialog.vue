@@ -328,11 +328,13 @@ async function runMineru(pdfPath: string) {
 }
 
 /** 导出 JSON：默认只导**当前筛选出来的**（筛选结果为空时明确说一句，绝不偷偷导全库 ✗） */
+/** 导出时是否把图片内嵌成 base64（默认否：只带 assetId，体积小）*/
+const embedImages = ref(false)
 async function exportJson(all = false) {
   const arr = all ? list.value : shown.value
   if (!arr.length) { flash(all ? '题库是空的，没有可导出的题' : '当前筛选结果为空 —— 想导整个题库请点「导出全部」'); return }
   const name = '题库' + (all ? '全部' : '筛选') + '-' + new Date().toISOString().slice(0, 10) + '.json'
-  const path = await saveTextFile(name, exportQuestionsJson(arr))
+  const path = await saveTextFile(name, exportQuestionsJson(arr, { embedImages: embedImages.value }))
   flash(path ? '已导出 ' + arr.length + ' 道题到：' + path : '已导出 ' + arr.length + ' 道题')
 }
 
@@ -670,6 +672,7 @@ function close() { emit('close') }
             <button class="qb__btn" :disabled="mineruBusy" title="导入 PDF：调 MinerU 云端识别成 Markdown（HTTP 在 Rust 侧发，绕开网页 CORS；识别结果先灌进「批量导入」面板，核对后再入库）" @click="pickFile('pdf')">{{ mineruBusy ? '识别中…' : '导入 PDF（MinerU）' }}</button>
             <button class="qb__btn" title="把**当前筛选出的**题导出成 JSON（筛选为空时会提示，不会偷偷导全库）" @click="exportJson()">导出筛选结果</button>
           <button class="qb__btn" title="把整个题库导出成 JSON" @click="exportJson(true)">导出全部</button>
+          <label class="qb__chk" title="把图片以 base64 一起写进 JSON —— 换机器/发给别人也能看到图（文件会大）"><input v-model="embedImages" type="checkbox" /> 内嵌图片</label>
             <button class="qb__btn" :title="'从解析里反推答案（认「故选B」这类明确写法），可补 ' + proposals.length + ' 道'" @click="doComplete">完善答案<template v-if="proposals.length">（{{ proposals.length }}）</template></button>
             <button class="qb__btn qb__btn--pri" title="新建一道试题" @click="startNew">＋ 新建试题</button>
             <button class="qb__btn qb__btn--pdf" :disabled="manageOnly || !pickedIds.length" :title="manageOnly ? '从工具栏打开时只能管理题库；插题请从「PDF 生成 → 试题库」打开' : '把左边勾选的题按 选择→填空→解答 排序，一起送进 PDF 生成'" @click="insertPicked(false)">生成 PDF（已选 {{ pickedIds.length }}）</button>

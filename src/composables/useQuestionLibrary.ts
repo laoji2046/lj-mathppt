@@ -694,13 +694,23 @@ export async function removeQuestions(ids: number[]): Promise<number> {
 export const QBANK_FORMAT = 'lj-mathslides-question-bank'
 
 /** 把题库导出成 JSON 文本（含全部结构化字段，可在别的机器导入） */
-export function exportQuestionsJson(list: QuestionEntry[]): string {
+export function exportQuestionsJson(list: QuestionEntry[], opt?: { embedImages?: boolean }): string {
+  const embed = !!opt?.embedImages
   return JSON.stringify({
     type: QBANK_FORMAT,
     version: 1,
     exportedAt: new Date().toISOString(),
     count: list.length,
-    questions: list.map((x) => ({ title: x.title, ...x.q })),
+    // 图：默认只带 assetId（体积小，适合归档）；勾了「内嵌图片」就把 src(dataURL) 一起写进去
+    //     → **换机器 / 发给同事也能看到图** ✓（导入时大图会重新转成 asset）
+    imagesEmbedded: embed,
+    questions: list.map((x) => ({
+      title: x.title,
+      ...x.q,
+      images: (x.q.images || []).map((im) => (embed
+        ? { n: im.n, src: im.src, caption: im.caption }
+        : { n: im.n, ...(im.assetId ? { assetId: im.assetId } : { src: im.src }), caption: im.caption })),
+    })),
   }, null, 2)
 }
 
