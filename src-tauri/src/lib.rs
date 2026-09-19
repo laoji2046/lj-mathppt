@@ -829,6 +829,255 @@ fn lib_health() -> serde_json::Value {
     })
 }
 
+/// 【题库 v3】左栏树 / 筛选条要的计数 —— **一次 IPC 拿全** ✓
+/// （别让前端拉 169 条自己算：题量上去会越来越慢 ✗）
+#[tauri::command]
+fn lib_q_facets() -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let q = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap_or(0) };
+    // 成对（名, 数）的通用查询：一律 CAST 成 TEXT（INTEGER 列用 String 取会整行失败 ✗）
+    let pair = |sql: &str| -> serde_json::Value {
+        let mut out = serde_json::Map::new();
+        if let Ok(mut st) = conn.prepare(sql) {
+            if let Ok(rows) = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))) {
+                for (k, c) in rows.filter_map(|x| x.ok()) {
+                    out.insert(k, serde_json::json!(c));
+                }
+            }
+        }
+        serde_json::Value::Object(out)
+    };
+    serde_json::json!({
+        "ok": true,
+        "total": q("SELECT COUNT(*) FROM library_item WHERE type='question'"),
+        "bySection": pair("SELECT CASE WHEN COALESCE(section,'')='' THEN '(未归类)' ELSE section END k, COUNT(*) c FROM library_item WHERE type='question' GROUP BY k ORDER BY c DESC"),
+        "byQtype": pair("SELECT CASE WHEN COALESCE(qtype,'')='' THEN '(空)' ELSE qtype END k, COUNT(*) c FROM library_item WHERE type='question' GROUP BY k ORDER BY c DESC"),
+        "byLevel": pair("SELECT CASE WHEN COALESCE(level,'')='' THEN '(空)' ELSE level END k, COUNT(*) c FROM library_item WHERE type='question' GROUP BY k ORDER BY c DESC"),
+        "byYear": pair("SELECT CASE WHEN COALESCE(year,0)=0 THEN '(空)' ELSE CAST(year AS TEXT) END k, COUNT(*) c FROM library_item WHERE type='question' GROUP BY k ORDER BY c DESC"),
+        "byPaper": pair("SELECT CASE WHEN COALESCE(paper,'')='' THEN '(空)' ELSE paper END k, COUNT(*) c FROM library_item WHERE type='question' GROUP BY k ORDER BY c DESC LIMIT 30"),
+        "byKp": pair("SELECT kp k, COUNT(*) c FROM question_kp GROUP BY k ORDER BY c DESC"),
+        "missing": {
+            "section": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND COALESCE(section,'')=''"),
+            "answer": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND json_valid(meta) AND COALESCE(json_extract(meta,'$.answer'),'')=''"),
+            "kp": q("SELECT COUNT(*) FROM library_item q WHERE type='question' AND NOT EXISTS(SELECT 1 FROM question_kp k WHERE k.qid = q.id)"),
+            "year": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND COALESCE(year,0)=0"),
+            "paper": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND COALESCE(paper,'')=''")
+        }
+    })
+}
+
+/// 【题库 v3】按条件查题：左树点一下 / 筛选项一变 / 搜索一输，都走这里 ✓
+/// filter 支持：section · qtype · level · year · paper(模糊) · kp · q(搜索) ·
+///             missingSection / missingAnswer / missingKp / missingYear(true 时才生效) · limit · offset
+#[tauri::command]
+fn lib_q_search(filter: serde_json::Value) -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let f = filter.as_object().cloned().unwrap_or_default();
+    let sget = |k: &str| {
+        f.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let bget = |k: &str| f.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+    let limit = f.get("limit").and_then(|v| v.as_i64()).unwrap_or(200).clamp(1, 500);
+    let offset = f.get("offset").and_then(|v| v.as_i64()).unwrap_or(0).max(0);
+
+    let mut where_sql = String::from(" WHERE type='question'");
+    let mut args: Vec<rusqlite::types::Value> = Vec::new();
+    let sec = sget("section");
+    if !sec.is_empty() {
+        if sec == "(未归类)" {
+            where_sql.push_str(" AND COALESCE(section,'')=''");
+        } else {
+            where_sql.push_str(" AND section = ?");
+            args.push(rusqlite::types::Value::Text(sec));
+        }
+    }
+    for key in ["qtype", "level"] {
+        let v = sget(key);
+        if !v.is_empty() {
+            where_sql.push_str(&format!(" AND {} = ?", key));
+            args.push(rusqlite::types::Value::Text(v));
+        }
+    }
+    let y = f.get("year").and_then(|v| v.as_i64()).unwrap_or(0);
+    if y > 0 {
+        where_sql.push_str(" AND year = ?");
+        args.push(rusqlite::types::Value::Integer(y));
+    }
+    let paper = sget("paper");
+    if !paper.is_empty() {
+        where_sql.push_str(" AND paper LIKE ?");
+        args.push(rusqlite::types::Value::Text(format!("%{}%", paper)));
+    }
+    let kp = sget("kp");
+    if !kp.is_empty() {
+        where_sql.push_str(" AND EXISTS (SELECT 1 FROM question_kp k WHERE k.qid = library_item.id AND k.kp = ?)");
+        args.push(rusqlite::types::Value::Text(kp));
+    }
+    let text = sget("q");
+    if !text.is_empty() {
+        where_sql.push_str(" AND (body LIKE ? OR title LIKE ?)");
+        let like = format!("%{}%", text);
+        args.push(rusqlite::types::Value::Text(like.clone()));
+        args.push(rusqlite::types::Value::Text(like));
+    }
+    if bget("missingSection") {
+        where_sql.push_str(" AND COALESCE(section,'')=''");
+    }
+    if bget("missingAnswer") {
+        where_sql.push_str(" AND json_valid(meta) AND COALESCE(json_extract(meta,'$.answer'),'')=''");
+    }
+    if bget("missingKp") {
+        where_sql.push_str(" AND NOT EXISTS (SELECT 1 FROM question_kp k WHERE k.qid = library_item.id)");
+    }
+    if bget("missingYear") {
+        where_sql.push_str(" AND COALESCE(year,0)=0");
+    }
+
+    let total: i64 = conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM library_item{}", where_sql),
+            rusqlite::params_from_iter(args.iter()),
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    let sql = format!(
+        "SELECT id, title, body, meta, section, qtype, level, difficulty, year, paper, updated_at          FROM library_item{} ORDER BY id DESC LIMIT ? OFFSET ?",
+        where_sql
+    );
+    args.push(rusqlite::types::Value::Integer(limit));
+    args.push(rusqlite::types::Value::Integer(offset));
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("查询失败: {}", e) }),
+    };
+    let rows = match stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_, i64>(0)?,
+            "title": r.get::<_, String>(1)?,
+            "body": r.get::<_, String>(2)?,
+            "meta": r.get::<_, String>(3)?,
+            "section": r.get::<_, String>(4)?,
+            "qtype": r.get::<_, String>(5)?,
+            "level": r.get::<_, String>(6)?,
+            "difficulty": r.get::<_, i64>(7)?,
+            "year": r.get::<_, i64>(8)?,
+            "paper": r.get::<_, String>(9)?,
+            "updatedAt": r.get::<_, String>(10)?,
+            "kp": Vec::<String>::new()
+        }))
+    }) {
+        Ok(x) => x,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("查询失败: {}", e) }),
+    };
+    let mut items: Vec<serde_json::Value> = rows.filter_map(|x| x.ok()).collect();
+
+    // 知识点：一次 IN 查询装回去（别每条一次 SQL ✗）
+    if !items.is_empty() {
+        let ids: Vec<String> = items
+            .iter()
+            .map(|x| x.get("id").and_then(|v| v.as_i64()).unwrap_or(0).to_string())
+            .collect();
+        let kp_sql = format!(
+            "SELECT qid, kp FROM question_kp WHERE qid IN ({}) ORDER BY kp",
+            ids.join(",")
+        );
+        let mut by_id: std::collections::HashMap<i64, Vec<String>> = std::collections::HashMap::new();
+        if let Ok(mut st) = conn.prepare(&kp_sql) {
+            if let Ok(krows) = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))) {
+                for (qid, k) in krows.filter_map(|x| x.ok()) {
+                    by_id.entry(qid).or_default().push(k);
+                }
+            }
+        }
+        for it in items.iter_mut() {
+            let id = it.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+            if let Some(list) = by_id.get(&id) {
+                if let Some(obj) = it.as_object_mut() {
+                    obj.insert("kp".to_string(), serde_json::json!(list));
+                }
+            }
+        }
+    }
+
+    serde_json::json!({
+        "ok": true, "total": total, "returned": items.len(), "limit": limit, "offset": offset, "items": items
+    })
+}
+
+/// 【题库 v3】改一道题的字段（章节 / 题型 / 难度 / 年份 / 试卷名 / 答案 / 知识点…）
+/// patch 的键**就是 meta 里的键**（section / qtype / level / difficulty / year / paperName / answer / knowledge…）
+/// 值给 null = 删掉这个键 ✓。改完自动同步真列 + 知识点表（走 lib_sync_qcols 同一个入口 ✓）
+#[tauri::command]
+fn lib_q_patch(id: i64, patch: serde_json::Value) -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let (kind, meta): (String, String) = match conn.query_row(
+        "SELECT type, meta FROM library_item WHERE id = ?1",
+        [id],
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+    ) {
+        Ok(x) => x,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("找不到条目 #{}: {}", id, e) }),
+    };
+    if kind != "question" {
+        return serde_json::json!({ "ok": false, "error": format!("只允许改题目（#{} 的类型是 {}）✗", id, kind) });
+    }
+    let mut m: serde_json::Value =
+        serde_json::from_str(if meta.is_empty() { "{}" } else { &meta }).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(obj) = m.as_object_mut() {
+        if let Some(p) = patch.as_object() {
+            for (k, v) in p {
+                if v.is_null() {
+                    obj.remove(k);
+                } else {
+                    obj.insert(k.clone(), v.clone());
+                }
+            }
+        }
+    }
+    let meta2 = serde_json::to_string(&m).unwrap_or_else(|_| "{}".to_string());
+    if let Err(e) = conn.execute(
+        "UPDATE library_item SET meta = ?1, updated_at = ?2 WHERE id = ?3",
+        rusqlite::params![meta2, now_stamp(), id],
+    ) {
+        return serde_json::json!({ "ok": false, "error": format!("更新失败: {}", e) });
+    }
+    if let Err(e) = lib_sync_qcols(&conn, id, "question", &meta2) {
+        return serde_json::json!({ "ok": false, "error": e });
+    }
+    // 取回新的真列（界面即时更新用 ✓）
+    let row = conn
+        .query_row(
+            "SELECT section, qtype, level, difficulty, year, paper FROM library_item WHERE id = ?1",
+            [id],
+            |r| {
+                Ok(serde_json::json!({
+                    "section": r.get::<_, String>(0)?,
+                    "qtype": r.get::<_, String>(1)?,
+                    "level": r.get::<_, String>(2)?,
+                    "difficulty": r.get::<_, i64>(3)?,
+                    "year": r.get::<_, i64>(4)?,
+                    "paper": r.get::<_, String>(5)?,
+                }))
+            },
+        )
+        .unwrap_or_else(|_| serde_json::json!({}));
+    serde_json::json!({ "ok": true, "id": id, "row": row })
+}
+
 /// 库信息：路径 + 条目数（前端显示与诊断用）。
 #[tauri::command]
 fn lib_info() -> serde_json::Value {
@@ -1789,6 +2038,9 @@ pub fn run() {
             lib_info,
         lib_schema_info,
         lib_health,
+        lib_q_facets,
+        lib_q_search,
+        lib_q_patch,
         ai_chat,
         asset_get,
             lib_query,
