@@ -805,6 +805,18 @@ export function questionToText(q: QuestionEntry, withSolution = false): string {
   return lines.join('\n')
 }
 
+/** 「这题还要人核对吗」——**按字段现算**，不额外存状态（老师改完就自动消失 ✓）。
+ *  顺序按"最好改"排：选项不全 → 没答案 → 题干过短（像残块）。返回 '' = 没问题。 */
+export function reviewWarn(q: { stem?: string; options?: string[]; answer?: string; qtype?: string }): string {
+  const opts = q.options || []
+  if ((q.qtype === 'choice' || q.qtype === 'multi') && opts.length < 4) {
+    return '选择题但只有 ' + opts.length + ' 个选项，请核对（可能是识别时被并进公式了）'
+  }
+  if (!(q.answer || '').trim()) return '没有答案，请补充或从解析里提取'
+  if ((q.stem || '').trim().length < 8) return '题干过短，可能是被切碎的残块'
+  return ''
+}
+
 export interface FilterOpt {
   q?: string
   tags?: string[]
@@ -814,6 +826,8 @@ export interface FilterOpt {
   chapter?: string | ''
   level?: Level | ''
   onlyMissingAnswer?: boolean
+  /** 只看"待核对"的题（选项不全 / 没答案 / 题干过短）—— 见 reviewWarn() */
+  review?: boolean
   year?: string
   paperName?: string
 }
@@ -829,6 +843,7 @@ export function filterQuestions(list: QuestionEntry[], opt: FilterOpt): Question
     if (opt.chapter && x.q.chapter !== opt.chapter) return false
     if (opt.level && levelOf(x.q.difficulty) !== opt.level) return false
     if (opt.onlyMissingAnswer && x.q.answer.trim()) return false
+    if (opt.review && !reviewWarn(x.q)) return false          // 只看"待核对"的（选项不全/没答案/题干过短）
     if (opt.year && x.q.year !== opt.year) return false
     if (opt.paperName && x.q.paperName !== opt.paperName) return false
     if (tags.length && !tags.every((t) => x.q.knowledge.indexOf(t) >= 0 || x.tags.indexOf(t) >= 0)) return false

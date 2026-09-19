@@ -9,6 +9,7 @@ import {
   buildPaperText, scoreOf, defaultScore, chaptersOf,
   scanJunk, scanDuplicates, removeQuestions,
   QTYPES, SECTIONS, LEVELS, levelOf, levelLabel, levelToDifficulty, qtypeLabel, withDefaults,
+  reviewWarn,
 } from '@/composables/useQuestionLibrary'
 import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup, JunkItem } from '@/composables/useQuestionLibrary'
 import { parseQuestionsWithInfo, PARSE_HELP, detectPaperInfo } from '@/composables/parseQuestions'
@@ -349,6 +350,8 @@ const pickedLevel = ref<Level | ''>('')
  */
 const pickedDiff = ref<number | null>(null)
 const onlyMissing = ref(false)
+/** 只看"待核对"的题（v1411 P1）：选项不全 / 没答案 / 题干过短 —— 按字段现算，改完自动消失 */
+const onlyReview = ref(false)
 /* ---- 多选出卷 ---- */
 const pickedIds = ref<number[]>([])
 function togglePick(id: number) {
@@ -442,6 +445,21 @@ const shown = computed(() => filterQuestions(list.value, {
   onlyMissingAnswer: onlyMissing.value,
 }))
 const selected = computed(() => list.value.find((x) => x.id === selectedId.value) || null)
+
+/** 「待核对」的题数 + 每道的原因（v1411 P1）—— 按字段现算，老师改完自动消失 ✓ */
+const reviewCount = computed(() => list.value.filter((x) => reviewWarn(x.q)).length)
+function warnOf(e: { q: { stem?: string; options?: string[]; answer?: string; qtype?: string } }): string { return reviewWarn(e.q) }
+/** 跳到下一道待核对（没有就绕回第一道） */
+function nextReview() {
+  const arr = shown.value
+  if (!arr.length) return
+  const cur = arr.findIndex((x) => x.id === selectedId.value)
+  for (let i = 1; i <= arr.length; i++) {
+    const x = arr[(cur + i + arr.length) % arr.length]
+    if (x && reviewWarn(x.q)) { selectedId.value = x.id; return }
+  }
+  flash('这个筛选结果里没有待核对的题了 ✓')
+}
 
 /* ---------- 插入到**当前幻灯片**（v1406） ----------
  * 题库原来只能插进「PDF 生成的试卷正文」；幻灯片是另一套（没有 [图N] 那套图号约定），
@@ -665,6 +683,8 @@ function close() { emit('close') }
           <span class="qb__fg">
             <button class="qb__f" :class="{ 'qb__f--on': onlyMissing }" title="只显示还没填答案的题"
               @click="onlyMissing = !onlyMissing">只看缺答案</button>
+            <button class="qb__f" :class="{ 'qb__f--on': onlyReview }" title="只显示需要人核对的题：选项不足 4 个 / 没答案 / 题干过短"
+              @click="onlyReview = !onlyReview">只看待核对（{{ reviewCount }}）</button>
           </span>
         </div>
 
@@ -692,6 +712,7 @@ function close() { emit('close') }
               <span class="qb__it">{{ x.title }}</span>
               <span class="qb__im">
                 {{ qtypeLabel(x.q.qtype) }} · {{ levelLabel(x.q.difficulty) }}
+                <b v-if="warnOf(x)" class="qb__warn" :title="warnOf(x)">⚠ 待核对</b>
                 <template v-if="x.q.section"> · {{ x.q.section }}</template>
                 <template v-if="!x.q.answer.trim()"> · <b class="qb__noans">缺答案</b></template>
                 <template v-else-if="x.q.answerFrom === 'auto'"> · <b class="qb__auto">自动</b></template>
@@ -703,6 +724,9 @@ function close() { emit('close') }
           <div class="qb__detail">
             <div v-if="selected && !cleanOpen" class="qb__slide">
               <button class="qb__btn qb__btn--pri" @click="insertToSlide">插入当前幻灯片</button>
+              <button class="qb__btn" :title="warnOf(selected) || '这一道看着没问题，点它会跳到下一道待核对的题'"
+                @click="nextReview">下一道待核对（{{ reviewCount }}）</button>
+              <span v-if="warnOf(selected)" class="qb__warnbox">⚠ {{ warnOf(selected) }}</span>
               <label class="qb__slideck">
                 <input v-model="slideWithAnswer" type="checkbox" /> 连答案/解析一起
               </label>
@@ -954,6 +978,7 @@ B. 2
 .qb__prow--paper { display: flex; align-items: center; gap: 8px; }
 .qb__ptitle { flex: 1; min-width: 0; font-weight: 600; }
 .qb__warn { margin-left: 6px; font-weight: 400; font-size: 11.5px; color: #b25f00; }
+.qb__warnbox { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 6px; background: #fff7e6; border: 1px solid #ffd591; color: #ad6800; font-size: 12px; }
 .qb__pcount { font-size: 11.5px; color: var(--muted, #888); }
 .qb__batchtop { display: flex; gap: 12px; flex-wrap: wrap; }
 .qb__byl { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted, #777); flex: 1; min-width: 160px; }
