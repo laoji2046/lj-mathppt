@@ -935,7 +935,7 @@ B. 2
                 <div class="qb__binfo">
                   <b>识别到 {{ parsed.length }} 道题</b>
                   <span v-if="parsed.length" class="qb__bwarn">
-                    <template v-if="parsed.filter((p) => p.warn).length">其中 {{ parsed.filter((p) => p.warn).length }} 道没识别到答案</template>
+                    <template v-if="parsed.filter((p) => p.warn).length">—— {{ parsed.length }} 道里 {{ parsed.filter((p) => p.warn).length }} 道需要核对（选项不全 / 没答案 / 题干过短）；入库后点「只看待核对」逐题处理；若是整卷选项都缺，换「全图 OCR」重跑一次更稳</template>
                     <template v-if="parsedInfo.skipped">；已跳过 {{ parsedInfo.skipped }} 行考生须知／抬头</template>
                     <span v-if="batchImages.length" class="qb__bimg">；本批次 {{ batchImages.length }} 张插图（已转成 [图N]，随题入库）</span>
                   </span>
