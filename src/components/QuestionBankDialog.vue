@@ -13,9 +13,9 @@ import {
 } from '@/composables/useQuestionLibrary'
 import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup, JunkItem } from '@/composables/useQuestionLibrary'
 import { parseQuestionsWithInfo, PARSE_HELP, detectPaperInfo, setContentList } from '@/composables/parseQuestions'
-import type { QuestionImage } from '@/composables/parseQuestions'
+import type { QuestionImage, ParsedQuestion } from '@/composables/parseQuestions'
 import { linkMineruImages, imagesForText, questionTextOf } from '@/composables/mineruImages'
-import { saveTextFile, isTauri, listenTauri, mineruStagePdf, mineruParse } from '@/composables/useTauri'
+import { saveTextFile, isTauri, listenTauri, mineruStagePdf, mineruParse, aiChat } from '@/composables/useTauri'
 import { useDeckStore } from '@/stores/deck'
 import type { SlideElement } from '@/types'
 import type { MineruProgress } from '@/composables/useTauri'
@@ -40,7 +40,19 @@ const q = ref('')
 const batchOpen = ref(false)
 const batchText = ref('')
 const parsedInfo = computed(() => parseQuestionsWithInfo(batchText.value))
-const parsed = computed(() => parsedInfo.value.list)
+/** 【AI 结构化】跑成功后用它替代正则结果（仍是"先预览再入库" ✓）；null = 用正则结果 */
+const aiList = ref<ParsedQuestion[] | null>(null)
+const aiBusy = ref(false)
+const aiMsg = ref('')
+const aiKey = ref('')
+const AI_KEY = 'lj-mathslides:ai-key'
+try { aiKey.value = localStorage.getItem(AI_KEY) || '' } catch { /* 隐私模式忽略 */ }
+watch(aiKey, (v) => {
+  const t = v.trim()
+  try { if (t) localStorage.setItem(AI_KEY, t); else localStorage.removeItem(AI_KEY) } catch { /* 忽略 */ }
+})
+
+const parsed = computed(() => aiList.value || parsedInfo.value.list)   // AI 结果优先（仍是先预览再入库）
 /**
  * 本批次（一次 MinerU 识别）的插图表：编号 N 对应正文里的 [图N]。
  * 整卷共用一个表，入库时再按题拆（imagesForText）—— 不能让第 3 题背上整卷的图。
@@ -53,6 +65,7 @@ const batchPaper = ref('')
 /** 自动识别结果（粘进来就填，用户可以改） */
 const detected = ref({ year: '', paperName: '', from: '' })
 // 正文一变就重新识别：认出来就填进去，认不出就保持原样（不覆盖用户手填的内容）
+watch(batchText, () => { aiList.value = null; aiMsg.value = '' })   // 正文一变，AI 结果作废（免得拿旧结果入库）
 watch(batchText, (v) => {
   const d = detectPaperInfo(v || '')
   detected.value = d
@@ -501,6 +514,38 @@ async function mergePrev() {
   flash('已合并：# ' + cur.id + ' → # ' + prev.id + '（图与选项一并带过去）')
 }
 
+/** 【AI 结构化切题】把当前正文交给大模型 → 结构化 JSON → 灌进"预览"（**不自动入库** ✓）。
+ *  价值：正则治不了的（选项被并进公式、跨栏、答案混排）模型一次就能理顺 ✓
+ *  ⚠ 模型自己解的答案一律标 answerFrom='ai' → 界面显示「AI 答案·待核对」，绝不冒充原卷答案 ✓ */
+const AI_SYSTEM = '你是中学数学试卷结构化助手。把用户给的试卷正文切成题目，输出**严格 JSON**（不要 markdown 代码块）：'
+  + '{"questions":[{"stem":"题干（保留 LaTeX，用 $...$）","options":["A选项内容","B...","C...","D..."],'
+  + '"answer":"A","qtype":"choice|multi|blank|answer","solution":"解析或空","knowledge":[],"difficulty":3}]}'
+  + ' 规则：题号开头才是新题；「（1）（2）」是小问不要切；选项字母 A/B/C/D 各自成项（包括被并进公式的）；'
+  + '原卷没有答案就留空字符串 —— 不要自己解题。'
+async function runAi() {
+  if (!isTauri()) { flash('AI 结构化只在桌面端可用'); return }
+  const key = aiKey.value.trim()
+  if (!key) { flash('先在上面填 AI API Key（DeepSeek 的 sk-…，只存本机、不写进源码）'); return }
+  if (!batchText.value.trim()) { flash('先有正文（导入 MD / 导入 PDF 或直接粘贴）再让 AI 结构化'); return }
+  if (aiBusy.value) { flash('AI 还在跑，请稍候…'); return }
+  aiBusy.value = true
+  aiMsg.value = 'AI 正在结构化切题…（真卷约 20 秒）'
+  try {
+    const r = await aiChat({ apiKey: key, system: AI_SYSTEM, userText: batchText.value })
+    if (!r || !r.ok) throw new Error(r && r.error ? String(r.error) : '未知错误')
+    const raw = String(r.content || '').replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '').trim()
+    const pj = parseQuestionsJson(raw)
+    if (pj.error || !pj.list.length) throw new Error(pj.error || 'AI 没给出题目')
+    const list = pj.list.map((q) => ({ ...q, answerFrom: (q.answer || '').trim() ? 'ai' : '' })) as ParsedQuestion[]
+    aiList.value = list
+    aiMsg.value = '✓ AI 结构化完成：' + list.length + ' 道（答案若为 AI 所解会标「AI 答案·待核对」）'
+    flash('AI 结构化完成：' + list.length + ' 道 —— 请核对下面结果，再点「识别并导入」')
+  } catch (e) {
+    aiMsg.value = '✗ ' + errText(e)
+    flash('AI 结构化失败：' + errText(e) + '（仍可继续用 MinerU + 正则的结果）')
+  } finally { aiBusy.value = false }
+}
+
 /** 跳到下一道待核对（没有就绕回第一道） */
 function nextReview() {
   const arr = shown.value
@@ -947,7 +992,15 @@ B. 2
                   <ul><li v-for="(h, i) in PARSE_HELP" :key="i">{{ h }}</li></ul>
                 </details>
                 <div class="qb__actions">
-                  <button class="qb__btn qb__btn--pri" :disabled="!parsed.length" @click="doBatch">识别并导入</button>
+                  <div class="qb__actions">
+              <input v-model="aiKey" class="qb__minput" type="password" autocomplete="off" spellcheck="false"
+                placeholder="AI API Key（DeepSeek sk-…，只存本机）" />
+              <button class="qb__btn" :disabled="aiBusy || !batchText.trim()" title="把上面这份正文交给大模型做结构化切题（正则治不了的用它兜底）" @click="runAi">
+                {{ aiBusy ? 'AI 处理中…' : '✦ AI 结构化切题' }}
+              </button>
+              <span v-if="aiMsg" class="qb__bhint">{{ aiMsg }}</span>
+            </div>
+            <button class="qb__btn qb__btn--pri" :disabled="!parsed.length" @click="doBatch">识别并导入</button>
                   <button class="qb__btn" @click="batchOpen = false">返回列表</button>
                   <button class="qb__btn" @click="batchText = ''; batchImages = []">清空</button>
                 </div>

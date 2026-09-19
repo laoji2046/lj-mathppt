@@ -279,6 +279,18 @@ export async function mineruParse(
   return invoke<MineruResult>('mineru_parse', { pdfPath, token, mode })
 }
 
+/** 调 Rust 侧的 AI（默认 DeepSeek）拿结构化 JSON。
+ *  ⚠ api_key 只从设置里来（localStorage），**不写进源码/仓库** ✓ */
+export interface AiResult { ok?: boolean; content?: string; usage?: unknown; error?: string; status?: number }
+export async function aiChat(opt: {
+  apiKey: string; system: string; userText: string; model?: string; baseUrl?: string
+}): Promise<AiResult> {
+  return invoke<AiResult>('ai_chat', {
+    baseUrl: opt.baseUrl || '', apiKey: opt.apiKey, model: opt.model || '',
+    system: opt.system, userText: opt.userText,
+  })
+}
+
 /** 把文本写到指定目录下的指定文件名（桌面端"另存为"用），返回完整路径 */
 export async function saveTextToDir(dir: string, name: string, text: string): Promise<string> {
   const b64 = bytesToBase64(new TextEncoder().encode(text))

@@ -200,7 +200,7 @@ export interface QuestionMeta {
   paperName: string
   region: string
   /** 答案来源：manual 人工 / auto 从解析自动提取 / 空 未填 */
-  answerFrom: '' | 'manual' | 'auto'
+  answerFrom: '' | 'manual' | 'auto' | 'ai'   // ai = 模型自己解的（界面标「AI 答案·待核对」）
   /**
    * 题干里 [图N] 对应的插图（**自包含 data URL**，见 parseQuestions.ts 的 QuestionImage）。
    * 可选 —— 老题没有这个字段，读出来一律容错成空数组；只有 MinerU 导入的题才有。
