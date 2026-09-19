@@ -551,7 +551,7 @@ fn lib_open() -> Result<rusqlite::Connection, String> {
 }
 
 /// 当前库结构版本（新库建表即 v1；打开时自动升到最新 ✓）
-const LIB_SCHEMA_VERSION: i64 = 2;
+const LIB_SCHEMA_VERSION: i64 = 3;
 
 /// 读库结构版本：library_meta 里没有这行 → 当 v1（老库）✓
 fn lib_schema_get(conn: &rusqlite::Connection) -> i64 {
@@ -572,6 +572,77 @@ fn lib_backup_before(to_v: i64) -> Result<(), String> {
         .unwrap_or(0);
     let bak = p.with_file_name(format!("library.db.bak-v{}-{}", to_v, ts));
     std::fs::copy(&p, &bak).map_err(|e| format!("迁移前备份失败（{}）: {}", bak.to_string_lossy(), e))?;
+    Ok(())
+}
+
+/// 【题库 v3】从 meta(JSON) 里取要抽成真列的筛选字段：(qtype, level, difficulty, year, paper)
+/// 一律**容错**：meta 不是合法 JSON、字段缺失、类型不对 → 给默认值
+/// （迁移/保存都不能因为一条脏数据就卡住整个库 ✗）
+fn lib_qcols_of(meta: &str) -> (String, String, i64, i64, String) {
+    let v: serde_json::Value = serde_json::from_str(if meta.is_empty() { "{}" } else { meta })
+        .unwrap_or(serde_json::Value::Object(Default::default()));
+    let s = |k: &str| {
+        v.get(k)
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let n = |k: &str| -> i64 {
+        v.get(k)
+            .map(|x| {
+                x.as_i64()
+                    .or_else(|| x.as_f64().map(|f| f as i64))
+                    .or_else(|| x.as_str().and_then(|t| t.trim().parse::<i64>().ok()))
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0)
+    };
+    (s("qtype"), s("level"), n("difficulty"), n("year"), s("paperName"))
+}
+
+/// 【题库 v3】meta.knowledge（字符串数组）→ 知识点（去空、去重、单个限长 40）
+fn lib_kp_of(meta: &str) -> Vec<String> {
+    let v: serde_json::Value = match serde_json::from_str(if meta.is_empty() { "{}" } else { meta }) {
+        Ok(x) => x,
+        Err(_) => return Vec::new(),
+    };
+    let mut out: Vec<String> = Vec::new();
+    if let Some(arr) = v.get("knowledge").and_then(|k| k.as_array()) {
+        for it in arr {
+            let s = it
+                .as_str()
+                .map(|t| t.trim().to_string())
+                .or_else(|| it.as_i64().map(|n| n.to_string()))
+                .unwrap_or_default();
+            if !s.is_empty() && s.chars().count() <= 40 && !out.contains(&s) {
+                out.push(s);
+            }
+        }
+    }
+    out
+}
+
+/// 【题库 v3】把一条题目的 meta 同步到真列 + question_kp 表。
+/// 插入 / 更新 / 迁移回填**都走这一个入口** —— 三处各写一遍迟早会不一致 ✗
+fn lib_sync_qcols(conn: &rusqlite::Connection, id: i64, kind: &str, meta: &str) -> Result<(), String> {
+    if kind != "question" {
+        return Ok(());
+    }
+    let (qtype, level, difficulty, year, paper) = lib_qcols_of(meta);
+    conn.execute(
+        "UPDATE library_item SET qtype=?1, level=?2, difficulty=?3, year=?4, paper=?5 WHERE id=?6",
+        rusqlite::params![qtype, level, difficulty, year, paper, id],
+    )
+    .map_err(|e| format!("同步题库筛选字段失败: {}", e))?;
+    conn.execute("DELETE FROM question_kp WHERE qid = ?1", [id])
+        .map_err(|e| format!("清理知识点失败: {}", e))?;
+    for kp in lib_kp_of(meta) {
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO question_kp(qid, kp) VALUES (?1, ?2)",
+            rusqlite::params![id, kp],
+        );
+    }
     Ok(())
 }
 
@@ -604,6 +675,67 @@ fn lib_migrate(conn: &rusqlite::Connection) -> Result<(), String> {
         v = 2;
     }
 
+    // ---- v2 → v3：新题库要的筛选字段抽成真列 + 知识点拆成一张表 ----
+    //  为什么：新设计要「按 题型/难度/年份/来源(试卷名)/知识点 筛」✗
+    //  全塞在 meta(JSON) 里只能全表扫 + 现算 ✓
+    //  ⚠ library_item **原本就有 source 列**（条目出处/内置标记那类用法）→
+    //    试卷名另开 **paper** 列，别抢 source ✗
+    //  回填走 lib_sync_qcols：与保存路径同一份逻辑，不会出现「迁移填的」和「保存填的」两套口径 ✓
+    if v == 2 {
+        lib_backup_before(3)?;
+        for (name, ddl) in [
+            ("qtype", "TEXT DEFAULT ''"),
+            ("level", "TEXT DEFAULT ''"),
+            ("difficulty", "INTEGER DEFAULT 0"),
+            ("year", "INTEGER DEFAULT 0"),
+            ("paper", "TEXT DEFAULT ''"),
+        ] {
+            let has: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('library_item') WHERE name = ?1",
+                    [name],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if has == 0 {
+                conn.execute_batch(&format!(
+                    "ALTER TABLE library_item ADD COLUMN {} {}",
+                    name, ddl
+                ))
+                .map_err(|e| format!("迁移 v2→v3 加列 {} 失败: {}", name, e))?;
+            }
+        }
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_q_section ON library_item(type, section);
+             CREATE INDEX IF NOT EXISTS idx_q_qtype ON library_item(type, qtype);
+             CREATE INDEX IF NOT EXISTS idx_q_level ON library_item(type, level);
+             CREATE INDEX IF NOT EXISTS idx_q_year ON library_item(type, year);
+             CREATE TABLE IF NOT EXISTS question_kp (qid INTEGER NOT NULL, kp TEXT NOT NULL, PRIMARY KEY(qid, kp));
+             CREATE INDEX IF NOT EXISTS idx_qkp_kp ON question_kp(kp);",
+        )
+        .map_err(|e| format!("迁移 v2→v3 建索引/知识点表失败: {}", e))?;
+        // 回填已有题目（只动 type='question' ✓ 公式/图形/课件不受影响）
+        let rows: Vec<(i64, String)> = {
+            let mut st = conn
+                .prepare("SELECT id, meta FROM library_item WHERE type = 'question'")
+                .map_err(|e| format!("迁移 v2→v3 读旧题失败: {}", e))?;
+            let it = st
+                .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+                .map_err(|e| format!("迁移 v2→v3 读旧题失败: {}", e))?;
+            it.filter_map(|x| x.ok()).collect()
+        };
+        let mut backfilled: i64 = 0;
+        for (id, meta) in rows {
+            lib_sync_qcols(conn, id, "question", &meta)?;
+            backfilled += 1;
+        }
+        let _ = conn.execute(
+            "INSERT INTO library_meta(k, v) VALUES('v3_backfilled', ?1) ON CONFLICT(k) DO UPDATE SET v = ?1",
+            [backfilled.to_string()],
+        );
+        v = 3;
+    }
+
     conn.execute(
         "INSERT INTO library_meta(k, v) VALUES('schema_version', ?1) ON CONFLICT(k) DO UPDATE SET v = ?1",
         [v.to_string()],
@@ -633,6 +765,68 @@ fn lib_schema_info() -> serde_json::Value {
         }
         Err(e) => serde_json::json!({ "ok": false, "error": e }),
     }
+}
+
+/// 【题库体检】只读自检报告：分类 / 题型 / 难度 / 年份 / 来源 的覆盖率 + 明显问题计数。
+/// 新题库界面的「体检报告」直接显示这份 JSON ✓；**不动任何数据** ✓
+/// ⚠ 用到 json_extract 的地方一律先 json_valid(meta) —— 一条脏 meta 会让整个查询报错 ✗
+#[tauri::command]
+fn lib_health() -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let q = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap_or(0) };
+    let by = |col: &str| -> serde_json::Value {
+        let mut out = serde_json::Map::new();
+        // ⚠ 一律 CAST(... AS TEXT)：year/difficulty 是 INTEGER 列，
+        //   rusqlite 用 String 取整数会整行失败 → 分组直接变空对象 ✗（v1440 实测抓到）
+        let sql = format!(
+            "SELECT CASE WHEN COALESCE(CAST({c} AS TEXT), '') = '' THEN '(空)' ELSE CAST({c} AS TEXT) END k, \
+             COUNT(*) c FROM library_item WHERE type='question' GROUP BY k ORDER BY c DESC",
+            c = col
+        );
+        if let Ok(mut st) = conn.prepare(&sql) {
+            if let Ok(rows) = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))) {
+                for (k, c) in rows.filter_map(|x| x.ok()) {
+                    out.insert(k, serde_json::json!(c));
+                }
+            }
+        }
+        serde_json::Value::Object(out)
+    };
+    let mut kp_top = serde_json::Map::new();
+    if let Ok(mut st) = conn
+        .prepare("SELECT kp, COUNT(*) c FROM question_kp GROUP BY kp ORDER BY c DESC LIMIT 20")
+    {
+        if let Ok(rows) = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))) {
+            for (k, c) in rows.filter_map(|x| x.ok()) {
+                kp_top.insert(k, serde_json::json!(c));
+            }
+        }
+    }
+    serde_json::json!({
+        "ok": true,
+        "version": lib_schema_get(&conn),
+        "path": library_path().to_string_lossy(),
+        "total": q("SELECT COUNT(*) FROM library_item WHERE type='question'"),
+        "section": by("section"),
+        "qtype": by("qtype"),
+        "level": by("level"),
+        "year": by("year"),
+        "noSection": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND COALESCE(section,'')=''"),
+        "noQtype": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND COALESCE(qtype,'')=''"),
+        "noYear": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND COALESCE(year,0)=0"),
+        "noPaper": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND COALESCE(paper,'')=''"),
+        "noAnswer": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND json_valid(meta) AND COALESCE(json_extract(meta,'$.answer'),'')=''"),
+        "noOptions": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND json_valid(meta) AND json_type(meta,'$.options')='array' AND json_array_length(json_extract(meta,'$.options'))=0 AND COALESCE(qtype,'') IN ('choice','')"),
+        "kpRows": q("SELECT COUNT(*) FROM question_kp"),
+        "kpCovered": q("SELECT COUNT(DISTINCT qid) FROM question_kp"),
+        "dupStems": q("SELECT COUNT(*) FROM (SELECT 1 FROM library_item WHERE type='question' GROUP BY substr(body,1,80) HAVING COUNT(*)>1)"),
+        // 可疑年份：<2000 或 >2035 基本是解析/OCR 错的（实测有 1981、2027 这种 ✗）
+        "suspectYear": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND year > 0 AND (year < 2000 OR year > 2035)"),
+        "kpTop": serde_json::Value::Object(kp_top)
+    })
 }
 
 /// 库信息：路径 + 条目数（前端显示与诊断用）。
@@ -746,31 +940,38 @@ fn lib_save(item: serde_json::Value) -> serde_json::Value {
     let builtin = item.get("builtin").and_then(|v| v.as_i64()).unwrap_or(0);
     let id = item.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
     let now = now_stamp();
-    if id > 0 {
-        let r = conn.execute(
+    let saved: Result<i64, String> = if id > 0 {
+        conn.execute(
             concat!(
                 "UPDATE library_item SET title=?1, body=?2, meta=?3, tags=?4, ",
                 "source=?5, updated_at=?6 WHERE id=?7"
             ),
             rusqlite::params![title, body, meta, tags, source, now, id],
-        );
-        match r {
-            Ok(_) => serde_json::json!({ "ok": true, "id": id }),
-            Err(e) => serde_json::json!({ "ok": false, "error": format!("更新失败: {}", e) }),
-        }
+        )
+        .map(|_| id)
+        .map_err(|e| format!("更新失败: {}", e))
     } else {
-        let r = conn.execute(
+        conn.execute(
             concat!(
                 "INSERT INTO library_item ",
                 "(type,title,body,meta,tags,source,builtin,created_at,updated_at,used_count) ",
                 "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0)"
             ),
             rusqlite::params![kind, title, body, meta, tags, source, builtin, now, now],
-        );
-        match r {
-            Ok(_) => serde_json::json!({ "ok": true, "id": conn.last_insert_rowid() }),
-            Err(e) => serde_json::json!({ "ok": false, "error": format!("写入失败: {}", e) }),
+        )
+        .map(|_| conn.last_insert_rowid())
+        .map_err(|e| format!("写入失败: {}", e))
+    };
+    match saved {
+        Ok(saved_id) => {
+            // 【题库 v3】把 meta 里的筛选字段 + 知识点同步到真列与 question_kp 表 ✓
+            // （非 question 类型直接返回 Ok，公式/图形/课件走这里不受影响 ✓）
+            if let Err(e) = lib_sync_qcols(&conn, saved_id, &kind, &meta) {
+                return serde_json::json!({ "ok": false, "error": e });
+            }
+            serde_json::json!({ "ok": true, "id": saved_id })
         }
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
     }
 }
 
@@ -779,7 +980,11 @@ fn lib_save(item: serde_json::Value) -> serde_json::Value {
 fn lib_remove(id: i64) -> serde_json::Value {
     match lib_open() {
         Ok(conn) => match conn.execute("DELETE FROM library_item WHERE id = ?1 AND builtin = 0", [id]) {
-            Ok(n) => serde_json::json!({ "ok": true, "removed": n }),
+            Ok(n) => {
+                // 题库：条目没了，它的知识点行也要清（否则知识点统计里挂着幽灵 ✗）
+                let _ = conn.execute("DELETE FROM question_kp WHERE qid = ?1", [id]);
+                serde_json::json!({ "ok": true, "removed": n })
+            }
             Err(e) => serde_json::json!({ "ok": false, "error": format!("删除失败: {}", e) }),
         },
         Err(e) => serde_json::json!({ "ok": false, "error": e }),
@@ -975,6 +1180,11 @@ fn lib_save_many(items: Vec<serde_json::Value>) -> serde_json::Value {
             rusqlite::params![kind, title, body, meta, gs("tags"), gs("source"), now, now],
         );
         if r.is_ok() {
+            // 【题库 v3】批量导入的题同样要填真列 + 知识点 ✓（否则「导入进来的筛不到」✗）
+            let new_id = tx.last_insert_rowid();
+            if let Err(e) = lib_sync_qcols(&tx, new_id, &kind, &meta) {
+                return serde_json::json!({ "ok": false, "error": e });
+            }
             added += 1;
         } else {
             skipped += 1;
@@ -1578,6 +1788,7 @@ pub fn run() {
             capture_window,
             lib_info,
         lib_schema_info,
+        lib_health,
         ai_chat,
         asset_get,
             lib_query,
