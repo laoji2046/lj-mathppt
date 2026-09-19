@@ -45,6 +45,8 @@ const aiList = ref<ParsedQuestion[] | null>(null)
 const aiBusy = ref(false)
 const aiMsg = ref('')
 const aiKey = ref('')
+/** 增量模式：只把正则切出来可疑的题发给 AI（省 token、也更快）*/
+const aiOnlySuspect = ref(true)
 const AI_KEY = 'lj-mathslides:ai-key'
 try { aiKey.value = localStorage.getItem(AI_KEY) || '' } catch { /* 隐私模式忽略 */ }
 watch(aiKey, (v) => {
@@ -517,6 +519,10 @@ async function mergePrev() {
 /** 【AI 结构化切题】把当前正文交给大模型 → 结构化 JSON → 灌进"预览"（**不自动入库** ✓）。
  *  价值：正则治不了的（选项被并进公式、跨栏、答案混排）模型一次就能理顺 ✓
  *  ⚠ 模型自己解的答案一律标 answerFrom='ai' → 界面显示「AI 答案·待核对」，绝不冒充原卷答案 ✓ */
+const AI_FIX_SYSTEM = '你是中学数学试卷校对助手。用户给的是从试卷里切出来的**可疑题目**（可能选项不全、被公式吃掉、被切碎）。'
+  + '请逐题修正并补全，输出**严格 JSON**（不要 markdown 代码块）：'
+  + '{"questions":[{"stem":"…","options":["A内容","B内容","C内容","D内容"],"answer":"","qtype":"choice|multi|blank|answer","solution":"","knowledge":[],"difficulty":3}]}'
+  + ' 必须**保持原顺序、题数不变**；选项字母 A/B/C/D 各自成项（包括被并进公式的）；原卷没有答案就留空，不要自己解题。'
 const AI_SYSTEM = '你是中学数学试卷结构化助手。把用户给的试卷正文切成题目，输出**严格 JSON**（不要 markdown 代码块）：'
   + '{"questions":[{"stem":"题干（保留 LaTeX，用 $...$）","options":["A选项内容","B...","C...","D..."],'
   + '"answer":"A","qtype":"choice|multi|blank|answer","solution":"解析或空","knowledge":[],"difficulty":3}]}'
@@ -529,21 +535,51 @@ async function runAi() {
   if (!batchText.value.trim()) { flash('先有正文（导入 MD / 导入 PDF 或直接粘贴）再让 AI 结构化'); return }
   if (aiBusy.value) { flash('AI 还在跑，请稍候…'); return }
   aiBusy.value = true
-  aiMsg.value = 'AI 正在结构化切题…（真卷约 20 秒）'
+  // 【增量模式】只把"正则切出来可疑的题"发给 AI（省 token、也更快 ✓）；关掉＝整卷结构化 ✓
+  const base = parsedInfo.value.list
+  const susp = base.map((q, i) => ({ q, i })).filter((x) => !!x.q.warn)
+  const incr = aiOnlySuspect.value && susp.length > 0
+  if (aiOnlySuspect.value && !susp.length) { aiBusy.value = false; flash('正则结果里没有「可疑题」，不用 AI 校正 ✓'); return }
+  aiMsg.value = incr ? ('AI 正在校正 ' + susp.length + ' 道可疑题…') : 'AI 正在结构化切题…（真卷约 20 秒）'
   try {
-    const r = await aiChat({ apiKey: key, system: AI_SYSTEM, userText: batchText.value })
+    const askInput = incr
+      ? susp.map((x, k) => (k + 1) + '. ' + x.q.stem + (x.q.options || []).map((o, j) => '\n' + 'ABCD'[j] + '. ' + o).join('')).join('\n\n')
+      : batchText.value
+    const r = await aiChat({ apiKey: key, system: incr ? AI_FIX_SYSTEM : AI_SYSTEM, userText: askInput })
     if (!r || !r.ok) throw new Error(r && r.error ? String(r.error) : '未知错误')
     const raw = String(r.content || '').replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '').trim()
     const pj = parseQuestionsJson(raw)
     if (pj.error || !pj.list.length) throw new Error(pj.error || 'AI 没给出题目')
     const list = pj.list.map((q) => ({ ...q, answerFrom: (q.answer || '').trim() ? 'ai' : '' })) as ParsedQuestion[]
-    aiList.value = list
-    aiMsg.value = '✓ AI 结构化完成：' + list.length + ' 道（答案若为 AI 所解会标「AI 答案·待核对」）'
-    flash('AI 结构化完成：' + list.length + ' 道 —— 请核对下面结果，再点「识别并导入」')
+    if (incr) {
+      // 数量必须对得上才合并（否则宁可不采纳，避免错位 ✗）
+      if (list.length !== susp.length) throw new Error('AI 返回 ' + list.length + ' 道，与可疑题数 ' + susp.length + ' 不一致 —— 未采用（可取消勾选改用整卷结构化）')
+      const merged = base.slice()
+      susp.forEach((x, k) => { merged[x.i] = list[k] })
+      aiList.value = merged
+    } else {
+      aiList.value = list
+    }
+    aiMsg.value = incr
+      ? ('✓ 只校正了 ' + list.length + ' 道可疑题（其余保留正则结果；AI 答案会标「AI 答案·待核对」）')
+      : ('✓ AI 结构化完成：' + list.length + ' 道（答案若为 AI 所解会标「AI 答案·待核对」）')
+    flash(incr
+      ? ('AI 校正完成：' + list.length + ' 道可疑题已被替换、其余保留 —— 请核对后再点「识别并导入」')
+      : ('AI 结构化完成：' + list.length + ' 道 —— 请核对下面结果，再点「识别并导入」'))
   } catch (e) {
     aiMsg.value = '✗ ' + errText(e)
     flash('AI 结构化失败：' + errText(e) + '（仍可继续用 MinerU + 正则的结果）')
   } finally { aiBusy.value = false }
+}
+
+/** 把「AI 答案·待核对」采纳成人工答案（answerFrom: ai → manual）—— 老师确认后才点 ✓ */
+async function adoptAiAnswer() {
+  const q = selected.value
+  if (!q) return
+  const ok = await updateQuestion(q.id, { ...q.q, answerFrom: 'manual' }, q.title)
+  if (!ok) { flash('采纳失败'); return }
+  await load()
+  flash('已采纳为人工答案 ✓（#' + q.id + '）')
 }
 
 /** 跳到下一道待核对（没有就绕回第一道） */
@@ -820,6 +856,7 @@ function close() { emit('close') }
               <span class="qb__it">{{ x.title }}</span>
               <span class="qb__im">
                 {{ qtypeLabel(x.q.qtype) }} · {{ levelLabel(x.q.difficulty) }}
+                <b v-if="x.q.answerFrom === 'ai'" class="qb__ai" title="这条答案是 AI 解出来的，请核对；核对无误到详情里点「采纳为人工答案」">AI答案</b>
                 <b v-if="warnOf(x)" class="qb__warn" :title="warnOf(x)">⚠ 待核对</b>
                 <template v-if="x.q.section"> · {{ x.q.section }}</template>
                 <template v-if="!x.q.answer.trim()"> · <b class="qb__noans">缺答案</b></template>
@@ -832,6 +869,7 @@ function close() { emit('close') }
           <div class="qb__detail">
             <div v-if="selected && !cleanOpen" class="qb__slide">
               <button class="qb__btn qb__btn--pri" @click="insertToSlide">插入当前幻灯片</button>
+              <button v-if="selected && selected.q.answerFrom === 'ai'" class="qb__btn" title="确认这条 AI 答案没问题 → 标成人工答案（之后不再算「AI 答案·待核对」）" @click="adoptAiAnswer">采纳为人工答案</button>
               <button class="qb__btn" title="这一题如果是被切碎的残块，可以并到上一题（题干/选项/图一起带过去）" @click="mergePrev">合并到上一题</button>
               <button class="qb__btn" :title="warnOf(selected) || '这一道看着没问题，点它会跳到下一道待核对的题'"
                 @click="nextReview">下一道待核对（{{ reviewCount }}）</button>
@@ -996,8 +1034,11 @@ B. 2
               <input v-model="aiKey" class="qb__minput" type="password" autocomplete="off" spellcheck="false"
                 placeholder="AI API Key（DeepSeek sk-…，只存本机）" />
               <button class="qb__btn" :disabled="aiBusy || !batchText.trim()" title="把上面这份正文交给大模型做结构化切题（正则治不了的用它兜底）" @click="runAi">
-                {{ aiBusy ? 'AI 处理中…' : '✦ AI 结构化切题' }}
+                {{ aiBusy ? 'AI 处理中…' : (aiOnlySuspect ? '✦ AI 校正可疑题' : '✦ AI 结构化切题') }}
               </button>
+              <label class="qb__chk" title="默认只把正则切出来可疑的题（选项不全/没答案/切碎）发给 AI —— 省 token 也更快；取消勾选＝整卷结构化">
+                <input v-model="aiOnlySuspect" type="checkbox" /> 只校正可疑题
+              </label>
               <span v-if="aiMsg" class="qb__bhint">{{ aiMsg }}</span>
             </div>
             <button class="qb__btn qb__btn--pri" :disabled="!parsed.length" @click="doBatch">识别并导入</button>
@@ -1124,6 +1165,7 @@ B. 2
 .qb__bptable th { background: #f1f5f9; color: #334155; font-weight: 600; }
 .qb__bps { text-align: left; color: #334155; }
 .qb__bp0 { color: #cbd5e1; }
+.qb__ai { margin-left: 5px; padding: 0 5px; border-radius: 5px; background: #f0f7ff; border: 1px solid #bae0ff; color: #0958d9; font-size: 11px; font-weight: 600; }
 .qb__warnbox { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 6px; background: #fff7e6; border: 1px solid #ffd591; color: #ad6800; font-size: 12px; }
 .qb__pcount { font-size: 11.5px; color: var(--muted, #888); }
 .qb__batchtop { display: flex; gap: 12px; flex-wrap: wrap; }

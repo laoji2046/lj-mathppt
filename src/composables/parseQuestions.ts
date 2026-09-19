@@ -418,7 +418,11 @@ function stripHtml(t: string): string {
         .map((c) => c.replace(/<[^>]*>/g, '').trim())
       return cells.join(' | ')
     }).filter((x) => x.trim())
-    return lines.length ? ' ' + lines.join(' ；') + ' ' : ' '
+    if (!lines.length) return ' '
+    // 输出 **Markdown 表格**（首行当表头 + 分隔行）—— 既好读，Markdown 视图还能直接渲染 ✓
+    const cells0 = lines[0].split(' | ')
+    const sep = '| ' + cells0.map(() => '---').join(' | ') + ' |'
+    return '\n' + ['| ' + lines[0] + ' |', sep, ...lines.slice(1).map((l) => '| ' + l + ' |')].join('\n') + '\n'
   })
   s = s.replace(/<sup[^>]*>([\s\S]*?)<\/sup>/gi, '^{$1}').replace(/<sub[^>]*>([\s\S]*?)<\/sub>/gi, '_{$1}')
   s = s.replace(/<[^>]{1,80}>/g, '')                 // 其余标签一律去掉
