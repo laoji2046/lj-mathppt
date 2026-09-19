@@ -144,6 +144,8 @@ async function doBatch() {
 }
 /* ---- 规则组卷（双向细目表）+ 组卷查重 ---- */
 const paperOpen = ref(false)
+/** 组卷时优先挑没用过的题（默认开；关掉＝纯随机）*/
+const preferUnused = ref(true)
 const rules = ref<PaperRule[]>([{ id: 1, qtype: 'choice', section: '', chapter: '', level: '', count: 5 }])
 let ruleSeq = 1
 const paperResult = ref<{ picked: QuestionEntry[]; results: RuleResult[] } | null>(null)
@@ -167,7 +169,7 @@ function doPick() {
   if (!pool.length) { flash('当前筛选结果里没有题 —— 先放宽筛选条件'); return }
   const active = rules.value.filter((r) => (Number(r.count) || 0) > 0)
   if (!active.length) { flash('至少填一条规则的题量'); return }
-  const r = pickByRules(pool, active)
+  const r = pickByRules(pool, active, { preferUnused: preferUnused.value })
   paperResult.value = r
   dupReport.value = findDuplicates(r.picked)
   const shortCnt = r.results.filter((x) => x.short).length
@@ -841,6 +843,7 @@ function close() { emit('close') }
                 <div class="qb__actions">
                   <button class="qb__btn" @click="addRule">＋ 添加规则</button>
                   <span class="qb__chk">抽题是随机的 —— 同样的规则每次抽出的卷子不一样</span>
+                  <label class="qb__chk" title="默认优先挑从来没出过的题；关掉就纯随机"><input v-model="preferUnused" type="checkbox" /> 优先挑没出过的题</label>
                 </div>
                 <div class="qb__actions">
                   <button class="qb__btn qb__btn--pri" @click="doPick">一键挑题</button>
