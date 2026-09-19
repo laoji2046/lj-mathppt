@@ -818,6 +818,52 @@ export function reviewWarn(q: { stem?: string; options?: string[]; answer?: stri
   return ''
 }
 
+/** 双向细目表：行 = 板块（含"未分类"）、列 = 难度 1..5；每格 = 题数 / 分值。
+ *  组卷时一眼看出"哪些板块/难度还没覆盖"——这是老师说的"双向细目表"。 */
+export function blueprintOf(items: QuestionEntry[]): {
+  rows: { section: string; cells: { count: number; score: number }[]; count: number; score: number }[]
+  cols: number[]
+  count: number
+  score: number
+} {
+  const cols = [1, 2, 3, 4, 5]
+  const map = new Map<string, { count: number; score: number }[]>()
+  let count = 0, score = 0
+  for (const it of items) {
+    const sec = normSection(it.q.section)
+    if (!map.has(sec)) map.set(sec, cols.map(() => ({ count: 0, score: 0 })))
+    const d = Math.max(1, Math.min(5, Math.round(it.q.difficulty || 3)))
+    const sc = scoreOf(it)
+    const cell = map.get(sec)![d - 1]
+    cell.count += 1
+    cell.score += sc
+    count += 1
+    score += sc
+  }
+  // 行序跟着 SECTIONS 走（未分类放最后），这样和筛选条的顺序一致
+  const order = SECTIONS.slice()
+  const rows = Array.from(map.entries())
+    .sort((a, b) => (order.indexOf(a[0]) + 100) % 1000 - (order.indexOf(b[0]) + 100) % 1000)
+    .map(([section, cells]) => ({
+      section, cells,
+      count: cells.reduce((n, c) => n + c.count, 0),
+      score: cells.reduce((n, c) => n + c.score, 0),
+    }))
+  return { rows, cols, count, score }
+}
+
+/** 题库健康度（一眼看到"库怎么样"）：总量 / 未分类 / 缺答案 / 待核对 / 含图 */
+export function healthOf(items: QuestionEntry[]): { total: number; unclassified: number; noAnswer: number; todo: number; withImage: number } {
+  let unclassified = 0, noAnswer = 0, todo = 0, withImage = 0
+  for (const it of items) {
+    if (normSection(it.q.section) === '未分类') unclassified += 1
+    if (!(it.q.answer || '').trim()) noAnswer += 1
+    if (reviewWarn(it.q)) todo += 1
+    if ((it.q.images || []).length) withImage += 1
+  }
+  return { total: items.length, unclassified, noAnswer, todo, withImage }
+}
+
 export interface FilterOpt {
   q?: string
   tags?: string[]

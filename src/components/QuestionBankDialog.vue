@@ -9,7 +9,7 @@ import {
   buildPaperText, scoreOf, defaultScore, chaptersOf,
   scanJunk, scanDuplicates, removeQuestions,
   QTYPES, SECTIONS, LEVELS, levelOf, levelLabel, levelToDifficulty, qtypeLabel, withDefaults,
-  reviewWarn,
+  reviewWarn, blueprintOf, healthOf,
 } from '@/composables/useQuestionLibrary'
 import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup, JunkItem } from '@/composables/useQuestionLibrary'
 import { parseQuestionsWithInfo, PARSE_HELP, detectPaperInfo } from '@/composables/parseQuestions'
@@ -448,6 +448,10 @@ const selected = computed(() => list.value.find((x) => x.id === selectedId.value
 
 /** 「待核对」的题数 + 每道的原因（v1411 P1）—— 按字段现算，老师改完自动消失 ✓ */
 const reviewCount = computed(() => list.value.filter((x) => reviewWarn(x.q)).length)
+/** 题库健康度（总量/未分类/缺答案/待核对/含图）—— 打开题库一眼看到"库怎么样" */
+const health = computed(() => healthOf(list.value))
+/** 双向细目表：对"一键挑题"的结果算 板块×难度 的题数/分值（组卷时看覆盖情况） */
+const bp = computed(() => (paperResult.value ? blueprintOf(paperResult.value.picked) : null))
 function warnOf(e: { q: { stem?: string; options?: string[]; answer?: string; qtype?: string } }): string { return reviewWarn(e.q) }
 /** 【结构修复·人工】把这一题**并到上一题**：残块/被切碎的常见修法（老师点头才做，不动别的题） */
 async function mergePrev() {
@@ -675,6 +679,14 @@ function close() { emit('close') }
         </div>
 
         <!-- 筛选：题型 / 难度分级 / 板块 / 只看缺答案 -->
+        <!-- 题库健康度（v1414 P3）：一眼看到"库怎么样"，点数字旁边的筛选就知道该补哪里 -->
+        <div class="qb__health">
+          <span>共 <b>{{ health.total }}</b> 道</span>
+          <span :class="{ 'qb__h--warn': health.unclassified > 0 }" title="这些题没有板块，用「未分类」筛选能看全">未分类 {{ health.unclassified }}</span>
+          <span :class="{ 'qb__h--warn': health.noAnswer > 0 }" title="没答案的题：可用「自动补答案」或手工补">缺答案 {{ health.noAnswer }}</span>
+          <span :class="{ 'qb__h--warn': health.todo > 0 }" title="选项不全 / 没答案 / 题干过短 —— 点筛选条「只看待核对」逐个过">待核对 {{ health.todo }}</span>
+          <span title="题里带插图的题数（[图N]）">含图 {{ health.withImage }}</span>
+        </div>
         <div class="qb__filters">
           <span class="qb__fg" v-if="pickedSection || pickedChapter">章节
             <button class="qb__f" :class="{ 'qb__f--on': pickedChapter === '' }" @click="pickedChapter = ''">全部</button>
@@ -812,6 +824,22 @@ function close() { emit('close') }
                 </div>
                 <div class="qb__actions">
                   <button class="qb__btn qb__btn--pri" @click="doPick">一键挑题</button>
+          <!-- 双向细目表：行=板块、列=难度 1..5，格=题数/分值（"—" = 这一格没覆盖） -->
+          <div v-if="bp && bp.count" class="qb__bp">
+            <div class="qb__bptitle2">双向细目表：<b>{{ bp.count }}</b> 道 / <b>{{ bp.score }}</b> 分</div>
+            <table class="qb__bptable">
+              <thead>
+                <tr><th>板块 \ 难度</th><th v-for="d in bp.cols" :key="d">{{ d }}</th><th>合计</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in bp.rows" :key="r.section">
+                  <td class="qb__bps">{{ r.section }}</td>
+                  <td v-for="(c, i) in r.cells" :key="i" :class="{ 'qb__bp0': !c.count }">{{ c.count ? c.count + ' / ' + c.score : '—' }}</td>
+                  <td><b>{{ r.count }} / {{ r.score }}</b></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
                   <button class="qb__btn" :disabled="manageOnly || !paperResult || !paperResult.picked.length" @click="sendPaper(false)">送进 PDF（仅题干）</button>
                   <button class="qb__btn" :disabled="manageOnly || !paperResult || !paperResult.picked.length" @click="sendPaper(true)">送进 PDF（含答案）</button>
                   <button class="qb__btn" @click="resetRules">清空规则</button>
@@ -1001,6 +1029,16 @@ B. 2
 .qb__prow--paper { display: flex; align-items: center; gap: 8px; }
 .qb__ptitle { flex: 1; min-width: 0; font-weight: 600; }
 .qb__warn { margin-left: 6px; font-weight: 400; font-size: 11.5px; color: #b25f00; }
+.qb__health { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 6px 12px; margin: 0 0 6px; background: #f8fafc; border: 1px solid #eef2f7; border-radius: 8px; font-size: 12.5px; color: #475569; }
+.qb__health b { color: #1e293b; }
+.qb__h--warn { color: #b25f00; font-weight: 600; }
+.qb__bp { margin: 8px 0; padding: 8px 10px; border: 1px solid #e6eef8; border-radius: 8px; background: #fbfdff; overflow: auto; }
+.qb__bptitle2 { font-size: 12.5px; color: #475569; margin-bottom: 6px; }
+.qb__bptable { border-collapse: collapse; font-size: 12px; }
+.qb__bptable th, .qb__bptable td { border: 1px solid #e6eef8; padding: 3px 8px; text-align: center; white-space: nowrap; }
+.qb__bptable th { background: #f1f5f9; color: #334155; font-weight: 600; }
+.qb__bps { text-align: left; color: #334155; }
+.qb__bp0 { color: #cbd5e1; }
 .qb__warnbox { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 6px; background: #fff7e6; border: 1px solid #ffd591; color: #ad6800; font-size: 12px; }
 .qb__pcount { font-size: 11.5px; color: var(--muted, #888); }
 .qb__batchtop { display: flex; gap: 12px; flex-wrap: wrap; }
