@@ -352,6 +352,8 @@ const pickedDiff = ref<number | null>(null)
 const onlyMissing = ref(false)
 /** 只看"待核对"的题（v1411 P1）：选项不全 / 没答案 / 题干过短 —— 按字段现算，改完自动消失 */
 const onlyReview = ref(false)
+/** 只看带插图的题（健康度"含图"那一栏旁边也能看到）*/
+const onlyImage = ref(false)
 /* ---- 多选出卷 ---- */
 const pickedIds = ref<number[]>([])
 function togglePick(id: number) {
@@ -443,6 +445,8 @@ const shown = computed(() => filterQuestions(list.value, {
   level: pickedLevel.value,
   difficulty: pickedDiff.value,
   onlyMissingAnswer: onlyMissing.value,
+    onlyImage: onlyImage.value,
+    review: onlyReview.value,
 }))
 const selected = computed(() => list.value.find((x) => x.id === selectedId.value) || null)
 
@@ -717,6 +721,8 @@ function close() { emit('close') }
           <span class="qb__fg">
             <button class="qb__f" :class="{ 'qb__f--on': onlyMissing }" title="只显示还没填答案的题"
               @click="onlyMissing = !onlyMissing">只看缺答案</button>
+            <button class="qb__f" :class="{ 'qb__f--on': onlyImage }" title="只显示题面里带插图的题（[图N]）"
+              @click="onlyImage = !onlyImage">只看有图（{{ health.withImage }}）</button>
             <button class="qb__f" :class="{ 'qb__f--on': onlyReview }" title="只显示需要人核对的题：选项不足 4 个 / 没答案 / 题干过短"
               @click="onlyReview = !onlyReview">只看待核对（{{ reviewCount }}）</button>
           </span>

@@ -875,6 +875,8 @@ export interface FilterOpt {
   onlyMissingAnswer?: boolean
   /** 只看"待核对"的题（选项不全 / 没答案 / 题干过短）—— 见 reviewWarn() */
   review?: boolean
+  /** 只看**带图**的题（题干里有 [图N]） */
+  onlyImage?: boolean
   year?: string
   paperName?: string
 }
@@ -891,6 +893,7 @@ export function filterQuestions(list: QuestionEntry[], opt: FilterOpt): Question
     if (opt.level && levelOf(x.q.difficulty) !== opt.level) return false
     if (opt.onlyMissingAnswer && x.q.answer.trim()) return false
     if (opt.review && !reviewWarn(x.q)) return false          // 只看"待核对"的（选项不全/没答案/题干过短）
+    if (opt.onlyImage && !(x.q.images || []).length) return false
     if (opt.year && x.q.year !== opt.year) return false
     if (opt.paperName && x.q.paperName !== opt.paperName) return false
     if (tags.length && !tags.every((t) => x.q.knowledge.indexOf(t) >= 0 || x.tags.indexOf(t) >= 0)) return false
