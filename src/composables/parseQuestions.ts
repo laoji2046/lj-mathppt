@@ -368,6 +368,16 @@ function findInlineOptionMark(line: string): number {
   return i > 0 ? i : -1
 }
 
+/** 一行里出现的**选项字母**（A/B/C/D…）—— 用来发现"缺了 A"这种结构问题。
+ *  ⚠ 用"字母后面紧跟分隔符"来判：`$P = A$ 。 B. 2 C. 4 D. 8` 里那个 A 后面是 `$` → **不算** ✓ */
+function optionLetters(line: string): string[] {
+  const out: string[] = []
+  const re = /(?<![A-Za-z$\\])([A-Ha-h])\s*[.、．)）:：]/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(line))) out.push(m[1].toUpperCase())
+  return out
+}
+
 /** 一行里可能有多个选项：A．1　B．2　C．3 —— 拆成数组 */
 function splitOptionsLine(line: string): string[] {
   const parts = line.split(/(?=[（(]?\s*[A-Ha-h]\s*[.、．)）]\s*)/g)
@@ -462,6 +472,7 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
     const ls = block.split('\n')
     const stemParts: string[] = []
     const options: string[] = []
+    const optLetters: string[] = []          // 选项字母（结构体检用：判断"是不是缺了 A"）
     let answer = ''
     let solution = ''
     let knowledge: string[] = []
@@ -515,6 +526,7 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
       if (mode === 'stem') {
         const mo = line.match(RE_OPT)
         if (mo) {
+          optLetters.push(...optionLetters(line))
           const many = splitOptionsLine(line)
           if (many.length > 1) options.push(...many.map(stripMd))
           else options.push(stripMd(mo[1]))
@@ -525,6 +537,7 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
         if (mi > 0) {
           const head = stripMd(line.slice(0, mi))
           if (head) stemParts.push(head)
+          optLetters.push(...optionLetters(line.slice(mi)))
           options.push(...splitOptionsLine(line.slice(mi)).map(stripMd))
           continue
         }
@@ -555,6 +568,23 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
       qtype = options.length >= 1 ? 'choice'
         // MinerU 的空是**转义下划线** ____ → 别忘了带反斜杠那种
         : /_{3,}|＿{3,}|\\_{2,}/.test(all) ? 'blank' : 'answer'
+    }
+    // 【结构修复】选择题/多选题却只切出 1~3 个选项 → 按**字母**把缺的位置补成"（识别缺失，请补）"。
+    //   ⚠ 必须放在"题型兜底"**之后**：块内不一定有小节标题，兜底之前 qtype 还可能是空的 ✗
+    //   实测：MinerU 有时把 A 选项并进公式（`$P = A$` 吃掉了 `A. 1`），只剩 B/C/D →
+    //   补回 4 个位置，老师在列表里一眼看到**缺的是哪一个**（而不是一道"三选项选择题"）
+    if ((qtype === 'choice' || qtype === 'multi') && options.length >= 1 && options.length < 4) {
+      const found = Array.from(new Set(optLetters)).filter((L) => 'ABCD'.indexOf(L) >= 0)
+      if (found.length && found.length < 4) {
+        const padded: string[] = []
+        let fi = 0
+        for (const L of ['A', 'B', 'C', 'D']) {
+          if (found.indexOf(L) < 0) padded.push('（识别缺失，请补）')
+          else { padded.push(options[fi] !== undefined ? options[fi] : '（识别缺失，请补）'); fi++ }
+        }
+        options.length = 0
+        options.push(...padded)
+      }
     }
     out.push({
       title: autoTitle(stem),

@@ -809,6 +809,7 @@ export function questionToText(q: QuestionEntry, withSolution = false): string {
  *  顺序按"最好改"排：选项不全 → 没答案 → 题干过短（像残块）。返回 '' = 没问题。 */
 export function reviewWarn(q: { stem?: string; options?: string[]; answer?: string; qtype?: string }): string {
   const opts = q.options || []
+  if (opts.some((o) => !o.trim() || o.indexOf('识别缺失') >= 0)) return '选项里有空位（识别缺失），请补上'
   if ((q.qtype === 'choice' || q.qtype === 'multi') && opts.length < 4) {
     return '选择题但只有 ' + opts.length + ' 个选项，请核对（可能是识别时被并进公式了）'
   }

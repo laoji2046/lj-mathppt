@@ -449,6 +449,28 @@ const selected = computed(() => list.value.find((x) => x.id === selectedId.value
 /** 「待核对」的题数 + 每道的原因（v1411 P1）—— 按字段现算，老师改完自动消失 ✓ */
 const reviewCount = computed(() => list.value.filter((x) => reviewWarn(x.q)).length)
 function warnOf(e: { q: { stem?: string; options?: string[]; answer?: string; qtype?: string } }): string { return reviewWarn(e.q) }
+/** 【结构修复·人工】把这一题**并到上一题**：残块/被切碎的常见修法（老师点头才做，不动别的题） */
+async function mergePrev() {
+  const arr = shown.value
+  const i = arr.findIndex((x) => x.id === selectedId.value)
+  if (i < 0) { flash('先在左边选一道题'); return }
+  if (i === 0) { flash('这已经是当前列表的第一道了，没有上一题可并'); return }
+  const prev = arr[i - 1], cur = arr[i]
+  if (!window.confirm('把 #' + cur.id + ' 并到上一题 #' + prev.id + '？\n\n会追加到上一题题干末尾：\n' + cur.q.stem.slice(0, 160) + '\n\n（本题随后删除，原卷面顺序不变）')) return
+  const merged = {
+    ...prev.q,
+    stem: (prev.q.stem + '\n' + cur.q.stem).trim(),
+    options: [...(prev.q.options || []), ...(cur.q.options || [])],
+    images: [...(prev.q.images || []), ...(cur.q.images || [])],
+  }
+  const ok = await updateQuestion(prev.id, merged, prev.title)
+  if (!ok) { flash('合并失败：上一题没写进去'); return }
+  await removeQuestion(cur.id)
+  await load()
+  selectedId.value = prev.id
+  flash('已合并：# ' + cur.id + ' → # ' + prev.id + '（图与选项一并带过去）')
+}
+
 /** 跳到下一道待核对（没有就绕回第一道） */
 function nextReview() {
   const arr = shown.value
@@ -724,6 +746,7 @@ function close() { emit('close') }
           <div class="qb__detail">
             <div v-if="selected && !cleanOpen" class="qb__slide">
               <button class="qb__btn qb__btn--pri" @click="insertToSlide">插入当前幻灯片</button>
+              <button class="qb__btn" title="这一题如果是被切碎的残块，可以并到上一题（题干/选项/图一起带过去）" @click="mergePrev">合并到上一题</button>
               <button class="qb__btn" :title="warnOf(selected) || '这一道看着没问题，点它会跳到下一道待核对的题'"
                 @click="nextReview">下一道待核对（{{ reviewCount }}）</button>
               <span v-if="warnOf(selected)" class="qb__warnbox">⚠ {{ warnOf(selected) }}</span>
