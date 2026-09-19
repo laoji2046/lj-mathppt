@@ -429,6 +429,49 @@ function findInlineOptionMark(line: string): number {
   return i > 0 ? i : -1
 }
 
+/* ------------------------------------------------------------------ *
+ * 以下两个函数**借鉴自参考实现** 参考/试卷/exam-import-app/src/core/examParser.ts
+ * （与 `参考/试卷/mineru-poc/exam_parser.py` 行为一致，两边可交叉验证）——
+ * 它们正好治我们的两个老毛病：① 选项被吞进公式 ② 题干里的杂字母把选项切乱 ✓
+ * ------------------------------------------------------------------ */
+
+/** 【公式边界修复】MinerU 常把紧跟公式的选项标签吸进公式，例如 `$|z| = A.1$`
+ *  实际应为 `$|z| =$ A.1` —— 把闭 `$` 挪到选项标记前面，后面照常切选项 ✓ */
+export function fixFormulaBoundary(text: string): { text: string; fixed: string[] } {
+  const fixed: string[] = []
+  const out = text.replace(/\$([^$]*)\$/g, (whole, inner: string) => {
+    const m = /\s+([A-D][.．、][\s\S]*)$/.exec(inner)
+    if (m) {
+      const head = inner.slice(0, m.index).replace(/\s+$/, '')
+      if (head) {
+        fixed.push(inner)
+        return '$' + head + '$ ' + m[1]
+      }
+    }
+    return whole
+  })
+  return { text: out, fixed }
+}
+
+/** 【最长有序选项序列】题干里常有"如图 B. 点…"这种杂字母 → 只保留最长的 A→B→C→D 有序序列 ✓
+ *  （参考实现同名函数；我们的 splitOptionsLine 以前是"见到标记就切"，容易被杂字母带偏 ✗） */
+function longestOrderedRun<T extends { label: string }>(marks: T[]): T[] {
+  let best: T[] = []
+  for (let i = 0; i < marks.length; i++) {
+    const seq = [marks[i]]
+    let nxt = String.fromCharCode(marks[i].label.charCodeAt(0) + 1)
+    for (let j = i + 1; j < marks.length; j++) {
+      if (marks[j].label === nxt) {
+        seq.push(marks[j])
+        nxt = String.fromCharCode(nxt.charCodeAt(0) + 1)
+        if (nxt > 'H') break
+      }
+    }
+    if (seq.length > best.length) best = seq
+  }
+  return best
+}
+
 /** 一行里出现的**选项字母**（A/B/C/D…）—— 用来发现"缺了 A"这种结构问题。
  *  ⚠ 用"字母后面紧跟分隔符"来判：`$P = A$ 。 B. 2 C. 4 D. 8` 里那个 A 后面是 `$` → **不算** ✓ */
 function optionLetters(line: string): string[] {
@@ -442,12 +485,14 @@ function optionLetters(line: string): string[] {
 /** 一行里可能有多个选项：A．1　B．2　C．3 —— 拆成数组 */
 function splitOptionsLine(line: string): string[] {
   const parts = line.split(/(?=[（(]?\s*[A-Ha-h]\s*[.、．)）]\s*)/g)
-  const out: string[] = []
+  const all: { label: string; text: string }[] = []
   for (const p of parts) {
     const m = p.match(RE_OPT)
-    if (m && m[1] !== undefined) out.push(m[1].trim())
+    if (m && m[1] !== undefined) all.push({ label: (p.match(/[A-Ha-h]/) || [''])[0].toUpperCase(), text: m[1].trim() })
   }
-  return out
+  // ⭐ 只取**最长的有序序列**（借鉴参考实现）：题干里的杂字母（如图中 B 点）不会再把选项切乱 ✓
+  const seq = longestOrderedRun(all)
+  return (seq.length > 1 ? seq : all).map((x) => x.text)
 }
 
 /** 把一段文本切成若干题块 */
@@ -530,7 +575,8 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
   for (const block of splitBlocks(raw)) {
     // ⚠ 考生须知 / 抬头 / 注意事项**不是题目** —— 它们也常以 1. 2. 编号，会被切题规则误切
     if (isNonQuestionBlock(block)) { skippedNonQuestion += 1; continue }
-    const ls = block.split('\n')
+    // 先把"被吞进公式的选项标记"吐出来（参考实现的 fixFormulaBoundary）→ 后面照常切选项 ✓
+    const ls = fixFormulaBoundary(block).text.split('\n')
     const stemParts: string[] = []
     const options: string[] = []
     const optLetters: string[] = []          // 选项字母（结构体检用：判断"是不是缺了 A"）
