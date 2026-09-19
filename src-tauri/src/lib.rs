@@ -2376,6 +2376,223 @@ fn lib_source_plan_apply(ids: Vec<i64>) -> serde_json::Value {
     serde_json::json!({ "ok": true, "batch": bid, "added": added, "needManual": need, "reused": reused, "idemKey": idem })
 }
 
+
+/* ================= 【v5 · P2a】导出为 Markdown 题库（Obsidian 可开 + 能重新回灌） ================= */
+
+/// YAML 标量：中文标题里可能带冒号 / 井号 / 引号 —— 需要时加双引号。
+/// ⚠ 我们的 front-matter 解析器只剥外层引号、不做反转义 → 内层双引号换成单引号（够用且不撒谎）
+fn lib_yaml_scalar(s: &str) -> String {
+    let v = s.replace(['\n', '\r'], " ").trim().to_string();
+    let need = v.is_empty()
+        || v.contains(':')
+        || v.contains('#')
+        || v.contains('"')
+        || v.contains('\'')
+        || v.starts_with('-')
+        || v.starts_with('[')
+        || v.starts_with('{');
+    if !need {
+        return v;
+    }
+    format!("\"{}\"", v.replace('"', "'"))
+}
+
+/// 文件名安全：只留 ASCII 字母数字与 . _ -（编号才是主键；中文题干不进文件名）
+fn lib_safe_name(s: &str) -> String {
+    let mut out = String::new();
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.trim_matches('_').is_empty() {
+        "q".to_string()
+    } else {
+        out
+    }
+}
+
+/// 难度档 1-5 → 系数（difficultyFromCoefficient 的逆）。导出用系数是为了**原样回灌** ✓
+fn lib_diff_coef(d: i64) -> &'static str {
+    match d {
+        1 => "0.94",
+        2 => "0.80",
+        3 => "0.65",
+        4 => "0.45",
+        _ => "0.20",
+    }
+}
+
+/// 难度档 1-5 → 中文档（给人看的；回灌时 导入侧由系数决定，档位只是参考 ✓）
+fn lib_diff_level(d: i64) -> &'static str {
+    match d {
+        1 => "基础",
+        2 => "基础",
+        3 => "中档",
+        _ => "拔高",
+    }
+}
+
+/// 【P2a】把整个题库导出成「一道题一个 .md」的 Markdown 题库。
+///
+/// 格式与「录入 → 题库单题格式」**完全一致**（YAML front-matter + ## 题目 / 选项 / 答案 / 解析），
+/// 所以导出的目录**可以直接再导入回来** —— 这比什么都重要：数据不被锁死 ✓
+#[tauri::command]
+fn lib_export_vault(dir: String) -> serde_json::Value {
+    let dest = dir.trim().to_string();
+    if dest.is_empty() {
+        return serde_json::json!({ "ok": false, "error": "导出目录是空的" });
+    }
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let rows: Vec<(i64, String, String, String, String, String, i64, i64, String, String, String)> = {
+        let mut st = match conn.prepare(
+            "SELECT id, COALESCE(code,''), COALESCE(meta,'{}'), COALESCE(section,''), COALESCE(qtype,''), \
+             COALESCE(level,''), COALESCE(difficulty,0), COALESCE(year,0), COALESCE(paper,''), COALESCE(status,''), COALESCE(updated_at,'') \
+             FROM library_item WHERE type = 'question' ORDER BY section, code, id",
+        ) {
+            Ok(x) => x,
+            Err(e) => return serde_json::json!({ "ok": false, "error": format!("读题目失败: {}", e) }),
+        };
+        st.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, i64>(6)?,
+                r.get::<_, i64>(7)?,
+                r.get::<_, String>(8)?,
+                r.get::<_, String>(9)?,
+            ))
+        })
+        .map(|it| it.filter_map(|x| x.ok()).collect())
+        .unwrap_or_default()
+    };
+    let root = std::path::PathBuf::from(&dest);
+    let qdir = root.join("questions");
+    if let Err(e) = std::fs::create_dir_all(&qdir) {
+        return serde_json::json!({ "ok": false, "error": format!("建目录失败: {}", e) });
+    }
+    let total = rows.len();
+    let mut written: Vec<(String, String, String)> = Vec::new(); // section, code, stem 摘要
+    for (n, (id, code, meta, section, qtype, level, diff, year, paper, status, updated)) in rows.iter().enumerate() {
+        let m: serde_json::Value = serde_json::from_str(if meta.trim().is_empty() { "{}" } else { meta })
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let gs = |k: &str| m.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let stem = gs("stem");
+        if stem.trim().is_empty() {
+            continue; // 没题干的（理论上不该有）跳过，别产出空文件
+        }
+        let options: Vec<String> = m
+            .get("options")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().map(|x| x.as_str().unwrap_or("").to_string()).collect())
+            .unwrap_or_default();
+        let knowledge: Vec<String> = m
+            .get("knowledge")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().map(|x| x.as_str().unwrap_or("").to_string()).collect())
+            .unwrap_or_default();
+        let answer = gs("answer");
+        let solution = gs("solution");
+        let name = if code.trim().is_empty() {
+            format!("q{}", id)
+        } else {
+            lib_safe_name(code)
+        };
+        let mut buf = String::new();
+        buf.push_str("---\n");
+        // ⚠ 第一行必须是 qid / source / number 之一：导入侧的「一个文件多道题」切块正则靠它 ✓
+        buf.push_str(&format!("qid: {}\n", id));
+        if !code.trim().is_empty() {
+            buf.push_str(&format!("code: {}\n", lib_yaml_scalar(code)));
+        }
+        buf.push_str(&format!("source: {}\n", lib_yaml_scalar(paper)));
+        buf.push_str(&format!("number: '{}'\n", n + 1));
+        if !qtype.is_empty() {
+            buf.push_str(&format!("type: {}\n", lib_yaml_scalar(qtype)));
+        }
+        if !section.is_empty() {
+            buf.push_str(&format!("section: {}\n", lib_yaml_scalar(section)));
+        }
+        buf.push_str(&format!("year: {}\n", year));
+        buf.push_str(&format!("level: {}\n", lib_diff_level(*diff)));
+        buf.push_str(&format!("difficulty: {}\n", lib_diff_coef(*diff)));
+        buf.push_str(&format!("status: {}\n", lib_yaml_scalar(status)));
+        buf.push_str(&format!("updatedAt: '{}'\n", updated));
+        if knowledge.is_empty() {
+            buf.push_str("knowledge: []\n");
+        } else {
+            buf.push_str("knowledge:\n");
+            for k in knowledge.iter() {
+                buf.push_str(&format!("- {}\n", lib_yaml_scalar(k)));
+            }
+        }
+        buf.push_str("---\n\n## 题目\n\n");
+        buf.push_str(stem.trim());
+        buf.push('\n');
+        if !options.is_empty() {
+            buf.push_str("\n## 选项\n\n");
+            for (i, o) in options.iter().enumerate() {
+                let letter = (b'A' + (i as u8 % 26)) as char;
+                buf.push_str(&format!("{}．{}\n", letter, o.trim()));
+            }
+        }
+        if !answer.trim().is_empty() {
+            buf.push_str("\n## 答案\n\n");
+            buf.push_str(answer.trim());
+            buf.push('\n');
+        }
+        if !solution.trim().is_empty() {
+            buf.push_str("\n## 解析\n\n");
+            buf.push_str(solution.trim());
+            buf.push('\n');
+        }
+        let file = qdir.join(format!("{}.md", name));
+        if let Err(e) = std::fs::write(&file, buf) {
+            return serde_json::json!({ "ok": false, "error": format!("写 {} 失败: {}", file.to_string_lossy(), e) });
+        }
+        let mut head: String = stem.chars().take(48).collect();
+        head = head.replace(['\n', '\r'], " ");
+        written.push((section.clone(), name, head));
+    }
+    // 目录（按板块分组；Obsidian 里点着就能跳）
+    let mut idx = String::new();
+    idx.push_str("# 题库导出\n\n");
+    idx.push_str(&format!(
+        "共 {} 道 · 题目在 questions/ 下（一道题一个 .md）\n\n> 这个目录**可以直接再导入回来**：录入 → 导入 .md 文件 ✓\n",
+        written.len()
+    ));
+    let mut cur = String::from("\u{0}");
+    for (section, name, head) in written.iter() {
+        if *section != cur {
+            cur = section.clone();
+            let title = if section.is_empty() { "未归类" } else { section.as_str() };
+            idx.push_str(&format!("\n## {}\n\n", title));
+        }
+        idx.push_str(&format!("- [{}](questions/{}.md) {}\n", name, name, head));
+    }
+    let index_file = root.join("index.md");
+    if let Err(e) = std::fs::write(&index_file, idx) {
+        return serde_json::json!({ "ok": false, "error": format!("写 index.md 失败: {}", e) });
+    }
+    serde_json::json!({
+        "ok": true,
+        "dir": dest,
+        "count": written.len(),
+        "total": total,
+        "index": index_file.to_string_lossy(),
+        "questions": qdir.to_string_lossy(),
+    })
+}
+
 /// 某道题的修订历史（新→旧）
 #[tauri::command]
 fn lib_q_revisions(qid: i64) -> serde_json::Value {
@@ -3494,6 +3711,7 @@ pub fn run() {
         lib_q_revisions,
         lib_source_plan,
         lib_source_plan_apply,
+        lib_export_vault,
         lib_kp_catalog,
         lib_source_report,
         ai_chat,

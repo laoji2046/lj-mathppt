@@ -550,3 +550,26 @@ export async function sourcePlanApply(ids: number[]): Promise<{ ok: boolean; bat
     return { ok: false, batch: '', added: 0, needManual: 0, reused: false, error: String((e as Error)?.message || e) }
   }
 }
+
+/* ---- 【v5 · P2a】导出为 Markdown 题库 ---- */
+
+/** 桌面端常用目录（导出时给个合理默认值；拿不到就返回空串 ✓） */
+export async function firstUserDir(label = '文档'): Promise<string> {
+  try {
+    const r = await invoke<{ ok?: boolean; dirs?: { label: string; path: string }[] }>('user_dirs')
+    const dirs = (r && r.dirs) || []
+    const hit = dirs.filter((d) => d.label === label)[0]
+    return (hit || dirs[0] || { path: '' }).path || ''
+  } catch { return '' }
+}
+
+/** 把整个题库导出成「一道题一个 .md」的 Markdown 题库（**能再导入回来** ✓） */
+export async function exportVault(dir: string): Promise<{ ok: boolean; dir: string; count: number; total: number; index: string; error?: string }> {
+  try {
+    const r = await invoke<{ ok?: boolean; dir?: string; count?: number; total?: number; index?: string; error?: string }>('lib_export_vault', { dir })
+    if (r && r.ok) return { ok: true, dir: r.dir || dir, count: r.count || 0, total: r.total || 0, index: r.index || '' }
+    return { ok: false, dir, count: 0, total: 0, index: '', error: (r && r.error) || '导出失败' }
+  } catch (e) {
+    return { ok: false, dir, count: 0, total: 0, index: '', error: String((e as Error)?.message || e) }
+  }
+}

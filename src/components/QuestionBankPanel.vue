@@ -17,6 +17,7 @@ import {
   SECTIONS, QTYPE_LABEL, LEVELS, STATUS_ORDER, statusLabel,
   qFacets, qSearch, qPatch, qBatch, metaOf, excerptOf, previewHtmlOf,
   questionTextOf, stripImageMarkers, pickImages, sourceReport, kpCatalog, sourcePlan, sourcePlanApply,
+  firstUserDir, exportVault,
 } from '@/composables/useQuestionBank'
 import type { QFacets, QFilter, QItem, SourceReport, SourcePlan } from '@/composables/useQuestionBank'
 
@@ -91,6 +92,25 @@ async function makeSourceDrafts() {
     flash((r.reused ? '✓ 命中已有批次（幂等，没重复建）：' : '✓ 已生成 ') + r.added + ' 条归一草稿' + (r.needManual ? '（' + r.needManual + ' 条有「？」要补全）' : '') + ' —— 去「草稿箱」确认')
     await loadPlan()
     report.value = await sourceReport()
+  } finally {
+    busy.value = false
+  }
+}
+
+/* ---------------- 【P2a】导出为 Markdown 题库 ---------------- */
+
+/** 导出成「一道题一个 .md」（Obsidian 可开、可 git，**而且能再导入回来** ✓） */
+async function exportVaultMd() {
+  const base = await firstUserDir('文档')
+  const stamp = new Date().toISOString().slice(0, 10)
+  const def = (base ? base + '\\' : '') + 'LJ题库-' + stamp
+  const dir = window.prompt('导出到哪个目录？（一道题一个 .md；这个目录能直接再导入回来）', def)
+  if (!dir || !String(dir).trim()) return
+  busy.value = true
+  try {
+    const r = await exportVault(String(dir).trim())
+    if (!r.ok) { flash('✗ ' + (r.error || '导出失败')); return }
+    flash('✓ 已导出 ' + r.count + '/' + r.total + ' 道到 ' + r.dir + '（index.md 是目录）')
   } finally {
     busy.value = false
   }
@@ -373,6 +393,7 @@ async function batchDelete() {
         <span class="qb__sub">共 {{ facets.total }} 道 · 当前筛出 {{ total }} 道</span>
         <span v-if="msg" class="qb__msg">{{ msg }}</span>
         <span class="qb__headrt">
+          <button class="qb__btn" title="导出成一道题一个 .md 的 Markdown 题库（Obsidian 可开、能再导入回来）" @click="exportVaultMd">导出 Markdown</button>
           <button class="qb__btn" title="AI / OCR 的产出先落草稿，人工确认后才进正式库" @click="draftOpen = true">草稿箱</button>
           <button class="qb__btn" title="来源合规报告：多少题有来源 / 有多少已成模板 / 哪几道要处理" @click="openReport">来源报告</button>
           <button class="qb__btn qb__btn--main" title="从 Markdown / JSON / PDF 批量录入试题" @click="importOpen = true">录入试题</button>

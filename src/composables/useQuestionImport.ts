@@ -510,6 +510,10 @@ export function parseVaultMarkdown(raw: string): ParsedQuestion | null {
   const number = String(d.number || '')
   const typeRaw = String(d.type || '')
   const coef = Number(d.difficulty)
+  // year 键优先（导出会写），否则才从来源串里抠 ✓
+  const yKey = Number(d.year)
+  const yNum = yKey >= 1900 && yKey <= 2100 ? yKey : yearFromSource(source)
+  const yStr = yNum ? String(yNum) : ''
   const p: ParsedQuestion = {
     title: [source, number].filter(Boolean).join('-') || (stem.length > 20 ? stem.slice(0, 20) + '…' : stem),
     stem,
@@ -519,8 +523,10 @@ export function parseVaultMarkdown(raw: string): ParsedQuestion | null {
     knowledge: [...arrOf(d.knowledge), ...arrOf(d.tags), ...arrOf(d.ai_tags)].filter(Boolean),
     difficulty: Number.isFinite(coef) && coef > 0 ? difficultyFromCoefficient(coef) : (Number(d.difficulty) >= 1 && Number(d.difficulty) <= 5 ? Number(d.difficulty) : 3),
     qtype: qtypeOf(typeRaw) as string | undefined,
-    year: String(yearFromSource(source) || ''),
-    yearExplicit: yearFromSource(source) ? String(yearFromSource(source)) : undefined,
+    // 「题库导出」会带 section / year —— 有就用它（回灌时章节不丢、年份不被来源串带偏 ✓）
+    section: String(d.section || '').trim() || undefined,
+    year: yStr,
+    yearExplicit: yStr || undefined,
     paperName: source || undefined,
     region: String(d.grade || d.semester || ''),
   }
