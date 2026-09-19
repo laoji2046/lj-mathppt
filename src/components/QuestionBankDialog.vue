@@ -304,10 +304,12 @@ async function runMineru(pdfPath: string) {
     if (!md.trim()) { throw new Error('MinerU 没有返回 Markdown 内容') }
     // 正文里的 ![](images/x.jpg) → [图N]，图本身（Rust 读成 base64）留在本批次表里，
     // 入库时按题拆开写进 meta.images —— 题库不存磁盘路径（产物目录会被清/换机就没了）。
-    const linked = linkMineruImages(md, r?.images)
+    // v1428：优先用 **content_list 组装出来的正文**（一块一行 → 选项不会被 MD 那种合并吃掉 ✓、
+    //   页眉页脚/页码已剔除 ✓）；而且它就是交给解析器的那份文本 → 「被吃掉的选项」能按题干末尾精确定位 ✓
+    const doc = String(r?.contentText || '').trim() || md
+    const linked = linkMineruImages(doc, r?.images)
     batchImages.value = linked.images
-    // 先把 content_list 原文交给解析器（切题时用它救回被 MD 吃掉的选项 ✓），再灌 MD
-    setContentList(String(r.contentText || ''))
+    setContentList(doc)
     batchText.value = linked.text
     batchOpen.value = true
     editing.value = false

@@ -316,6 +316,23 @@ let currentContentList = ''
 export function setContentList(text: string) { currentContentList = text || '' }
 export function getContentListLen(): number { return currentContentList.length }
 
+/** 【去掉卷首"抬头"】结构化正文（content_list 一块一行）的开头常混进试卷标题/卷次（如
+ *  `Z20+ 名校联盟…2027 届高三第一次学情诊断 第I卷`）—— 老的关键词规则认不出"联盟/诊断"这类写法 ✗。
+ *  这里改成**结构判断**：一直跳到第一个"像题开始"的行（题号行 或 小节标题行）为止 ✓ */
+export function stripLeadingMatter(text: string): string {
+  const ls = text.split('\n')
+  for (let i = 0; i < ls.length; i++) {
+    const t = ls[i].trim()
+    if (!t) continue
+    // ⚠ 考生须知也长成 `1. 本卷满分…` 的样子 ✗ → 带须知词的先跳过（否则会把须知当成第一道题）
+    if (noteHits(t) >= 1) continue
+    if (/^\d{1,3}\s*[.、．)）]\s*\S/.test(t) || isSegmentHead(t) || /^[（(]\s*\d{1,3}\s*分/.test(t)) {
+      return ls.slice(i).join('\n')
+    }
+  }
+  return text
+}
+
 export function typeOfSegmentHead(t: string): string {
   const s = t.replace(/[#*`_\s]/g, '')
   if (/多选|多项选择|有多项符合/.test(s)) return 'multi'
@@ -538,7 +555,9 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
   //   反过来（先切段再剥）会踩一个大坑：答案区里也有「## 四、解答题」这种小节标题 →
   //   它被当成新一段的开始，而这一段的文本里已经没有「参考答案」那行标题了 →
   //   **答案被当成好几道题** ✗（实测真卷 19 题变 24 题，多出来的 5 条正是填空/解答答案）
-  const stripped = stripNonQuestionLines(raw)
+  // 结构化正文（content_list）开头常有抬头 → 先按结构跳到第一道题 ✓
+  const body = stripLeadingMatter(raw)
+  const stripped = stripNonQuestionLines(body)
   skippedNonQuestion = stripped.skipped
   // 小节标题（一、选择题…）由 splitBlocks 当成分块边界、在块内循环里被识别成题型 ✓
   const out = parseSegment(stripped.text, '')
@@ -676,9 +695,12 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
         // MinerU 的空是**转义下划线** ____ → 别忘了带反斜杠那种
         : /_{3,}|＿{3,}|\\_{2,}/.test(all) ? 'blank' : 'answer'
     }
-    // 【救回被吃掉的选项】v1425 试过在这里接线，但**没成功**（见 docs：content_list 的块文本与解析出的
-    //   题干严格对不上 —— LaTeX 空格/换行归一化不同，按"题干末尾 24 字"定位落空 ✗）→ 暂时保留
-    //   recoverLeadingOption() 纯函数（单测 5/5 过）+ setContentList()，等有更稳的定位方式再接 ✓
+    // 【救回被吃掉的选项】v1428 起**正文与 content_list 是同一份文本**（一块一行）→
+    //   按"题干末尾 24 字"定位一定命中 ✓ 所以这里可以放心接上了 ✓
+    if ((qtype === 'choice' || qtype === 'multi') && options.length >= 1 && options.length < 4) {
+      const rec = recoverLeadingOption(currentContentList, optLetters, options, stemParts.join(' '))
+      if (rec !== options && rec.length > options.length) { options.length = 0; options.push(...rec) }
+    }
     // 【结构修复】选择题/多选题却只切出 1~3 个选项 → 按**字母**把缺的位置补成"（识别缺失，请补）"。
     //   ⚠ 必须放在"题型兜底"**之后**：块内不一定有小节标题，兜底之前 qtype 还可能是空的 ✗
     //   实测：MinerU 有时把 A 选项并进公式（`$P = A$` 吃掉了 `A. 1`），只剩 B/C/D →

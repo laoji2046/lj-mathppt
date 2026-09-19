@@ -1006,6 +1006,12 @@ fn mineru_stage_pdf(data_base64: String, file_name: String) -> Result<String, St
 /// 单张超 4MB / 一批超 16MB 的图直接跳过（防止一张大图把 IPC 与 SQLite 撑死）。
 /// 把 content_list.json 里所有 **text 块**的文字拼起来 —— 给前端"救回被 full.md 吃掉的选项"用
 /// （实测：MD 里 Q6 的 "A. 1" 丢了，content_list 里还留着 `。1` ✓）。读不到就返回空串，前端退回补占位 ✓
+/// 把 content_list.json 组装成"**按块、一行一块**"的正文文本 —— 这是我们的解析主入口（v1428 起）：
+/// - `header / footer / page_number` **直接跳过** ✓（页眉页脚混进题干是老毛病 ✗）
+/// - `text / equation` → 原样一行 ✓（**块边界就是行边界**，选项不会被 MD 那种合并吃掉 ✓）
+/// - `table` → 交给前端的 stripHtml 变可读文本（这里原样给 HTML/表格体 ✓）
+/// - `image` → 合成 `![](img_path)` 一行 ✓，于是前端的 [图N] 注册照旧能用 ✓
+/// 读不到就返回空串，前端退回用 full.md ✓
 fn mineru_content_text(json_path: &std::path::Path) -> String {
     use std::io::Read;
     if json_path.as_os_str().is_empty() {
@@ -1020,9 +1026,24 @@ fn mineru_content_text(json_path: &std::path::Path) -> String {
     let mut out = String::new();
     if let Some(arr) = v.as_array() {
         for b in arr {
-            if let Some(t) = b.get("text").and_then(|x| x.as_str()) {
-                if !t.is_empty() { out.push_str(t); out.push('\n'); }
+            let ty = b.get("type").and_then(|x| x.as_str()).unwrap_or("");
+            if ty == "header" || ty == "footer" || ty == "page_number" { continue; }
+            // 到「参考答案」就整段停 —— 答案区的块不是题目 ✓（MD 那条路靠文本截断，这里靠块）
+            if let Some(t0) = b.get("text").and_then(|x| x.as_str()) {
+                if t0.replace([' ', '\t'], "").contains("参考答案") && t0.len() <= 24 { break; }
             }
+            if ty == "image" {
+                if let Some(p) = b.get("img_path").and_then(|x| x.as_str()) {
+                    if !p.is_empty() { out.push_str("![]("); out.push_str(p); out.push_str(")\n"); }
+                }
+                continue;
+            }
+            // table 有时在 text 里（HTML），有时在 table_body 里
+            let mut t = b.get("text").and_then(|x| x.as_str()).unwrap_or("").to_string();
+            if t.is_empty() {
+                if let Some(tb) = b.get("table_body").and_then(|x| x.as_str()) { t = tb.to_string(); }
+            }
+            if !t.is_empty() { out.push_str(&t); out.push('\n'); }
         }
     }
     out
