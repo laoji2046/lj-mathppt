@@ -1688,7 +1688,7 @@ fn lib_import_add_drafts(payload: serde_json::Value) -> serde_json::Value {
         let opts_json = serde_json::to_string(&options).unwrap_or_else(|_| "[]".to_string());
         let kp_json = serde_json::to_string(&lib_json_arr(d.get("knowledge"))).unwrap_or_else(|_| "[]".to_string());
         if let Err(e) = conn.execute(
-            "INSERT INTO import_draft(id,batch_id,source_item_id,source_label,page,bbox,confidence,needs_review,stem,options,answer,solution,qtype,section,difficulty,knowledge,year,paper,source_kind,raw_text,warn,status,target_qid,extra,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,'needs_review',0,?22,?23) ON CONFLICT(id) DO UPDATE SET stem=excluded.stem, options=excluded.options, answer=excluded.answer, solution=excluded.solution, qtype=excluded.qtype, section=excluded.section, difficulty=excluded.difficulty, knowledge=excluded.knowledge, year=excluded.year, paper=excluded.paper, source_kind=excluded.source_kind, raw_text=excluded.raw_text, warn=excluded.warn, needs_review=excluded.needs_review, page=excluded.page, bbox=excluded.bbox, confidence=excluded.confidence, source_label=excluded.source_label",
+            "INSERT INTO import_draft(id,batch_id,source_item_id,source_label,page,bbox,confidence,needs_review,stem,options,answer,solution,qtype,section,difficulty,knowledge,year,paper,source_kind,raw_text,warn,status,target_qid,extra,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,'needs_review',?22,?23,?24) ON CONFLICT(id) DO UPDATE SET stem=excluded.stem, options=excluded.options, answer=excluded.answer, solution=excluded.solution, qtype=excluded.qtype, section=excluded.section, difficulty=excluded.difficulty, knowledge=excluded.knowledge, year=excluded.year, paper=excluded.paper, source_kind=excluded.source_kind, raw_text=excluded.raw_text, warn=excluded.warn, needs_review=excluded.needs_review, page=excluded.page, bbox=excluded.bbox, confidence=excluded.confidence, target_qid=excluded.target_qid, extra=excluded.extra, source_label=excluded.source_label",
             rusqlite::params![
                 id,
                 batch,
@@ -1711,6 +1711,8 @@ fn lib_import_add_drafts(payload: serde_json::Value) -> serde_json::Value {
                 dgs("sourceKind"),
                 dgs("rawText"),
                 res.warn,
+                // 【v1452】补图走这里：targetQid 指向已有题，extra 带 images ✓
+                d.get("targetQid").and_then(|v| v.as_i64()).unwrap_or(0),
                 dgs("extra"),
                 now
             ],
@@ -1961,7 +1963,15 @@ fn lib_import_commit(ids: Vec<String>) -> serde_json::Value {
             .map(|a| a.iter().filter_map(|y| y.as_str().map(|s| s.to_string())).collect())
             .unwrap_or_default();
             if let Some(obj) = om.as_object_mut() {
-                if patch_keys.is_empty() {
+                // 【v1452】图不在 import_draft 的列里 → 走 extra.images（**不加列、不迁移** ✓）
+            if let Ok(ev) = serde_json::from_str::<serde_json::Value>(
+                v.get("extra").and_then(|x| x.as_str()).unwrap_or("{}"),
+            ) {
+                if let Some(imgs) = ev.get("images") {
+                    m["images"] = imgs.clone();
+                }
+            }
+            if patch_keys.is_empty() {
                     // 没写 patch 键 = 整条替换（草稿里的字段为准）
                     if let Some(src) = m.as_object() {
                         for (k, val) in src.iter() {
@@ -2594,6 +2604,63 @@ fn lib_export_vault(dir: String) -> serde_json::Value {
         "index": index_file.to_string_lossy(),
         "questions": qdir.to_string_lossy(),
     })
+}
+
+/// 【v1452】按题干给「给已有题补图」找对应题：**空白无关**的归一化，先整串一致、再前 30 字一致。
+/// 返回每条的 `{ index, qid, code, how }`；`how = exact | prefix | none`。
+/// 为什么不猜太多：前缀匹配只是**能对上就行**，最终由草稿箱里人工确认（且草稿上写明是「题干一致」还是「前段一致」）✓
+#[tauri::command]
+fn lib_q_match_stems(stems: Vec<String>) -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let norm = |s: &str| -> String { s.chars().filter(|c| !c.is_whitespace()).collect() };
+    let rows: Vec<(i64, String, String)> = {
+        let mut st = match conn.prepare(
+            "SELECT id, COALESCE(code,''), COALESCE(json_extract(meta,'$.stem'),'') FROM library_item WHERE type = 'question' ORDER BY id",
+        ) {
+            Ok(x) => x,
+            Err(e) => return serde_json::json!({ "ok": false, "error": format!("读题目失败: {}", e) }),
+        };
+        st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    };
+    let items: Vec<serde_json::Value> = stems
+        .iter()
+        .enumerate()
+        .map(|(i, raw)| {
+            let n = norm(raw);
+            let head: String = n.chars().take(30).collect();
+            let mut how = "none";
+            let mut hit: Option<(i64, String)> = None;
+            if !n.is_empty() {
+                for (qid, code, s) in rows.iter() {
+                    if norm(s) == n {
+                        hit = Some((*qid, code.clone()));
+                        how = "exact";
+                        break;
+                    }
+                }
+                if hit.is_none() && head.chars().count() >= 12 {
+                    for (qid, code, s) in rows.iter() {
+                        let m: String = norm(s).chars().take(30).collect();
+                        if m == head {
+                            hit = Some((*qid, code.clone()));
+                            how = "prefix";
+                            break;
+                        }
+                    }
+                }
+            }
+            match hit {
+                Some((qid, code)) => serde_json::json!({ "index": i, "qid": qid, "code": code, "how": how }),
+                None => serde_json::json!({ "index": i, "qid": 0, "code": "", "how": "none" }),
+            }
+        })
+        .collect();
+    serde_json::json!({ "ok": true, "items": items })
 }
 
 /// 某道题的修订历史（新→旧）
@@ -3759,6 +3826,7 @@ pub fn run() {
         lib_source_plan,
         lib_source_plan_apply,
         lib_export_vault,
+        lib_q_match_stems,
         lib_kp_catalog,
         lib_source_report,
         ai_chat,

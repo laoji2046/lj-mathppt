@@ -371,6 +371,8 @@ export function draftExcerpt(d: ImportDraft, n = 90): string {
 /** 前端往草稿里灌的一条（字段名与 Rust 的 lib_import_add_drafts 对齐 ✓） */
 export interface DraftIn {
   sourceItemId?: string
+  /** 【v1452】指向已有题（补图 / 归一都用它）—— 0 = 新建 ✓ */
+  targetQid?: number
   sourceLabel?: string
   page?: number
   bbox?: string
@@ -552,6 +554,16 @@ export async function sourcePlanApply(ids: number[]): Promise<{ ok: boolean; bat
 }
 
 /* ---- 【v5 · P2a】导出为 Markdown 题库 ---- */
+
+/** 【v1452】按题干给「给已有题补图」找库里的对应题 ✓ */
+export interface StemMatch { index: number; qid: number; code: string; how: string }
+export async function matchStems(stems: string[]): Promise<StemMatch[]> {
+  try {
+    const r = await invoke<{ ok?: boolean; items?: StemMatch[] }>('lib_q_match_stems', { stems })
+    if (r && r.ok !== false) return r.items || []
+  } catch { /* 空库也能跑 ✓ */ }
+  return []
+}
 
 /** 桌面端常用目录（导出时给个合理默认值；拿不到就返回空串 ✓） */
 export async function firstUserDir(label = '文档'): Promise<string> {

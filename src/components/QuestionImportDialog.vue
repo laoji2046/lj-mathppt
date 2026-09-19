@@ -26,7 +26,7 @@ import {
   importParsedQuestions, metaOfParsed, draftFromMeta,
   parseAnyMarkdown, parseAnyJson, parseVaultMarkdownMany,
 } from '@/composables/useQuestionImport'
-import { SECTIONS, QTYPE_LABEL, qFacets, stemPreviewText, importBegin, importAddDrafts, idemKeyOf } from '@/composables/useQuestionBank'
+import { SECTIONS, QTYPE_LABEL, qFacets, stemPreviewText, importBegin, importAddDrafts, idemKeyOf, matchStems } from '@/composables/useQuestionBank'
 import { typesetHosts } from '@/composables/useMathJax'
 import { escapeHtml, normalizeMixed } from '@/types'
 
@@ -297,6 +297,47 @@ async function doSaveDrafts() {
   }
 }
 
+/* ---------------- 【v1452】给已有题补图（不新建题，只 patch images） ---------------- */
+
+/** 把这些图补到**已有的题**上：按题干找对应题 → targetQid → 只 patch images（正式库题数不变 ✓） */
+async function doPatchImages() {
+  const withImg = rows.value.filter((r) => r.on && (r.q.images || []).length > 0)
+  if (!withImg.length) { flash('勾选的行里没有带图的 —— 补图只对「有图」的行有意义'); return }
+  busy.value = true
+  try {
+    const m = await matchStems(withImg.map((r) => String(r.q.stem || '')))
+    const hit = m.filter((x) => x.qid > 0)
+    if (!hit.length) { flash('这 ' + withImg.length + ' 道带图的题在库里没找到对应题（可能还没入库过）'); return }
+    const key = idemKeyOf('patchimg', hit.map((x) => x.qid).join(',') + '|' + withImg.length)
+    const b = await importBegin({ sourceType: 'patch_images', sourceLabel: '给已有题补图 ' + hit.length + ' 道', idemKey: key })
+    if (!b.ok || !b.batch) { flash('✗ ' + (b.error || '开批次失败')); return }
+    const drafts = hit.map((x) => {
+      const q = metaOfParsed(withImg[x.index].q)
+      return {
+        sourceItemId: 'q' + x.qid,
+        sourceLabel: '已有 #' + (x.code || x.qid) + '（' + (x.how === 'exact' ? '题干一致' : '题干前段一致') + '）',
+        targetQid: x.qid,
+        stem: q.stem,
+        options: q.options,
+        answer: q.answer,
+        solution: q.solution,
+        paper: q.paperName,
+        extra: JSON.stringify({ patch: ['images'], images: q.images, from: 'MinerU 补图' }),
+      }
+    })
+    const r = await importAddDrafts(b.batch.id, drafts, drafts.length)
+    if (!r.ok) { flash('✗ ' + (r.error || '存补图草稿失败')); return }
+    const exact = hit.filter((x) => x.how === 'exact').length
+    report.value = [
+      (b.reused ? '命中已有批次（幂等）' : '新批次') + '：' + b.batch.id,
+      '带图 ' + withImg.length + ' 道 → 找到已有题 ' + hit.length + ' 道（题干一致 ' + exact + ' / 前段一致 ' + (hit.length - exact) + '）',
+      '去「试题库 → 草稿箱」确认 → 「确认入库」：只改图，**题数不变** ✓',
+    ].join('\n')
+    flash('✓ 已存 ' + r.added + ' 条补图草稿 —— 去「草稿箱」确认')
+  } finally {
+    busy.value = false
+  }
+}
 /* ---------------- PDF：MinerU（HTTP 在 Rust 侧发；网页端直连被 CORS 挡） ---------------- */
 
 async function importPdfToBatch(f: File) {
@@ -448,6 +489,7 @@ function optsText(o: string[]): string {
         <span class="qi__picked">已勾 {{ onCount }} / {{ rows.length }} 道</span>
         <span v-if="onCount" class="qi__hint2">无来源 {{ noSourceCount }} · 缺答案 {{ noAnswerCount }} · 0 选项 {{ noOptsCount }}</span>
         <button class="qi__btn" :disabled="busy || !onCount" title="先把这批落成草稿（不写正式库），到「草稿箱」逐条确认后再入库" @click="doSaveDrafts">先存草稿 {{ onCount }} 道</button>
+        <button class="qb__btn qi__btn" :disabled="busy || !onCount" title="把这些图补到**已有的题**上（按题干找对应题；只改图，不新建题）" @click="doPatchImages">补到已有题 {{ onCount }} 道</button>
         <button class="qi__btn qi__btn--main qi__btn--go" :disabled="busy || !onCount" @click="doImport">入库 {{ onCount }} 道</button>
         <pre v-if="report" class="qi__report">{{ report }}</pre>
       </footer>
