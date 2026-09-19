@@ -96,11 +96,28 @@ export function metaOf(it: { meta?: string } | null | undefined): Record<string,
 /** 题干摘要：LaTeX / markdown / 图号都去掉，只留人眼能扫的字 ✓ */
 export function excerptOf(raw: string, n = 80): string {
   let s = String(raw || '')
-  s = s.replace(/\$[^$]*\$/g, ' ')
+  // ⚠ 顺序要紧：**块级 $$…$$ 必须先剥** —— 否则 \$[^$]*\$ 会把 $$ 两两吃掉，
+  //   公式内部的 \left \frac 等命令留下来变成 "\; \\" 这种噪声（实测：卡片上只剩反斜杠 ✗）
+  s = s.replace(/\$\$[\s\S]*?\$\$/g, ' ')
+  s = s.replace(/\$[^$\n]*\$/g, ' ')
+  s = s.replace(/\\\[[\s\S]*?\\\]/g, ' ')
+  s = s.replace(/\\\([\s\S]*?\\\)/g, ' ')
   s = s.replace(/\\[a-zA-Z]+\s*/g, ' ')
   s = s.replace(/\[图\d+(?::[^\]]*)?\]/g, ' ')
   s = s.replace(/[#*>`_]/g, ' ')
+  s = s.replace(/\\[^a-zA-Z\s]/g, ' ')   // 残留的 \; \, \\ \[ \] 之类（一个反斜杠 + 非字母）
+  s = s.replace(/[{}]/g, ' ')            // 残留花括号
   s = s.replace(/\s+/g, ' ').trim()
+  return s.length > n ? s.slice(0, n) + '…' : s
+}
+
+/**
+ * 【校对表 / 题卡用】题干摘要 —— **保留公式**（不剥 $…$），只折叠空白 + 截断 ✓
+ * 为什么另开一个：校对的时候公式**正是要核对的内容**，剥掉等于让人没法校对 ✗
+ * （excerptOf 是给列表「扫一眼」用的，两者用途不同，别混）
+ */
+export function stemPreviewText(raw: string, n = 260): string {
+  const s = String(raw || '').replace(/\s+/g, ' ').trim()
   return s.length > n ? s.slice(0, n) + '…' : s
 }
 

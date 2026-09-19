@@ -13,7 +13,7 @@
  *  - 解析映射与默认值全在 useQuestionImport（纯函数），这里只做界面 ✓
  *  - MinerU token 只存本机 localStorage，**绝不写进源码/仓库** ✓
  */
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { isTauri, listenTauri, mineruParse, mineruStagePdf } from '@/composables/useTauri'
 import type { MineruProgress } from '@/composables/useTauri'
@@ -26,7 +26,9 @@ import {
   importParsedQuestions, metaOfParsed,
   parseAnyMarkdown, parseAnyJson, parseVaultMarkdownMany,
 } from '@/composables/useQuestionImport'
-import { SECTIONS, QTYPE_LABEL, qFacets, excerptOf } from '@/composables/useQuestionBank'
+import { SECTIONS, QTYPE_LABEL, qFacets, stemPreviewText } from '@/composables/useQuestionBank'
+import { typesetHosts } from '@/composables/useMathJax'
+import { escapeHtml, normalizeMixed } from '@/types'
 
 const emit = defineEmits<{ (e: 'close'): void; (e: 'imported', n: number): void }>()
 
@@ -129,6 +131,42 @@ function loadRows(list: ParsedQuestion[], tip: string) {
   rows.value = list.map((q) => ({ on: true, q }))
   report.value = ''
   flash(tip + '：识别出 ' + list.length + ' 道 —— 请核对后点「入库」')
+  void renderCardStems()
+}
+
+/** 卡片题数上限：超过就不跑 MathJax（纯文本已保留公式，不至于卡） */
+const STEM_MATH_MAX = 120
+
+/**
+ * 把校对表每张卡的题干渲染出来 —— **必须保留公式** ✓
+ *   ① 先落纯文本（$…$ 原样可见）→ 即使 MathJax 失败也不是空白；
+ *   ② 再统一交给 MathJax（typesetHosts 只排版、不写内容，一次排一批 ✓）
+ * ⚠ 内容由本函数写，模板里不要再绑 {{ }} —— 否则任意响应式变化都会把渲染结果冲掉 ✗
+ */
+async function renderCardStems() {
+  await nextTick()
+  const hosts = Array.from(document.querySelectorAll<HTMLElement>('.qi__stem'))
+  const list = rows.value
+  hosts.forEach((h, i) => {
+    h.textContent = i < list.length ? stemPreviewText(list[i].q.stem) : ''
+  })
+  if (!hosts.length || hosts.length > STEM_MATH_MAX) return
+  hosts.forEach((h, i) => {
+    const stem = i < list.length ? String(list[i].q.stem || '') : ''
+    h.innerHTML = normalizeMixed(escapeHtml(stemPreviewText(stem)))
+    h.classList.add('fx-mixed-host')
+  })
+  try {
+    await typesetHosts(hosts)
+  } catch {
+    /* 渲染失败就保留上面已写好的纯文本（公式原样可见），不影响校对 ✓ */
+  }
+}
+
+/** 删一行：行数变了，索引要按 DOM 顺序重排（渲染是「DOM 顺序 ↔ rows」对齐的 ✓） */
+function removeRow(i: number) {
+  rows.value.splice(i, 1)
+  void renderCardStems()
 }
 
 function parseMd(raw: string, prefix = '') {
@@ -335,7 +373,7 @@ function optsText(o: string[]): string {
             <div class="qi__list">
               <div v-for="(r, i) in rows" :key="i" class="qi__card" :class="{ 'qi__card--on': r.on }">
                 <label class="qi__pick" title="勾选（不勾就不入库）" @click.stop><input v-model="r.on" type="checkbox" /></label>
-                <div class="qi__stem">{{ excerptOf(r.q.stem) }}</div>
+                <div class="qi__stem" :data-qi="i"></div>
                 <div class="qi__fields">
                   <select v-model="r.q.qtype" class="qi__mini">
                     <option value="">未判</option>
@@ -349,7 +387,7 @@ function optsText(o: string[]): string {
                   <input v-model="r.q.year" class="qi__mini qi__mini--n" placeholder="年份" />
                   <input v-model="r.q.paperName" class="qi__mini qi__mini--wide" placeholder="试卷名" />
                   <input v-model="r.q.answer" class="qi__mini qi__mini--wide" placeholder="答案（原卷没有就留空）" />
-                  <button class="qi__btn qi__btn--danger" @click="rows.splice(i, 1)">删</button>
+                  <button class="qi__btn qi__btn--danger" @click="removeRow(i)">删</button>
                 </div>
                 <div v-if="(r.q.options || []).length" class="qi__opts">{{ optsText(r.q.options || []) }}</div>
                 <div v-if="r.q.warn" class="qi__warn">{{ r.q.warn }}</div>
@@ -407,7 +445,9 @@ function optsText(o: string[]): string {
 .qi__card { position: relative; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px 8px 30px; background: #fff; }
 .qi__card--on { border-color: var(--brand-600, #534AB7); }
 .qi__pick { position: absolute; left: 8px; top: 10px; }
-.qi__stem { font-size: 12.5px; color: var(--text); line-height: 1.55; margin-bottom: 6px; }
+.qi__stem { font-size: 12.5px; color: var(--text); line-height: 1.7; margin-bottom: 6px; overflow-x: auto; }
+.qi__stem :deep(mjx-container) { font-size: inherit; max-width: 100%; }
+.qi__stem :deep(mjx-container[display="true"]) { margin: 2px 0; }
 .qi__fields { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .qi__fields select { height: 28px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; background: #fff; color: var(--text); }
 .qi__opts { margin-top: 5px; font-size: 11.5px; color: var(--muted); line-height: 1.6; }

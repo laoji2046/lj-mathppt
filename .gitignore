@@ -31,3 +31,4 @@ _docx-out/
 .workbuddy-ai/
 # DSH 视觉工具的产物目录（截图 / 临时图，不进仓库）
 .dsh-vision-router/
+.probe-sync.txt
