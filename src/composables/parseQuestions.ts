@@ -74,6 +74,8 @@ export interface QuestionImage {
   src: string
   /** 内容库资源 id（大图走它；小图直接内联 src） */
   assetId?: number
+  /** 【v1453】原图所在页（MinerU 给的几何，用来把图按位置归属到题 ✓） */
+  page?: number
   caption?: string
 }
 

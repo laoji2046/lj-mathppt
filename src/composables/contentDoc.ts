@@ -15,6 +15,9 @@ export interface ContentBlock {
   img_path?: string
   table_body?: string
   bbox?: number[]
+  /** 图片的**图注**（以前被丢掉，题图就没 caption 了 ✗） */
+  image_caption?: string
+  image_footnote?: string
   page_idx?: number
 }
 
@@ -86,7 +89,15 @@ export function assembleContentDoc(rawJson: string): string {
   let out = ''
   for (const b of reorderBlocks(arr)) {
     const ty = String(b.type || '')
-    if (ty === 'image') { const p = String(b.img_path || ''); if (p) out += '![](' + p + ')\n'; continue }
+    // 【v1453】把 MinerU 的**图注**写进 alt（以前是空 alt，图注就丢了；题库的 caption 正是靠它 ✓）
+    if (ty === 'image') {
+      const p = String(b.img_path || '')
+      if (p) {
+        const cap = String(b.image_caption || '').replace(/[[\]]/g, ' ').replace(/\s+/g, ' ').trim()
+        out += '![' + cap + '](' + p + ')\n'
+      }
+      continue
+    }
     const t = String(b.text || b.table_body || '')
     if (t) out += t + '\n'
     // 【v1451 修】表格 / 公式块**没有可用文本**但带了图（MinerU 常把图形判成 table、把公式裁成图）：
@@ -95,6 +106,33 @@ export function assembleContentDoc(rawJson: string): string {
       const p = String(b.img_path || '')
       if (p) out += '![](' + p + ')\n'
     }
+  }
+  return out
+}
+/** 【v1453】图片在原文里的几何位置：path → { page, y }（按「同页 + y」归属到题，比字符偏移稳 ✓） */
+export function imagePositions(rawJson: string): Record<string, { page: number; y: number }> {
+  const out: Record<string, { page: number; y: number }> = {}
+  let arr: ContentBlock[] = []
+  try { const v = JSON.parse(rawJson); if (Array.isArray(v)) arr = v as ContentBlock[] } catch { return out }
+  for (const b of arr) {
+    const p = String((b && b.img_path) || '')
+    if (!p) continue
+    const bb = Array.isArray(b.bbox) ? b.bbox : []
+    out[p] = { page: Number(b.page_idx) || 0, y: Number(bb[1]) || 0 }
+  }
+  return out
+}
+
+/** 【v1453】正文块的几何位置（与 assembleContentDoc **同一顺序**）：给「这张图落在哪道题之后」用 ✓ */
+export function blockGeometry(rawJson: string): { head: string; page: number; y: number }[] {
+  let arr: ContentBlock[] = []
+  try { const v = JSON.parse(rawJson); if (Array.isArray(v)) arr = v as ContentBlock[] } catch { return [] }
+  const out: { head: string; page: number; y: number }[] = []
+  for (const b of reorderBlocks(arr)) {
+    const t = String(b.text || b.table_body || '').replace(/\s+/g, ' ').trim()
+    if (!t) continue
+    const bb = Array.isArray(b.bbox) ? b.bbox : []
+    out.push({ head: t.slice(0, 12), page: Number(b.page_idx) || 0, y: Number(bb[1]) || 0 })
   }
   return out
 }
