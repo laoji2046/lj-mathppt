@@ -76,13 +76,14 @@ export async function libInfo(): Promise<{ path: string; count: number; backend:
   }
 }
 
-/** 取某一类全部条目（按使用次数降序） */
+/** 取某一类全部条目（按 id 降序 = 新录入的在前） */
 export async function libQuery(kind: LibKind): Promise<LibItem[]> {
   if (!isTauri()) {
     // 降级数据里每条都带 type（见 libSave 的降级分支）
     return fbLoad()
       .items.filter((x) => (x as { type?: string }).type === kind)
-      .sort((a, b) => b.usedCount - a.usedCount || a.id - b.id)
+      // 与 Rust 的 lib_query 一致：按 id 降序（新录入的在最上面），不再按引用次数
+      .sort((a, b) => b.id - a.id)
   }
   try {
     const r = await invoke<{ ok?: boolean; items?: LibItem[] }>('lib_query', { kind })

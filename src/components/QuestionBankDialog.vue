@@ -12,7 +12,11 @@ import {
 } from '@/composables/useQuestionLibrary'
 import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup, JunkItem } from '@/composables/useQuestionLibrary'
 import { parseQuestionsWithInfo, PARSE_HELP, detectPaperInfo } from '@/composables/parseQuestions'
+import type { QuestionImage } from '@/composables/parseQuestions'
+import { linkMineruImages, imagesForText, questionTextOf } from '@/composables/mineruImages'
 import { saveTextFile, isTauri, listenTauri, mineruStagePdf, mineruParse } from '@/composables/useTauri'
+import { useDeckStore } from '@/stores/deck'
+import type { SlideElement } from '@/types'
 import type { MineruProgress } from '@/composables/useTauri'
 
 const props = defineProps<{
@@ -22,7 +26,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
   /** id：单题 = 题库 id；整套 / 组卷 = 0（没有单题 id）；label：告诉调用方"插了什么" */
-  (e: 'insert', text: string, id: number, label?: string): void
+  (e: 'insert', text: string, id: number, label?: string, images?: QuestionImage[]): void
 }>()
 
 const list = ref<QuestionEntry[]>([])
@@ -36,6 +40,12 @@ const batchOpen = ref(false)
 const batchText = ref('')
 const parsedInfo = computed(() => parseQuestionsWithInfo(batchText.value))
 const parsed = computed(() => parsedInfo.value.list)
+/**
+ * 本批次（一次 MinerU 识别）的插图表：编号 N 对应正文里的 [图N]。
+ * 整卷共用一个表，入库时再按题拆（imagesForText）—— 不能让第 3 题背上整卷的图。
+ * 号是**整卷唯一**的，所以同一份卷子里不会有两道题都叫 [图1]。
+ */
+const batchImages = ref<QuestionImage[]>([])
 /** 本批次统一套用的年份与试卷名（题内写了【年份】【试卷】则以题内为准） */
 const batchYear = ref('')
 const batchPaper = ref('')
@@ -49,6 +59,48 @@ watch(batchText, (v) => {
   if (d.year && !batchYear.value.trim()) batchYear.value = d.year
   if (d.paperName && !batchPaper.value.trim()) batchPaper.value = d.paperName
 })
+/**
+ * 把一组题里的 [图N] 按「这一次插入」重新编号，并给出配套的图片表。
+ *
+ * 为什么必须重编：两道来自不同卷子的题可能都写着 [图1]，直接拼在一起时，
+ * 试卷那一侧只能按号替换 → 后插的图会把先插的顶掉（就是「指到同号错图」这类问题）。
+ * 这里把整批的号拉通编成 1..k（只在本次插入内唯一），并把图片一起交给试卷侧注册。
+ * 没有配图的 [图N]（手写的老题）**原样留着** —— 行为与改动前完全一致。
+ */
+function renumberForInsert(entries: QuestionEntry[]): { items: QuestionEntry[]; images: QuestionImage[] } {
+  const all: QuestionImage[] = []
+  let seq = 0
+  const items = entries.map((e) => {
+    const src = e.q.images || []
+    if (!src.length) return e
+    const map = new Map<number, QuestionImage>()
+    const rewrite = (t: string) => String(t || '').replace(/\[图(\d+)((?::[^\[\]]*)?)\]/g, (m0, d: string, rest: string) => {
+      const n = Number(d)
+      const hit = src.find((x) => x.n === n)
+      if (!hit) return m0
+      let out = map.get(n)
+      if (!out) { out = { n: ++seq, src: hit.src, caption: hit.caption }; map.set(n, out); all.push(out) }
+      return '[图' + out.n + (rest || '') + ']'
+    })
+    return {
+      ...e,
+      q: {
+        ...e.q,
+        stem: rewrite(e.q.stem),
+        options: e.q.options.map(rewrite),
+        solution: rewrite(e.q.solution),
+        images: Array.from(map.values()),
+      },
+    }
+  })
+  return { items, images: all }
+}
+
+/** 本批次里某一题引用到的插图数（预览用；入库时才真正按题拆） */
+function imgCountOf(p: { stem?: string; options?: string[]; solution?: string }): number {
+  return imagesForText(questionTextOf(p), batchImages.value).length
+}
+
 /** 一组题的卷面总分（题内分值优先，否则按题型默认） */
 function paperTotal(arr: QuestionEntry[]): number {
   return arr.reduce((s, x) => s + scoreOf(x), 0)
@@ -64,23 +116,30 @@ function insertPaperGroup(g: PaperGroup, withSolution: boolean) {
   // （以前点一下就全灌进正文，散题组甚至会把整个"未归卷"都灌进来 ✗）
   const warn = g.paperName ? '' : '\n\n⚠ 这些题没有试卷名 —— 这是「未归卷」的散题合集，一次会把它们全部插入'
   if (!confirm('插入整套「' + name + '」？\n\n共 ' + g.count + ' 道，合计 ' + paperTotal(g.items) + ' 分' + warn)) return
-  emit('insert', paperGroupToText(g, withSolution), 0, '整套「' + name + '」共 ' + g.count + ' 道')
+  // 图片：整批拉通重编号后一起交给试卷侧（它再按自己的图号注册，保证不发生同号顶替）
+  const pack = renumberForInsert(g.items)
+  emit('insert', paperGroupToText({ ...g, items: pack.items }, withSolution), 0, '整套「' + name + '」共 ' + g.count + ' 道', pack.images)
   g.items.forEach((x) => void touchQuestion(x.id))
   flash('已整套插入「' + name + '」共 ' + g.count + ' 道')
 }
 async function doBatch() {
   if (!parsed.value.length) return
   // 批次级的年份 / 试卷名：题内没写就套用批次的
+  // 图片：整卷一个表 → 按题挑出这一题真的引用到的（题干/选项/解析里出现 [图N]）
   const items = parsed.value.map((p) => ({
     ...p,
     yearExplicit: p.yearExplicit || batchYear.value.trim(),
     paperName: p.paperName || batchPaper.value.trim(),
+    images: imagesForText(questionTextOf(p), batchImages.value),
   }))
+  const imgCount = items.reduce((s, p) => s + (p.images?.length || 0), 0)
   const r = await importParsedQuestions(items)
   await load()
   batchOpen.value = false
   batchText.value = ''
-  flash('已导入 ' + r.added + ' 道题' + (r.skipped ? '，跳过 ' + r.skipped + ' 道（与库里已有的题干重复）' : ''))
+  batchImages.value = []
+  flash('已导入 ' + r.added + ' 道题' + (imgCount ? '（含 ' + imgCount + ' 张插图）' : '')
+    + (r.skipped ? '，跳过 ' + r.skipped + ' 道（与库里已有的题干重复）' : ''))
 }
 /* ---- 规则组卷（双向细目表）+ 组卷查重 ---- */
 const paperOpen = ref(false)
@@ -120,7 +179,8 @@ function sendPaper(withSolution: boolean) {
   if (blockIfManageOnly()) return
   const sig = 'rule:' + arr.map((x) => x.id).join(',') + ':' + (withSolution ? 1 : 0)
   if (!confirmRepeat(sig, '这套规则组卷')) return
-  emit('insert', buildPaperText(arr, { withSolution }), 0, '规则组卷 ' + arr.length + ' 道（' + paperTotal(arr) + ' 分）')
+  const pack = renumberForInsert(arr)
+  emit('insert', buildPaperText(pack.items, { withSolution }), 0, '规则组卷 ' + arr.length + ' 道（' + paperTotal(arr) + ' 分）', pack.images)
   arr.forEach((x) => void touchQuestion(x.id))
   markSent(sig)
   flash('已把 ' + arr.length + ' 道题送进 PDF 生成（共 ' + paperTotal(arr) + ' 分）')
@@ -239,13 +299,18 @@ async function runMineru(pdfPath: string) {
     const r = await mineruParse(pdfPath, token, mode)
     const md = r?.mdText || ''
     if (!md.trim()) { throw new Error('MinerU 没有返回 Markdown 内容') }
-    batchText.value = md
+    // 正文里的 ![](images/x.jpg) → [图N]，图本身（Rust 读成 base64）留在本批次表里，
+    // 入库时按题拆开写进 meta.images —— 题库不存磁盘路径（产物目录会被清/换机就没了）。
+    const linked = linkMineruImages(md, r?.images)
+    batchImages.value = linked.images
+    batchText.value = linked.text
     batchOpen.value = true
     editing.value = false
-    const tip = '识别完成：' + (r.seconds ?? '?') + 's / ' + (r.pages || '?') + ' 页，'
+    const tip = '识别完成：' + (r.seconds ?? '?') + 's / ' + (r.pages || '?') + ' 页；'
+      + linked.images.length + ' 张插图已转成 [图N]'
       + (mode === 'precise'
-        ? '已存 md + json → ' + (r.mdPath || '') + (r.outDir ? '（产物目录：' + r.outDir + '）' : '')
-        : '轻量接口只出 Markdown（未存 json）')
+        ? '；已存 md + json → ' + (r.mdPath || '') + (r.outDir ? '（产物目录：' + r.outDir + '）' : '')
+        : '；轻量接口只出 Markdown（未存 json）')
       + ' —— 请核对下面识别结果，再点「识别并导入」'
     mineruProg.value = '✓ ' + tip
     flash('MinerU ' + tip)
@@ -277,6 +342,12 @@ const pickedChapter = ref('')
 // 换了板块就把章节清掉 —— 否则会残留一个不属于新板块的章节，筛出来是空的
 watch(pickedSection, () => { pickedChapter.value = '' })
 const pickedLevel = ref<Level | ''>('')
+/**
+ * 难度细筛：1-5（这个字段以前只被 filterQuestions 读、模板里从来不写，是个死筛选）。
+ * 与上面的 易/中/难 是**同一字段的两种粒度**：粗档看整体，细值看具体第几级，两者可叠加。
+ * null = 不限。
+ */
+const pickedDiff = ref<number | null>(null)
 const onlyMissing = ref(false)
 /* ---- 多选出卷 ---- */
 const pickedIds = ref<number[]>([])
@@ -297,7 +368,8 @@ function insertPicked(withSolution: boolean) {
   const sig = 'pick:' + arr.map((x) => x.id).join(',') + ':' + (withSolution ? 1 : 0)
   if (!confirmRepeat(sig, '这批 ' + arr.length + ' 道题')) return
   // 统一走 buildPaperText：按题型分段 + 每题（x分）+ 卷面总分 —— 与整套插入排版一致
-  emit('insert', buildPaperText(arr, { withSolution }), 0, '已勾选 ' + arr.length + ' 道（共 ' + total + ' 分）')
+  const pack = renumberForInsert(arr)
+  emit('insert', buildPaperText(pack.items, { withSolution }), 0, '已勾选 ' + arr.length + ' 道（共 ' + total + ' 分）', pack.images)
   arr.forEach((x) => void touchQuestion(x.id))
   markSent(sig)
   flash('已把 ' + arr.length + ' 道题送进 PDF 生成（共 ' + total + ' 分）')
@@ -366,9 +438,33 @@ const shown = computed(() => filterQuestions(list.value, {
   section: pickedSection.value,
   chapter: pickedChapter.value,
   level: pickedLevel.value,
+  difficulty: pickedDiff.value,
   onlyMissingAnswer: onlyMissing.value,
 }))
 const selected = computed(() => list.value.find((x) => x.id === selectedId.value) || null)
+
+/* ---------- 插入到**当前幻灯片**（v1406） ----------
+ * 题库原来只能插进「PDF 生成的试卷正文」；幻灯片是另一套（没有 [图N] 那套图号约定），
+ * 所以这里：题干+选项 → 一个**文本元素**；题目里的图 → 各自的**图片元素**（按顺序，拖一下位置即可）。 */
+const deck = useDeckStore()
+const slideWithAnswer = ref(false)
+function insertToSlide() {
+  const q = selected.value
+  if (!q) { flash('先在左边选一道题'); return }
+  let text = questionToText(q, slideWithAnswer.value).trim()
+  const imgs = q.q?.images || []     // ⚠ 图挂在 meta（entry.q.images）上，不在 entry 上
+  // [图N] 是试卷正文的约定，幻灯片不认 → 去掉标记，改用真图（顺序一致）
+  text = text.replace(/\[图\s*\d+\]/g, '').replace(/\n{3,}/g, '\n\n').trim()
+  if (!text) { flash('这道题没有可插入的文字'); return }
+  deck.addElement('text', {
+    text, fontSize: 22, w: 1100, h: Math.min(620, 140 + text.split('\n').length * 30),
+  } as Partial<SlideElement>)
+  for (const im of imgs) {
+    deck.addElement('image', { src: im.src, w: 520, h: 320, fit: 'contain' } as Partial<SlideElement>)
+  }
+  flash('已插入幻灯片：题面' + (slideWithAnswer.value ? '（含答案/解析）' : '（不含答案）')
+    + (imgs.length ? '；另有 ' + imgs.length + ' 张图（图片元素，拖到合适位置）' : ''))
+}
 
 function toggleTag(t: string) {
   const i = pickedTags.value.indexOf(t)
@@ -434,7 +530,8 @@ async function insertOne(withSolution: boolean) {
   const x = selected.value
   if (!x) { flash('先在右边选一道题'); return }
   if (blockIfManageOnly()) return
-  emit('insert', questionToText(x, withSolution), x.id, '试题 #' + x.id)
+  const pack = renumberForInsert([x])
+  emit('insert', questionToText(pack.items[0], withSolution), x.id, '试题 #' + x.id, pack.images)
   void touchQuestion(x.id)
 }
 /* ---- 清理与批量删除 ---- */
@@ -552,6 +649,14 @@ function close() { emit('close') }
             <button v-for="l in LEVELS" :key="l.v" class="qb__f" :class="{ 'qb__f--on': pickedLevel === l.v }"
               @click="pickedLevel = (pickedLevel === l.v ? '' : l.v)">{{ l.label }}</button>
           </span>
+          <!-- 1-5 细筛：以前 pickDiff 只被 filterQuestions 读、界面上根本没有入口（死筛选） -->
+          <span class="qb__fg">难度值
+            <button class="qb__f" :class="{ 'qb__f--on': pickedDiff === null }" title="不按 1-5 细分（只看上面的 易/中/难）"
+              @click="pickedDiff = null">不限</button>
+            <button v-for="d in [1, 2, 3, 4, 5]" :key="d" class="qb__f" :class="{ 'qb__f--on': pickedDiff === d }"
+              :title="'只要难度值 = ' + d + '（与 易/中/难 是同一字段的两种粒度，可叠加）'"
+              @click="pickedDiff = (pickedDiff === d ? null : d)">{{ d }}</button>
+          </span>
           <span class="qb__fg">板块
             <button class="qb__f" :class="{ 'qb__f--on': pickedSection === '' }" @click="pickedSection = ''">全部</button>
             <button v-for="s in SECTIONS" :key="s" class="qb__f" :class="{ 'qb__f--on': pickedSection === s }"
@@ -590,11 +695,19 @@ function close() { emit('close') }
                 <template v-if="x.q.section"> · {{ x.q.section }}</template>
                 <template v-if="!x.q.answer.trim()"> · <b class="qb__noans">缺答案</b></template>
                 <template v-else-if="x.q.answerFrom === 'auto'"> · <b class="qb__auto">自动</b></template>
+                <template v-if="(x.q.images || []).length"> · 图{{ (x.q.images || []).length }}</template>
               </span>
             </div>
           </div>
 
           <div class="qb__detail">
+            <div v-if="selected && !cleanOpen" class="qb__slide">
+              <button class="qb__btn qb__btn--pri" @click="insertToSlide">插入当前幻灯片</button>
+              <label class="qb__slideck">
+                <input v-model="slideWithAnswer" type="checkbox" /> 连答案/解析一起
+              </label>
+              <span class="qb__slidehint">题干+选项作为一个文本元素；题里的图作为图片元素插进去（拖一下位置即可）</span>
+            </div>
             <template v-if="cleanOpen">
               <div class="qb__clean">
                 <div class="qb__bhead">清理试题库 —— 用「导入时的同一套判据」扫描；只给建议，点删除才真删</div>
@@ -721,6 +834,7 @@ B. 2
                   <span v-if="parsed.length" class="qb__bwarn">
                     <template v-if="parsed.filter((p) => p.warn).length">其中 {{ parsed.filter((p) => p.warn).length }} 道没识别到答案</template>
                     <template v-if="parsedInfo.skipped">；已跳过 {{ parsedInfo.skipped }} 行考生须知／抬头</template>
+                    <span v-if="batchImages.length" class="qb__bimg">；本批次 {{ batchImages.length }} 张插图（已转成 [图N]，随题入库）</span>
                   </span>
                 </div>
                 <details class="qb__bhelp">
@@ -730,13 +844,13 @@ B. 2
                 <div class="qb__actions">
                   <button class="qb__btn qb__btn--pri" :disabled="!parsed.length" @click="doBatch">识别并导入</button>
                   <button class="qb__btn" @click="batchOpen = false">返回列表</button>
-                  <button class="qb__btn" @click="batchText = ''">清空</button>
+                  <button class="qb__btn" @click="batchText = ''; batchImages = []">清空</button>
                 </div>
                 <div v-if="parsed.length" class="qb__bprev">
                   <div class="qb__bptitle">预览（前 5 道）</div>
                   <div v-for="(p, i) in parsed.slice(0, 5)" :key="i" class="qb__bpitem">
                     <b>{{ p.title }}</b>
-                    <span>选项 {{ p.options.length }} · 答案 {{ p.answer || '—' }} · 难度 {{ p.difficulty }}<template v-if="p.knowledge.length"> · {{ p.knowledge.join('、') }}</template></span>
+                    <span>选项 {{ p.options.length }} · 答案 {{ p.answer || '—' }} · 难度 {{ p.difficulty }}<template v-if="imgCountOf(p)"> · 图 {{ imgCountOf(p) }}</template><template v-if="p.knowledge.length"> · {{ p.knowledge.join('、') }}</template></span>
                   </div>
                 </div>
               </div>
@@ -781,6 +895,15 @@ B. 2
                 <div v-if="selected.q.options.length" class="qb__vsec"><b>选项</b><pre>{{ selected.q.options.map((o, i) => String.fromCharCode(65 + i) + '. ' + o).join('\n') }}</pre></div>
                 <div v-if="selected.q.answer" class="qb__vsec"><b>答案</b><pre>{{ selected.q.answer }}</pre></div>
                 <div v-if="selected.q.solution" class="qb__vsec"><b>解析</b><pre>{{ selected.q.solution }}</pre></div>
+                <div v-if="(selected.q.images || []).length" class="qb__vsec">
+                  <b>插图（{{ (selected.q.images || []).length }} 张，随题入库；插入试卷时自动配号）</b>
+                  <div class="qb__vfigs">
+                    <figure v-for="im in (selected.q.images || [])" :key="im.n">
+                      <img :src="im.src" :alt="'图' + im.n" />
+                      <figcaption>[图{{ im.n }}]<template v-if="im.caption"> {{ im.caption }}</template></figcaption>
+                    </figure>
+                  </div>
+                </div>
                 <div class="qb__vmeta">
                   {{ qtypeLabel(selected.q.qtype) }} · 难度 {{ levelLabel(selected.q.difficulty) }}
                   <template v-if="selected.q.section"> · 板块 {{ selected.q.section }}</template>
@@ -889,6 +1012,9 @@ B. 2
 .qb__it { font-size: 13px; font-weight: 600; }
 .qb__im { font-size: 11.5px; color: var(--muted, #888); }
 .qb__detail { flex: 1; min-width: 0; overflow: auto; padding: 12px 16px; }
+.qb__slide { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #e2e8f0; }
+.qb__slideck { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: #475569; }
+.qb__slidehint { font-size: 12px; color: #94a3b8; }
 .qb__empty { color: var(--muted, #888); font-size: 13px; padding: 18px; }
 .qb__vtitle { font-weight: 700; margin-bottom: 8px; }
 .qb__vsec { margin-bottom: 10px; }
@@ -904,6 +1030,12 @@ B. 2
 .qb__bhelp summary { cursor: pointer; }
 .qb__bhelp ul { margin: 6px 0 0 18px; padding: 0; line-height: 1.9; }
 .qb__bprev { border-top: 1px dashed #e4e4ee; padding-top: 8px; }
+.qb__bimg { color: #0f766e; margin-left: 8px; font-size: 12px; }
+/* 题目插图缩略图（题库详情）：让老师入库后能当场看到图，不用等插进试卷 */
+.qb__vfigs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.qb__vfigs figure { margin: 0; border: 1px solid #eeeef6; border-radius: 8px; padding: 6px; background: #fff; max-width: 250px; }
+.qb__vfigs img { display: block; max-width: 230px; max-height: 190px; }
+.qb__vfigs figcaption { font-size: 11.5px; color: var(--muted, #888); margin-top: 4px; text-align: center; }
 .qb__bptitle { font-size: 12px; color: var(--muted, #888); margin-bottom: 6px; }
 .qb__bpitem { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 6px; background: #fafafd; margin-bottom: 4px; }
 .qb__bpitem b { font-size: 12.5px; }

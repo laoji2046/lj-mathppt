@@ -924,7 +924,10 @@ function clipLine(k: number, b2: number, view: View): [[number, number], [number
 
 /** 画「多条直线 / 线段」（参数见 LINE_PARAMS）。返回空串 = 没开。
  *  线段按起终点 x 截断，直线铺满窗口；两者都先裁到窗口内，不会溢到元素框外面。 */
-function drawExtraLines(kind: string, pv: Record<string, number>, view: View, w: number, h: number, stroke: string, sw: number, colors?: (string | null)[]): string {
+function drawExtraLines(
+  kind: string, pv: Record<string, number>, view: View, w: number, h: number, stroke: string, sw: number,
+  colors?: (string | null)[], labels?: (string | null)[], links?: (PointLink | null)[],
+): string {
   const n = Math.max(0, Math.min(4, Math.round(pv.n || 0)))
   if (!n) return ''
   const dots = Math.round(pv.ldot ?? 1) !== 0        // 线段端点圆点，可选
@@ -943,6 +946,7 @@ function drawExtraLines(kind: string, pv: Record<string, number>, view: View, w:
       hi = Math.min(hi, Math.max(sN, eN))
       if (hi - lo < 1e-9) continue
     }
+    if (Math.round(pv['hide' + i] ?? 0)) continue                     // 绑定的切线解不出来（定点在曲线内）→ 这条线不画
     const col = colors && colors[i - 1] ? colors[i - 1]! : stroke     // 每条线可以有自己的颜色
     const lDash = Math.round(pv['d' + i] ?? 0) ? '7 5' : ''             // 每条线可以自己选虚实 → 虚线标交点、实线画图形都行
     out += lineSvg(mm.X(lo), mm.Y(k * lo + b2), mm.X(hi), mm.Y(k * hi + b2), col, sw, lDash)
@@ -954,7 +958,9 @@ function drawExtraLines(kind: string, pv: Record<string, number>, view: View, w:
         const dd = Math.hypot(rs[0].x - rs[1].x, rs[0].y - rs[1].y)
         const fs2 = Math.max(11, Math.min(w, h) * 0.05)
         const mx = (rs[0].x + rs[1].x) / 2, my = (rs[0].y + rs[1].y) / 2
-        out += textSvg(mm.X(mx) + fs2 * 0.35, mm.Y(my) - fs2 * 0.45, dd.toFixed(2), fs2, stroke)
+        // 弦的名字：两个端点各自是哪个**标注点**就叫什么 → |P₁P₂| = 8.00（认不出就退回"弦长"）
+        out += textSvg(mm.X(mx) + fs2 * 0.35, mm.Y(my) - fs2 * 0.45,
+          chordLabel(kind, pv, rs, { pointLabels: labels, pointLinks: links }) + ' = ' + dd.toFixed(2), fs2, stroke)
       }
     }
   }
@@ -1275,7 +1281,13 @@ export function conicLineIntersections(kind: string, params?: Record<string, num
 
 /** 直线与圆锥曲线的**绑定**：目前一种 —— 这条线是**某个标注点处的切线**（tangentAt = 点序号）。
  *  绑上之后 k、m 每次**现算** ✓，所以动点一滑、切线就跟着转 ✓。 */
-export interface LineLink { tangentAt: number }
+export interface LineLink {
+  /** 这条线是**某个标注点处的切线**（点序号）—— 动点一滑切线就跟着转 */
+  tangentAt?: number
+  /** 这条线是**过某个定点作的切线**（点序号）+ 取第几支（0/1）：定点在曲线外时有两条 */
+  tangentFrom?: number
+  which?: number
+}
 
 /** 圆锥曲线在点 (x0,y0) 处的**切线** y = kx + m。
  *  二次型 F = Ax²+By²+Cx+Dy+E → 切线为 (2Ax0+C)(x−x0) + (2By0+D)(y−y0) = 0。
@@ -1293,6 +1305,62 @@ export function conicTangentAt(kind: string, params: Record<string, number> | un
   return { k, m: y0 - k * x0 }
 }
 
+/** 【过定点作切线】从点 P(px,py) 向圆锥曲线作切线（最多两条）。
+ *  做法：先求 **P 的极线**（就是两个切点的连线）—— 对二次型 F = Ax²+By²+Cx+Dy+E，
+ *  极线为 A·px·x + B·py·y + C(x+px)/2 + D(y+py)/2 + E = 0；
+ *  再把极线与曲线求交 → 两个**切点** T₁T₂；切线就是 P 与切点的连线（切点是切线的极限位置）✓。
+ *  P 在曲线上 → 两条切线重合（返回 1 条）；P 在曲线内部 → 返回 []（作不出切线）。
+ *  ⚠ 竖直切线沿用本项目约定：用很大的斜率近似（y = kx + m 表示不了竖直）。 */
+export function conicTangentsFrom(
+  kind: string, params: Record<string, number> | undefined, px: number, py: number,
+): { k: number; m: number }[] {
+  const q = conicQuadratic(kind, params)
+  if (!q) return []
+  // ---- 极线 y = kp·x + mp ----
+  const A = q.A * px + q.C / 2
+  const B = q.B * py + q.D / 2
+  const K = (q.C * px) / 2 + (q.D * py) / 2 + q.E
+  let kp = 0, mp = 0
+  if (Math.abs(B) > 1e-12) { kp = -A / B; mp = -K / B }
+  else if (Math.abs(A) > 1e-12) { kp = 1e4; mp = -1e4 * (-K / A) }   // 极线竖直（x = −K/A）
+  else return []
+  // ---- 极线 ∩ 曲线 = 切点（与 conicLineRoots 同一套解法）----
+  const A2 = q.A + q.B * kp * kp
+  const B2 = 2 * q.B * kp * mp + q.C + q.D * kp
+  const C2 = q.B * mp * mp + q.D * mp + q.E
+  const xs: number[] = []
+  if (Math.abs(A2) < 1e-12) {
+    if (Math.abs(B2) > 1e-12) xs.push(-C2 / B2)
+  } else {
+    const disc = B2 * B2 - 4 * A2 * C2
+    const tol = 1e-9 * (B2 * B2 + Math.abs(4 * A2 * C2) + 1e-12)
+    if (disc >= -tol) {
+      const sq = Math.sqrt(Math.max(0, disc))
+      xs.push((-B2 + sq) / (2 * A2), (-B2 - sq) / (2 * A2))
+    }
+  }
+  const out: { k: number; m: number }[] = []
+  for (const x of xs) {
+    if (!isFinite(x)) continue
+    const y = kp * x + mp
+    // ⚠ P 自己在曲线上时，切点 T 与 P 重合 → "P 与 T 的连线"退化（dx=0 会被误判成竖直切线，
+    //   椭圆的上下顶点就是这样：真正的切线是**水平的** y=b ✗）。这种情况直接用 P 处的切线 ✓
+    if (Math.hypot(x - px, y - py) < 1e-7) {
+      const t0 = conicTangentAt(kind, params, px, py)
+      if (t0) out.push(t0)
+      continue
+    }
+    const dx = x - px
+    if (Math.abs(dx) < 1e-9) out.push({ k: 1e4, m: py - 1e4 * px })   // 竖直切线（过 P）
+    else { const k = (y - py) / dx; out.push({ k, m: py - k * px }) }
+  }
+  if (out.length === 2) {
+    // 两条几乎重合 = P 在曲线上 → 只留一条
+    if (Math.abs(out[0].k - out[1].k) < 1e-6 && Math.abs(out[0].m - out[1].m) < 1e-6) return [out[0]]
+  }
+  return out
+}
+
 /** 把"绑定的线"解析成实际参数：切线由它的**切点**现算 → 覆盖 k{i}/m{i}。
  *  顺序：动点 / 自由点 → 切线 → （交点在 conicPointPos 里用已经生效的参数现算）✓ */
 export function conicEffectiveParams(
@@ -1304,14 +1372,50 @@ export function conicEffectiveParams(
   for (let i = 0; i < lineLinks.length; i++) {
     const lk = lineLinks[i]
     if (!lk) continue
+    // ① 过定点作切线（定点通常是个"自由点"）：现算两支切线，取 which 指定的一支
+    if (lk.tangentFrom != null) {
+      const P = conicPointPos(kind, pv, lk.tangentFrom, pointLinks)
+      // ⚠ 解不出切线时（定点在曲线内 / 该点此刻不画）必须**标记隐藏**：
+      //   否则会退回默认的 k=0、m=0，凭空画出一条过原点的假线 ✗（实测就这么冒出来过）
+      if (!P) { pv['hide' + (i + 1)] = 1; continue }
+      const ts = conicTangentsFrom(kind, pv, P.x, P.y)
+      const t = ts[Math.max(0, Math.min(ts.length - 1, Math.round(lk.which ?? 0)))]
+      if (t) { pv['k' + (i + 1)] = t.k; pv['m' + (i + 1)] = t.m }
+      else pv['hide' + (i + 1)] = 1
+      continue
+    }
+    // ② 某标注点处的切线
+    if (lk.tangentAt == null) continue
     const pt = conicPointPos(kind, pv, lk.tangentAt, pointLinks)
-    if (!pt) continue
+    if (!pt) { pv['hide' + (i + 1)] = 1; continue }
     const km = conicTangentAt(kind, pv, pt.x, pt.y)
     // ⚠ **不要四舍五入** ✗ —— 舍入会让"严格相切"变成"差一点点"，判别式掉到负数，
     //   于是切线算出**0 个交点**（实测 t=0.8 的切线就是这样消失的）。全精度留着 ✓
     if (km) { pv['k' + (i + 1)] = km.k; pv['m' + (i + 1)] = km.m }
   }
   return pv
+}
+
+/** 弦的名字：这条线与曲线的两个交点分别落在哪个**标注点**上，就用那两个名字拼 `|P_1P_2|`
+ *  （名字里的 `_1` 会渲染成下标 → 显示成 |P₁P₂|）。认不出（没标注点/名字空）就退回"弦长"。 */
+function chordLabel(
+  kind: string, pv: Record<string, number>,
+  rs: { x: number; y: number }[],
+  opt?: { pointLabels?: (string | null)[]; pointLinks?: (PointLink | null)[] },
+): string {
+  const labs = opt?.pointLabels || []
+  const links = opt?.pointLinks || []
+  const names: string[] = []
+  for (const r of rs.slice(0, 2)) {
+    let nm = ''
+    // ⚠ 标注点是 **1 起**的（conicPointPos 内部取 links[i-1]）—— 这里 j 是数组下标，传 j+1 ✓
+    for (let j = 0; j < labs.length; j++) {
+      const p = conicPointPos(kind, pv, j + 1, links)
+      if (p && Math.hypot(p.x - r.x, p.y - r.y) < 1e-6) { nm = String(labs[j] || '').trim(); break }
+    }
+    names.push(nm)
+  }
+  return names[0] && names[1] ? '|' + names[0] + names[1] + '|' : '弦长'
 }
 
 export function conicFigure(kind: string, w: number, h: number, baseStroke: string, sw: number, fill = 'none', params?: Record<string, number>, opt?: { conicStroke?: string; axisColor?: string; lineColors?: (string | null)[]; pointColors?: (string | null)[]; pointLabels?: (string | null)[]; pointLinks?: (PointLink | null)[]; lineLinks?: (LineLink | null)[] }): string {
@@ -1340,7 +1444,7 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
   // 「圆锥曲线 + 直线 / 线段」：在 s 的**最前面**加一次就够 —— 后面各分支只管往 s 上追加再 return s，
   // 所以不需要改动任何一个分支（改四个分支结尾容易漏、也容易错）。
   // 画在圆锥曲线**下面**，交点处线条不会互相压住。
-  s += drawExtraLines(kind, pv, view, w, h, baseStroke, sw, opt?.lineColors)
+  s += drawExtraLines(kind, pv, view, w, h, baseStroke, sw, opt?.lineColors, opt?.pointLabels, opt?.pointLinks)
   s += drawExtraPoints(kind, pv, view, w, h, baseStroke, opt?.pointLabels, opt?.pointLinks, opt?.pointColors)
   const label = (x: number, y: number, t: string, dx = 0, dy = 0) => textSvg(X(x) + dx, Y(y) + dy, t, fs, stroke)
   const dot = (x: number, y: number, k = 1) => dotSvg(X(x), Y(y), r * k, stroke)

@@ -230,6 +230,29 @@ function addTangent() {
   flash('已加第 ' + (n + 1) + ' 条线 = **第 ' + base + ' 个点处的切线**（那个点一动，切线就跟着转）')
 }
 
+/** **过定点作切线**：把某个**标注点**当定点，一次新增**两条**线，绑成"过该点的两条切线"。
+ *  定点在曲线外 → 两条；在曲线上 → 两条重合（看着像一条）；在曲线内 → 作不出来（线不画）。
+ *  k/m 每次现算 → 定点一拖 / 动点一滑，两条切线自动跟着转 ✓。 */
+const tangentFromPt = ref(1)
+function addTangentFromPoint() {
+  const m = mathfig.value
+  if (!m) return
+  const pn = Math.max(0, Math.min(6, Math.round(Number(m.params?.pn) || 0)))
+  if (pn < 1) { flash('先加一个标注点当"定点"（「＋ 在曲线上加动点」/「求交点」都会加标注点），再作切线'); return }
+  const want = Math.max(1, Math.min(pn, Math.round(Number(tangentFromPt.value) || 1)))
+  const params = { ...(m.params || {}) }
+  const n = Math.max(0, Math.min(4, Math.round(Number(params.n) || 0)))
+  if (n + 2 > 4) { flash('直线最多 4 条，而"过定点作切线"一次要占 2 条 —— 先删掉几条再来'); return }
+  const ll: ({ tangentAt?: number; tangentFrom?: number; which?: number } | null)[] = [...(m.lineLinks || [])]
+  while (ll.length < n + 2) ll.push(null)
+  ll[n] = { tangentFrom: want, which: 0 }
+  ll[n + 1] = { tangentFrom: want, which: 1 }
+  params.n = n + 2
+  patch({ params, lineLinks: ll } as Partial<SlideElement>)
+  flash('已加第 ' + (n + 1) + '、' + (n + 2) + ' 条线 = **过第 ' + want + ' 个点的两条切线**'
+    + '（定点在曲线内时两条都画不出来，属正常；拖那个点切线会跟着转）')
+}
+
 function calcIntersections() {
   const m = mathfig.value
   if (!m) return
@@ -1445,6 +1468,12 @@ function layerTypeLabel(type: string) {
         <!-- 可调参数（正弦型 A/ω/φ、含参二次的 a…） -->
         <button v-if="hasLineParams" class="figlib__btn" title="在曲线上加一个动点：拖动它只会沿曲线滑动（不会跑出曲线）" @click="addMovingPoint">＋ 在曲线上加动点</button>
         <button v-if="hasLineParams" class="figlib__btn" title="给最近的标注点作切线：切线会随该点自动转动（动点一滑、切线跟着转）" @click="addTangent">＋ 过标注点作切线</button>
+        <span v-if="hasLineParams" class="tangfrom" title="把第 n 个标注点当定点，一次加两条过它的切线（定点在曲线外才有两条）">
+          过第
+          <input v-model.number="tangentFromPt" class="tangfrom__n" type="number" min="1" max="6" step="1" />
+          个点作切线
+          <button class="figlib__btn" @click="addTangentFromPoint">＋ 加两条</button>
+        </span>
         <button v-if="hasLineParams" class="figlib__btn" title="算出每条直线/线段与这条圆锥曲线的交点，直接生成标注点（之后可用橙色手柄拖动微调）" @click="calcIntersections">求交点 → 生成标注点</button>
         <p v-if="ixMsg" class="panel__hint">{{ ixMsg }}</p>
         <p v-if="linkedN" class="panel__hint">其中 <b>{{ linkedN }}</b> 个点钉在「直线与曲线的交点」上：<b>直线一改它们就跟着动</b>；拖它 = 平移那条线；手动改它的 x/y 则解除绑定。</p>
@@ -2606,4 +2635,7 @@ function layerTypeLabel(type: string) {
 .solid-prop__row2 { display: flex; gap: 6px; margin-top: 5px; }
 .solid-prop__row2 .quick__btn { flex: 1; }
 
+.tangfrom { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; font-size: 12px; color: #555; }
+.tangfrom__n { width: 46px; padding: 2px 4px; }
+.tangfrom__n::-webkit-inner-spin-button { -webkit-appearance: none; }
 </style>

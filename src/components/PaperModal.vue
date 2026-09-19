@@ -998,16 +998,33 @@ const qbOpen = ref(false)
  * 试题库 → 组卷：把选题文本插到试卷正文末尾。
  * 插完**不关窗** —— 组卷通常是连续选好几道题。
  */
-function onQuestionInsert(text: string, id: number, label?: string) {
-  const body = input.value
-  const sep = body && !body.endsWith('\n') ? '\n\n' : ''
+function onQuestionInsert(text: string, id: number, label?: string, imgs?: { n: number; src: string; caption?: string }[]) {
+  // 题库里的 [图N] 是**题目自己的编号**，跟本试卷的图号（images 映射）无关 ——
+  // 直接插进来就会指到同号的别的图（用户实报的「红字：图片缺失图N」/ 指错图）。
+  // 所以这里先把题带来的图**注册进本试卷的 images 映射**（同一张图复用同一个图号，
+  // 与 normalizeMdImages 的规则一致），再把文本里的 [图N] 换成新号。
+  let body = text
+  for (const im of imgs || []) {
+    if (!im || !im.src || !(im.n > 0)) continue
+    const exist = Object.keys(images.value).find(
+      (k) => images.value[Number(k)] && images.value[Number(k)].src === im.src,
+    )
+    let n = exist ? Number(exist) : ++imgSeq.value
+    if (!exist) images.value[n] = { src: im.src, address: im.caption || '题库插图', caption: im.caption }
+    // 只换号，不动后面的参数（[图1:center] → [图7:center]）；
+    // 负向先行断言保证 [图1] 不会误伤 [图12]
+    body = body.replace(new RegExp('\\[图' + im.n + '(?=[\\]:])', 'g'), '[图' + n)
+  }
+  const cur = input.value
+  const sep = cur && !cur.endsWith('\n') ? '\n\n' : ''
   // 整套 / 组卷（id=0）插到**已经有内容**的正文后面时，先手动分页：
   // 每套卷子各自从新的一页开始，题号各从 1 起才讲得通（否则两套 1.2.3. 混在一页 ✗）
-  const brk = id === 0 && body.trim() ? '[分页]\n' : ''
-  input.value += sep + brk + text + '\n'
+  const brk = id === 0 && cur.trim() ? '[分页]\n' : ''
+  input.value += sep + brk + body + '\n'
   render()
   saveDraftSoon()
-  paperMsg.value = '已插入' + (label ? ' ' + label : id ? ' 试题 #' + id : '') + ' ✓（可继续选下一道）'
+  paperMsg.value = '已插入' + (label ? ' ' + label : id ? ' 试题 #' + id : '')
+    + ((imgs || []).length ? '，配图 ' + (imgs || []).length + ' 张' : '') + ' ✓（可继续选下一道）'
 }
 
 /**
@@ -1302,7 +1319,13 @@ function restoreDraft(): boolean {
     const s = localStorage.getItem(DRAFT_KEY)
     if (!s) return false
     const d = JSON.parse(s)
-    if (d.images && typeof d.images === 'object') images.value = d.images as Record<number, { src: string; address?: string; caption?: string }>
+    if (d.images && typeof d.images === 'object') {
+      images.value = d.images as Record<number, { src: string; address?: string; caption?: string }>
+      // ⚠ 图号游标要接着草稿里已有的最大图号往下走 —— 否则新插一张图会**覆盖**草稿里的图 1
+      //   （imgSeq 从 0 起，草稿里的 images 是 {1:…,2:…}，实测插第二张就把图 1 顶掉了）
+      const keys = Object.keys(images.value).map((k) => Number(k)).filter((n) => Number.isFinite(n) && n > 0)
+      imgSeq.value = keys.length ? Math.max(...keys) : 0
+    }
     if (typeof d.input === 'string') input.value = d.input
     if (typeof d.template === 'string') template.value = d.template
     if (typeof d.fontFamily === 'string') fontFamily.value = d.fontFamily

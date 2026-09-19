@@ -224,6 +224,8 @@ export interface MineruResult {
   seconds?: number
   mode?: string
   outDir?: string
+  /** 正文引用到的插图（Rust 读成 base64）：前端转成 data URL 随题入库，见 mineruImages.ts */
+  images?: { path: string; mime?: string; bytes?: number; dataBase64: string }[]
 }
 
 /**

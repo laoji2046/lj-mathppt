@@ -563,7 +563,11 @@ fn lib_info() -> serde_json::Value {
     }
 }
 
-/// 取某一类条目（按使用次数降序，其次按 id）。
+/// 取某一类条目（**按 id 降序：新录入的在最上面**）。
+///
+/// ⚠ 曾经是 ORDER BY used_count DESC, id ASC —— 但界面上早就不显示「引用次数」、
+///   抽题也不按它排（pickByRules 是随机的），于是「用过很多次的老题永远压在列表最前」，
+///   新导入的一整卷反而排到最后，老师找不到。现在直接按 id 降序（id 是自增主键 = 录入顺序）。
 #[tauri::command]
 fn lib_query(kind: String) -> serde_json::Value {
     let conn = match lib_open() {
@@ -573,7 +577,7 @@ fn lib_query(kind: String) -> serde_json::Value {
     let mut stmt = match conn.prepare(concat!(
         "SELECT id, title, body, meta, tags, source, builtin, updated_at, used_count ",
         "FROM library_item WHERE type = ?1 ",
-        "ORDER BY used_count DESC, id ASC"
+        "ORDER BY id DESC"
     )) {
         Ok(s) => s,
         Err(e) => return serde_json::json!({ "ok": false, "error": format!("查询失败: {}", e) }),
@@ -968,6 +972,82 @@ fn mineru_stage_pdf(data_base64: String, file_name: String) -> Result<String, St
     Ok(full.to_string_lossy().into_owned())
 }
 
+/// 从 Markdown 正文里收集**试卷插图**：找出所有 Markdown 图片语法里的相对路径，
+/// 把对应文件读成 base64 回传前端（前端转成 data URL 存进题库 meta，不再依赖产物目录还在）。
+///
+/// 为什么在 Rust 侧做：
+///  ① 图片在 MinerU 产物目录（%APPDATA%\lj-mathslides\mineru\...）里，
+///     前端的 read_local_image 只能读 exe 同级，够不着；
+///  ② 只回传**正文真的引用到的**图 —— zip 里常有没被引用的表格图/答题卡图，不回传省 IPC。
+/// 单张超 4MB / 一批超 16MB 的图直接跳过（防止一张大图把 IPC 与 SQLite 撑死）。
+fn mineru_collect_images(dir: &std::path::Path, md: &str) -> Vec<serde_json::Value> {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+
+    const MAX_IMG_BYTES: usize = 4 * 1024 * 1024;
+    const MAX_TOTAL_BYTES: usize = 16 * 1024 * 1024;
+
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut total = 0usize;
+    let mut i = 0usize;
+    while i < md.len() {
+        let rel = match md[i..].find("](") {
+            Some(p) => p,
+            None => break,
+        };
+        let start = i + rel + 2;
+        let end = match md[start..].find(')') {
+            Some(e) => e,
+            None => break,
+        };
+        let raw = md[start..start + end].trim();
+        i = start + end + 1;
+        // 取括号里的第一个 token，去掉尖括号写法 <>
+        let path = raw
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_matches(|c| c == '<' || c == '>')
+            .trim();
+        if path.is_empty() {
+            continue;
+        }
+        let low = path.to_ascii_lowercase();
+        if low.starts_with("http://")
+            || low.starts_with("https://")
+            || low.starts_with("data:")
+            || low.starts_with("asset:")
+        {
+            continue;
+        }
+        // 归一化：去掉 ./ 前缀、统一斜杠；挡掉绝对路径与 .. 穿越
+        let clean = path.trim_start_matches("./").replace('\\', "/");
+        if clean.starts_with('/') || clean.split('/').any(|s| s == ".." || s.is_empty()) {
+            continue;
+        }
+        if !seen.insert(clean.clone()) {
+            continue;
+        }
+        // Windows 的 Path 同时认 / 与 \，直接 join 即可
+        let full = dir.join(clean.as_str());
+        let bytes = match fs::read(&full) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        if bytes.len() > MAX_IMG_BYTES || total + bytes.len() > MAX_TOTAL_BYTES {
+            continue;
+        }
+        total += bytes.len();
+        out.push(serde_json::json!({
+            "path": clean,
+            "mime": guess_image_mime(&full),
+            "bytes": bytes.len(),
+            "dataBase64": B64.encode(&bytes),
+        }));
+    }
+    out
+}
 /// MinerU 远程解析：上传 PDF → 轮询 → 下载产物 → 解压出 full.md / content_list.json。
 /// 返回 { mdPath, jsonPath, mdText, pages, seconds, mode, outDir }。
 // ⚠ 不要写 #[tauri::command(async)]：那会让它在 **async runtime 线程**上跑，而里面用的是
@@ -1247,6 +1327,8 @@ fn mineru_parse(
         (md, found_json.unwrap_or_default(), text)
     };
 
+    // 正文引用到的插图：读成 base64 一起回传（必须在 md_text 被 json! 移走之前）
+    let images = mineru_collect_images(&dir, &md_text);
     let seconds = t0.elapsed().as_secs();
     emit("done", total_pages, total_pages);
     Ok(serde_json::json!({
@@ -1260,6 +1342,8 @@ fn mineru_parse(
         "seconds": seconds,
         "mode": effective,
         "outDir": out_dir,
+        // 正文里引用到的插图（base64）：前端把 md 里的图片语法换成 [图N]，图随题入库
+        "images": images,
     }))
 }
 
@@ -1409,5 +1493,64 @@ mod tests {
     fn write_export_bad_base64() {
         let (status, _) = write_export("C:/foo", "x.html", "!!!not-base64!!!").unwrap_err();
         assert_eq!(status, 400);
+    }
+
+    /// MinerU 插图收集：拿**真的识别产物**（参考/试卷/mineru-poc/out/exam_fig）跑一遍。
+    /// 断言：① 只回传正文引用到的图（目录里有 2 张，正文只引用了 1 张）；
+    ///       ② 回传的 base64 能解回 JPEG；③ 明文里的 data:/http 链接不会被当成本地图去读。
+    #[test]
+    fn mineru_collect_images_real_exam_fig() {
+        use base64::Engine;
+        let dir = std::path::Path::new(
+            r"D:\vue-app\参考\试卷\mineru-poc\out\exam_fig",
+        );
+        let md_path = dir.join("full.md");
+        if !md_path.is_file() {
+            println!("跳过：找不到真产物 {}", md_path.to_string_lossy());
+            return;
+        }
+        let md = std::fs::read_to_string(&md_path).expect("读 full.md");
+        println!("full.md {} 字符", md.len());
+        assert!(
+            md.contains("![") && md.contains("images/"),
+            "full.md 里应该有 Markdown 图片语法"
+        );
+
+        let imgs = super::mineru_collect_images(dir, &md);
+        println!("正文引用到的图 {} 张", imgs.len());
+        assert_eq!(imgs.len(), 1, "正文只引用了 1 张图（另一张是没被引用的表格图）");
+        let one = &imgs[0];
+        let p = one.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        let mime = one.get("mime").and_then(|v| v.as_str()).unwrap_or("");
+        let bytes = one.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+        let b64 = one
+            .get("dataBase64")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(b64.as_bytes())
+            .expect("base64 应该能解");
+        println!(
+            "  path={} mime={} bytes={} base64={} 字符",
+            p,
+            mime,
+            bytes,
+            b64.len()
+        );
+        assert!(p.starts_with("images/"), "路径要相对产物目录：{}", p);
+        assert_eq!(mime, "image/jpeg");
+        assert_eq!(raw.len() as u64, bytes, "回传字节数要等于真实文件大小");
+        assert_eq!(&raw[..2], &[0xFF, 0xD8], "JPEG 头");
+        // 目录里第 2 张图（表格图）没被正文引用 —— 不能顺带回传
+        let names: Vec<String> = imgs
+            .iter()
+            .map(|i| i.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string())
+            .collect();
+        assert!(!names.iter().any(|n| n.contains("14e0be50")), "未引用的表格图不该回传");
+
+        // 外链 / data URL 不能被当成本地文件
+        let fake = "![a](https://example.com/x.jpg)\n![b](data:image/png;base64,AAAA)\n";
+        let none = super::mineru_collect_images(dir, fake);
+        assert!(none.is_empty(), "外链与 data URL 不落盘，不该回传");
     }
 }

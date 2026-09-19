@@ -59,6 +59,21 @@ export function parseQuestionsWithInfo(raw: string): { list: ParsedQuestion[]; s
   return { list, skipped: skippedNonQuestion }
 }
 
+/**
+ * 题目插图（题库里的题**不存磁盘路径**，只存自包含的 data URL）。
+ *  n    —— 题干里 [图N] 的编号（题目内唯一，插入试卷时会按试卷的图号重编）
+ *  src  —— data:image/...;base64,...（为什么用 data URL 而不是文件路径：
+ *          ① MinerU 产物目录是临时缓存（%APPDATA%\lj-mathslides\mineru\<时间戳>），
+ *             清掉/换机器/导出 JSON 就全丢；② PaperModal 自己的图片库本来就是 data URL，
+ *             同一套表示可以直接注册进去显示与导出 PDF。）
+ *  caption —— 图注（MinerU 的 image_caption / Markdown 的 alt），可为空
+ */
+export interface QuestionImage {
+  n: number
+  src: string
+  caption?: string
+}
+
 export interface ParsedQuestion {
   title: string
   stem: string
@@ -83,6 +98,8 @@ export interface ParsedQuestion {
   paperName?: string
   year: string
   region: string
+  /** 题干/选项里引用的插图（[图N] 对应的图）—— MinerU 导入时填，其余来源留空 */
+  images?: QuestionImage[]
   warn?: string
 }
 

@@ -3,7 +3,10 @@
  *
  * 复用通用表（library_item，type='question'），结构化字段放 meta：
  *   { stem, options[], answer, solution, knowledge[],
- *     qtype, section, date, difficulty, year, region, answerFrom }
+ *     qtype, section, date, difficulty, year, region, answerFrom, images[] }
+ *
+ * images：题干里 [图N] 对应的插图（自包含 data URL）。MinerU 导入 PDF 时才有；
+ * 老数据没有这个字段，readImages 一律容错成空数组。
  *
  * 设计取舍：
  *  - 检索先用 LIKE + 分类过滤，够用；FTS5 留到需要时再评估（中文分词效果一般）。
@@ -11,7 +14,7 @@
  *  - **难度内部仍存 1-5**（兼容旧数据），界面按 易/中/难 三档呈现与筛选。
  */
 import { libQuery, libSave, libRemove, libBump, libTags, libSaveMany } from './useLibrary'
-import type { ParsedQuestion } from './parseQuestions'
+import type { ParsedQuestion, QuestionImage } from './parseQuestions'
 import { judgeNonQuestion } from './parseQuestions'
 import type { LibDraft, LibItem } from './useLibrary'
 
@@ -156,6 +159,11 @@ export interface QuestionMeta {
   region: string
   /** 答案来源：manual 人工 / auto 从解析自动提取 / 空 未填 */
   answerFrom: '' | 'manual' | 'auto'
+  /**
+   * 题干里 [图N] 对应的插图（**自包含 data URL**，见 parseQuestions.ts 的 QuestionImage）。
+   * 可选 —— 老题没有这个字段，读出来一律容错成空数组；只有 MinerU 导入的题才有。
+   */
+  images?: QuestionImage[]
 }
 
 export interface QuestionEntry extends LibItem {
@@ -165,7 +173,25 @@ export interface QuestionEntry extends LibItem {
 const EMPTY_META: QuestionMeta = {
   stem: '', options: [], answer: '', solution: '',
   knowledge: [], difficulty: 3, score: 0, qtype: 'choice', section: '', chapter: '', date: '',
-  year: '', paperName: '', region: '', answerFrom: '',
+  year: '', paperName: '', region: '', answerFrom: '', images: [],
+}
+
+/**
+ * 读插图数组：**老数据没有 images 字段**，一律容错成空数组 ——
+ * 这次改动不能让库里已有的题读不出来（每条都要能过）。
+ */
+function readImages(v: unknown): QuestionImage[] {
+  if (!Array.isArray(v)) return []
+  const out: QuestionImage[] = []
+  for (const it of v) {
+    if (!it || typeof it !== 'object') continue
+    const o = it as Record<string, unknown>
+    const n = Number(o.n)
+    const src = String(o.src || '')
+    if (!Number.isFinite(n) || n <= 0 || !src) continue
+    out.push({ n, src, caption: o.caption ? String(o.caption) : undefined })
+  }
+  return out.sort((a, b) => a.n - b.n)
 }
 
 function readMeta(raw: Record<string, unknown>): QuestionMeta {
@@ -191,6 +217,7 @@ function readMeta(raw: Record<string, unknown>): QuestionMeta {
     paperName: String(m.paperName || ''),
     region: String(m.region || ''),
     answerFrom: (String(m.answerFrom || '') as QuestionMeta['answerFrom']) || (answer ? 'manual' : ''),
+    images: readImages(m.images),
   }
 }
 
@@ -267,6 +294,8 @@ export function withDefaults(meta: Partial<QuestionMeta>): QuestionMeta {
   }
   if (!q.qtype) q.qtype = inferQType(q)
   if (!q.section) q.section = guessSection(q.stem, q.knowledge)
+  // images 一定要是数组：{ ...EMPTY_META, ...meta } 会把 undefined 也盖上去（老调用方没传）
+  if (!Array.isArray(q.images)) q.images = []
   if (q.answer && !q.answerFrom) q.answerFrom = 'manual'
   return q
 }
@@ -328,6 +357,7 @@ export async function importParsedQuestions(list: ParsedQuestion[]): Promise<{ a
       chapter: (p as { chapter?: string }).chapter,
       date: (p as { date?: string }).date,
       paperName: (p as { paperName?: string }).paperName,
+      images: (p as { images?: QuestionImage[] }).images,
       answerFrom,
     })
     return draftOf(q, p.title)
@@ -639,6 +669,8 @@ export function parseQuestionsJson(text: string): { list: ParsedQuestion[]; erro
       paperName: o.paperName ? String(o.paperName) : undefined,
       region: String(o.region || o.source || ''),
     }
+    const imgs = readImages(o.images)
+    if (imgs.length) p.images = imgs
     const sc = Number(o.score)
     if (Number.isFinite(sc) && sc > 0) p.scoreExplicit = sc
     // 「答案从哪来」也要保住：否则自动提取（auto）的题导入后会被当成手填
