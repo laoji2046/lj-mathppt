@@ -10,7 +10,7 @@
  */
 import { isTauri, invoke } from './useTauri'
 
-export type LibKind = 'formula' | 'figure' | 'question' | 'deck'
+export type LibKind = 'formula' | 'figure' | 'question' | 'deck' | 'paperdraftimg'   // 最后一项：试卷草稿的大图转存（见 PaperModal.saveDraft）
 
 export interface LibItem {
   /** 仅浏览器降级数据带（Rust 侧按 type 分表查询，不返回该列） */

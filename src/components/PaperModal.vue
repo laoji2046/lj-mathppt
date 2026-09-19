@@ -6,6 +6,7 @@ const QuestionBankDialog = defineAsyncComponent(() => import('@/components/Quest
 import AppIcon from './AppIcon.vue'
 import { loadMathJax } from '@/composables/useMathJax'
 import { imagesDir, isTauri, readLocalImage } from '@/composables/useTauri'
+import { libQuery, libRemove, libSave } from '@/composables/useLibrary'
 import { useDeckStore } from '@/stores/deck'
 import { MATH_FIGURE_OPTIONS } from '@/types'
 import { closeFigPalette, openFigPalette } from '@/ui/figPalette'
@@ -1305,13 +1306,38 @@ const paperMsg = ref('')
 
 
 const DRAFT_KEY = 'lj-paper-draft-v1'
+/** 草稿里图片超过这个字符数就**转存到内容库**（SQLite，容量不受限），草稿只留"已转存"标记。
+ *  localStorage 只有 ~5MB，而整卷几十张 data URL 图轻松超 —— 原来超了会 try/catch **静默存不上** ✗ */
+const DRAFT_IMG_LIMIT = 1500000
+/** 纯函数，便于单测：这份草稿需不需要把图转存出去 */
+function draftNeedsOffload(jsonLen: number): boolean { return jsonLen > DRAFT_IMG_LIMIT }
+
+/** 把当前 images 转存进内容库（同名旧行先清掉，只留最新一份） */
+async function offloadDraftImages() {
+  if (!isTauri()) return
+  try {
+    for (const it of await libQuery('paperdraftimg')) await libRemove(it.id)
+    await libSave({
+      type: 'paperdraftimg', title: DRAFT_KEY, body: '',
+      meta: { images: images.value } as unknown as Record<string, unknown>,
+      tags: '草稿图', source: '试卷草稿', builtin: 0,
+    })
+  } catch { /* 转存失败：至少草稿文本还在（图会丢，但不静默崩） */ }
+}
+
 function saveDraft() {
   try {
     const d: Record<string, unknown> = { images: images.value, input: input.value, template: template.value, fontFamily: fontFamily.value, fontSize: fontSize.value, fontColor: fontColor.value,
       lineHeight: lineHeight.value, para: para.value, indent: indent.value, numStyle: numStyle.value, headerText: headerText.value,
       footerText: footerText.value, autoNum: autoNum.value, h2size: h2size.value, gapQ: gapQ.value, headerGap: headerGap.value,
       footerGap: footerGap.value, optLayout: optLayout.value, bodyCols: bodyCols.value }
+    const json = JSON.stringify(d)
+    if (!draftNeedsOffload(json.length)) { localStorage.setItem(DRAFT_KEY, json); return }
+    // 图太大：草稿本体**去掉 images**（这样一定存得下 ✓），图转存内容库 → 恢复时再取回来
+    delete d.images
+    d.imgOffloaded = true
     localStorage.setItem(DRAFT_KEY, JSON.stringify(d))
+    void offloadDraftImages()
   } catch { /* 忽略配额/隐私模式 */ }
 }
 function restoreDraft(): boolean {
@@ -1325,6 +1351,21 @@ function restoreDraft(): boolean {
       //   （imgSeq 从 0 起，草稿里的 images 是 {1:…,2:…}，实测插第二张就把图 1 顶掉了）
       const keys = Object.keys(images.value).map((k) => Number(k)).filter((n) => Number.isFinite(n) && n > 0)
       imgSeq.value = keys.length ? Math.max(...keys) : 0
+    } else if (d.imgOffloaded) {
+      // 图在内容库里（saveDraft 转存的）→ 异步取回来；取回来前 paperMsg 提示一下，别让人以为图丢了
+      paperMsg.value = '正在从内容库取回试卷插图…'
+      void (async () => {
+        try {
+          const rows = (await libQuery('paperdraftimg')).sort((a, b) => Number(b.id) - Number(a.id))
+          const im = rows[0] && rows[0].meta ? (rows[0].meta as { images?: Record<number, { src: string; address?: string; caption?: string }> }).images : null
+          if (im && typeof im === 'object') {
+            images.value = im
+            const ks = Object.keys(images.value).map((k) => Number(k)).filter((n) => Number.isFinite(n) && n > 0)
+            imgSeq.value = ks.length ? Math.max(...ks) : 0
+            paperMsg.value = '已取回 ' + ks.length + ' 张试卷插图 ✓'
+          } else { paperMsg.value = '草稿里的插图没能取回（内容库里没有对应数据）' }
+        } catch { paperMsg.value = '草稿里的插图取回失败' }
+      })()
     }
     if (typeof d.input === 'string') input.value = d.input
     if (typeof d.template === 'string') template.value = d.template
