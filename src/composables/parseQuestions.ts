@@ -348,11 +348,33 @@ function isNonQuestionBlock(block: string): boolean {
   return false
 }
 
-/** 去掉 Markdown 记号（行首 `#`、成对的 `**`）—— LaTeX 的 `$` 与反斜杠原样保留 */
+/** MinerU 偶尔把**表格**原样吐成 HTML（<table><tr><td>x</td>…</table>）——
+ *  老师看到的题面里不该有标签 ✗。这里把表格转成可读文本：
+ *  单元格用 ' | ' 连、行与行之间用 ' ；' 连（数据表就成了 `x | 1 | 2 | 4 | 5 | 8 ；y | 11 | 15 | …`）。
+ *  顺带：<sup>a</sup> → ^{a}、<sub>b</sub> → _{b}，其余标签一律去掉，常见实体解码。 */
+function stripHtml(t: string): string {
+  let s = t
+  // 整张表：逐行抽单元格文本
+  s = s.replace(/<table[\s\S]*?<\/table>/gi, (blk) => {
+    const rows = blk.match(/<tr[\s\S]*?<\/tr>/gi) || []
+    const lines = rows.map((r) => {
+      const cells = (r.match(/<t[dh][\s\S]*?<\/t[dh]>/gi) || [])
+        .map((c) => c.replace(/<[^>]*>/g, '').trim())
+      return cells.join(' | ')
+    }).filter((x) => x.trim())
+    return lines.length ? ' ' + lines.join(' ；') + ' ' : ' '
+  })
+  s = s.replace(/<sup[^>]*>([\s\S]*?)<\/sup>/gi, '^{$1}').replace(/<sub[^>]*>([\s\S]*?)<\/sub>/gi, '_{$1}')
+  s = s.replace(/<[^>]{1,80}>/g, '')                 // 其余标签一律去掉
+  s = s.replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+  return s.replace(/[ \t]{2,}/g, ' ').trim()
+}
+
+/** 去掉 Markdown 记号（行首 `#`、成对的 `**`）与 HTML 残留 —— LaTeX 的 `$` 与反斜杠原样保留 */
 function stripMd(t: string): string {
-  return t
+  return stripHtml(t)
     .replace(/^\s*#{1,6}(?:\s+|$)/, '')
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
     .trim()
 }
 
