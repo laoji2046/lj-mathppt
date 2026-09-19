@@ -868,7 +868,9 @@ export function reviewWarn(q: { stem?: string; options?: string[]; answer?: stri
   const opts = q.options || []
   if (opts.some((o) => !o.trim() || o.indexOf('识别缺失') >= 0)) return '选项里有空位（识别缺失），请补上'
   if ((q.qtype === 'choice' || q.qtype === 'multi') && opts.length < 4) {
-    return '选择题但只有 ' + opts.length + ' 个选项，请核对（可能是识别时被并进公式了）'
+    return opts.length === 0
+      ? '这道选择题没切出选项 —— 选项很可能在**图片**里（或者识别时整段丢了），请手动补'
+      : '选择题但只有 ' + opts.length + ' 个选项，请核对（可能是识别时被并进公式了）'
   }
   if (!(q.answer || '').trim()) return '没有答案，请补充或从解析里提取'
   if ((q.stem || '').trim().length < 8) return '题干过短，可能是被切碎的残块'
@@ -919,6 +921,44 @@ export function healthOf(items: QuestionEntry[]): { total: number; unclassified:
     if ((it.q.images || []).length) withImage += 1
   }
   return { total: items.length, unclassified, noAnswer, todo, withImage }
+}
+
+/** 【题库健康度小结】生成一份 Markdown 报告（纯函数 → 可单测 ✓）。
+ *  内容：总量 / 未分类 / 缺答案 / 待核对 / AI 答案 / 含图 + 板块分布 + 待核对清单（前 20 条）。
+ *  导出到文件走 `saveTextFile`，也可以直接复制走 ✓ */
+export function healthReport(list: QuestionEntry[], now = new Date()): string {
+  const h = healthOf(list)
+  const aiN = list.filter((x) => x.q.answerFrom === 'ai').length
+  const dist = new Map<string, number>()
+  for (const x of list) { const s = normSection(x.q.section); dist.set(s, (dist.get(s) || 0) + 1) }
+  const lines: string[] = []
+  lines.push('# 题库健康度小结')
+  lines.push('')
+  lines.push('生成时间：' + now.toLocaleString('zh-CN'))
+  lines.push('')
+  lines.push('| 指标 | 数量 |')
+  lines.push('| --- | --- |')
+  lines.push('| 总题数 | ' + h.total + ' |')
+  lines.push('| 未分类（板块为空/认不出）| ' + h.unclassified + ' |')
+  lines.push('| 缺答案 | ' + h.noAnswer + ' |')
+  lines.push('| 待核对（选项不全 / 没答案 / 题干过短）| ' + h.todo + ' |')
+  lines.push('| 其中 AI 解出的答案（待核对）| ' + aiN + ' |')
+  lines.push('| 含插图 | ' + h.withImage + ' |')
+  lines.push('')
+  lines.push('## 板块分布')
+  lines.push('')
+  lines.push('| 板块 | 题数 |')
+  lines.push('| --- | --- |')
+  for (const s of SECTIONS) { const n = dist.get(s) || 0; if (n) lines.push('| ' + s + ' | ' + n + ' |') }
+  lines.push('')
+  const todo = list.filter((x) => reviewWarn(x.q)).slice(0, 20)
+  lines.push('## 待核对清单（前 ' + todo.length + ' 条）')
+  lines.push('')
+  if (!todo.length) lines.push('（没有待核对的题 ✓）')
+  for (const x of todo) {
+    lines.push('- **#' + x.id + '** ' + x.title.slice(0, 40) + ' —— ' + reviewWarn(x.q))
+  }
+  return lines.join('\n') + '\n'
 }
 
 export interface FilterOpt {

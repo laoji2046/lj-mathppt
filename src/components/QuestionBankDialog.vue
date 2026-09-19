@@ -9,7 +9,7 @@ import {
   buildPaperText, scoreOf, defaultScore, chaptersOf,
   scanJunk, scanDuplicates, removeQuestions,
   QTYPES, SECTIONS, LEVELS, levelOf, levelLabel, levelToDifficulty, qtypeLabel, withDefaults,
-  reviewWarn, blueprintOf, healthOf,
+  reviewWarn, blueprintOf, healthOf, healthReport,
 } from '@/composables/useQuestionLibrary'
 import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup, JunkItem } from '@/composables/useQuestionLibrary'
 import { parseQuestionsWithInfo, PARSE_HELP, detectPaperInfo, setContentList } from '@/composables/parseQuestions'
@@ -491,6 +491,14 @@ const selected = computed(() => list.value.find((x) => x.id === selectedId.value
 const reviewCount = computed(() => list.value.filter((x) => reviewWarn(x.q)).length)
 /** 题库健康度（总量/未分类/缺答案/待核对/含图）—— 打开题库一眼看到"库怎么样" */
 const health = computed(() => healthOf(list.value))
+/** 健康度小结（Markdown）：点按钮生成 → 可复制/另存 ✓ */
+const reportOpen = ref(false)
+const reportText = ref('')
+function openReport() { reportText.value = healthReport(list.value); reportOpen.value = true }
+async function copyReport() {
+  try { await navigator.clipboard.writeText(reportText.value); flash('健康度小结已复制到剪贴板 ✓') }
+  catch { flash('复制失败（可手动全选复制）') }
+}
 /** 双向细目表：对"一键挑题"的结果算 板块×难度 的题数/分值（组卷时看覆盖情况） */
 const bp = computed(() => (paperResult.value ? blueprintOf(paperResult.value.picked) : null))
 function warnOf(e: { q: { stem?: string; options?: string[]; answer?: string; qtype?: string } }): string { return reviewWarn(e.q) }
@@ -794,6 +802,15 @@ function close() { emit('close') }
           <button class="qb__hbtn" :class="{ 'qb__h--warn': health.noAnswer > 0 }" title="点它只看没答案的题（可用「自动补答案」或手工补）" @click="clearFilters(); onlyMissing = true">缺答案 {{ health.noAnswer }}</button>
           <button class="qb__hbtn" :class="{ 'qb__h--warn': health.todo > 0 }" title="点它只看待核对的题（选项不全/没答案/题干过短）" @click="clearFilters(); onlyReview = true">待核对 {{ health.todo }}</button>
           <button class="qb__hbtn" title="点它只看带插图的题" @click="clearFilters(); onlyImage = true">含图 {{ health.withImage }}</button>
+          <button class="qb__hbtn" title="生成一份题库健康度小结（Markdown，可复制/另存）" @click="openReport">📋 健康度小结</button>
+        </div>
+        <div v-if="reportOpen" class="qb__report">
+          <div class="qb__bhead">题库健康度小结（Markdown —— 可复制，或交给「导出」另存）</div>
+          <pre class="qb__pre">{{ reportText }}</pre>
+          <div class="qb__actions">
+            <button class="qb__btn qb__btn--pri" @click="copyReport">复制</button>
+            <button class="qb__btn" @click="reportOpen = false">关闭</button>
+          </div>
         </div>
         <div class="qb__filters">
           <span class="qb__fg" v-if="pickedSection || pickedChapter">章节
@@ -1165,6 +1182,8 @@ B. 2
 .qb__bptable th { background: #f1f5f9; color: #334155; font-weight: 600; }
 .qb__bps { text-align: left; color: #334155; }
 .qb__bp0 { color: #cbd5e1; }
+.qb__report { margin: 6px 0 8px; padding: 8px 10px; border: 1px solid #e6eef8; border-radius: 8px; background: #fbfdff; }
+.qb__pre { max-height: 260px; overflow: auto; margin: 6px 0; padding: 8px; background: #fff; border: 1px solid #eef2f7; border-radius: 6px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 .qb__ai { margin-left: 5px; padding: 0 5px; border-radius: 5px; background: #f0f7ff; border: 1px solid #bae0ff; color: #0958d9; font-size: 11px; font-weight: 600; }
 .qb__warnbox { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 6px; background: #fff7e6; border: 1px solid #ffd591; color: #ad6800; font-size: 12px; }
 .qb__pcount { font-size: 11.5px; color: var(--muted, #888); }
