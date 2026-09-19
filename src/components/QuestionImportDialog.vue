@@ -23,10 +23,10 @@ import type { QuestionImage } from '@/composables/parseQuestions'
 import { setContentList } from '@/composables/parseQuestions'
 import type { ParsedQuestion } from '@/composables/parseQuestions'
 import {
-  importParsedQuestions, metaOfParsed,
+  importParsedQuestions, metaOfParsed, draftFromMeta,
   parseAnyMarkdown, parseAnyJson, parseVaultMarkdownMany,
 } from '@/composables/useQuestionImport'
-import { SECTIONS, QTYPE_LABEL, qFacets, stemPreviewText } from '@/composables/useQuestionBank'
+import { SECTIONS, QTYPE_LABEL, qFacets, stemPreviewText, importBegin, importAddDrafts, idemKeyOf } from '@/composables/useQuestionBank'
 import { typesetHosts } from '@/composables/useMathJax'
 import { escapeHtml, normalizeMixed } from '@/types'
 
@@ -197,8 +197,9 @@ function parseJson(raw: string, prefix = '') {
   loadRows(r.list, (prefix ? prefix + '；' : '') + (r.mode === 'ai' ? 'AI 结构化 JSON' : '题库 JSON') + '解析完成')
 }
 
-function doParseMd() { pendingImages.value = []; parseMd(text.value) }
-function doParseJson() { parseJson(text.value) }
+// 记下这次的来源类型：存草稿时写进批次 sourceType，幂等键也跟着它变 ✓
+function doParseMd() { fileMode.value = 'md'; pendingImages.value = []; parseMd(text.value) }
+function doParseJson() { fileMode.value = 'json'; parseJson(text.value) }
 
 /* ---------------- ③ 校对 ---------------- */
 
@@ -247,6 +248,40 @@ async function doImport() {
     flash('✓ 已入库 ' + res.added + ' 道' + (res.skipped ? '（跳过重复 ' + res.skipped + '）' : ''))
     emit('imported', res.added)
     if (res.added) rows.value = []
+  } finally {
+    busy.value = false
+  }
+}
+
+/* ---------------- ④b 先存草稿（v5 · P1b）：**不写正式库**，等草稿箱人工确认 ✓ ---------------- */
+
+async function doSaveDrafts() {
+  const picked = rows.value.filter((r) => r.on).map((r) => r.q)
+  if (!picked.length) { flash('先勾选要存草稿的题'); return }
+  busy.value = true
+  try {
+    // 批次名：优先用「批量填来源」里填的，其次取第一道题自己的试卷名 ✓
+    let label = batchPaper.value.trim()
+    if (!label) {
+      for (const p of picked) {
+        const m = metaOfParsed(p)
+        if (m.paperName) { label = m.paperName; break }
+      }
+    }
+    if (!label) label = '未命名来源'
+    // 幂等键：同一份文本 + 同一解析方式 → 同一个键（重复点不会重复建批次 ✓）
+    const key = idemKeyOf(fileMode.value === 'json' ? 'json' : 'md', text.value)
+    const b = await importBegin({ sourceType: fileMode.value, sourceLabel: label, idemKey: key })
+    if (!b.ok || !b.batch) { flash('✗ ' + (b.error || '开批次失败')); return }
+    const drafts = picked.map((p, i) => draftFromMeta(metaOfParsed(p), '第 ' + (i + 1) + ' 题', 'q' + (i + 1)))
+    const r = await importAddDrafts(b.batch.id, drafts, drafts.length)
+    if (!r.ok) { flash('✗ ' + (r.error || '存草稿失败')); return }
+    report.value = [
+      (b.reused ? '命中已有批次（幂等，没重复建）' : '新批次') + '：' + b.batch.id,
+      '存草稿 ' + r.added + ' 条，其中 ' + r.needReview + ' 条被质量闸门拦下（待复核）',
+      '到「试题库 → 草稿箱」逐条看告警、改好、确认后再入库 ✓',
+    ].join('\n')
+    flash('✓ 已存 ' + r.added + ' 条草稿' + (r.needReview ? '（' + r.needReview + ' 条待复核）' : ''))
   } finally {
     busy.value = false
   }
@@ -400,6 +435,7 @@ function optsText(o: string[]): string {
       <footer class="qi__foot">
         <span class="qi__picked">已勾 {{ onCount }} / {{ rows.length }} 道</span>
         <span v-if="onCount" class="qi__hint2">无来源 {{ noSourceCount }} · 缺答案 {{ noAnswerCount }} · 0 选项 {{ noOptsCount }}</span>
+        <button class="qi__btn" :disabled="busy || !onCount" title="先把这批落成草稿（不写正式库），到「草稿箱」逐条确认后再入库" @click="doSaveDrafts">先存草稿 {{ onCount }} 道</button>
         <button class="qi__btn qi__btn--main qi__btn--go" :disabled="busy || !onCount" @click="doImport">入库 {{ onCount }} 道</button>
         <pre v-if="report" class="qi__report">{{ report }}</pre>
       </footer>

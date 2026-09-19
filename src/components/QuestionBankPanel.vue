@@ -22,6 +22,8 @@ import type { QFacets, QFilter, QItem, SourceReport } from '@/composables/useQue
 
 /** 试题录入（M4）：体量不小，按需加载 ✓ */
 const QuestionImportDialog = defineAsyncComponent(() => import('./QuestionImportDialog.vue'))
+/** 草稿箱（v5 · P1b）：AI / OCR 的产出先落这里，人工确认后才进正式库 ✓ */
+const DraftBox = defineAsyncComponent(() => import('./DraftBox.vue'))
 import { useDeckStore } from '@/stores/deck'
 import { sendToPaper } from '@/ui/paper'
 import type { SlideElement } from '@/types'
@@ -37,6 +39,8 @@ const msg = ref('')
 const previewHost = ref<HTMLElement | null>(null)
 /** 录入窗口开没开（M4） */
 const importOpen = ref(false)
+/** 草稿箱开没开（v5 · P1b） */
+const draftOpen = ref(false)
 /** 最近一次批量删除前 Rust 侧留的整库备份路径（hover 可看全路径）✓ */
 const lastBackup = ref('')
 
@@ -335,6 +339,7 @@ async function batchDelete() {
         <span class="qb__sub">共 {{ facets.total }} 道 · 当前筛出 {{ total }} 道</span>
         <span v-if="msg" class="qb__msg">{{ msg }}</span>
         <span class="qb__headrt">
+          <button class="qb__btn" title="AI / OCR 的产出先落草稿，人工确认后才进正式库" @click="draftOpen = true">草稿箱</button>
           <button class="qb__btn" title="来源合规报告：多少题有来源 / 有多少已成模板 / 哪几道要处理" @click="openReport">来源报告</button>
           <button class="qb__btn qb__btn--main" title="从 Markdown / JSON / PDF 批量录入试题" @click="importOpen = true">录入试题</button>
           <button class="qb__close" title="关闭 (Esc)" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
@@ -491,6 +496,7 @@ async function batchDelete() {
     </div>
 
     <QuestionImportDialog v-if="importOpen" @close="importOpen = false" @imported="onImported" />
+    <DraftBox v-if="draftOpen" @close="draftOpen = false" @committed="onImported" />
 
     <!-- 【P0b】知识点建议：来自受控词表 kp_catalog（kind=knowledge 的板块级词）✓ -->
     <datalist id="qb-kp"><option v-for="k in kpOptions" :key="k" :value="k"></option></datalist>

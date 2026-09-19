@@ -294,3 +294,186 @@ export async function pickImages(it: QItem): Promise<QuestionImage[]> {
   }
   return out
 }
+/* ================= 【v5 · P1b】草稿箱：批次 / 草稿 / 确认入库 ================= */
+
+export interface ImportBatch {
+  id: string
+  sourceType: string
+  sourceLabel: string
+  status: string
+  questionCount: number
+  idemKey: string
+  createdAt: string
+  finishedAt?: string | null
+}
+
+export interface ImportDraft {
+  id: string
+  sourceItemId: string
+  sourceLabel: string
+  /** 原图页码 / 坐标（MinerU 已经给了，别再丢） */
+  page?: number | null
+  bbox?: string
+  confidence?: number | null
+  /** 1 = 被闸门拦下，需要人工看 */
+  needsReview: number
+  stem: string
+  /** JSON 数组字符串（Rust 侧列存的是 TEXT） */
+  options: string
+  answer: string
+  solution: string
+  qtype: string
+  section: string
+  difficulty: number
+  /** JSON 数组字符串 */
+  knowledge: string
+  year: number
+  paper: string
+  sourceKind: string
+  /** 版面解析原文（人工修的底稿） */
+  rawText: string
+  /** 闸门给的告警：为什么被拦下 */
+  warn: string
+  status: string
+  /** 已入库的题 id（0 = 还没入） */
+  targetQid: number
+}
+
+/** 草稿状态 → 中文（方案 §5.1 状态机） */
+export const DRAFT_STATUS_LABEL: Record<string, string> = {
+  needs_review: '待复核',
+  ready: '可用',
+  approved: '已确认',
+  published: '已入库',
+  rejected: '已弃用',
+}
+export function draftStatusLabel(s: string): string {
+  const k = String(s || '').trim()
+  if (!k) return '未标状态'
+  return DRAFT_STATUS_LABEL[k] || k
+}
+/** 够格进正式库的状态（**与 Rust 的 lib_draft_ok_for_commit 保持一致** ✓） */
+export function draftCanCommit(s: string): boolean {
+  return s === 'ready' || s === 'approved' || s === 'published'
+}
+/** 草稿的 options / knowledge 是 JSON 数组字符串 → 数组（坏了给空表，界面不崩 ✓） */
+export function draftArr(s: string): string[] {
+  try {
+    const v = JSON.parse(String(s || '[]'))
+    return Array.isArray(v) ? v.map((x) => String(x)) : []
+  } catch { return [] }
+}
+/** 草稿列表「扫一眼」用的摘要（**保留公式**；要渲染公式的那套用 stemPreviewText） */
+export function draftExcerpt(d: ImportDraft, n = 90): string {
+  return excerptOf(d.stem || d.rawText || '', n)
+}
+
+/** 前端往草稿里灌的一条（字段名与 Rust 的 lib_import_add_drafts 对齐 ✓） */
+export interface DraftIn {
+  sourceItemId?: string
+  sourceLabel?: string
+  page?: number
+  bbox?: string
+  confidence?: number
+  stem: string
+  options: string[]
+  answer?: string
+  solution?: string
+  qtype?: string
+  section?: string
+  difficulty?: number
+  knowledge?: string[]
+  year?: number
+  paper?: string
+  sourceKind?: string
+  rawText?: string
+  warn?: string
+  /** 只用来数「有几处图片标记没落地」，不进库 ✓ */
+  images?: unknown[]
+  extra?: string
+}
+
+export async function importBegin(p: { sourceType: string; sourcePath?: string; sourceLabel?: string; idemKey?: string; extra?: string }): Promise<{ ok: boolean; reused: boolean; code: string; batch?: ImportBatch; error?: string }> {
+  try {
+    const r = await invoke<{ ok?: boolean; reused?: boolean; code?: string; batch?: ImportBatch; error?: string }>('lib_import_begin', { payload: p })
+    if (r && r.ok) return { ok: true, reused: !!r.reused, code: r.code || '', batch: r.batch }
+    return { ok: false, reused: false, code: '', error: (r && r.error) || '开批次失败' }
+  } catch (e) {
+    return { ok: false, reused: false, code: '', error: String((e as Error)?.message || e) }
+  }
+}
+
+export async function importAddDrafts(batchId: string, drafts: DraftIn[], expectedCount = -1): Promise<{ ok: boolean; added: number; needReview: number; ids: string[]; error?: string }> {
+  try {
+    const r = await invoke<{ ok?: boolean; added?: number; needReview?: number; ids?: string[]; error?: string }>('lib_import_add_drafts', { payload: { batchId, drafts, expectedCount } })
+    if (r && r.ok) return { ok: true, added: r.added || 0, needReview: r.needReview || 0, ids: r.ids || [] }
+    return { ok: false, added: 0, needReview: 0, ids: [], error: (r && r.error) || '存草稿失败' }
+  } catch (e) {
+    return { ok: false, added: 0, needReview: 0, ids: [], error: String((e as Error)?.message || e) }
+  }
+}
+
+export async function importDrafts(batch: string): Promise<ImportDraft[]> {
+  try {
+    const r = await invoke<{ ok?: boolean; items?: ImportDraft[] }>('lib_import_drafts', { batch })
+    if (r && r.ok !== false) return r.items || []
+  } catch { /* 空库也能跑 ✓ */ }
+  return []
+}
+
+export async function importDraftPatch(ids: string[], patch: Record<string, unknown>): Promise<{ ok: boolean; updated: number; error?: string }> {
+  try {
+    const r = await invoke<{ ok?: boolean; updated?: number; error?: string }>('lib_import_draft_patch', { ids, patch })
+    if (r && r.ok) return { ok: true, updated: r.updated || 0 }
+    return { ok: false, updated: 0, error: (r && r.error) || '改草稿失败' }
+  } catch (e) {
+    return { ok: false, updated: 0, error: String((e as Error)?.message || e) }
+  }
+}
+
+export async function importCommit(ids: string[]): Promise<{ ok: boolean; created: number; code: string; blocked: { id: string; status: string; warn: string }[]; error?: string }> {
+  try {
+    const r = await invoke<{ ok?: boolean; created?: number; code?: string; blocked?: { id: string; status: string; warn: string }[]; error?: string }>('lib_import_commit', { ids })
+    if (r && r.ok) return { ok: true, created: r.created || 0, code: '', blocked: [] }
+    return { ok: false, created: 0, code: (r && r.code) || '', blocked: (r && r.blocked) || [], error: (r && r.error) || '入库失败' }
+  } catch (e) {
+    return { ok: false, created: 0, code: '', blocked: [], error: String((e as Error)?.message || e) }
+  }
+}
+
+export async function importDiscard(ids: string[]): Promise<{ ok: boolean; rejected: number; error?: string }> {
+  try {
+    const r = await invoke<{ ok?: boolean; rejected?: number; error?: string }>('lib_import_discard', { ids })
+    if (r && r.ok) return { ok: true, rejected: r.rejected || 0 }
+    return { ok: false, rejected: 0, error: (r && r.error) || '弃用失败' }
+  } catch (e) {
+    return { ok: false, rejected: 0, error: String((e as Error)?.message || e) }
+  }
+}
+
+export async function importBatches(limit = 50): Promise<ImportBatch[]> {
+  try {
+    const r = await invoke<{ ok?: boolean; items?: ImportBatch[] }>('lib_import_batches', { limit })
+    if (r && r.ok !== false) return r.items || []
+  } catch { /* 空库也能跑 ✓ */ }
+  return []
+}
+
+/** 从识别历史重建：只复制草稿，**不重调 OCR / LLM** ✓ */
+export async function importRebuild(batch: string): Promise<{ ok: boolean; batch: string; copied: number; ocrCalls: number; error?: string }> {
+  try {
+    const r = await invoke<{ ok?: boolean; batch?: string; copied?: number; ocrCalls?: number; error?: string }>('lib_import_rebuild', { batch })
+    if (r && r.ok) return { ok: true, batch: r.batch || '', copied: r.copied || 0, ocrCalls: r.ocrCalls || 0 }
+    return { ok: false, batch: '', copied: 0, ocrCalls: 0, error: (r && r.error) || '重建失败' }
+  } catch (e) {
+    return { ok: false, batch: '', copied: 0, ocrCalls: 0, error: String((e as Error)?.message || e) }
+  }
+}
+
+/** 幂等键：同一份输入 + 同一解析方式 → 同一个键（重复点不会重复建批次、不重复计费 ✓） */
+export function idemKeyOf(sourceType: string, payload: string): string {
+  let h = 5381
+  const s = sourceType + '|' + payload
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0
+  return sourceType + '-' + h.toString(16) + '-' + s.length
+}

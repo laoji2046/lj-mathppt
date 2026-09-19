@@ -258,6 +258,26 @@ export async function importParsedQuestions(list: ParsedQuestion[]): Promise<{ a
   }
   return libSaveMany(drafts)
 }
+/** 【v5 · P1b】QMeta → 草稿载荷（**只落草稿，不写正式库** ✓；确认入库由草稿箱做） */
+export function draftFromMeta(q: QMeta, sourceLabel = '', sourceItemId = '') {
+  return {
+    sourceItemId,
+    sourceLabel,
+    stem: q.stem || '',
+    options: q.options || [],
+    answer: q.answer || '',
+    solution: q.solution || '',
+    qtype: String(q.qtype || ''),
+    section: q.section || '',
+    difficulty: Number(q.difficulty) || 0,
+    knowledge: q.knowledge || [],
+    year: Number(q.year) || 0,
+    paper: q.paperName || '',
+    warn: q.warn || '',
+    images: q.images || [],
+  }
+}
+
 
 /* ---------------- 入口：MD / 文本 ---------------- */
 

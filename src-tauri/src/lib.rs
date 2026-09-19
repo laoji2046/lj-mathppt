@@ -1591,7 +1591,7 @@ fn lib_import_begin(payload: serde_json::Value) -> serde_json::Value {
     };
     let row_of = |id: &str| -> Option<serde_json::Value> {
         conn.query_row(
-            "SELECT id, source_type, source_label, status, question_count, idem_key FROM import_batch WHERE id = ?1",
+            "SELECT id, source_type, source_label, status, question_count, COALESCE(idem_key,'') FROM import_batch WHERE id = ?1",
             [id],
             |r| {
                 Ok(serde_json::json!({
@@ -2021,7 +2021,9 @@ fn lib_import_batches(limit: i64) -> serde_json::Value {
     };
     let lim = limit.clamp(1, 200);
     let mut st = match conn.prepare(
-        "SELECT id, source_type, source_label, status, question_count, idem_key, created_at, finished_at FROM import_batch ORDER BY created_at DESC, id DESC LIMIT ?1",
+        // ⚠ idem_key 可能是 NULL（从识别历史重建出来的批次就没有幂等键）——用 String 取 NULL 会让**整行被丢**：
+        //   重建批次在列表里凭空消失、LIMIT 1 甚至直接返回空表 ✗（v1448 探针抓到的）
+        "SELECT id, source_type, source_label, status, question_count, COALESCE(idem_key,''), created_at, finished_at FROM import_batch ORDER BY created_at DESC, id DESC LIMIT ?1",
     ) {
         Ok(x) => x,
         Err(e) => return serde_json::json!({ "ok": false, "error": format!("读批次失败: {}", e) }),
