@@ -856,6 +856,9 @@ export const LINE_PARAMS: ParamSpec[] = [
   // 默认 1（显示）→ **老图元外观完全不变**。
   { key: 'ldot', label: '线段端点圆点', short: '端点', group: 'lset', def: 1, bool: true, showIf: (p) => (p.n || 0) >= 1 },
   { key: 'chord', label: '显示弦长', short: '弦长', group: 'lset', def: 0, bool: true, showIf: (p) => (p.n || 0) >= 1 },
+  // 【极线 / 切点弦】定点关于曲线的极线 + 两个切点。用"第 1 条『过定点作切线』的定点"；
+  // 没有那种线就用第 1 个标注点 ✓（少一个参数、少一次选点，行为也符合直觉）
+  { key: 'polar', label: '画极线（切点弦）：定点的那条 + 两个切点', short: '极线', group: 'lset', def: 0, bool: true },
 ]
 for (let i = 1; i <= 4; i++) {
   const on = (p: Record<string, number>) => (p.n || 0) >= i
@@ -1311,20 +1314,23 @@ export function conicTangentAt(kind: string, params: Record<string, number> | un
  *  再把极线与曲线求交 → 两个**切点** T₁T₂；切线就是 P 与切点的连线（切点是切线的极限位置）✓。
  *  P 在曲线上 → 两条切线重合（返回 1 条）；P 在曲线内部 → 返回 []（作不出切线）。
  *  ⚠ 竖直切线沿用本项目约定：用很大的斜率近似（y = kx + m 表示不了竖直）。 */
-export function conicTangentsFrom(
+/** 定点 P(px,py) 关于圆锥曲线的**极线**（= 两切点连线 = 切点弦）+ **两个切点**。
+ *  极线：A·px·x + B·py·y + C(x+px)/2 + D(y+py)/2 + E = 0，整理成 y = kx + m。
+ *  ⚠ 三种情形：① P 在曲线外 → 极线是实数线、切点是两个实数（就是切点）；
+ *   ② P 在曲线**内部** → 极线仍是实数线，但**切点无实交点**（touches 为空）；
+ *   ③ P 在曲线**中心** → 极线是**无穷远直线**（polar = null，画不出来）✓ */
+export function conicPolar(
   kind: string, params: Record<string, number> | undefined, px: number, py: number,
-): { k: number; m: number }[] {
+): { polar: { k: number; m: number } | null; touches: { x: number; y: number }[] } {
   const q = conicQuadratic(kind, params)
-  if (!q) return []
-  // ---- 极线 y = kp·x + mp ----
+  if (!q) return { polar: null, touches: [] }
   const A = q.A * px + q.C / 2
   const B = q.B * py + q.D / 2
   const K = (q.C * px) / 2 + (q.D * py) / 2 + q.E
   let kp = 0, mp = 0
   if (Math.abs(B) > 1e-12) { kp = -A / B; mp = -K / B }
   else if (Math.abs(A) > 1e-12) { kp = 1e4; mp = -1e4 * (-K / A) }   // 极线竖直（x = −K/A）
-  else return []
-  // ---- 极线 ∩ 曲线 = 切点（与 conicLineRoots 同一套解法）----
+  else return { polar: null, touches: [] }                            // 无穷远（曲线中心）
   const A2 = q.A + q.B * kp * kp
   const B2 = 2 * q.B * kp * mp + q.C + q.D * kp
   const C2 = q.B * mp * mp + q.D * mp + q.E
@@ -1339,10 +1345,22 @@ export function conicTangentsFrom(
       xs.push((-B2 + sq) / (2 * A2), (-B2 - sq) / (2 * A2))
     }
   }
+  const touches: { x: number; y: number }[] = []
+  for (const x of xs) if (isFinite(x)) { const y = kp * x + mp; if (!touches.some((t) => Math.abs(t.x - x) < 1e-9 && Math.abs(t.y - y) < 1e-9)) touches.push({ x, y }) }
+  return { polar: { k: kp, m: mp }, touches }
+}
+
+export function conicTangentsFrom(
+  kind: string, params: Record<string, number> | undefined, px: number, py: number,
+): { k: number; m: number }[] {
+  const q = conicQuadratic(kind, params)
+  if (!q) return []
+  // 极线 + 切点（= 切点弦的两端），切线就是"定点 ↔ 切点"的连线
+  const { polar, touches } = conicPolar(kind, params, px, py)
+  if (!polar) return []
   const out: { k: number; m: number }[] = []
-  for (const x of xs) {
-    if (!isFinite(x)) continue
-    const y = kp * x + mp
+  for (const t of touches) {
+    const x = t.x, y = t.y
     // ⚠ P 自己在曲线上时，切点 T 与 P 重合 → "P 与 T 的连线"退化（dx=0 会被误判成竖直切线，
     //   椭圆的上下顶点就是这样：真正的切线是**水平的** y=b ✗）。这种情况直接用 P 处的切线 ✓
     if (Math.hypot(x - px, y - py) < 1e-7) {
@@ -1446,6 +1464,23 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
   // 画在圆锥曲线**下面**，交点处线条不会互相压住。
   s += drawExtraLines(kind, pv, view, w, h, baseStroke, sw, opt?.lineColors, opt?.pointLabels, opt?.pointLinks)
   s += drawExtraPoints(kind, pv, view, w, h, baseStroke, opt?.pointLabels, opt?.pointLinks, opt?.pointColors)
+  // 【极线 / 切点弦】定点关于曲线的极线（虚线）+ 两个切点（圆点）。
+  // 定点取"第 1 条『过定点作切线』的定点"，没有那种线就用第 1 个标注点 ✓
+  if (Math.round(pv.polar ?? 0)) {
+    let pi2 = 1
+    for (const lk of opt?.lineLinks || []) if (lk && lk.tangentFrom != null) { pi2 = lk.tangentFrom; break }
+    const P = conicPointPos(kind, pv, Math.max(1, Math.round(pi2)), opt?.pointLinks)
+    if (P) {
+      const pr = conicPolar(kind, pv, P.x, P.y)
+      if (pr.polar) {
+        const span = clipLine(pr.polar.k, pr.polar.m, view)
+        if (span) s += '<line x1="' + n1(X(span[0][0])) + '" y1="' + n1(Y(span[0][1])) +
+          '" x2="' + n1(X(span[1][0])) + '" y2="' + n1(Y(span[1][1])) + '" stroke="' + stroke +
+          '" stroke-width="' + n1(Math.max(1, sw * 0.8)) + '" stroke-dasharray="' + dash + '" stroke-linecap="round"/>'
+      }
+      for (const t of pr.touches) s += dotSvg(X(t.x), Y(t.y), r, stroke)
+    }
+  }
   const label = (x: number, y: number, t: string, dx = 0, dy = 0) => textSvg(X(x) + dx, Y(y) + dy, t, fs, stroke)
   const dot = (x: number, y: number, k = 1) => dotSvg(X(x), Y(y), r * k, stroke)
 
