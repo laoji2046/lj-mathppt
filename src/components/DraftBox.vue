@@ -66,8 +66,11 @@ async function openBatch(id: string) {
   if (drafts.value.length) select(drafts.value[0])
 }
 
-function refresh(keepId = '') {
+/** 重新拉当前批次。⚠ **默认保留勾选** —— 不然「全部确认 → 确认入库」中间一刷新就把勾选清了 ✗（v1449 踩过） */
+function refresh(keepId = '', keepPicked = true) {
+  const keep = picked.value.slice()
   return openBatch(curBatch.value).then(() => {
+    if (keepPicked) picked.value = drafts.value.filter((d) => keep.includes(d.id)).map((d) => d.id)
     if (keepId) {
       const d = drafts.value.find((x) => x.id === keepId)
       if (d) select(d)
@@ -145,7 +148,7 @@ async function discardPicked() {
     const r = await importDiscard(ids)
     if (!r.ok) { flash('✗ ' + (r.error || '弃用失败')); return }
     flash('✓ 已弃用 ' + r.rejected + ' 条')
-    await refresh()
+    await refresh('', false)
   } finally {
     busy.value = false
   }

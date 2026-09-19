@@ -16,9 +16,9 @@ import { typesetMixed } from '@/composables/useMathJax'
 import {
   SECTIONS, QTYPE_LABEL, LEVELS, STATUS_ORDER, statusLabel,
   qFacets, qSearch, qPatch, qBatch, metaOf, excerptOf, previewHtmlOf,
-  questionTextOf, stripImageMarkers, pickImages, sourceReport, kpCatalog,
+  questionTextOf, stripImageMarkers, pickImages, sourceReport, kpCatalog, sourcePlan, sourcePlanApply,
 } from '@/composables/useQuestionBank'
-import type { QFacets, QFilter, QItem, SourceReport } from '@/composables/useQuestionBank'
+import type { QFacets, QFilter, QItem, SourceReport, SourcePlan } from '@/composables/useQuestionBank'
 
 /** 试题录入（M4）：体量不小，按需加载 ✓ */
 const QuestionImportDialog = defineAsyncComponent(() => import('./QuestionImportDialog.vue'))
@@ -57,8 +57,42 @@ async function openReport() {
   reportBusy.value = true
   try {
     report.value = await sourceReport()
+    await loadPlan()
   } finally {
     reportBusy.value = false
+  }
+}
+
+/* ---------------- 【P1c】来源归一建议 ---------------- */
+const plan = ref<SourcePlan | null>(null)
+const planBusy = ref(false)
+/** 有建议的（空建议 = 认不出，生成草稿也没用 ✓） */
+const actionable = computed(() => (plan.value?.items || []).filter((i) => i.suggest))
+/** 报告里 plan.error 直接写在 v-else-if 里会被 TS 收窄成 never → 用 computed 兜一下 ✓ */
+const planError = computed(() => String(plan.value?.error || ''))
+
+async function loadPlan() {
+  planBusy.value = true
+  try {
+    plan.value = await sourcePlan()
+  } finally {
+    planBusy.value = false
+  }
+}
+
+/** 生成归一草稿：**只写草稿**，正式库要等草稿箱确认才动 ✓ */
+async function makeSourceDrafts() {
+  const ids = actionable.value.map((i) => i.id)
+  if (!ids.length) { flash('没有可自动生成草稿的建议（认不出的只能人工填）'); return }
+  busy.value = true
+  try {
+    const r = await sourcePlanApply(ids)
+    if (!r.ok) { flash('✗ ' + (r.error || '生成草稿失败')); return }
+    flash((r.reused ? '✓ 命中已有批次（幂等，没重复建）：' : '✓ 已生成 ') + r.added + ' 条归一草稿' + (r.needManual ? '（' + r.needManual + ' 条有「？」要补全）' : '') + ' —— 去「草稿箱」确认')
+    await loadPlan()
+    report.value = await sourceReport()
+  } finally {
+    busy.value = false
   }
 }
 
@@ -520,6 +554,38 @@ async function batchDelete() {
             <div class="qb__rptcard" :class="{ 'qb__rptcard--warn': report.fillRate !== 100 }"><b>{{ report.fillRate }}%</b><span>来源覆盖率</span></div>
             <div class="qb__rptcard" :class="{ 'qb__rptcard--warn': report.canonicalRate !== 100 }"><b>{{ report.canonicalRate }}%</b><span>成型率（有来源的里面）</span></div>
           </div>
+          <div class="qb__t1">
+            来源归一建议
+            <span v-if="plan && plan.aliasTableLoaded" class="qb__hint2">（已读库外别名表）</span>
+          </div>
+          <div v-if="planBusy" class="qb__hint">正在算建议…</div>
+          <template v-else-if="plan">
+            <div class="qb__rptcards">
+              <div class="qb__rptcard"><b>{{ plan.canonical }}</b><span>来源已成型</span></div>
+              <div class="qb__rptcard"><b>{{ plan.alias }}</b><span>别名表命中</span></div>
+              <div class="qb__rptcard"><b>{{ plan.rule }}</b><span>规则可整</span></div>
+              <div class="qb__rptcard"><b>{{ plan.template }}</b><span>模板半成品</span></div>
+              <div class="qb__rptcard" :class="{ 'qb__rptcard--warn': plan.none + plan.noPaper > 0 }"><b>{{ plan.none + plan.noPaper }}</b><span>只能人工填</span></div>
+            </div>
+            <div class="qb__rptrow qb__rptrow--head">
+              <span class="qb__rptcode">编号</span>
+              <span class="qb__rptpaper">现在</span>
+              <span class="qb__rptarrow"></span>
+              <span class="qb__rptnew">建议</span>
+            </div>
+            <div v-for="it in plan.items.slice(0, 60)" :key="it.id" class="qb__rptrow">
+              <span class="qb__rptcode">{{ it.code || ('#' + it.id) }}</span>
+              <span class="qb__rptpaper">{{ it.paper }}</span>
+              <span class="qb__rptarrow">→</span>
+              <span class="qb__rptnew" :class="{ 'qb__rptnew--warn': it.needManual }">{{ it.suggest || '（认不出，要人工填）' }}</span>
+            </div>
+            <div v-if="plan.items.length > 60" class="qb__hint">只显示前 60 条（共 {{ plan.items.length }} 条）</div>
+            <div v-if="plan.noPaper > 0" class="qb__hint">另有 {{ plan.noPaper }} 道来源空着（不猜，只能人工填）</div>
+            <div class="qb__rptactions">
+              <button class="qb__btn qb__btn--main" :disabled="busy || !actionable.length" title="只生成草稿：正式库一个字不改，去草稿箱确认后才生效" @click="makeSourceDrafts">生成 {{ actionable.length }} 条归一草稿</button>
+            </div>
+          </template>
+          <div v-else-if="planError" class="qb__warnbox">{{ planError }}</div>
           <div class="qb__t1">按来源类别</div>
           <div v-if="!report.byKind.length" class="qb__hint">还没有题目 ✓</div>
           <div class="qb__chips">
@@ -622,5 +688,11 @@ async function batchDelete() {
 .qb__rptrow:hover { background: var(--panel-2, #f4f3ef); }
 .qb__rptcode { color: var(--muted); font-family: ui-monospace, monospace; }
 .qb__rptpaper { color: #8f2a1b; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qb__rptrow--head { color: var(--muted); font-size: 11px; }
+.qb__rptrow--head:hover { background: transparent; }
+.qb__rptarrow { color: var(--muted); }
+.qb__rptnew { color: #2f6b45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qb__rptnew--warn { color: #9a6212; }
+.qb__rptactions { display: flex; justify-content: flex-end; margin: 8px 0 4px; }
 .qb__rpttitle { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

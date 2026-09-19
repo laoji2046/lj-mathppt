@@ -57,6 +57,14 @@ fn split_sep(t: &str) -> Vec<String> {
     }
 }
 
+
+/// 占位符：「？」这类表示「这里要人补」。
+/// **占位符不算成型** —— 否则「高三 · ？ · ？ · ？-？学年」也会被算进成型率，指标立刻变假 ✗
+fn is_placeholder(s: &str) -> bool {
+    let t = s.trim();
+    t.is_empty() || t.chars().all(|c| c == '？' || c == '?' || c == '-' || c == '—')
+}
+
 /// 是否已符合某一类模板（幂等保护 + 批量报告残留都用它）
 pub fn is_canonical(t: &str) -> bool {
     let s = t.trim();
@@ -64,6 +72,10 @@ pub fn is_canonical(t: &str) -> bool {
         return true;
     }
     let p = split_sep(s);
+    // 任何一段是占位符 → 还没成型（要人补），别让它混进成型率 ✗
+    if p.iter().any(|x| is_placeholder(x)) {
+        return false;
+    }
     match p.len() {
         // 校内：高一上 · 期末 · 某某中学 · 2025-2026学年
         4 => p[0].starts_with('高') && p[3].ends_with("学年"),
@@ -245,6 +257,96 @@ pub fn load_map() -> HashMap<String, String> {
     map
 }
 
+
+/// —— 以下是【P1c】「来源归一建议」用的抽取工具（纯函数，零依赖） ——
+
+/// 找第一个 4 位年份（1900..2100），且前后都不接数字（别把 5 位串里的一段当年份）
+fn first_year(s: &str) -> Option<i32> {
+    let cs: Vec<char> = s.chars().collect();
+    let mut i = 0usize;
+    while i + 3 < cs.len() {
+        let is4 = cs[i..i + 4].iter().all(|c| c.is_ascii_digit())
+            && (i == 0 || !cs[i - 1].is_ascii_digit())
+            && (i + 4 >= cs.len() || !cs[i + 4].is_ascii_digit());
+        if is4 {
+            if let Ok(n) = cs[i..i + 4].iter().collect::<String>().parse::<i32>() {
+                if (1900..2100).contains(&n) {
+                    return Some(n);
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// 把年份 / 「届」 / 学段 / 类别词剥掉，剩下的当作「地区 / 考试名」（剥不出来就是空串）
+fn slot_mid(s: &str) -> String {
+    let cs: Vec<char> = s.chars().collect();
+    let mut out = String::new();
+    let mut i = 0usize;
+    while i < cs.len() {
+        let is4 = i + 3 < cs.len()
+            && cs[i..i + 4].iter().all(|c| c.is_ascii_digit())
+            && (i == 0 || !cs[i - 1].is_ascii_digit())
+            && (i + 4 >= cs.len() || !cs[i + 4].is_ascii_digit());
+        if is4 {
+            i += 4;
+            continue;
+        }
+        out.push(cs[i]);
+        i += 1;
+    }
+    for w in [
+        "届", "学年", "上学期", "下学期", "高三", "高二", "高一", "初中", "小学",
+        "一模", "二模", "三模", "四模", "模拟", "联考", "高考", "真题",
+    ] {
+        out = out.replace(w, "");
+    }
+    // 中文标题里的空格是噪声（「8 月底」→「8月底」），规约串不该带它 ✓
+    out.split_whitespace().collect::<Vec<_>>().join("")
+}
+
+/// 【P1c】套六类模板给一条**半成品建议**：只认得出类别 / 学段 / 学年，缺的部分写「？」。
+///
+/// 纪律：**绝不猜** —— 抽不出来的（学校名、地区）就留「？」，返回值**不保证 canonical**，
+/// 调用方要按 is_canonical() 决定「直接能用」还是「要人工补」。
+/// 已经成型的、认不出类别的、空串的 → 一律 None（不硬套模板）。
+pub fn template_hint(raw: &str) -> Option<String> {
+    let s = tier2(raw);
+    if s.is_empty() || s == UNKNOWN || is_canonical(&s) {
+        return None;
+    }
+    let y = first_year(&s).map(|n| n.to_string()).unwrap_or_else(|| "？".to_string());
+    let mid = slot_mid(&s);
+    let mid = if mid.is_empty() { "？".to_string() } else { mid };
+    let kind = kind_of(&s);
+    let stage = if s.contains("高三") {
+        Some("高三")
+    } else if s.contains("高二") {
+        Some("高二")
+    } else if s.contains("高一") {
+        Some("高一")
+    } else {
+        None
+    };
+    // 学段 + 届 → 按「校内考试」模板（校本卷子是老数据的大头）
+    if let Some(st) = stage {
+        let xue = match first_year(&s) {
+            Some(n) if s.contains("届") => format!("{}-{}学年", n - 1, n),
+            Some(n) => format!("{}-{}学年", n, n + 1),
+            None => "？-？学年".to_string(),
+        };
+        return Some(format!("{} · {} · ？ · {}", st, mid, xue));
+    }
+    match kind {
+        "模拟" => Some(format!("{} · {} · 模拟", y, mid)),
+        "联考" => Some(format!("{} · {} · 联考", y, mid)),
+        "高考真题" => Some(format!("{} · {} · 高考真题", y, mid)),
+        // 教辅 / 专题汇编 / 未知：老数据里极少，不硬套（宁可报「认不出」也不猜）
+        _ => None,
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,5 +421,44 @@ mod tests {
         let mut mm = HashMap::new();
         mm.insert("全国卷理".to_string(), "2001 · 全国卷 · 高考真题".to_string());
         assert_eq!(normalize("全国卷理", &mm), "2001 · 全国卷 · 高考真题");
+    }
+
+    /// 【P1c】模板建议：能整成型的要成型，缺信息的**留「？」不猜**
+    #[test]
+    fn template_hint_fills_what_it_can() {
+        // 「2026届某市一模数学试题」→ 年份 + 地区 + 类别，**直接成型** ✓
+        let a = template_hint("2026届某市一模数学试题").unwrap();
+        assert_eq!(a, "2026 · 某市 · 模拟");
+        assert!(is_canonical(&a), "应当直接成型: {}", a);
+        // 联考同理
+        let b = template_hint("2026届四省联考").unwrap();
+        assert_eq!(b, "2026 · 四省 · 联考");
+        assert!(is_canonical(&b));
+    }
+
+    #[test]
+    fn template_hint_leaves_unknown_slots_blank() {
+        // 校本卷子：认得出学段和学年，**学校名留「？」**（不猜学校 ✗）
+        let a = template_hint("2027 届高三 8 月底学情调研").unwrap();
+        assert_eq!(a, "高三 · 8月底学情调研 · ？ · 2026-2027学年");
+        assert!(!is_canonical(&a), "有「？」就不该算成型: {}", a);
+    }
+
+    #[test]
+    fn template_hint_skips_canonical_and_unknown() {
+        assert!(template_hint("2026 · 全国I卷 · 高考真题").is_none(), "已成型的不该再出建议");
+        assert!(template_hint("").is_none());
+        assert!(template_hint("   ").is_none());
+        // 认不出类别、也没有学段线索 → 不硬套模板
+        assert!(template_hint("普通高中总复习资料").is_none());
+    }
+
+    #[test]
+    fn year_and_slot_extraction() {
+        assert_eq!(first_year("2026届某市一模"), Some(2026));
+        assert_eq!(first_year("高三 8 月底"), None);
+        assert_eq!(first_year("12345 届"), None, "5 位数字里不该切出年份");
+        assert_eq!(slot_mid("2026届某市一模"), "某市");
+        assert_eq!(slot_mid("2027届高三8月底学情调研"), "8月底学情调研");
     }
 }

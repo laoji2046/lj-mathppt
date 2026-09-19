@@ -1858,7 +1858,7 @@ fn lib_import_commit(ids: Vec<String>) -> serde_json::Value {
     let mut blocked: Vec<serde_json::Value> = Vec::new();
     for id in ids.iter() {
         let got = conn.query_row(
-            "SELECT id, batch_id, stem, options, answer, solution, qtype, section, difficulty, knowledge, year, paper, warn, status, needs_review FROM import_draft WHERE id = ?1",
+            "SELECT id, batch_id, stem, options, answer, solution, qtype, section, difficulty, knowledge, year, paper, warn, status, needs_review, COALESCE(target_qid,0), COALESCE(extra,'') FROM import_draft WHERE id = ?1",
             [id],
             |r| {
                 Ok(serde_json::json!({
@@ -1877,6 +1877,8 @@ fn lib_import_commit(ids: Vec<String>) -> serde_json::Value {
                     "warn": r.get::<_, String>(12)?,
                     "status": r.get::<_, String>(13)?,
                     "needsReview": r.get::<_, i64>(14)?,
+                    "targetQid": r.get::<_, i64>(15)?,
+                    "extra": r.get::<_, String>(16)?,
                 }))
             },
         );
@@ -1940,6 +1942,64 @@ fn lib_import_commit(ids: Vec<String>) -> serde_json::Value {
         }
         if !batch_id.is_empty() {
             m["batchId"] = serde_json::json!(batch_id);
+        }
+        // 【P1c】targetQid > 0 = **改已有题**（来源归一走这条）：按 extra.patch 列出的键
+        //   把它合进原题的 meta —— **不是新建一道**，所以正式库题数不变 ✓
+        let target = v.get("targetQid").and_then(|x| x.as_i64()).unwrap_or(0);
+        if target > 0 {
+            let old_meta: String = match tx.query_row("SELECT meta FROM library_item WHERE id = ?1", [target], |r| r.get(0)) {
+                Ok(x) => x,
+                Err(e) => return serde_json::json!({ "ok": false, "error": format!("要更新的题 #{} 不存在: {}", target, e) }),
+            };
+            let mut om: serde_json::Value = serde_json::from_str(if old_meta.is_empty() { "{}" } else { &old_meta })
+                .unwrap_or_else(|_| serde_json::json!({}));
+            let patch_keys: Vec<String> = serde_json::from_str::<serde_json::Value>(
+                v.get("extra").and_then(|x| x.as_str()).unwrap_or("{}"),
+            )
+            .ok()
+            .and_then(|e| e.get("patch").and_then(|p| p.as_array()).cloned())
+            .map(|a| a.iter().filter_map(|y| y.as_str().map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+            if let Some(obj) = om.as_object_mut() {
+                if patch_keys.is_empty() {
+                    // 没写 patch 键 = 整条替换（草稿里的字段为准）
+                    if let Some(src) = m.as_object() {
+                        for (k, val) in src.iter() {
+                            obj.insert(k.clone(), val.clone());
+                        }
+                    }
+                } else {
+                    for k in patch_keys.iter() {
+                        if let Some(val) = m.get(k) {
+                            obj.insert(k.clone(), val.clone());
+                        }
+                    }
+                }
+            }
+            let meta2 = lib_prepare_qmeta(&tx, &om.to_string(), &sn_map);
+            if let Err(e) = tx.execute(
+                "UPDATE library_item SET meta = ?1, updated_at = ?2, batch_id = ?3 WHERE id = ?4",
+                rusqlite::params![meta2, now, batch_id, target],
+            ) {
+                return serde_json::json!({ "ok": false, "error": format!("更新题 #{} 失败: {}", target, e) });
+            }
+            if let Err(e) = lib_sync_qcols(&tx, target, "question", &meta2) {
+                return serde_json::json!({ "ok": false, "error": e });
+            }
+            if let Err(e) = lib_snapshot_revision(&tx, target, "source_fix") {
+                return serde_json::json!({ "ok": false, "error": e });
+            }
+            if let Err(e) = tx.execute(
+                "UPDATE import_draft SET status = 'published', target_qid = ?1, needs_review = 0 WHERE id = ?2",
+                rusqlite::params![target, draft_id],
+            ) {
+                return serde_json::json!({ "ok": false, "error": format!("回写草稿失败: {}", e) });
+            }
+            if !batch_id.is_empty() && !batches.contains(&batch_id) {
+                batches.push(batch_id.clone());
+            }
+            created.push(serde_json::json!({ "draftId": draft_id, "qid": target, "updated": true }));
+            continue;
         }
         let meta = lib_prepare_qmeta(&tx, &m.to_string(), &sn_map);
         let section = v.get("section").and_then(|x| x.as_str()).unwrap_or("").to_string();
@@ -2095,6 +2155,227 @@ fn lib_import_rebuild(batch: String) -> serde_json::Value {
     }
 }
 
+
+/* ================= 【v5 · P1c】来源归一：出建议 → 只写草稿 → 人工确认 ================= */
+
+/// 稳定短哈希（FNV-1a）：给「同一批来源归一」算幂等键用（不引依赖 ✓）
+fn lib_hash_of(s: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{:08x}", (h & 0xffff_ffff) as u32)
+}
+
+/// 【P1c】来源归一**建议**（**只读**：一个字都不写库 ✓）
+///
+/// 三档建议 + 两档人工（纪律：不猜）：
+///   alias     库外别名表 source_canonical_map.json 里明确写了 → 最准最便宜
+///   rule      现成的 normalize() 就能整成六类模板的样子
+///   template  套模板 + 缺的写「？」（needManual = true，要人在草稿箱补全）
+///   none      认不出，只能人工填
+/// 另把「来源空着」的题单独列出来（paper 为空的不猜，人工填）。
+#[tauri::command]
+fn lib_source_plan() -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let map = source_normalize::load_map();
+    let rows: Vec<(i64, String, String, String)> = {
+        let mut st = match conn.prepare(
+            "SELECT id, COALESCE(code,''), COALESCE(paper,''), COALESCE(title,'') FROM library_item WHERE type = 'question' ORDER BY id",
+        ) {
+            Ok(x) => x,
+            Err(e) => return serde_json::json!({ "ok": false, "error": format!("读题目失败: {}", e) }),
+        };
+        st.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        })
+        .map(|it| it.filter_map(|x| x.ok()).collect())
+        .unwrap_or_default()
+    };
+    let mut items: Vec<serde_json::Value> = Vec::new();
+    let mut no_paper: Vec<serde_json::Value> = Vec::new();
+    let (mut n_alias, mut n_rule, mut n_tpl, mut n_none) = (0i64, 0i64, 0i64, 0i64);
+    let mut canonical: i64 = 0;
+    let mut filled: i64 = 0;
+    for (id, code, paper, title) in rows {
+        let p = paper.trim();
+        // 「未知」= 没填来源（哨兵值），和空串一样只能人工填 —— **不猜** ✓
+        if p.is_empty() || p == source_normalize::UNKNOWN {
+            no_paper.push(serde_json::json!({
+                "id": id, "code": code,
+                "title": title.chars().take(24).collect::<String>(),
+            }));
+            continue;
+        }
+        filled += 1;
+        if source_normalize::is_canonical(p) {
+            canonical += 1;
+            continue;
+        }
+        let kind = source_normalize::kind_of(p).to_string();
+        let (suggest, how) = if let Some(hit) = map.get(p) {
+            (hit.clone(), "alias")
+        } else {
+            let cand = source_normalize::normalize(p, &map);
+            if cand != p && source_normalize::is_canonical(&cand) {
+                (cand, "rule")
+            } else if let Some(t) = source_normalize::template_hint(p) {
+                (t, "template")
+            } else {
+                (String::new(), "none")
+            }
+        };
+        match how {
+            "alias" => n_alias += 1,
+            "rule" => n_rule += 1,
+            "template" => n_tpl += 1,
+            _ => n_none += 1,
+        }
+        let need = !suggest.is_empty() && !source_normalize::is_canonical(&suggest);
+        items.push(serde_json::json!({
+            "id": id, "code": code, "paper": paper, "kind": kind,
+            "suggest": suggest, "how": how, "needManual": need,
+        }));
+    }
+    // 能直接用的排前面（alias > rule > template > none），同档按 id
+    let rank = |h: &str| -> i32 {
+        match h {
+            "alias" => 0,
+            "rule" => 1,
+            "template" => 2,
+            _ => 3,
+        }
+    };
+    items.sort_by_key(|x| {
+        let h = x.get("how").and_then(|v| v.as_str()).unwrap_or("");
+        (rank(h), x.get("id").and_then(|v| v.as_i64()).unwrap_or(0))
+    });
+    let total = items.len() as i64 + canonical + no_paper.len() as i64;
+    serde_json::json!({
+        "ok": true,
+        "total": total,
+        "canonical": canonical,
+        "filled": filled,
+        "alias": n_alias,
+        "rule": n_rule,
+        "template": n_tpl,
+        "none": n_none,
+        "noPaper": no_paper.len(),
+        "aliasTableLoaded": !map.is_empty(),
+        "items": items,
+        "noPaperItems": no_paper,
+    })
+}
+
+/// 【P1c】把选中的建议**生成草稿**：target_qid 指向原题、extra.patch 只允许改 paperName。
+/// 正式库**一个字都不改** —— 人工在草稿箱确认后，由 lib_import_commit 走「更新已有题」分支 ✓
+#[tauri::command]
+fn lib_source_plan_apply(ids: Vec<i64>) -> serde_json::Value {
+    if ids.is_empty() {
+        return serde_json::json!({ "ok": false, "error": "没有选中要归一的题" });
+    }
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let map = source_normalize::load_map();
+    // ① 逐条算建议（与原题当前 paper 一致的话就不生成草稿）
+    let mut todo: Vec<(i64, String, String, String)> = Vec::new(); // qid, stem, old, suggest
+    for id in ids.iter() {
+        let got = conn.query_row(
+            "SELECT COALESCE(json_extract(meta,'$.stem'),''), COALESCE(paper,'') FROM library_item WHERE id = ?1 AND type = 'question'",
+            [id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        );
+        let (stem, paper) = match got {
+            Ok(x) => x,
+            Err(_) => continue, // 找不到就跳过（不静默改错东西）
+        };
+        let p = paper.trim().to_string();
+        let suggest = if let Some(hit) = map.get(&p) {
+            hit.clone()
+        } else {
+            let cand = source_normalize::normalize(&p, &map);
+            if cand != p && source_normalize::is_canonical(&cand) {
+                cand
+            } else {
+                source_normalize::template_hint(&p).unwrap_or_default()
+            }
+        };
+        if suggest.is_empty() || suggest == p {
+            continue;
+        }
+        todo.push((*id, stem, p, suggest));
+    }
+    if todo.is_empty() {
+        return serde_json::json!({ "ok": false, "error": "选中的题都没有可用建议（认不出的要人工填）" });
+    }
+    // ② 开批次（复用 lib_import_begin：同一批 id 幂等命中，不重复建 ✓）
+    let key_src: Vec<String> = todo.iter().map(|x| x.0.to_string()).collect();
+    let idem = format!("sourcefix-{}", lib_hash_of(&key_src.join(",")));
+    let batch = lib_import_begin(serde_json::json!({
+        "sourceType": "source_fix",
+        "sourceLabel": format!("来源归一 {} 道", todo.len()),
+        "idemKey": idem,
+    }));
+    let bid = match batch.get("batch").and_then(|b| b.get("id")).and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => {
+            return serde_json::json!({
+                "ok": false,
+                "error": batch.get("error").and_then(|v| v.as_str()).unwrap_or("开批次失败"),
+            })
+        }
+    };
+    // ③ 灌草稿：**只带 paperName 这一个 patch 键**，别的一律不动 ✓
+    let now = now_stamp();
+    let mut added: i64 = 0;
+    let mut need: i64 = 0;
+    for (qid, stem, old, suggest) in todo.iter() {
+        let ok_shape = source_normalize::is_canonical(suggest);
+        if !ok_shape {
+            need += 1;
+        }
+        let did = format!("{}-q{}", bid, qid);
+        let extra = serde_json::json!({ "patch": ["paperName"], "from": old }).to_string();
+        let warn = if ok_shape {
+            String::new()
+        } else {
+            "建议里有「？」，要你补全（学校名 / 地区）".to_string()
+        };
+        if let Err(e) = conn.execute(
+            "INSERT INTO import_draft(id,batch_id,source_item_id,source_label,page,bbox,confidence,needs_review,stem,options,answer,solution,qtype,section,difficulty,knowledge,year,paper,source_kind,raw_text,warn,status,target_qid,extra,created_at) VALUES(?1,?2,?3,?4,NULL,'',NULL,?5,?6,'[]','','','','',0,'[]',0,?7,'','',?8,'needs_review',?9,?10,?11) ON CONFLICT(id) DO UPDATE SET source_label=excluded.source_label, stem=excluded.stem, needs_review=excluded.needs_review, paper=excluded.paper, warn=excluded.warn, target_qid=excluded.target_qid, extra=excluded.extra",
+            rusqlite::params![
+                did,
+                bid,
+                format!("q{}", qid),
+                format!("原：{}", old),
+                if ok_shape { 0 } else { 1 },
+                stem,
+                suggest,
+                warn,
+                qid,
+                extra,
+                now
+            ],
+        ) {
+            return serde_json::json!({ "ok": false, "error": format!("写归一草稿失败: {}", e) });
+        }
+        added += 1;
+    }
+    let reused = batch.get("reused").and_then(|v| v.as_bool()).unwrap_or(false);
+    serde_json::json!({ "ok": true, "batch": bid, "added": added, "needManual": need, "reused": reused, "idemKey": idem })
+}
+
 /// 某道题的修订历史（新→旧）
 #[tauri::command]
 fn lib_q_revisions(qid: i64) -> serde_json::Value {
@@ -2184,15 +2465,18 @@ fn lib_source_report() -> serde_json::Value {
     for (id, title, paper) in rows {
         total += 1;
         let p = paper.trim();
-        let ok = !p.is_empty() && source_normalize::is_canonical(p);
-        if p.is_empty() {
+        // ⚠「未知」是**哨兵值**、不是来源：空串和「未知」都算「没有来源」，
+        //   否则一道没填来源的题会被算进成型率，指标立刻变假 ✗（v1449 探针发现的）
+        let unknown = p.is_empty() || p == source_normalize::UNKNOWN;
+        let ok = !unknown && source_normalize::is_canonical(p);
+        if unknown {
             empty += 1;
         } else if ok {
             canonical += 1;
         }
         let k = source_normalize::kind_of(p).to_string();
         *by_kind.entry(k.clone()).or_insert(0) += 1;
-        if !p.is_empty() && !ok {
+        if !unknown && !ok {
             let t: String = title.chars().take(24).collect();
             needs.push(serde_json::json!({ "id": id, "title": t, "paper": paper, "kind": k }));
         }
@@ -3208,6 +3492,8 @@ pub fn run() {
         lib_import_batches,
         lib_import_rebuild,
         lib_q_revisions,
+        lib_source_plan,
+        lib_source_plan_apply,
         lib_kp_catalog,
         lib_source_report,
         ai_chat,

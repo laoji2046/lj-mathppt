@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "LJ-MathSlides",
-  "version": "2026.9.1448",
+  "version": "2026.9.1449",
   "identifier": "com.lj.mathslides",
   "build": {
     "frontendDist": "../dist"

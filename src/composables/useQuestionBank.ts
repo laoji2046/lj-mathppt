@@ -477,3 +477,76 @@ export function idemKeyOf(sourceType: string, payload: string): string {
   for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0
   return sourceType + '-' + h.toString(16) + '-' + s.length
 }
+
+/* ---- 【v5 · P1c】来源归一建议 ---- */
+
+export interface SourcePlanItem {
+  id: number
+  code: string
+  paper: string
+  /** 归一前的类别（未知 / 模拟 / 校内 …） */
+  kind: string
+  /** 建议的规范名；空串 = 认不出，只能人工填 */
+  suggest: string
+  /** alias / rule / template / none */
+  how: string
+  /** 建议里还有「？」→ 要人补全 */
+  needManual: boolean
+}
+
+export interface SourcePlan {
+  ok: boolean
+  total: number
+  /** 来源已经成型的题数 */
+  canonical: number
+  /** 有来源的题数（canonicalRate 的分母） */
+  filled: number
+  alias: number
+  rule: number
+  template: number
+  none: number
+  /** 来源空着的题数（不猜，人工填） */
+  noPaper: number
+  /** 库外别名表 source_canonical_map.json 读到了没有 */
+  aliasTableLoaded: boolean
+  items: SourcePlanItem[]
+  noPaperItems: { id: number; code: string; title: string }[]
+  error?: string
+}
+
+export const HOW_LABEL: Record<string, string> = {
+  alias: '别名表',
+  rule: '规则可整',
+  template: '模板半成品',
+  none: '认不出',
+}
+export function howLabel(h: string): string {
+  return HOW_LABEL[h] || h
+}
+
+const EMPTY_PLAN: SourcePlan = {
+  ok: false, total: 0, canonical: 0, filled: 0, alias: 0, rule: 0, template: 0,
+  none: 0, noPaper: 0, aliasTableLoaded: false, items: [], noPaperItems: [],
+}
+
+/** 来源归一建议（**只读**：Rust 侧一个字都不写库 ✓） */
+export async function sourcePlan(): Promise<SourcePlan> {
+  try {
+    const r = await invoke<Partial<SourcePlan>>('lib_source_plan', {})
+    if (r && r.ok !== false) return { ...EMPTY_PLAN, ...r, ok: true }
+    return { ...EMPTY_PLAN, error: (r && r.error) || '读不到建议' }
+  } catch (e) {
+    return { ...EMPTY_PLAN, error: String((e as Error)?.message || e) }
+  }
+}
+
+/** 把建议生成**草稿**（正式库一个字不改；去草稿箱确认后才生效 ✓） */
+export async function sourcePlanApply(ids: number[]): Promise<{ ok: boolean; batch: string; added: number; needManual: number; reused: boolean; error?: string }> {
+  try {
+    const r = await invoke<{ ok?: boolean; batch?: string; added?: number; needManual?: number; reused?: boolean; error?: string }>('lib_source_plan_apply', { ids })
+    if (r && r.ok) return { ok: true, batch: r.batch || '', added: r.added || 0, needManual: r.needManual || 0, reused: !!r.reused }
+    return { ok: false, batch: '', added: 0, needManual: 0, reused: false, error: (r && r.error) || '生成草稿失败' }
+  } catch (e) {
+    return { ok: false, batch: '', added: 0, needManual: 0, reused: false, error: String((e as Error)?.message || e) }
+  }
+}
