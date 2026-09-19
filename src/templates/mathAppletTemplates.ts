@@ -8,6 +8,7 @@
  * 3. 版式固定栅格：左栏用 leftCol() 游标自上而下排，右栏 1180~1800，全部落在 1920×1080 内。
  */
 import type { SlideElement } from '@/types'
+import { applet3dHtml, default3DScene } from '@/composables/applet3d'
 
 const INK = '#1a1a1a'
 const ACCENT = '#c0392b'
@@ -199,6 +200,22 @@ export interface MathAppletTemplate {
 }
 
 export const mathAppletTemplates: MathAppletTemplate[] = [
+  // ================= 嵌入 · 3D（v1437：three.js 懒加载 · 拖动旋转） =================
+  {
+    id: 'embed-3d-solid', name: '嵌入 · 3D 立体图（可旋转）', cat: '例题·HTML', tag: '3D',
+    desc: 'three.js 立体图：拖动旋转 · 滚轮缩放 · 自动缓慢旋转；按住 Ctrl/空格 拖＝移动元素（离线、懒加载）',
+    build() {
+      const id = eid()
+      const el = html(560, 250, 800, 520, applet3dHtml(default3DScene(), { elId: id })) as unknown as Record<string, unknown>
+      el.id = id
+      el.applet3d = true
+      return [
+        txt(560, 168, 900, 56, '3D 立体图（拖动旋转 · 滚轮缩放）', { fontSize: 34, fontWeight: 700, fontFamily: 'hei-bold' }),
+        txt(560, 786, 900, 36, '提示：按住 Ctrl（或空格）拖动 = 移动这个元素；直接拖 = 转场景', { fontSize: 22, color: SUB }),
+        el as unknown as SlideElement,
+      ]
+    },
+  },
   // ================= 例题 · 组合公式 =================
   {
     id: 'ex-formula-quadratic', name: '例题 · 二次函数最值（组合公式）', cat: '例题·组合公式', tag: '组合公式',

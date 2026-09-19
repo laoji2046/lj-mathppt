@@ -16,6 +16,10 @@ const imageSrc = computed(() => {
 
 // ---- 网页(html)/外部链接 用 iframe（blob 或外部 src） ----
 const iframeSrc = ref('')
+/** 【3D 嵌入】这种 iframe 要"自己收拖拽"才能转场景 → 指针事件放开；
+ *  其它嵌入仍是 none（点/拖任意处都能选中并移动元素 ✓）。
+ *  ⚠ 不能把类型断言写进模板（Vue 模板表达式的解析器不认 `as` ✗）→ 放这算 ✓ */
+const framePE = computed(() => ((props.el as unknown as { applet3d?: boolean }).applet3d ? 'auto' : contentPE))
 let blobUrl = ''
 function makeBlob() {
   if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = '' }
@@ -120,7 +124,7 @@ const isDoc = computed(() => props.el.kind === 'doc')
       v-else-if="iframeSrc"
       :src="iframeSrc"
       class="embed-el__frame"
-      :style="{ pointerEvents: contentPE }"
+      :style="{ pointerEvents: framePE }"
       sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
       referrerpolicy="no-referrer"
     ></iframe>

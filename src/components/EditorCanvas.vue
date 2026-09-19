@@ -25,6 +25,19 @@ watch(fitScaleRef, (v) => { fitScale.value = v }, { immediate: true })
 /** 真实比例 = 适屏比例 × 用户缩放（zoom / pan 都在 @/ui/canvasView，与状态栏共用同一份） */
 const scale = computed(() => fitScaleRef.value * zoom.value)
 
+/** 【3D 嵌入】iframe 里"按住 Ctrl/空格 拖"时会把位移 postMessage 过来 →
+ *  这里按**画布缩放**把屏幕位移换算成画布坐标，应用到那个元素上 ✓（直接拖=转场景，不走这里 ✓） */
+function onApplet3dMove(e: MessageEvent) {
+  const d = e.data as { t?: string; elId?: string; dx?: number; dy?: number } | null
+  if (!d || d.t !== 'applet3d-move' || !d.elId) return
+  const els = store.deck.slides.flatMap((s) => s.elements)
+  const el = els.find((x) => x.id === d.elId)
+  if (!el) return
+  const k = Math.max(0.05, scale.value)
+  store.updateElement(el.id, { x: el.x + (d.dx || 0) / k, y: el.y + (d.dy || 0) / k } as Partial<SlideElement>)
+}
+window.addEventListener('message', onApplet3dMove)
+
 // ---- 画布平移 ----
 const spaceDown = ref(false)
 let panOrigin: { x: number; y: number; px: number; py: number } | null = null

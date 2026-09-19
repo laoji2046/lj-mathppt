@@ -44,11 +44,13 @@ export function default3DScene(): Scene3D {
 
 /** 生成嵌入用的自包含 HTML（`threeSrc` 默认走 app 根路径 → 打包后能取到 public/three ✓；
  *  单测/截图时传相对路径即可，因为本地文件里 `/three/...` 会解析到磁盘根 ✗） */
-export function applet3dHtml(spec: Scene3D, opt?: { threeSrc?: string; height?: string }): string {
+export function applet3dHtml(spec: Scene3D, opt?: { threeSrc?: string; height?: string; elId?: string }): string {
   const src = opt?.threeSrc || '/three/three.iife.js'
+  const elId = opt?.elId || ''
   const data = JSON.stringify(spec).replace(/</g, '\\u003c')   // 防止 </script> 之类把 HTML 撕开
   const js = [
     'var SPEC = ' + data + ';',
+    'var ELID = ' + JSON.stringify(elId) + ';',
     'var host = document.getElementById("h");',
     'var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });',
     'renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));',
@@ -125,7 +127,7 @@ export function applet3dHtml(spec: Scene3D, opt?: { threeSrc?: string; height?: 
     'host.addEventListener("pointermove", function (e) {',
     '  if (!dragging) return;',
     '  var dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY;',
-    '  if (parentDrag) { try { parent.postMessage({ t: "applet3d-move", dx: dx, dy: dy }, "*"); } catch (err) {} return; }',
+    '  if (parentDrag) { try { parent.postMessage({ t: "applet3d-move", elId: ELID, dx: dx, dy: dy }, "*"); } catch (err) {} return; }',
     '  yaw += dx * 0.01; pitch = Math.max(-1.3, Math.min(1.3, pitch + dy * 0.01)); place();',
     '});',
     'host.addEventListener("pointerup", function () { dragging = false; parentDrag = false; });',
