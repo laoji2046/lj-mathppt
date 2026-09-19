@@ -70,7 +70,10 @@ export function parseQuestionsWithInfo(raw: string): { list: ParsedQuestion[]; s
  */
 export interface QuestionImage {
   n: number
+  /** 图（data URL）。**存库时大图会换成 assetId、这里留空**，加载时再 hydrate 回来 */
   src: string
+  /** 内容库资源 id（大图走它；小图直接内联 src） */
+  assetId?: number
   caption?: string
 }
 

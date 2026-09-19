@@ -17,6 +17,7 @@ import { libQuery, libSave, libRemove, libBump, libTags, libSaveMany } from './u
 import type { ParsedQuestion, QuestionImage } from './parseQuestions'
 import { judgeNonQuestion } from './parseQuestions'
 import type { LibDraft, LibItem } from './useLibrary'
+import { saveAsset, ensureAssets, assetSrc } from './useAssets'
 
 export type Difficulty = 1 | 2 | 3 | 4 | 5
 
@@ -229,8 +230,10 @@ function readImages(v: unknown): QuestionImage[] {
     const o = it as Record<string, unknown>
     const n = Number(o.n)
     const src = String(o.src || '')
-    if (!Number.isFinite(n) || n <= 0 || !src) continue
-    out.push({ n, src, caption: o.caption ? String(o.caption) : undefined })
+    const assetId = Number(o.assetId) || 0
+    if (!Number.isFinite(n) || n <= 0) continue
+    if (!src && !assetId) continue          // 两个都没有 = 这条没用
+    out.push({ n, src, assetId: assetId || undefined, caption: o.caption ? String(o.caption) : undefined })
   }
   return out.sort((a, b) => a.n - b.n)
 }
@@ -316,7 +319,15 @@ export function missingAnswer(list: QuestionEntry[]): QuestionEntry[] {
 /* ---------------- 增删改查 ---------------- */
 
 export async function listQuestions(): Promise<QuestionEntry[]> {
-  return (await libQuery('question')).map(toEntry)
+  const list = (await libQuery('question')).map(toEntry)
+  // 【大图 hydrate】库里存的是 assetId → 这里补回 src（界面/插图/导出照旧拿 src ✓）
+  await ensureAssets()
+  for (const e of list) {
+    for (const im of e.q.images || []) {
+      if (!im.src && im.assetId) im.src = assetSrc(im.assetId)
+    }
+  }
+  return list
 }
 
 function today(): string {
@@ -341,6 +352,23 @@ export function withDefaults(meta: Partial<QuestionMeta>): QuestionMeta {
   return q
 }
 
+/** 超过这个长度的 data URL 才转资源（小图直接内联，省一次 IO）*/
+const BIG_IMAGE = 16384
+
+/** 【大图转资源】把 images 里的大 data URL 存进内容库、换成 assetId；失败就原样内联（不丢图）*/
+async function leanImages(imgs?: QuestionImage[]): Promise<QuestionImage[] | undefined> {
+  if (!imgs || !imgs.length) return imgs
+  const out: QuestionImage[] = []
+  for (const im of imgs) {
+    if (im.src && im.src.length > BIG_IMAGE) {
+      const id = im.assetId || await saveAsset(im.src)
+      if (id) { out.push({ n: im.n, src: '', assetId: id, caption: im.caption }); continue }
+    }
+    out.push({ ...im })
+  }
+  return out
+}
+
 function draftOf(q: QuestionMeta, title: string, id = 0): LibDraft {
   return {
     id: id > 0 ? id : undefined,
@@ -355,11 +383,15 @@ function draftOf(q: QuestionMeta, title: string, id = 0): LibDraft {
 }
 
 export async function addQuestion(meta: Partial<QuestionMeta>, title?: string): Promise<number> {
-  return libSave(draftOf(withDefaults(meta), title || ''))
+  const q = withDefaults(meta)
+  q.images = await leanImages(q.images) || []
+  return libSave(draftOf(q, title || ''))
 }
 
 export async function updateQuestion(id: number, meta: Partial<QuestionMeta>, title?: string): Promise<number> {
-  return libSave(draftOf(withDefaults(meta), title || '', id))
+  const q = withDefaults(meta)
+  q.images = await leanImages(q.images) || []
+  return libSave(draftOf(q, title || '', id))
 }
 
 export async function removeQuestion(id: number): Promise<boolean> {
@@ -403,6 +435,11 @@ export async function importParsedQuestions(list: ParsedQuestion[]): Promise<{ a
     })
     return draftOf(q, p.title)
   })
+  // 【大图转资源】批量导入时同样把大图换成 assetId（MinerU 插图就走这条）
+  for (const d of drafts) {
+    const m = d.meta as { images?: QuestionImage[] }
+    m.images = await leanImages(m.images)
+  }
   return libSaveMany(drafts)
 }
 
