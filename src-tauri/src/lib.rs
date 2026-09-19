@@ -1078,6 +1078,101 @@ fn lib_q_patch(id: i64, patch: serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "ok": true, "id": id, "row": row })
 }
 
+/// 【题库 v3 · M3】批量改题：**一个事务里**改多道（批量改章节 / 批量打知识点 / 批量删除）✓
+/// ops 每项 = { id, patch?, delete? }：
+///   - delete=true → 删掉这道题（连带清 question_kp）
+///   - 否则把 patch 合进 meta（键就是 meta 里的键，值 null = 删键）→ 走 lib_sync_qcols 同步真列 + 知识点
+/// 任何一步失败 → 整个事务回滚（**不留半份** ✗）；只允许 type=question ✗
+#[tauri::command]
+fn lib_q_batch(ops: Vec<serde_json::Value>) -> serde_json::Value {
+    let mut conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let tx = match conn.transaction() {
+        Ok(t) => t,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("事务失败: {}", e) }),
+    };
+    let now = now_stamp();
+    let mut updated: i64 = 0;
+    let mut deleted: i64 = 0;
+    let mut rows: Vec<serde_json::Value> = Vec::new();
+    for op in ops.iter() {
+        let id = op.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+        if id <= 0 {
+            continue;
+        }
+        let kind: String = match tx.query_row(
+            "SELECT type FROM library_item WHERE id = ?1",
+            [id],
+            |r| r.get(0),
+        ) {
+            Ok(k) => k,
+            Err(e) => {
+                return serde_json::json!({ "ok": false, "error": format!("找不到条目 #{}: {}", id, e) })
+            }
+        };
+        if kind != "question" {
+            return serde_json::json!({ "ok": false, "error": format!("只允许改题目（#{} 的类型是 {}）✗", id, kind) });
+        }
+        if op.get("delete").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if let Err(e) = tx.execute("DELETE FROM library_item WHERE id = ?1 AND builtin = 0", [id]) {
+                return serde_json::json!({ "ok": false, "error": format!("删除 #{} 失败: {}", id, e) });
+            }
+            let _ = tx.execute("DELETE FROM question_kp WHERE qid = ?1", [id]);
+            deleted += 1;
+            continue;
+        }
+        let meta: String = tx
+            .query_row("SELECT meta FROM library_item WHERE id = ?1", [id], |r| r.get(0))
+            .unwrap_or_else(|_| "{}".to_string());
+        let mut m: serde_json::Value =
+            serde_json::from_str(if meta.is_empty() { "{}" } else { &meta }).unwrap_or_else(|_| serde_json::json!({}));
+        if let (Some(obj), Some(p)) = (m.as_object_mut(), op.get("patch").and_then(|v| v.as_object())) {
+            for (k, v) in p {
+                if v.is_null() {
+                    obj.remove(k);
+                } else {
+                    obj.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        let meta2 = serde_json::to_string(&m).unwrap_or_else(|_| "{}".to_string());
+        if let Err(e) = tx.execute(
+            "UPDATE library_item SET meta = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![meta2, now, id],
+        ) {
+            return serde_json::json!({ "ok": false, "error": format!("更新 #{} 失败: {}", id, e) });
+        }
+        if let Err(e) = lib_sync_qcols(&tx, id, "question", &meta2) {
+            return serde_json::json!({ "ok": false, "error": e });
+        }
+        let row = tx
+            .query_row(
+                "SELECT section, qtype, level, difficulty, year, paper FROM library_item WHERE id = ?1",
+                [id],
+                |r| {
+                    Ok(serde_json::json!({
+                        "id": id,
+                        "section": r.get::<_, String>(0)?,
+                        "qtype": r.get::<_, String>(1)?,
+                        "level": r.get::<_, String>(2)?,
+                        "difficulty": r.get::<_, i64>(3)?,
+                        "year": r.get::<_, i64>(4)?,
+                        "paper": r.get::<_, String>(5)?,
+                    }))
+                },
+            )
+            .unwrap_or_else(|_| serde_json::json!({ "id": id }));
+        rows.push(row);
+        updated += 1;
+    }
+    if let Err(e) = tx.commit() {
+        return serde_json::json!({ "ok": false, "error": format!("提交失败: {}", e) });
+    }
+    serde_json::json!({ "ok": true, "updated": updated, "deleted": deleted, "rows": rows })
+}
+
 /// 库信息：路径 + 条目数（前端显示与诊断用）。
 #[tauri::command]
 fn lib_info() -> serde_json::Value {
@@ -2041,6 +2136,7 @@ pub fn run() {
         lib_q_facets,
         lib_q_search,
         lib_q_patch,
+        lib_q_batch,
         ai_chat,
         asset_get,
             lib_query,

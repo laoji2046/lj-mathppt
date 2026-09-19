@@ -642,6 +642,26 @@ export const useDeckStore = defineStore('deck', () => {
     currentSlide.value.elements.push(el)
     selectedIds.value = [el.id]
   }
+  /**
+   * 批量插入元素（**一次快照、一次选中**）—— 题库「插入幻灯片」用 ✓
+   * 逐条调 addElement 会留下 N 个撤销步、而且只有最后一个被选中 ✗
+   * items[i].overrides 里给了 x/y 就按给的放（用来纵向排列多道题）。
+   */
+  function addElements(items: { type: ElementType; overrides?: Partial<SlideElement> }[]): string[] {
+    const slide = currentSlide.value
+    if (!slide || !items.length) return []
+    pushHistory()
+    const ids: string[] = []
+    items.forEach((it, k) => {
+      const offset = ((slide.elements.length + k) % 5) * 32
+      const el = createElement(it.type, { x: 260 + offset, y: 240 + offset })
+      Object.assign(el, it.overrides || {})
+      slide.elements.push(el)
+      ids.push(el.id)
+    })
+    selectedIds.value = ids
+    return ids
+  }
   function updateElement(id: string, patch: Partial<SlideElement>) {
     const el = currentSlide.value?.elements.find((e) => e.id === id)
     if (el) Object.assign(el, patch)
@@ -999,7 +1019,7 @@ export const useDeckStore = defineStore('deck', () => {
     slideClip, copySlideToClip, cutSlideToClip, pasteSlideAt, toggleSlideHidden, resetSlide, applyLayoutToSlide,
     addSlide, addSubpageAfterCurrent, addPageWithTemplate, addBundlePages, applyBlank, addBlankPage, removeSlide, setSlideSubpage, gotoSlide, insertSlides, replaceDeck, importDeck, copySlide, moveSlide, reorderSlide,
     versions, saveVersion, restoreVersion, deleteVersion,
-    addElement, updateElement, switchGraphic, commitElements, setAllFragments, removeSelected, removeElement, copyElements, cutElements, pasteElements, canPaste, setSlideBg, setSlideBgGradient, setSlideBgImage, setSlideTransition, setSlideNotes, applyTemplate, applyBundle,
+    addElement, addElements, updateElement, switchGraphic, commitElements, setAllFragments, removeSelected, removeElement, copyElements, cutElements, pasteElements, canPaste, setSlideBg, setSlideBgGradient, setSlideBgImage, setSlideTransition, setSlideNotes, applyTemplate, applyBundle,
     groupSelection, ungroup,
     alignSelection, distributeSelection, reorderZ, setElementIndex,
     resetDeck, undo, redo, pushHistory, saveNow,

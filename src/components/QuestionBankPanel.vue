@@ -15,9 +15,13 @@ import AppIcon from './AppIcon.vue'
 import { typesetMixed } from '@/composables/useMathJax'
 import {
   SECTIONS, QTYPE_LABEL, LEVELS,
-  qFacets, qSearch, qPatch, metaOf, excerptOf, previewHtmlOf,
+  qFacets, qSearch, qPatch, qBatch, metaOf, excerptOf, previewHtmlOf,
+  questionTextOf, stripImageMarkers, pickImages,
 } from '@/composables/useQuestionBank'
 import type { QFacets, QFilter, QItem } from '@/composables/useQuestionBank'
+import { useDeckStore } from '@/stores/deck'
+import { sendToPaper } from '@/ui/paper'
+import type { SlideElement } from '@/types'
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 
@@ -36,6 +40,19 @@ const yearKeys = computed(() => Object.keys(facets.value.byYear || {}).filter((k
 
 /** 就地表单（保存时按字段 patch 回 meta ✓） */
 const form = ref({ section: '', qtype: '', level: '', year: 0, paperName: '', answer: '', kpText: '' })
+
+/* ---------------- M3：多选 + 批量 + 插入 ---------------- */
+const store = useDeckStore()
+/** 勾选的题 id（批量操作的对象；一道都没勾就用右边预览的这道 ✓） */
+const picked = ref<number[]>([])
+/** 插入带不带答案/解析（默认不带：讲题时先不给答案 ✓） */
+const withAnswer = ref(false)
+const batchSection = ref('')
+const batchKp = ref('')
+const pickedList = computed(() => items.value.filter((x) => picked.value.includes(x.id)))
+const allPicked = computed(() => items.value.length > 0 && items.value.every((x) => picked.value.includes(x.id)))
+/** 到底对哪几道下手：勾了就用勾的，没勾就用当前预览的这道 ✓ */
+const targets = computed<QItem[]>(() => (pickedList.value.length ? pickedList.value : sel.value ? [sel.value] : []))
 
 function flash(t: string, ms = 2600) {
   msg.value = t
@@ -132,6 +149,119 @@ async function save() {
     busy.value = false
   }
 }
+
+/* ---------------- M3：多选 / 批量 / 插入 ---------------- */
+
+function togglePick(it: QItem) {
+  picked.value = picked.value.includes(it.id) ? picked.value.filter((x) => x !== it.id) : [...picked.value, it.id]
+}
+function toggleAll() {
+  picked.value = allPicked.value ? [] : items.value.map((x) => x.id)
+}
+
+/** 插入幻灯片：每题一个**混排**元素（公式写 $…$，不用 math 元素 ✓），题图另做图片元素 ✓ */
+async function insertToSlide() {
+  const list = targets.value
+  if (!list.length) { flash('先勾选题目（或点右边预览一道）'); return }
+  busy.value = true
+  try {
+    const els: { type: 'richtex' | 'image'; overrides: Partial<SlideElement> }[] = []
+    let y = 40
+    let placed = 0
+    let missing = 0
+    for (const it of list) {
+      const imgs = await pickImages(it)
+      const cut = stripImageMarkers(questionTextOf(it, withAnswer.value))
+      if (!cut.text) continue
+      const lines = cut.text.split('\n').length
+      const h = Math.max(80, Math.min(680, lines * 38 + 28))
+      els.push({
+        type: 'richtex',
+        overrides: {
+          text: cut.text, fontSize: 24, align: 'left', color: '#1a1a1a',
+          w: 1180, h, x: 48, y, autoBox: true,
+        } as Partial<SlideElement>,
+      })
+      y += h + 16
+      for (const im of imgs) {
+        els.push({ type: 'image', overrides: { src: im.src, fit: 'contain', x: 48, y, w: 520, h: 320 } as Partial<SlideElement> })
+        y += 336
+      }
+      placed += imgs.length
+      missing += Math.max(0, cut.dropped - imgs.length)
+    }
+    if (!els.length) { flash('这几道题没有可插入的文字'); return }
+    store.addElements(els)   // 一次快照、一次选中新元素 ✓
+    emit('close')
+    flash('✓ 已插入 ' + list.length + ' 道到幻灯片'
+      + (placed ? '，配图 ' + placed + ' 张' : '')
+      + (missing ? '（有 ' + missing + ' 处图片标记未落地，需手动补图）' : ''))
+  } finally {
+    busy.value = false
+  }
+}
+
+/** 加入试卷：交给接收口（试卷没开 → App 会把它打开，PaperModal 挂载时消费 ✓） */
+async function addToPaper() {
+  const list = targets.value
+  if (!list.length) { flash('先勾选题目（或点右边预览一道）'); return }
+  busy.value = true
+  try {
+    const parts: string[] = []
+    const imgs: { n: number; src: string; caption?: string }[] = []
+    let no = 1
+    for (const it of list) {
+      const text = questionTextOf(it, withAnswer.value).trim()
+      if (!text) continue
+      parts.push(list.length > 1 ? no++ + '. ' + text : text)
+      for (const im of await pickImages(it)) imgs.push({ n: im.n, src: im.src, caption: im.caption })
+    }
+    if (!parts.length) { flash('这几道题没有可插入的文字'); return }
+    sendToPaper({ text: parts.join('\n\n'), id: list.length === 1 ? list[0].id : 0, label: '试题 ' + list.length + ' 道', imgs })
+    flash('✓ 已加入试卷' + (imgs.length ? '（配图 ' + imgs.length + ' 张）' : '') + '，可继续选下一道')
+  } finally {
+    busy.value = false
+  }
+}
+
+/** 批量：**一个事务**改多道（失败不留半份 ✓） */
+async function batchApply(key: 'section' | 'knowledge', value: unknown, label: string) {
+  const ids = picked.value.slice()
+  if (!ids.length) { flash('先勾选题目'); return }
+  busy.value = true
+  try {
+    const r = await qBatch(ids.map((id) => ({ id, patch: { [key]: value } })))
+    if (!r.ok) { flash('✗ ' + (r.error || '批量保存失败')); return }
+    picked.value = []
+    flash('✓ 已批量' + label + ' ' + r.updated + ' 道')
+    await reload()
+    if (selId.value) await renderPreview()
+  } finally {
+    busy.value = false
+  }
+}
+function batchPatchSection() { if (batchSection.value) void batchApply('section', batchSection.value, '改章节') }
+function batchPatchKp() {
+  const kp = kpListOf(batchKp.value)
+  if (!kp.length) { flash('知识点是空的'); return }
+  void batchApply('knowledge', kp, '打知识点')
+}
+async function batchDelete() {
+  const ids = picked.value.slice()
+  if (!ids.length) { flash('先勾选题目'); return }
+  if (!window.confirm('删除选中的 ' + ids.length + ' 道题？不可撤销（会连带清掉它们的知识点）')) return
+  busy.value = true
+  try {
+    const r = await qBatch(ids.map((id) => ({ id, delete: true })))
+    if (!r.ok) { flash('✗ ' + (r.error || '批量删除失败')); return }
+    picked.value = []
+    selId.value = 0
+    flash('✓ 已删除 ' + r.deleted + ' 道')
+    await reload()
+  } finally {
+    busy.value = false
+  }
+}
 </script>
 
 <template>
@@ -181,10 +311,17 @@ async function save() {
 
         <main class="qb__list">
           <div v-if="!items.length" class="qb__empty">没有符合条件的题</div>
-          <button
+          <div class="qb__listbar">
+            <label class="qb__chk"><input type="checkbox" :checked="allPicked" @change="toggleAll" />全选（当前 {{ items.length }} 道）</label>
+            <span v-if="picked.length" class="qb__hint2">已勾 {{ picked.length }} 道</span>
+          </div>
+          <div
             v-for="it in items" :key="it.id" class="qb__card"
-            :class="{ 'qb__card--on': it.id === selId }" @click="select(it)"
+            :class="{ 'qb__card--on': it.id === selId, 'qb__card--pick': picked.includes(it.id) }" @click="select(it)"
           >
+            <label class="qb__pick" title="勾选（批量操作）" @click.stop>
+              <input type="checkbox" :checked="picked.includes(it.id)" @change="togglePick(it)" />
+            </label>
             <div class="qb__chips">
               <span class="qb__chip" :class="{ 'qb__chip--warn': !it.section }">{{ it.section || '未归类' }}</span>
               <span class="qb__chip">{{ QTYPE_LABEL[it.qtype] || '未判题型' }}</span>
@@ -194,7 +331,7 @@ async function save() {
             </div>
             <div class="qb__stem">{{ excerptOf(it.body || it.title) }}</div>
             <div v-if="it.kp.length" class="qb__kps">{{ it.kp.join(' · ') }}</div>
-          </button>
+          </div>
         </main>
 
         <aside class="qb__view">
@@ -244,6 +381,23 @@ async function save() {
           </template>
         </aside>
       </div>
+
+      <footer class="qb__foot">
+        <span class="qb__picked">已勾 {{ picked.length }} 道<template v-if="!picked.length && sel">（未勾 → 用当前这道）</template></span>
+        <label class="qb__chk"><input v-model="withAnswer" type="checkbox" />插入带答案/解析</label>
+        <span class="qb__sep"></span>
+        <button class="qb__btn qb__btn--main" :disabled="busy" title="题干+选项做成混排元素插入当前页（公式按 $…$ 渲染）" @click="insertToSlide">插入幻灯片</button>
+        <button class="qb__btn" :disabled="busy" title="把题干+选项交到试卷正文末尾（试卷没开就打开它）" @click="addToPaper">加入试卷</button>
+        <span class="qb__sep"></span>
+        <select v-model="batchSection" class="qb__mini" :disabled="!picked.length">
+          <option value="">批量改章节…</option>
+          <option v-for="s in SECTIONS" :key="s" :value="s">{{ s }}</option>
+        </select>
+        <button class="qb__btn" :disabled="busy || !picked.length || !batchSection" @click="batchPatchSection">应用</button>
+        <input v-model="batchKp" class="qb__mini qb__mini--wide" placeholder="批量打知识点（逗号分隔）" :disabled="!picked.length" />
+        <button class="qb__btn" :disabled="busy || !picked.length || !batchKp.trim()" @click="batchPatchKp">应用</button>
+        <button class="qb__btn qb__btn--danger" :disabled="busy || !picked.length" @click="batchDelete">删除</button>
+      </footer>
     </div>
   </div>
 </template>
@@ -291,4 +445,17 @@ async function save() {
 .qb__actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
 .qb__empty { padding: 20px 10px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
 .qb__miss { color: #b3541e; }
+/* ---- M3：多选 / 批量 / 插入 ---- */
+.qb__listbar { display: flex; align-items: center; gap: 8px; padding: 2px 4px 8px; }
+.qb__hint2 { font-size: 11px; color: var(--brand-600, #534AB7); }
+.qb__card { position: relative; padding-right: 32px; }
+.qb__card--pick { background: #f6f4ff; border-color: var(--brand-600, #534AB7); }
+.qb__pick { position: absolute; top: 9px; right: 9px; display: inline-flex; }
+.qb__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 16px; border-top: 1px solid var(--border); background: var(--panel-2, #faf9f6); font-size: 12px; }
+.qb__picked { color: var(--muted); font-size: 12px; }
+.qb__sep { width: 1px; height: 18px; background: var(--border); }
+.qb__mini { height: 28px; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; background: #fff; color: var(--text); }
+.qb__mini--wide { width: 200px; }
+.qb__btn--danger { color: #b42318; border-color: #f0c9c4; }
+.qb__btn--danger:disabled { color: var(--muted); border-color: var(--border); }
 </style>

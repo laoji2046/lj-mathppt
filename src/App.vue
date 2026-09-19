@@ -40,12 +40,16 @@ import { openLayoutGallery } from '@/ui/layoutGallery'
 import { openHelp } from '@/ui/help'
 import { openGeom3D } from '@/ui/geom3d'
 import { initShotMode, shotRequest } from '@/ui/shot'
+import { paperPending } from '@/ui/paper'
 import ContextMenu from '@/components/ContextMenu.vue'
 import StatusBar from '@/components/StatusBar.vue'
 
 const store = useDeckStore()
 const presenting = ref(false)
 const paperOpen = ref(false)
+
+/** 试题库「加入试卷」：没接住就挂成待办 → 这里把试卷打开（PaperModal 挂载时消费掉）✓ */
+watch(paperPending, (p) => { if (p) paperOpen.value = true })
 
 /** 向导的「从 PPT 导入」✓：不重造入口 ✓，直接打开工具栏的「文件」菜单让用户走现成路径 ✓ */
 function openPptImportMenu() {

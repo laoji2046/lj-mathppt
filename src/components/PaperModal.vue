@@ -10,6 +10,8 @@ import { MATH_FIGURE_OPTIONS } from '@/types'
 import { closeFigPalette, openFigPalette } from '@/ui/figPalette'
 import { geom3dSink, openGeom3D } from '@/ui/geom3d'
 import { vectorizeSink, openVectorize } from '@/ui/vectorize'
+import { paperInsertSink, paperPending } from '@/ui/paper'
+import type { PaperInsertPayload } from '@/ui/paper'
 
 /**
  * PDF 生成（A4 分页 + 题号识别），移植自参考版 LJ-PPT 的 PaperMode。
@@ -1334,6 +1336,39 @@ function restoreDraft(): boolean {
     return true
   } catch { return false }
 }
+/**
+ * 试题库 → 试卷：把选题正文插到**正文末尾**（M3 接回；旧实现在 v1439 随旧题库一起摘掉了）✓
+ *
+ * 题图自带 [图N]（是**题目自己的编号**），本试卷的图号是另一套映射 ——
+ * 所以先把题带来的图注册进 images、再把文本里的 [图N] 换成新号；
+ * 否则会指到同号的别的图 ✗（用户实报过「图片缺失图N」）。
+ * 插完**不关窗**：组卷通常是连续选好几道 ✓
+ */
+function onQuestionInsert(p: PaperInsertPayload) {
+  let body = p.text
+  for (const im of p.imgs || []) {
+    if (!im || !im.src || !(im.n > 0)) continue
+    const exist = Object.keys(images.value).find(
+      (k) => images.value[Number(k)] && images.value[Number(k)].src === im.src,
+    )
+    const n = exist ? Number(exist) : ++imgSeq.value
+    if (!exist) images.value[n] = { src: im.src, address: im.caption || '题库插图', caption: im.caption }
+    // 只换号，不动后面的参数（[图1:center] → [图7:center]）；
+    // 负向先行断言保证 [图1] 不会误伤 [图12] ✓
+    body = body.replace(new RegExp('\\[图' + im.n + '(?=[\\]:])', 'g'), '[图' + n)
+  }
+  const cur = input.value
+  const sep = cur && !cur.endsWith('\n') ? '\n\n' : ''
+  // 整套 / 组卷（id=0）插到**已经有内容**的正文后面时，先手动分页：
+  // 每套卷子各自从新的一页开始，题号各从 1 起才讲得通（否则两套 1.2.3. 混在一页 ✗）
+  const brk = p.id === 0 && cur.trim() ? '[分页]\n' : ''
+  input.value += sep + brk + body + '\n'
+  render()
+  saveDraftSoon()
+  paperMsg.value = '已插入' + (p.label ? ' ' + p.label : p.id ? ' 试题 #' + p.id : '')
+    + ((p.imgs || []).length ? '，配图 ' + (p.imgs || []).length + ' 张' : '') + ' ✓（可继续选下一道）'
+}
+
 let draftTimer: number | undefined
 function saveDraftSoon() { clearTimeout(draftTimer); draftTimer = window.setTimeout(saveDraft, 300) }
 watch([input, template, fontFamily, fontSize, fontColor, lineHeight, para, indent, numStyle, headerText, footerText, autoNum, h2size, gapQ, headerGap, footerGap, optLayout], saveDraftSoon)
@@ -1343,6 +1378,10 @@ onMounted(() => {
   // 桌面端顺带拿到 images 目录，界面上提示用户「试题图放这里」
   if (isTauri()) imagesDir().then((d) => { imgDirHint.value = d })
   render()
+  // 试题库的接收口：本窗口开着就接住；顺带把「待办」消费掉 ✓
+  paperInsertSink.value = onQuestionInsert
+  const pend = paperPending.value
+  if (pend) { paperPending.value = null; onQuestionInsert(pend) }
 })
 
 // 文档关掉时把图形库的"接收方"清掉 —— 否则下次从工具栏打开图形库，
@@ -1354,6 +1393,7 @@ onBeforeUnmount(() => {
   //   → **两边都插不进去** ✓（用户实测：三维插不进试卷、也插不进页面 ✓）。
   geom3dSink.value = null
   vectorizeSink.value = null   // 描摹的接收口同样要清 ✓
+  paperInsertSink.value = null   // 试题库的接收口同样要清 ✓
 })
 /** 图片有更新（用户换了图）时清缓存重渲染 */
 function refreshImages() {

@@ -6,6 +6,8 @@
  *  - 筛选/计数交给 SQL（lib_q_facets / lib_q_search）：题量上去也不会拖慢界面 ✓
  */
 import { invoke } from './useTauri'
+import { assetSrc, loadAssets } from './useAssets'
+import type { QuestionImage } from './parseQuestions'
 
 export interface QFacets {
   ok?: boolean
@@ -116,5 +118,75 @@ export function previewHtmlOf(it: QItem): string {
   out += '<div class="qb__sec qb__sec--ans">答案：' + (ans ? esc(ans) : '<span class="qb__miss">（原卷没有 / 尚未录入）</span>') + '</div>'
   const sol = String(m.solution || '').trim()
   if (sol) out += '<div class="qb__sec">解析：' + esc(sol) + '</div>'
+  return out
+}
+
+
+/* ---------------- M3：批量改 / 插入（幻灯片 · 试卷） ---------------- */
+
+export interface QBatchOp { id: number; patch?: Record<string, unknown>; delete?: boolean }
+
+/** 批量改题：**一个事务**（改章节/打知识点/删除），中途失败全部回滚 ✓ */
+export async function qBatch(ops: QBatchOp[]): Promise<{ ok: boolean; updated: number; deleted: number; rows: Record<string, unknown>[]; error?: string }> {
+  try {
+    const r = await invoke<{ ok?: boolean; updated?: number; deleted?: number; rows?: Record<string, unknown>[]; error?: string }>('lib_q_batch', { ops })
+    if (r && r.ok) return { ok: true, updated: r.updated || 0, deleted: r.deleted || 0, rows: r.rows || [] }
+    return { ok: false, updated: 0, deleted: 0, rows: [], error: (r && r.error) || '批量保存失败' }
+  } catch (e) {
+    return { ok: false, updated: 0, deleted: 0, rows: [], error: String((e as Error)?.message || e) }
+  }
+}
+
+/** 题干 + 选项（选项数组为空 = 选项本来就写在题干里了，不要再拼一遍 ✓） */
+export function stemWithOptions(it: QItem): string {
+  const m = metaOf(it)
+  let stem = String(m.stem || it.body || it.title || '')
+  const opts = Array.isArray(m.options) ? (m.options as unknown[]).map((x) => String(x)) : []
+  if (opts.length) stem += '\n' + opts.map((o, i) => 'ABCDEFGH'[i] + '．' + o).join('\n')
+  return stem
+}
+
+/** 题干 + 选项 [+ 答案/解析] —— 幻灯片与试卷共用这一份排版 ✓ */
+export function questionTextOf(it: QItem, withAnswer: boolean): string {
+  const m = metaOf(it)
+  const lines = [stemWithOptions(it)]
+  if (withAnswer) {
+    const ans = String(m.answer || '').trim()
+    const sol = String(m.solution || '').trim()
+    if (ans) lines.push('【答案】' + ans)
+    if (sol) lines.push('【解析】' + sol)
+  }
+  return lines.join('\n')
+}
+
+/** Markdown 图片语法（老数据正文里写的就是这个） */
+const MD_IMG = /!\[([^\]]*)\]\(\s*<?([^)\s>]+)[^)]*\)/g
+/** [图N] / [图N:参数]（试卷正文的图号约定） */
+const IMG_TAG = /\[图\s*(\d+)(?::[^\]]*)?\]/g
+
+/**
+ * 把正文里的图片标记摘成空并报数 —— 混排元素放不下图，图要另做成 image 元素 ✓
+ * 返回 dropped = 摘掉了几处（用来提示"有几张图得手动补"）。
+ */
+export function stripImageMarkers(text: string): { text: string; dropped: number } {
+  let dropped = 0
+  let out = String(text || '').replace(MD_IMG, () => { dropped++; return '' })
+  out = out.replace(IMG_TAG, () => { dropped++; return '' })
+  out = out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+  return { text: out, dropped }
+}
+
+/** 题目自带的图（meta.images）；assetId 走资源库 hydrate 回 data URL ✓ */
+export async function pickImages(it: QItem): Promise<QuestionImage[]> {
+  const m = metaOf(it)
+  const raw = Array.isArray(m.images) ? (m.images as QuestionImage[]) : []
+  if (!raw.length) return []
+  const ids = raw.map((x) => Number(x.assetId)).filter((n) => n > 0)
+  if (ids.length) await loadAssets(ids)
+  const out: QuestionImage[] = []
+  for (const x of raw) {
+    const src = x.src || assetSrc(Number(x.assetId))
+    if (src) out.push({ n: Number(x.n) || out.length + 1, src, caption: x.caption })
+  }
   return out
 }
