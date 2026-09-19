@@ -18,7 +18,13 @@ export interface QFacets {
   byYear: Record<string, number>
   byPaper: Record<string, number>
   byKp: Record<string, number>
-  missing: { section: number; answer: number; kp: number; year: number; paper: number }
+  /** 【v4/P0b】生命周期状态分布（draft / needs_review / ready / approved / published / rejected） */
+  byStatus: Record<string, number>
+  /** 【v4/P0b】来源类别分布（六类规约 + 未知） */
+  bySourceKind: Record<string, number>
+  /** 【v4/P0b】带抽取告警的题数（warn 真列非空） */
+  warned: number
+  missing: { section: number; answer: number; kp: number; year: number; paper: number; code: number }
 }
 
 export interface QItem {
@@ -34,6 +40,15 @@ export interface QItem {
   paper: string
   kp: string[]
   updatedAt: string
+  /* ---- 【v4/P0b】四个 v4 真列：以前只躺在库里，界面上一个都看不到 ---- */
+  /** 人可读稳定编号 P-2026-0001（老师能口头引用 ✓） */
+  code: string
+  /** 生命周期：draft / needs_review / ready / approved / published / rejected */
+  status: string
+  /** 来源类别（六类规约；paper 为空时也是空） */
+  sourceKind: string
+  /** 抽取告警（AI / OCR 的 warnings，随题走；空串 = 没告警） */
+  warn: string
 }
 
 export interface QFilter {
@@ -48,6 +63,10 @@ export interface QFilter {
   missingAnswer?: boolean
   missingKp?: boolean
   missingYear?: boolean
+  /** 【v4/P0b】按生命周期状态筛（"(空)" = 还没标过状态） */
+  status?: string
+  /** 【v4/P0b】按来源类别筛 */
+  sourceKind?: string
   limit?: number
   offset?: number
 }
@@ -57,9 +76,29 @@ export const SECTIONS = ['集合与逻辑', '函数与导数', '三角函数与�
 export const QTYPE_LABEL: Record<string, string> = { choice: '选择题', multi: '多选题', blank: '填空题', answer: '解答题', proof: '证明题' }
 export const LEVELS = ['基础', '中档', '拔高']
 
+/* ---- 【v4/P0b】生命周期状态（方案 §5.1 状态机；只有 ready / approved / published 算「能进正式库」） ---- */
+export const STATUS_LABEL: Record<string, string> = {
+  draft: '草稿',
+  needs_review: '待复核',
+  ready: '可用',
+  approved: '已审',
+  published: '已发布',
+  rejected: '已弃',
+}
+/** 状态机顺序（下拉框按它排；不含 blocked —— 那是抽取过程的中间态，不落题） */
+export const STATUS_ORDER = ['draft', 'needs_review', 'ready', 'approved', 'published', 'rejected']
+
+/** 状态 → 中文；空串给「未标状态」，未知值原样显示（别把将来新加的状态吃掉 ✗） */
+export function statusLabel(s: string): string {
+  const k = String(s || '').trim()
+  if (!k) return '未标状态'
+  return STATUS_LABEL[k] || k
+}
+
 const EMPTY_FACETS: QFacets = {
   total: 0, bySection: {}, byQtype: {}, byLevel: {}, byYear: {}, byPaper: {}, byKp: {},
-  missing: { section: 0, answer: 0, kp: 0, year: 0, paper: 0 },
+  byStatus: {}, bySourceKind: {}, warned: 0,
+  missing: { section: 0, answer: 0, kp: 0, year: 0, paper: 0, code: 0 },
 }
 
 export async function qFacets(): Promise<QFacets> {
@@ -68,6 +107,52 @@ export async function qFacets(): Promise<QFacets> {
     if (r && r.ok !== false) return { ...EMPTY_FACETS, ...r, missing: { ...EMPTY_FACETS.missing, ...(r.missing || {}) } }
   } catch { /* 空库/浏览器降级都走默认值 ✓ */ }
   return EMPTY_FACETS
+}
+
+/* ---- 【v4/P0b】来源合规报告 + 受控词表：P0 只做了 Rust 命令，界面压根看不到 ---- */
+
+export interface SourceReportRow { id: number; title: string; paper: string; kind: string }
+
+export interface SourceReport {
+  ok: boolean
+  total: number
+  /** paper 为空的题数（P0 实测老库 129/169 —— 如实显示，不粉饰 ✓） */
+  empty: number
+  /** 有 paper 且符合六类模板的题数 */
+  canonical: number
+  /** 来源覆盖率 %（有来源 / 总数） */
+  fillRate: number
+  /** 成型率 %（成型 / 有来源的）—— 规约真正的验收指标，空值不算分子 ✓ */
+  canonicalRate: number
+  byKind: { kind: string; count: number }[]
+  needsWork: SourceReportRow[]
+  error?: string
+}
+
+const EMPTY_REPORT: SourceReport = {
+  ok: false, total: 0, empty: 0, canonical: 0,
+  fillRate: 0, canonicalRate: 0, byKind: [], needsWork: [],
+}
+
+export async function sourceReport(): Promise<SourceReport> {
+  try {
+    const r = await invoke<Partial<SourceReport>>('lib_source_report', {})
+    if (r && r.ok !== false) return { ...EMPTY_REPORT, ...r, ok: true }
+    return { ...EMPTY_REPORT, error: (r && r.error) || '读不到报告' }
+  } catch (e) {
+    return { ...EMPTY_REPORT, error: String((e as Error)?.message || e) }
+  }
+}
+
+export interface KpCatalogItem { kp: string; kind: string; aliases: string; parent: string }
+
+/** 受控词表（板块级）：kind = 'knowledge'（板块）/ 'method'（方法） */
+export async function kpCatalog(): Promise<KpCatalogItem[]> {
+  try {
+    const r = await invoke<{ ok?: boolean; items?: KpCatalogItem[] }>('lib_kp_catalog', {})
+    if (r && r.ok !== false) return r.items || []
+  } catch { /* 空库也能跑 ✓ */ }
+  return []
 }
 
 export async function qSearch(f: QFilter): Promise<{ total: number; items: QItem[] }> {

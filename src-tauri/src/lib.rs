@@ -1083,12 +1083,19 @@ fn lib_q_facets() -> serde_json::Value {
         "byYear": pair("SELECT CASE WHEN COALESCE(year,0)=0 THEN '(空)' ELSE CAST(year AS TEXT) END k, COUNT(*) c FROM library_item WHERE type='question' GROUP BY k ORDER BY c DESC"),
         "byPaper": pair("SELECT CASE WHEN COALESCE(paper,'')='' THEN '(空)' ELSE paper END k, COUNT(*) c FROM library_item WHERE type='question' GROUP BY k ORDER BY c DESC LIMIT 30"),
         "byKp": pair("SELECT kp k, COUNT(*) c FROM question_kp GROUP BY k ORDER BY c DESC"),
+        // 【v4/P0b】生命周期状态 + 来源类别（真列，已有索引）—— 界面按它们筛
+        "byStatus": pair("SELECT CASE WHEN COALESCE(status,'')='' THEN '(空)' ELSE status END k, COUNT(*) c FROM library_item WHERE type='question' GROUP BY k ORDER BY c DESC"),
+        "bySourceKind": pair("SELECT CASE WHEN COALESCE(source_kind,'')='' THEN '(空)' ELSE source_kind END k, COUNT(*) c FROM library_item WHERE type='question' GROUP BY k ORDER BY c DESC"),
+        // 带告警的题数（warn 真列非空）—— 题卡上的 ⚠ 角标就是它
+        "warned": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND COALESCE(warn,'')<>''"),
         "missing": {
             "section": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND COALESCE(section,'')=''"),
             "answer": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND json_valid(meta) AND COALESCE(json_extract(meta,'$.answer'),'')=''"),
             "kp": q("SELECT COUNT(*) FROM library_item q WHERE type='question' AND NOT EXISTS(SELECT 1 FROM question_kp k WHERE k.qid = q.id)"),
             "year": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND COALESCE(year,0)=0"),
-            "paper": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND COALESCE(paper,'')=''")
+            "paper": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND COALESCE(paper,'')=''"),
+            // 【v4/P0b】没有可读编号的题（迁移后应为 0；>0 说明有条写库路径漏了 lib_prepare_qmeta）
+            "code": q("SELECT COUNT(*) FROM library_item WHERE type='question' AND COALESCE(code,'')=''")
         }
     })
 }
@@ -1130,6 +1137,18 @@ fn lib_q_search(filter: serde_json::Value) -> serde_json::Value {
         if !v.is_empty() {
             where_sql.push_str(&format!(" AND {} = ?", key));
             args.push(rusqlite::types::Value::Text(v));
+        }
+    }
+    // 【v4/P0b】状态 / 来源类别（真列）。筛「(空)」走 COALESCE 判空，与 section 同一口径
+    for (key, col) in [("status", "status"), ("sourceKind", "source_kind")] {
+        let v = sget(key);
+        if !v.is_empty() {
+            if v == "(空)" {
+                where_sql.push_str(&format!(" AND COALESCE({},'')=''", col));
+            } else {
+                where_sql.push_str(&format!(" AND {} = ?", col));
+                args.push(rusqlite::types::Value::Text(v));
+            }
         }
     }
     let y = f.get("year").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -1176,7 +1195,8 @@ fn lib_q_search(filter: serde_json::Value) -> serde_json::Value {
         .unwrap_or(0);
 
     let sql = format!(
-        "SELECT id, title, body, meta, section, qtype, level, difficulty, year, paper, updated_at          FROM library_item{} ORDER BY id DESC LIMIT ? OFFSET ?",
+        // COALESCE：老行这四个真列可能是 NULL，用 String 取 NULL 会整行失败（P0b 新加的四个列）
+        "SELECT id, title, body, meta, section, qtype, level, difficulty, year, paper, COALESCE(code,''), COALESCE(status,''), COALESCE(source_kind,''), COALESCE(warn,''), updated_at          FROM library_item{} ORDER BY id DESC LIMIT ? OFFSET ?",
         where_sql
     );
     args.push(rusqlite::types::Value::Integer(limit));
@@ -1197,7 +1217,11 @@ fn lib_q_search(filter: serde_json::Value) -> serde_json::Value {
             "difficulty": r.get::<_, i64>(7)?,
             "year": r.get::<_, i64>(8)?,
             "paper": r.get::<_, String>(9)?,
-            "updatedAt": r.get::<_, String>(10)?,
+            "code": r.get::<_, String>(10)?,
+            "status": r.get::<_, String>(11)?,
+            "sourceKind": r.get::<_, String>(12)?,
+            "warn": r.get::<_, String>(13)?,
+            "updatedAt": r.get::<_, String>(14)?,
             "kp": Vec::<String>::new()
         }))
     }) {
@@ -1290,7 +1314,7 @@ fn lib_q_patch(id: i64, patch: serde_json::Value) -> serde_json::Value {
     // 取回新的真列（界面即时更新用 ✓）
     let row = conn
         .query_row(
-            "SELECT section, qtype, level, difficulty, year, paper FROM library_item WHERE id = ?1",
+            "SELECT section, qtype, level, difficulty, year, paper, COALESCE(code,''), COALESCE(status,''), COALESCE(source_kind,''), COALESCE(warn,'') FROM library_item WHERE id = ?1",
             [id],
             |r| {
                 Ok(serde_json::json!({
@@ -1300,6 +1324,11 @@ fn lib_q_patch(id: i64, patch: serde_json::Value) -> serde_json::Value {
                     "difficulty": r.get::<_, i64>(3)?,
                     "year": r.get::<_, i64>(4)?,
                     "paper": r.get::<_, String>(5)?,
+                    // 【v4/P0b】保存后界面要就地更新编号/状态/来源/告警，一并取回
+                    "code": r.get::<_, String>(6)?,
+                    "status": r.get::<_, String>(7)?,
+                    "sourceKind": r.get::<_, String>(8)?,
+                    "warn": r.get::<_, String>(9)?,
                 }))
             },
         )
@@ -1386,7 +1415,7 @@ fn lib_q_batch(ops: Vec<serde_json::Value>) -> serde_json::Value {
         }
         let row = tx
             .query_row(
-                "SELECT section, qtype, level, difficulty, year, paper FROM library_item WHERE id = ?1",
+                "SELECT section, qtype, level, difficulty, year, paper, COALESCE(code,''), COALESCE(status,''), COALESCE(source_kind,''), COALESCE(warn,'') FROM library_item WHERE id = ?1",
                 [id],
                 |r| {
                     Ok(serde_json::json!({
@@ -1397,6 +1426,10 @@ fn lib_q_batch(ops: Vec<serde_json::Value>) -> serde_json::Value {
                         "difficulty": r.get::<_, i64>(3)?,
                         "year": r.get::<_, i64>(4)?,
                         "paper": r.get::<_, String>(5)?,
+                        "code": r.get::<_, String>(6)?,
+                        "status": r.get::<_, String>(7)?,
+                        "sourceKind": r.get::<_, String>(8)?,
+                        "warn": r.get::<_, String>(9)?,
                     }))
                 },
             )
@@ -1495,6 +1528,8 @@ fn lib_source_report() -> serde_json::Value {
         "total": total,
         "empty": empty,
         "canonical": canonical,
+        // 【P0b 修 bug】items 算出来了却没放进返回值 —— 报告少了「按来源类别」这一块
+        "byKind": items,
         "needsWork": needs,
         // 有来源的比例（覆盖率）
         "fillRate": pct(filled, total),

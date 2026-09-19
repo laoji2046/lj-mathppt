@@ -14,11 +14,11 @@ import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch } from 
 import AppIcon from './AppIcon.vue'
 import { typesetMixed } from '@/composables/useMathJax'
 import {
-  SECTIONS, QTYPE_LABEL, LEVELS,
+  SECTIONS, QTYPE_LABEL, LEVELS, STATUS_ORDER, statusLabel,
   qFacets, qSearch, qPatch, qBatch, metaOf, excerptOf, previewHtmlOf,
-  questionTextOf, stripImageMarkers, pickImages,
+  questionTextOf, stripImageMarkers, pickImages, sourceReport, kpCatalog,
 } from '@/composables/useQuestionBank'
-import type { QFacets, QFilter, QItem } from '@/composables/useQuestionBank'
+import type { QFacets, QFilter, QItem, SourceReport } from '@/composables/useQuestionBank'
 
 /** 试题录入（M4）：体量不小，按需加载 ✓ */
 const QuestionImportDialog = defineAsyncComponent(() => import('./QuestionImportDialog.vue'))
@@ -28,7 +28,7 @@ import type { SlideElement } from '@/types'
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 
-const facets = ref<QFacets>({ total: 0, bySection: {}, byQtype: {}, byLevel: {}, byYear: {}, byPaper: {}, byKp: {}, missing: { section: 0, answer: 0, kp: 0, year: 0, paper: 0 } })
+const facets = ref<QFacets>({ total: 0, bySection: {}, byQtype: {}, byLevel: {}, byYear: {}, byPaper: {}, byKp: {}, byStatus: {}, bySourceKind: {}, warned: 0, missing: { section: 0, answer: 0, kp: 0, year: 0, paper: 0, code: 0 } })
 const items = ref<QItem[]>([])
 const total = ref(0)
 const selId = ref(0)
@@ -40,13 +40,48 @@ const importOpen = ref(false)
 /** 最近一次批量删除前 Rust 侧留的整库备份路径（hover 可看全路径）✓ */
 const lastBackup = ref('')
 
+/* ---------------- 【P0b】来源报告 + 受控词表 ---------------- */
+/** 来源报告开没开 / 报告内容（后端算好，前端只负责显示 ✓） */
+const reportOpen = ref(false)
+const report = ref<SourceReport | null>(null)
+const reportBusy = ref(false)
+/** 知识点输入建议（来自 kp_catalog，只取板块级 knowledge）✓ */
+const kpOptions = ref<string[]>([])
+
+async function openReport() {
+  reportOpen.value = true
+  reportBusy.value = true
+  try {
+    report.value = await sourceReport()
+  } finally {
+    reportBusy.value = false
+  }
+}
+
+async function loadKpCatalog() {
+  try {
+    kpOptions.value = (await kpCatalog()).filter((x) => x.kind === 'knowledge').map((x) => x.kp)
+  } catch { /* 空库也能跑 ✓ */ }
+}
+
+/** 报告里点一道 → 关报告并跳过去（不在当前筛选里就先清筛选 ✓） */
+async function jumpTo(id: number) {
+  reportOpen.value = false
+  if (!items.value.some((x) => x.id === id)) {
+    f.value = {}
+    await reload()
+  }
+  const it = items.value.find((x) => x.id === id)
+  if (it) select(it)
+}
+
 const f = ref<QFilter>({})
 const sel = computed(() => items.value.find((x) => x.id === selId.value) || null)
 const kpKeys = computed(() => Object.keys(facets.value.byKp || {}))
 const yearKeys = computed(() => Object.keys(facets.value.byYear || {}).filter((k) => k !== '(空)'))
 
 /** 就地表单（保存时按字段 patch 回 meta ✓） */
-const form = ref({ section: '', qtype: '', level: '', year: 0, paperName: '', answer: '', kpText: '' })
+const form = ref({ section: '', qtype: '', level: '', year: 0, paperName: '', answer: '', kpText: '', status: '' })
 
 /* ---------------- M3：多选 + 批量 + 插入 ---------------- */
 const store = useDeckStore()
@@ -78,7 +113,7 @@ async function reload() {
     busy.value = false
   }
 }
-onMounted(reload)
+onMounted(() => { void reload(); void loadKpCatalog() })
 
 function pickSection(s: string) {
   f.value.section = f.value.section === s ? undefined : s
@@ -104,6 +139,7 @@ function select(it: QItem) {
     paperName: String(m.paperName || it.paper || ''),
     answer: String(m.answer || ''),
     kpText: (it.kp || []).join('、'),
+    status: it.status || '',
   }
   void nextTick(renderPreview)
 }
@@ -138,6 +174,8 @@ async function save() {
       paperName: form.value.paperName || '',
       answer: form.value.answer || '',
       knowledge: kpListOf(form.value.kpText),
+      // 【P0b】空串 = 保持原状态（Rust 侧 CASE WHEN '' THEN status）✓
+      status: form.value.status || '',
     }
     const r = await qPatch(it.id, patch)
     if (!r.ok) { flash('✗ ' + (r.error || '保存失败')); return }
@@ -297,6 +335,7 @@ async function batchDelete() {
         <span class="qb__sub">共 {{ facets.total }} 道 · 当前筛出 {{ total }} 道</span>
         <span v-if="msg" class="qb__msg">{{ msg }}</span>
         <span class="qb__headrt">
+          <button class="qb__btn" title="来源合规报告：多少题有来源 / 有多少已成模板 / 哪几道要处理" @click="openReport">来源报告</button>
           <button class="qb__btn qb__btn--main" title="从 Markdown / JSON / PDF 批量录入试题" @click="importOpen = true">录入试题</button>
           <button class="qb__close" title="关闭 (Esc)" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
         </span>
@@ -315,6 +354,14 @@ async function batchDelete() {
         <select v-model.number="f.year" @change="reload">
           <option :value="0">年份：全部</option>
           <option v-for="y in yearKeys" :key="y" :value="Number(y)">{{ y }}（{{ facets.byYear[y] }}）</option>
+        </select>
+        <select v-model="f.status" @change="reload">
+          <option value="">状态：全部</option>
+          <option v-for="s in STATUS_ORDER" :key="s" :value="s">{{ statusLabel(s) }}（{{ facets.byStatus[s] || 0 }}）</option>
+        </select>
+        <select v-model="f.sourceKind" @change="reload">
+          <option value="">来源类别：全部</option>
+          <option v-for="(c, k) in facets.bySourceKind" :key="k" :value="k">{{ k }}（{{ c }}）</option>
         </select>
         <label class="qb__chk"><input v-model="f.missingAnswer" type="checkbox" @change="reload" />缺答案 {{ facets.missing.answer }}</label>
         <label class="qb__chk"><input v-model="f.missingKp" type="checkbox" @change="reload" />缺知识点 {{ facets.missing.kp }}</label>
@@ -351,11 +398,15 @@ async function batchDelete() {
               <input type="checkbox" :checked="picked.includes(it.id)" @change="togglePick(it)" />
             </label>
             <div class="qb__chips">
+              <span class="qb__chip qb__chip--code" :class="{ 'qb__chip--warn': !it.code }" :title="it.code || '没有编号（写库漏了 lib_prepare_qmeta）'">{{ it.code || '无编号' }}</span>
               <span class="qb__chip" :class="{ 'qb__chip--warn': !it.section }">{{ it.section || '未归类' }}</span>
               <span class="qb__chip">{{ QTYPE_LABEL[it.qtype] || '未判题型' }}</span>
               <span v-if="it.level" class="qb__chip">{{ it.level }}</span>
               <span class="qb__chip" :class="{ 'qb__chip--warn': !it.year }">{{ it.year ? it.year + ' 年' : '无年份' }}</span>
+              <span class="qb__chip qb__chip--st" :class="'qb__chip--st-' + (it.status || 'none')">{{ statusLabel(it.status) }}</span>
+              <span v-if="it.sourceKind" class="qb__chip qb__chip--src">{{ it.sourceKind }}</span>
               <span v-if="!metaOf(it).answer" class="qb__chip qb__chip--warn">缺答案</span>
+              <span v-if="it.warn" class="qb__chip qb__chip--alert" :title="it.warn">⚠ 告警</span>
             </div>
             <div class="qb__stem">{{ excerptOf(it.body || it.title) }}</div>
             <div v-if="it.kp.length" class="qb__kps">{{ it.kp.join(' · ') }}</div>
@@ -367,9 +418,13 @@ async function batchDelete() {
           <template v-else>
             <div class="qb__chips qb__chips--top">
               <span class="qb__chip">#{{ sel.id }}</span>
+              <span class="qb__chip qb__chip--code" :class="{ 'qb__chip--warn': !sel.code }">{{ sel.code || '无编号' }}</span>
+              <span class="qb__chip qb__chip--st" :class="'qb__chip--st-' + (sel.status || 'none')">{{ statusLabel(sel.status) }}</span>
               <span class="qb__chip" :class="{ 'qb__chip--warn': !sel.paper }">{{ sel.paper || '来源未填' }}</span>
+              <span v-if="sel.sourceKind" class="qb__chip qb__chip--src">{{ sel.sourceKind }}</span>
               <span class="qb__chip">{{ sel.difficulty ? '难度 ' + sel.difficulty : '难度未填' }}</span>
             </div>
+            <div v-if="sel.warn" class="qb__warnbox">⚠ {{ sel.warn }}</div>
             <div ref="previewHost" class="qb__preview"></div>
             <div class="qb__form">
               <label>章节
@@ -393,6 +448,12 @@ async function batchDelete() {
               <label>年份
                 <input v-model.number="form.year" type="number" min="1900" max="2100" />
               </label>
+              <label>状态
+                <select v-model="form.status">
+                  <option value="">（保持原状态）</option>
+                  <option v-for="s in STATUS_ORDER" :key="s" :value="s">{{ statusLabel(s) }}</option>
+                </select>
+              </label>
               <label class="qb__full">试卷名 / 来源
                 <input v-model="form.paperName" placeholder="例如：2026届高三年级数学学科试卷" />
               </label>
@@ -400,7 +461,7 @@ async function batchDelete() {
                 <textarea v-model="form.answer" rows="2" placeholder="原卷没有就留空 ✓（不要自己解题）"></textarea>
               </label>
               <label class="qb__full">知识点（逗号/顿号分隔）
-                <input v-model="form.kpText" placeholder="例如：导数、单调性" />
+                <input v-model="form.kpText" list="qb-kp" placeholder="例如：导数、单调性（可点开词表挑 ✓）" />
               </label>
               <div class="qb__actions">
                 <button class="qb__btn qb__btn--main" :disabled="busy" @click="save">保存这一道</button>
@@ -430,6 +491,45 @@ async function batchDelete() {
     </div>
 
     <QuestionImportDialog v-if="importOpen" @close="importOpen = false" @imported="onImported" />
+
+    <!-- 【P0b】知识点建议：来自受控词表 kp_catalog（kind=knowledge 的板块级词）✓ -->
+    <datalist id="qb-kp"><option v-for="k in kpOptions" :key="k" :value="k"></option></datalist>
+
+    <!-- 【P0b】来源报告：把 lib_source_report 的数字摊开（覆盖率 ≠ 成型率，两个都摆出来 ✓） -->
+    <div v-if="reportOpen" class="qb__rpt" @click.self="reportOpen = false">
+      <div class="qb__rptbox">
+        <header class="qb__rpthead">
+          <span class="qb__title">来源报告</span>
+          <span class="qb__sub">「有来源」≠「来源成型」—— 两个数分开看 ✓</span>
+          <button class="qb__close" title="关闭" @click="reportOpen = false"><AppIcon name="close" :size="13" /></button>
+        </header>
+        <div v-if="reportBusy" class="qb__empty">正在统计…</div>
+        <div v-else-if="!report" class="qb__empty">读不到报告</div>
+        <div v-else class="qb__rptbody">
+          <div v-if="report.error" class="qb__warnbox">{{ report.error }}</div>
+          <div class="qb__rptcards">
+            <div class="qb__rptcard"><b>{{ report.total }}</b><span>题目总数</span></div>
+            <div class="qb__rptcard"><b>{{ report.empty }}</b><span>没有来源</span></div>
+            <div class="qb__rptcard"><b>{{ report.canonical }}</b><span>来源成型</span></div>
+            <div class="qb__rptcard" :class="{ 'qb__rptcard--warn': report.fillRate !== 100 }"><b>{{ report.fillRate }}%</b><span>来源覆盖率</span></div>
+            <div class="qb__rptcard" :class="{ 'qb__rptcard--warn': report.canonicalRate !== 100 }"><b>{{ report.canonicalRate }}%</b><span>成型率（有来源的里面）</span></div>
+          </div>
+          <div class="qb__t1">按来源类别</div>
+          <div v-if="!report.byKind.length" class="qb__hint">还没有题目 ✓</div>
+          <div class="qb__chips">
+            <span v-for="r in report.byKind" :key="r.kind" class="qb__chip">{{ r.kind }} {{ r.count }}</span>
+          </div>
+          <div class="qb__t1">需要处理（{{ report.needsWork.length }}）</div>
+          <div v-if="!report.needsWork.length" class="qb__hint">来源都成型了 ✓</div>
+          <div v-for="r in report.needsWork.slice(0, 200)" :key="r.id" class="qb__rptrow" @click="jumpTo(r.id)">
+            <span class="qb__rptcode">#{{ r.id }}</span>
+            <span class="qb__rptpaper">{{ r.paper }}</span>
+            <span class="qb__rpttitle">{{ r.title }}</span>
+          </div>
+          <div v-if="report.needsWork.length > 200" class="qb__hint">只显示前 200 条（共 {{ report.needsWork.length }} 条）</div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -491,4 +591,30 @@ async function batchDelete() {
 .qb__btn--danger { color: #b42318; border-color: #f0c9c4; }
 .qb__btn--danger:disabled { color: var(--muted); border-color: var(--border); }
 .qb__bak { font-size: 11px; color: var(--muted); }
+/* ---- 【P0b】编号 / 状态 / 来源类别 / 告警 ---- */
+.qb__chip--code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #eef1f6; color: #3a4252; }
+.qb__chip--src { background: #eaf3ec; color: #2f6b45; }
+.qb__chip--st { background: #eef1f6; color: #3a4252; }
+.qb__chip--st-published { background: #e6f4ea; color: #1f6b3a; }
+.qb__chip--st-ready, .qb__chip--st-approved { background: #e8effa; color: #2a4f8f; }
+.qb__chip--st-draft, .qb__chip--st-needs_review { background: #fdf3e3; color: #9a6212; }
+.qb__chip--st-rejected { background: #f6e7e6; color: #9a2b22; }
+.qb__chip--st-none { background: #f1f1f1; }
+.qb__chip--alert { background: #fdeceb; color: #a02016; font-weight: 600; }
+.qb__warnbox { margin: 0 0 8px; padding: 6px 8px; border: 1px solid #f3d3ce; border-radius: 6px; background: #fdf3f2; color: #8f2a1b; font-size: 12px; line-height: 1.6; }
+.qb__rpt { position: absolute; inset: 0; z-index: 12; background: rgba(20, 24, 34, 0.45); display: flex; align-items: center; justify-content: center; }
+.qb__rptbox { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: min(880px, 92%); max-height: 84%; display: flex; flex-direction: column; overflow: hidden; }
+.qb__rpthead { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.qb__rpthead .qb__close { margin-left: auto; }
+.qb__rptbody { overflow-y: auto; padding: 12px 16px; }
+.qb__rptcards { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.qb__rptcard { flex: 1 1 130px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2, #faf9f6); display: flex; flex-direction: column; gap: 2px; }
+.qb__rptcard b { font-size: 17px; color: var(--text); }
+.qb__rptcard span { font-size: 11px; color: var(--muted); }
+.qb__rptcard--warn b { color: #b3541e; }
+.qb__rptrow { display: flex; align-items: baseline; gap: 8px; padding: 4px 2px; border-bottom: 1px dashed var(--border); font-size: 12px; cursor: pointer; }
+.qb__rptrow:hover { background: var(--panel-2, #f4f3ef); }
+.qb__rptcode { color: var(--muted); font-family: ui-monospace, monospace; }
+.qb__rptpaper { color: #8f2a1b; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qb__rpttitle { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
