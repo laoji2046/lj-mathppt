@@ -545,7 +545,94 @@ fn lib_open() -> Result<rusqlite::Connection, String> {
         "CREATE TABLE IF NOT EXISTS library_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);"
     );
     conn.execute_batch(sql).map_err(|e| format!("建表失败: {}", e))?;
+    // 打开即迁移（版本记在 library_meta.schema_version ✓；每步迁移前先备份 ✓）
+    lib_migrate(&conn)?;
     Ok(conn)
+}
+
+/// 当前库结构版本（新库建表即 v1；打开时自动升到最新 ✓）
+const LIB_SCHEMA_VERSION: i64 = 2;
+
+/// 读库结构版本：library_meta 里没有这行 → 当 v1（老库）✓
+fn lib_schema_get(conn: &rusqlite::Connection) -> i64 {
+    conn.query_row("SELECT v FROM library_meta WHERE k = 'schema_version'", [], |r| r.get::<_, String>(0))
+        .ok()
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(1)
+}
+
+/// 迁移前备份：把 .db 复制成 library.db.bak-v{n}-{时间戳}（同目录 ✓）。
+/// **备份失败就不迁移** —— 宁可不动，也不能冒险把老师的题库改坏 ✗
+fn lib_backup_before(to_v: i64) -> Result<(), String> {
+    let p = library_path();
+    if !p.exists() { return Ok(()); }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let bak = p.with_file_name(format!("library.db.bak-v{}-{}", to_v, ts));
+    std::fs::copy(&p, &bak).map_err(|e| format!("迁移前备份失败（{}）: {}", bak.to_string_lossy(), e))?;
+    Ok(())
+}
+
+/// 【库结构迁移】逐版升级；每步之前先备份 ✓。老库只有 v1 → 会依次跑到最新；
+/// 新库建表时是 v1，第一次打开就补到最新 ✓（`CREATE TABLE IF NOT EXISTS` 不会补列，所以必须有它 ✗）
+fn lib_migrate(conn: &rusqlite::Connection) -> Result<(), String> {
+    let mut v = lib_schema_get(conn);
+    if v >= LIB_SCHEMA_VERSION { return Ok(()); }
+
+    // ---- v1 → v2：把 meta 里的 section 抽成**真列 + 索引** ----
+    //  为什么：板块筛选/排序现在要扫全部 meta(JSON) ✗；抽成列后能走索引 ✓
+    //  **同步不用改保存路径**：用两个触发器从 NEW.meta 里自动抽 section ✓
+    if v == 1 {
+        lib_backup_before(2)?;
+        let has: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pragma_table_info('library_item') WHERE name = 'section'", [], |r| r.get(0))
+            .unwrap_or(0);
+        if has == 0 {
+            conn.execute_batch(
+                "ALTER TABLE library_item ADD COLUMN section TEXT DEFAULT '';
+                 UPDATE library_item SET section = COALESCE(json_extract(meta, '$.section'), '');
+                 CREATE INDEX IF NOT EXISTS idx_lib_section ON library_item(section);
+                 CREATE TRIGGER IF NOT EXISTS trg_lib_section_ins AFTER INSERT ON library_item
+                 BEGIN UPDATE library_item SET section = COALESCE(json_extract(NEW.meta, '$.section'), '') WHERE id = NEW.id; END;
+                 CREATE TRIGGER IF NOT EXISTS trg_lib_section_upd AFTER UPDATE OF meta ON library_item
+                 BEGIN UPDATE library_item SET section = COALESCE(json_extract(NEW.meta, '$.section'), '') WHERE id = NEW.id; END;",
+            )
+            .map_err(|e| format!("迁移 v1→v2 失败: {}", e))?;
+        }
+        v = 2;
+    }
+
+    conn.execute(
+        "INSERT INTO library_meta(k, v) VALUES('schema_version', ?1) ON CONFLICT(k) DO UPDATE SET v = ?1",
+        [v.to_string()],
+    )
+    .map_err(|e| format!("写入 schema_version 失败: {}", e))?;
+    Ok(())
+}
+
+/// 库结构信息（版本 / 条数 / section 列填了几条）—— 诊断与自检用 ✓
+#[tauri::command]
+fn lib_schema_info() -> serde_json::Value {
+    match lib_open() {
+        Ok(conn) => {
+            let v = lib_schema_get(&conn);
+            let n: i64 = conn.query_row("SELECT COUNT(*) FROM library_item", [], |r| r.get(0)).unwrap_or(0);
+            let sec: i64 = conn
+                .query_row("SELECT COUNT(*) FROM library_item WHERE section IS NOT NULL AND section <> ''", [], |r| r.get(0))
+                .unwrap_or(0);
+            serde_json::json!({
+                "ok": true,
+                "version": v,
+                "latest": LIB_SCHEMA_VERSION,
+                "items": n,
+                "sectionFilled": sec,
+                "path": library_path().to_string_lossy(),
+            })
+        }
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
 }
 
 /// 库信息：路径 + 条目数（前端显示与诊断用）。
@@ -1490,6 +1577,7 @@ pub fn run() {
             list_windows,
             capture_window,
             lib_info,
+        lib_schema_info,
         ai_chat,
         asset_get,
             lib_query,
