@@ -2,10 +2,10 @@
  * 题库的「大图」不进题目 JSON（SQLite 的 meta），而是存成**内容库资源**（type='asset'），
  * 题目里只留 assetId —— 这样列表加载、导出 JSON、跨机迁移都轻 ✓
  *
- * ⚠ 现状：按「整库 asset 拉一次 + 会话内缓存」实现（Rust 侧还没有按 id 取的命令）。
- *   资源多时首次加载会慢 —— 后续加 `asset_get(ids)` 优化（见 docs/试题库-重设计.md）。
+ * 取图走 Rust 的 `asset_get(ids)`（**按 id 精确取**）；非桌面端降级成 `ensureAssets()`（整库拉一次）。
  */
 import { libQuery, libSave } from './useLibrary'
+import { invoke, isTauri } from './useTauri'
 
 const cache = new Map<number, string>()
 let loadedAll = false
@@ -23,7 +23,22 @@ export async function saveAsset(src: string): Promise<number> {
   } catch { return 0 }
 }
 
-/** 把所有资源读进缓存（一次；读不到就算了 —— 图会缺，但题还在 ✓） */
+/** 【按 id 精确取图】只取缓存里没有的；Rust 侧一条 SQL 就够（不再整库拉） */
+export async function loadAssets(ids: number[]): Promise<void> {
+  const need = Array.from(new Set((ids || []).map((x) => Number(x)).filter((x) => x > 0 && !cache.has(x))))
+  if (!need.length) return
+  if (!isTauri()) { await ensureAssets(); return }
+  try {
+    const r = await invoke<{ ok?: boolean; items?: { id: number; meta: string }[] }>('asset_get', { ids: need })
+    for (const it of r?.items || []) {
+      let src = ''
+      try { src = String((JSON.parse(it.meta || '{}') as { src?: string }).src || '') } catch { src = '' }
+      if (src) cache.set(Number(it.id), src)
+    }
+  } catch { /* 取不到 → 退化成「缺图」，但题还在 */ }
+}
+
+/** 整库拉一次（浏览器降级 / 老数据没有 assetId 时的兜底） */
 export async function ensureAssets(): Promise<void> {
   if (loadedAll) return
   try {

@@ -17,7 +17,7 @@ import { libQuery, libSave, libRemove, libBump, libTags, libSaveMany } from './u
 import type { ParsedQuestion, QuestionImage } from './parseQuestions'
 import { judgeNonQuestion } from './parseQuestions'
 import type { LibDraft, LibItem } from './useLibrary'
-import { saveAsset, ensureAssets, assetSrc } from './useAssets'
+import { saveAsset, ensureAssets, assetSrc, loadAssets } from './useAssets'
 
 export type Difficulty = 1 | 2 | 3 | 4 | 5
 
@@ -321,7 +321,10 @@ export function missingAnswer(list: QuestionEntry[]): QuestionEntry[] {
 export async function listQuestions(): Promise<QuestionEntry[]> {
   const list = (await libQuery('question')).map(toEntry)
   // 【大图 hydrate】库里存的是 assetId → 这里补回 src（界面/插图/导出照旧拿 src ✓）
-  await ensureAssets()
+  const needIds: number[] = []
+  for (const e of list) { for (const im of e.q.images || []) { if (!im.src && im.assetId) needIds.push(im.assetId) } }
+  if (needIds.length) await loadAssets(needIds)   // 按 id 精确取（Rust asset_get）
+  else await ensureAssets()                       // 浏览器降级 / 老数据
   for (const e of list) {
     for (const im of e.q.images || []) {
       if (!im.src && im.assetId) im.src = assetSrc(im.assetId)

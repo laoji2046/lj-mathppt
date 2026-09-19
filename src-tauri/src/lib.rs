@@ -563,6 +563,30 @@ fn lib_info() -> serde_json::Value {
     }
 }
 
+/// 【按 id 取资源】题库大图存成 type='asset' 的条目后，前端按 id 把图取回来。
+/// 以前是整库 asset 拉一次（资源多了首次加载很慢 ✗）→ 现在按 id 精确取 ✓
+#[tauri::command]
+fn asset_get(ids: Vec<i64>) -> serde_json::Value {
+    if ids.is_empty() {
+        return serde_json::json!({ "ok": true, "items": [] });
+    }
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for id in ids {
+        let row = conn.query_row(
+            "SELECT id, meta FROM library_item WHERE id = ?1 AND type = 'asset'",
+            [id],
+            |r| { let i: i64 = r.get(0)?; let m: String = r.get(1)?; Ok((i, m)) },
+        );
+        if let Ok((i, m)) = row {
+            out.push(serde_json::json!({ "id": i, "meta": m }));
+        }
+    }
+    serde_json::json!({ "ok": true, "items": out })
+}
 /// 取某一类条目（**按 id 降序：新录入的在最上面**）。
 ///
 /// ⚠ 曾经是 ORDER BY used_count DESC, id ASC —— 但界面上早就不显示「引用次数」、
@@ -1362,6 +1386,7 @@ pub fn run() {
             list_windows,
             capture_window,
             lib_info,
+        asset_get,
             lib_query,
             lib_save,
             lib_remove,
