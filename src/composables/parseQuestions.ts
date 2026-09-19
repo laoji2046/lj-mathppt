@@ -250,8 +250,9 @@ function stripNonQuestionLines(text: string): { text: string; skipped: number } 
     if (noteHits(t) >= 2) { skipped++; return }
     if (isShortNote(t)) { skipped++; return }
     if (RE_NOTE_HEAD.test(t)) { skipped++; return }
-    // 分段标题行（一、选择题）与「(12 分)」这种分值行 —— 都不是题目
-    if (isSegmentHead(t)) { skipped++; return }
+    // 分段标题行（一、选择题）—— 不是题目，但**不能直接丢**：它是"题型"的唯一可靠来源，
+    //   所以要**带个标记留在文本里**（），交给 splitBySegmentHeads 用；题目文本里不含这个字符。
+    // 小节标题行（一、选择题）**不在这里丢**：它决定后面那道题的题型，交给 splitBlocks + 块内循环处理
     if (/^[（(]\s*\d{1,3}\s*分\s*[)）]\s*$/.test(t)) { skipped++; return }
     if (i < 8 && isTitleLine(t)) { skipped++; return }
     out.push(l)
@@ -271,6 +272,38 @@ function stripMark(t: string): string {
 function isSegmentHead(t: string): boolean {
   const s = stripMark(t)
   return /^[一二三四五六七八九十]{1,3}\s*[、.．]\s*(选择题|填空题|解答题|多选题|单选题|判断题|计算题|证明题|应用题|选做题|必做题)/.test(s)
+}
+
+/** 「一、选择题：本题共 8 小题…」这行告诉我们**这一段的题型** —— 这是试卷里最可靠的题型信号
+ *  （比"看有没有选项"稳：解答题里也会出现选项字母；而选择题可能一个选项都没切出来）。
+ *  返回 '' = 认不出（那就退回结构推断）。 */
+export function typeOfSegmentHead(t: string): string {
+  const s = t.replace(/[#*`_\s]/g, '')
+  if (/多选|多项选择|有多项符合题目要求|至少有两项/.test(s)) return 'multi'
+  if (/单项选择|选择题|只有一项符合题目要求/.test(s)) return 'choice'
+  if (/填空/.test(s)) return 'blank'
+  if (/解答|证明题|计算题|应用题|必做题|选做题/.test(s)) return 'answer'
+  return ''
+}
+
+/** 按「小节标题」把整篇切成若干段，每段带上题型（标题行本身不再进题面） */
+export function splitBySegmentHeads(text: string): { text: string; qtype: string }[] {
+  const out: { text: string; qtype: string }[] = []
+  let cur: string[] = []
+  let curType = ''
+  // eslint-disable-next-line prefer-const
+  for (const line of text.split('\n')) {
+    //  开头 = 上面"非题目行剥离"阶段特意留下来的小节标题（原始行）
+    if (line.charAt(0) === '' || isSegmentHead(line)) {
+      if (cur.join('\n').trim()) out.push({ text: cur.join('\n'), qtype: curType })
+      cur = []
+      curType = typeOfSegmentHead(line)
+      continue
+    }
+    cur.push(line)
+  }
+  if (cur.join('\n').trim()) out.push({ text: cur.join('\n'), qtype: curType })
+  return out.length ? out : [{ text, qtype: '' }]
 }
 
 /** 这一段有没有「题目特征」（选项/答案/解析/数学符号/填空括号/下划线） */
@@ -360,6 +393,13 @@ function splitBlocks(text: string): string[] {
       }
       continue
     }
+    // 小节标题（一、选择题）也是分块边界：它必须成为**新块的第一行** ——
+    // 这样块内循环先读到它、把 qtype 定好，再处理这道题 ✓（顺序错了题型就会张冠李戴）
+    if (isSegmentHead(l)) {
+      if (cur.some((x) => x.trim())) blocks.push(cur.join('\n'))
+      cur = [l]
+      continue
+    }
     if (RE_NUM.test(l) && cur.some((x) => x.trim())) {
       blocks.push(cur.join('\n'))
       cur = [l]
@@ -376,10 +416,23 @@ function t_all(block: string): string {
 }
 
 export function parseQuestions(raw: string): ParsedQuestion[] {
+  const out: ParsedQuestion[] = []
+  // ⚠⚠ 顺序很关键：**先整篇剥掉"非题目行"（其中「参考答案」要整段截断），再按小节切段**。
+  //   反过来（先切段再剥）会踩一个大坑：答案区里也有「## 四、解答题」这种小节标题 →
+  //   它被当成新一段的开始，而这一段的文本里已经没有「参考答案」那行标题了 →
+  //   **答案被当成好几道题** ✗（实测真卷 19 题变 24 题，多出来的 5 条正是填空/解答答案）
   const stripped = stripNonQuestionLines(raw)
   skippedNonQuestion = stripped.skipped
+  // 小节标题（一、选择题…）由 splitBlocks 当成分块边界、在块内循环里被识别成题型 ✓
+  out.push(...parseSegment(stripped.text, ''))
+  return out
+}
+
+/** 一段（一个小节）内部的切题 + 逐题解析 */
+function parseSegment(raw: string, segType: string): ParsedQuestion[] {
+  // 剥"非题目行"已在 parseQuestions 里对整篇做过一次（顺序原因见那里的注释）
   const out: ParsedQuestion[] = []
-  for (const block of splitBlocks(stripped.text)) {
+  for (const block of splitBlocks(raw)) {
     // ⚠ 考生须知 / 抬头 / 注意事项**不是题目** —— 它们也常以 1. 2. 编号，会被切题规则误切
     if (isNonQuestionBlock(block)) { skippedNonQuestion += 1; continue }
     const ls = block.split('\n')
@@ -391,7 +444,7 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
     let difficulty = 3
     let year = ''
     let region = ''
-    let qtype = ''
+    let qtype = segType                  // 小节标题给的题型（兜底见下面 hasQuestionFeature 之后）
     let section = ''
     let chapter = ''
     let date = ''
@@ -404,6 +457,8 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
         if (mode === 'solution') solution += '\n'
         continue
       }
+      // 小节标题行（块的第一行）：定这一段所有题的题型，本身不进题面
+      if (isSegmentHead(line)) { if (!qtype) qtype = typeOfSegmentHead(line); continue }
       let m = line.match(RE_DIFF)
       if (m) { difficulty = parseDiff(m[1]); continue }
       m = line.match(RE_QTYPE)
@@ -470,6 +525,12 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
     const scoreExplicit = ms ? Number(ms[1]) || 0 : 0
 
     if (!stem && !options.length) continue
+    // 题型兜底：小节标题没给 → 按结构猜（有选项 = 选择；有下划线空 = 填空；否则解答）
+    if (!qtype) {
+      const all = stem + ' ' + options.join(' ')
+      qtype = options.length >= 1 ? 'choice'
+        : /_{3,}|＿{3,}/.test(all) ? 'blank' : 'answer'
+    }
     out.push({
       title: autoTitle(stem),
       stem,
