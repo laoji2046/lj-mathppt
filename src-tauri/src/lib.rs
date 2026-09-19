@@ -575,6 +575,25 @@ fn lib_backup_before(to_v: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// 【M4 加固】打一个带标签的整库备份（同目录）：library.db.bak-{tag}-{时间戳}
+/// 用途：**批量删除前自动留一份** —— 误点「全选 → 删除」也能整库还原 ✓
+/// （v1443 实测教训：一个「全选 → 删除」就把线上 169 道清空了 ✗）
+fn lib_backup_tagged(tag: &str) -> String {
+    let p = library_path();
+    if !p.exists() {
+        return String::new();
+    }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let bak = p.with_file_name(format!("library.db.bak-{}-{}", tag, ts));
+    match std::fs::copy(&p, &bak) {
+        Ok(_) => bak.to_string_lossy().to_string(),
+        Err(_) => String::new(),
+    }
+}
+
 /// 【题库 v3】从 meta(JSON) 里取要抽成真列的筛选字段：(qtype, level, difficulty, year, paper)
 /// 一律**容错**：meta 不是合法 JSON、字段缺失、类型不对 → 给默认值
 /// （迁移/保存都不能因为一条脏数据就卡住整个库 ✗）
@@ -1089,6 +1108,9 @@ fn lib_q_batch(ops: Vec<serde_json::Value>) -> serde_json::Value {
         Ok(c) => c,
         Err(e) => return serde_json::json!({ "ok": false, "error": e }),
     };
+    // 【M4 加固】这次要删东西 → **先整库备份**（4MB 拷贝，代价极小；失败也不拦，照删）
+    let will_delete = ops.iter().any(|o| o.get("delete").and_then(|v| v.as_bool()).unwrap_or(false));
+    let backup = if will_delete { lib_backup_tagged("qdel") } else { String::new() };
     let tx = match conn.transaction() {
         Ok(t) => t,
         Err(e) => return serde_json::json!({ "ok": false, "error": format!("事务失败: {}", e) }),
@@ -1170,7 +1192,7 @@ fn lib_q_batch(ops: Vec<serde_json::Value>) -> serde_json::Value {
     if let Err(e) = tx.commit() {
         return serde_json::json!({ "ok": false, "error": format!("提交失败: {}", e) });
     }
-    serde_json::json!({ "ok": true, "updated": updated, "deleted": deleted, "rows": rows })
+    serde_json::json!({ "ok": true, "updated": updated, "deleted": deleted, "backup": backup, "rows": rows })
 }
 
 /// 库信息：路径 + 条目数（前端显示与诊断用）。

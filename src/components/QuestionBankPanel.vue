@@ -10,7 +10,7 @@
  *  - 筛选用 SQL 做（facets/search），界面不做全量过滤 ✓
  *  - 保存后**就地更新那一条 + 重算计数**，不整屏重载（免得滚动位置丢失 ✗）
  */
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { typesetMixed } from '@/composables/useMathJax'
 import {
@@ -19,6 +19,9 @@ import {
   questionTextOf, stripImageMarkers, pickImages,
 } from '@/composables/useQuestionBank'
 import type { QFacets, QFilter, QItem } from '@/composables/useQuestionBank'
+
+/** 试题录入（M4）：体量不小，按需加载 ✓ */
+const QuestionImportDialog = defineAsyncComponent(() => import('./QuestionImportDialog.vue'))
 import { useDeckStore } from '@/stores/deck'
 import { sendToPaper } from '@/ui/paper'
 import type { SlideElement } from '@/types'
@@ -32,6 +35,10 @@ const selId = ref(0)
 const busy = ref(false)
 const msg = ref('')
 const previewHost = ref<HTMLElement | null>(null)
+/** 录入窗口开没开（M4） */
+const importOpen = ref(false)
+/** 最近一次批量删除前 Rust 侧留的整库备份路径（hover 可看全路径）✓ */
+const lastBackup = ref('')
 
 const f = ref<QFilter>({})
 const sel = computed(() => items.value.find((x) => x.id === selId.value) || null)
@@ -152,6 +159,12 @@ async function save() {
 
 /* ---------------- M3：多选 / 批量 / 插入 ---------------- */
 
+/** 录入完成后：提示 + 重算计数（新题马上能在左树/筛选里看到 ✓） */
+function onImported(n: number) {
+  flash('✓ 已入库 ' + n + ' 道')
+  void reload()
+}
+
 function togglePick(it: QItem) {
   picked.value = picked.value.includes(it.id) ? picked.value.filter((x) => x !== it.id) : [...picked.value, it.id]
 }
@@ -246,17 +259,29 @@ function batchPatchKp() {
   if (!kp.length) { flash('知识点是空的'); return }
   void batchApply('knowledge', kp, '打知识点')
 }
+/**
+ * 批量删除 ✗ 危险动作，两道闸门：
+ *   ① 超过 20 道要**手输题数**才执行（确认框点快了也拦得住）；
+ *   ② Rust 侧删除前**自动整库备份** library.db.bak-qdel-<时间戳> ✓
+ *   （v1443 实测教训：一个「全选 → 删除」就把线上 169 道清空了。）
+ */
 async function batchDelete() {
   const ids = picked.value.slice()
   if (!ids.length) { flash('先勾选题目'); return }
-  if (!window.confirm('删除选中的 ' + ids.length + ' 道题？不可撤销（会连带清掉它们的知识点）')) return
+  if (ids.length > 20) {
+    const typed = window.prompt('⚠ 即将删除 ' + ids.length + ' 道题（不可撤销，只在筛选结果上）。\n请输入题数 ' + ids.length + ' 确认：', '')
+    if (String(typed == null ? '' : typed).trim() !== String(ids.length)) { flash('已取消（没输对题数）'); return }
+  } else if (!window.confirm('删除选中的 ' + ids.length + ' 道题？不可撤销（会连带清掉它们的知识点）')) {
+    return
+  }
   busy.value = true
   try {
     const r = await qBatch(ids.map((id) => ({ id, delete: true })))
     if (!r.ok) { flash('✗ ' + (r.error || '批量删除失败')); return }
     picked.value = []
     selId.value = 0
-    flash('✓ 已删除 ' + r.deleted + ' 道')
+    flash('✓ 已删除 ' + r.deleted + ' 道' + (r.backup ? '；删除前已整库备份' : ''))
+    lastBackup.value = r.backup || ''
     await reload()
   } finally {
     busy.value = false
@@ -271,7 +296,10 @@ async function batchDelete() {
         <span class="qb__title">试题库</span>
         <span class="qb__sub">共 {{ facets.total }} 道 · 当前筛出 {{ total }} 道</span>
         <span v-if="msg" class="qb__msg">{{ msg }}</span>
-        <button class="qb__close" title="关闭 (Esc)" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
+        <span class="qb__headrt">
+          <button class="qb__btn qb__btn--main" title="从 Markdown / JSON / PDF 批量录入试题" @click="importOpen = true">录入试题</button>
+          <button class="qb__close" title="关闭 (Esc)" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
+        </span>
       </header>
 
       <div class="qb__filters">
@@ -397,8 +425,11 @@ async function batchDelete() {
         <input v-model="batchKp" class="qb__mini qb__mini--wide" placeholder="批量打知识点（逗号分隔）" :disabled="!picked.length" />
         <button class="qb__btn" :disabled="busy || !picked.length || !batchKp.trim()" @click="batchPatchKp">应用</button>
         <button class="qb__btn qb__btn--danger" :disabled="busy || !picked.length" @click="batchDelete">删除</button>
+        <span v-if="lastBackup" class="qb__bak" :title="lastBackup">删除前已自动备份整库</span>
       </footer>
     </div>
+
+    <QuestionImportDialog v-if="importOpen" @close="importOpen = false" @imported="onImported" />
   </div>
 </template>
 
@@ -409,7 +440,8 @@ async function batchDelete() {
 .qb__title { font-size: 15px; font-weight: 700; color: var(--text); }
 .qb__sub { font-size: 12px; color: var(--muted); }
 .qb__msg { font-size: 12px; color: var(--brand-600, #534AB7); }
-.qb__close { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; cursor: pointer; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--gray-600); }
+.qb__headrt { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.qb__close { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; cursor: pointer; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--gray-600); }
 .qb__filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 12px; }
 .qb__search { flex: 1; min-width: 160px; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; }
 .qb__filters select, .qb__form select, .qb__form input, .qb__form textarea { height: 28px; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; background: #fff; color: var(--text); }
@@ -458,4 +490,5 @@ async function batchDelete() {
 .qb__mini--wide { width: 200px; }
 .qb__btn--danger { color: #b42318; border-color: #f0c9c4; }
 .qb__btn--danger:disabled { color: var(--muted); border-color: var(--border); }
+.qb__bak { font-size: 11px; color: var(--muted); }
 </style>

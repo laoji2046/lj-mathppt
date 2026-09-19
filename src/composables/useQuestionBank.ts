@@ -54,7 +54,7 @@ export interface QFilter {
 
 /** 11 个必修板块（沿用旧题库的口径）+ 未分类兜底 ✓ */
 export const SECTIONS = ['集合与逻辑', '函数与导数', '三角函数与向量', '数列', '不等式', '立体几何', '解析几何', '概率与统计', '复数', '计数原理', '未分类']
-export const QTYPE_LABEL: Record<string, string> = { choice: '选择题', blank: '填空题', answer: '解答题', proof: '证明题' }
+export const QTYPE_LABEL: Record<string, string> = { choice: '选择题', multi: '多选题', blank: '填空题', answer: '解答题', proof: '证明题' }
 export const LEVELS = ['基础', '中档', '拔高']
 
 const EMPTY_FACETS: QFacets = {
@@ -127,13 +127,15 @@ export function previewHtmlOf(it: QItem): string {
 export interface QBatchOp { id: number; patch?: Record<string, unknown>; delete?: boolean }
 
 /** 批量改题：**一个事务**（改章节/打知识点/删除），中途失败全部回滚 ✓ */
-export async function qBatch(ops: QBatchOp[]): Promise<{ ok: boolean; updated: number; deleted: number; rows: Record<string, unknown>[]; error?: string }> {
+export interface QBatchResult { ok: boolean; updated: number; deleted: number; /** 批量删除时 Rust 侧自动留下的整库备份路径 ✓ */ backup: string; rows: Record<string, unknown>[]; error?: string }
+
+export async function qBatch(ops: QBatchOp[]): Promise<QBatchResult> {
   try {
-    const r = await invoke<{ ok?: boolean; updated?: number; deleted?: number; rows?: Record<string, unknown>[]; error?: string }>('lib_q_batch', { ops })
-    if (r && r.ok) return { ok: true, updated: r.updated || 0, deleted: r.deleted || 0, rows: r.rows || [] }
-    return { ok: false, updated: 0, deleted: 0, rows: [], error: (r && r.error) || '批量保存失败' }
+    const r = await invoke<{ ok?: boolean; updated?: number; deleted?: number; backup?: string; rows?: Record<string, unknown>[]; error?: string }>('lib_q_batch', { ops })
+    if (r && r.ok) return { ok: true, updated: r.updated || 0, deleted: r.deleted || 0, backup: r.backup || '', rows: r.rows || [] }
+    return { ok: false, updated: 0, deleted: 0, backup: '', rows: [], error: (r && r.error) || '批量保存失败' }
   } catch (e) {
-    return { ok: false, updated: 0, deleted: 0, rows: [], error: String((e as Error)?.message || e) }
+    return { ok: false, updated: 0, deleted: 0, backup: '', rows: [], error: String((e as Error)?.message || e) }
   }
 }
 
