@@ -288,15 +288,20 @@ function isSegmentHead(t: string): boolean {
  *  @param options 已经切出来的选项文本（顺序同 letters）
  *  @param content 该题在 content_list 里的原文（没有就原样返回）
  */
-export function recoverLeadingOption(content: string | undefined, letters: string[], options: string[]): string[] {
+export function recoverLeadingOption(content: string | undefined, letters: string[], options: string[], stemTail?: string): string[] {
   if (!content || !options.length || options.length >= 4) return options
+  // ⚠ 先把范围**缩到这道题**：content 是整篇的块文本，直接 search 会找到别的题的 "B." ✗
+  //   用题干末尾 24 字（唯一性最强的一段）定位 → 只在它后面 400 字里找选项标记 ✓
+  let scope = content
+  const tail = String(stemTail || '').replace(/\s+/g, ' ').trim().slice(-24)
+  if (tail) { const k = content.indexOf(tail); if (k >= 0) scope = content.slice(k, k + 400) }
   const found = Array.from(new Set(letters)).filter((L) => 'ABCD'.indexOf(L) >= 0).sort()
   if (!found.length || found.indexOf('A') >= 0) return options      // A 在，不用救
   const first = found[0]                                            // 通常 'B'
   const re = new RegExp('[（(]?\\s*' + first + '\\s*[.、．)）]')
-  const i = content.search(re)
+  const i = scope.search(re)
   if (i <= 0) return options
-  const head = content.slice(0, i)
+  const head = scope.slice(0, i)
   if (!/\$[^$]*=\s*[A-D]\s*\$/.test(head)) return options          // 没有“= A$”痕迹 → 别乱救
   const m = head.match(/[。．.,，]\s*([^。．.,，]{1,8})\s*$/)
   if (!m) return options
@@ -306,6 +311,11 @@ export function recoverLeadingOption(content: string | undefined, letters: strin
   out.unshift(frag)
   return out
 }
+/// 【当前这批导入的 content_list 原文】由导入侧（MinerU）设置 → 解析器用它救回被 MD 吃掉的选项 ✓
+let currentContentList = ''
+export function setContentList(text: string) { currentContentList = text || '' }
+export function getContentListLen(): number { return currentContentList.length }
+
 export function typeOfSegmentHead(t: string): string {
   const s = t.replace(/[#*`_\s]/g, '')
   if (/多选|多项选择|有多项符合/.test(s)) return 'multi'
@@ -620,6 +630,9 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
         // MinerU 的空是**转义下划线** ____ → 别忘了带反斜杠那种
         : /_{3,}|＿{3,}|\\_{2,}/.test(all) ? 'blank' : 'answer'
     }
+    // 【救回被吃掉的选项】v1425 试过在这里接线，但**没成功**（见 docs：content_list 的块文本与解析出的
+    //   题干严格对不上 —— LaTeX 空格/换行归一化不同，按"题干末尾 24 字"定位落空 ✗）→ 暂时保留
+    //   recoverLeadingOption() 纯函数（单测 5/5 过）+ setContentList()，等有更稳的定位方式再接 ✓
     // 【结构修复】选择题/多选题却只切出 1~3 个选项 → 按**字母**把缺的位置补成"（识别缺失，请补）"。
     //   ⚠ 必须放在"题型兜底"**之后**：块内不一定有小节标题，兜底之前 qtype 还可能是空的 ✗
     //   实测：MinerU 有时把 A 选项并进公式（`$P = A$` 吃掉了 `A. 1`），只剩 B/C/D →

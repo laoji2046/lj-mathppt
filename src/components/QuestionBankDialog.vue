@@ -12,7 +12,7 @@ import {
   reviewWarn, blueprintOf, healthOf,
 } from '@/composables/useQuestionLibrary'
 import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup, JunkItem } from '@/composables/useQuestionLibrary'
-import { parseQuestionsWithInfo, PARSE_HELP, detectPaperInfo } from '@/composables/parseQuestions'
+import { parseQuestionsWithInfo, PARSE_HELP, detectPaperInfo, setContentList } from '@/composables/parseQuestions'
 import type { QuestionImage } from '@/composables/parseQuestions'
 import { linkMineruImages, imagesForText, questionTextOf } from '@/composables/mineruImages'
 import { saveTextFile, isTauri, listenTauri, mineruStagePdf, mineruParse } from '@/composables/useTauri'
@@ -306,6 +306,8 @@ async function runMineru(pdfPath: string) {
     // 入库时按题拆开写进 meta.images —— 题库不存磁盘路径（产物目录会被清/换机就没了）。
     const linked = linkMineruImages(md, r?.images)
     batchImages.value = linked.images
+    // 先把 content_list 原文交给解析器（切题时用它救回被 MD 吃掉的选项 ✓），再灌 MD
+    setContentList(String(r.contentText || ''))
     batchText.value = linked.text
     batchOpen.value = true
     editing.value = false

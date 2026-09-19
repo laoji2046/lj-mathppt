@@ -1004,6 +1004,30 @@ fn mineru_stage_pdf(data_base64: String, file_name: String) -> Result<String, St
 ///     前端的 read_local_image 只能读 exe 同级，够不着；
 ///  ② 只回传**正文真的引用到的**图 —— zip 里常有没被引用的表格图/答题卡图，不回传省 IPC。
 /// 单张超 4MB / 一批超 16MB 的图直接跳过（防止一张大图把 IPC 与 SQLite 撑死）。
+/// 把 content_list.json 里所有 **text 块**的文字拼起来 —— 给前端"救回被 full.md 吃掉的选项"用
+/// （实测：MD 里 Q6 的 "A. 1" 丢了，content_list 里还留着 `。1` ✓）。读不到就返回空串，前端退回补占位 ✓
+fn mineru_content_text(json_path: &std::path::Path) -> String {
+    use std::io::Read;
+    if json_path.as_os_str().is_empty() {
+        return String::new();
+    }
+    let mut s = String::new();
+    match std::fs::File::open(json_path) {
+        Ok(mut f) => { if f.read_to_string(&mut s).is_err() { return String::new(); } }
+        Err(_) => return String::new(),
+    }
+    let v: serde_json::Value = match serde_json::from_str(&s) { Ok(v) => v, Err(_) => return String::new() };
+    let mut out = String::new();
+    if let Some(arr) = v.as_array() {
+        for b in arr {
+            if let Some(t) = b.get("text").and_then(|x| x.as_str()) {
+                if !t.is_empty() { out.push_str(t); out.push('\n'); }
+            }
+        }
+    }
+    out
+}
+
 fn mineru_collect_images(dir: &std::path::Path, md: &str) -> Vec<serde_json::Value> {
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
@@ -1353,6 +1377,8 @@ fn mineru_parse(
 
     // 正文引用到的插图：读成 base64 一起回传（必须在 md_text 被 json! 移走之前）
     let images = mineru_collect_images(&dir, &md_text);
+    // content_list 的文字块（救回被 MD 吃掉的选项用）—— 要在 json! 之前算好
+    let content_text = mineru_content_text(&json_path);
     let seconds = t0.elapsed().as_secs();
     emit("done", total_pages, total_pages);
     Ok(serde_json::json!({
@@ -1362,6 +1388,7 @@ fn mineru_parse(
         "jsonPath": json_path.to_string_lossy(),
         // mdText：前端直接灌进批量导入面板
         "mdText": md_text,
+        "contentText": content_text,
         "pages": total_pages.unwrap_or(0),
         "seconds": seconds,
         "mode": effective,

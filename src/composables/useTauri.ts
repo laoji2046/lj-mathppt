@@ -220,6 +220,8 @@ export interface MineruResult {
   jsonPath?: string
   /** Markdown 正文 —— 直接灌进批量导入面板 */
   mdText?: string
+  /** content_list.json 的文字块（拼成一串）—— 救回被 full.md 吃掉的选项用 */
+  contentText?: string
   pages?: number
   seconds?: number
   mode?: string
