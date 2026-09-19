@@ -2,6 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::Emitter;
 
+mod source_normalize;
+
 // ////////////////////////////////////////////////////////////////////////////
 // LJ-MathSlides (Vue 版) — Tauri 2 后端。
 //
@@ -551,7 +553,7 @@ fn lib_open() -> Result<rusqlite::Connection, String> {
 }
 
 /// 当前库结构版本（新库建表即 v1；打开时自动升到最新 ✓）
-const LIB_SCHEMA_VERSION: i64 = 3;
+const LIB_SCHEMA_VERSION: i64 = 4;
 
 /// 读库结构版本：library_meta 里没有这行 → 当 v1（老库）✓
 fn lib_schema_get(conn: &rusqlite::Connection) -> i64 {
@@ -592,6 +594,105 @@ fn lib_backup_tagged(tag: &str) -> String {
         Ok(_) => bak.to_string_lossy().to_string(),
         Err(_) => String::new(),
     }
+}
+
+/// 【v4】当前年份（不引 chrono：civil-from-days 换算，只为编号用）
+fn current_year() -> i64 {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let z = secs.div_euclid(86400) + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    if m <= 2 { y + 1 } else { y }
+}
+
+/// 【v4】分配可读编号：P-{年}-{四位序号}（年度计数器）。
+/// ⚠ year <= 0 表示「年份未知」→ 编号写 **P-0000-xxxx**：
+///   老数据里 103 道没年份，不能假装是今年（Sitimo 的 code 是身份，不能骗人）。
+///   新建题由调用方传当前年（见 lib_prepare_qmeta）。
+fn lib_next_code(conn: &rusqlite::Connection, year: i64) -> String {
+    let y = if year > 0 { year } else { 0 };
+    let _ = conn.execute(
+        "INSERT INTO question_code_counter(year, serial) VALUES(?1, 1)
+         ON CONFLICT(year) DO UPDATE SET serial = serial + 1",
+        [y],
+    );
+    let serial: i64 = conn
+        .query_row("SELECT serial FROM question_code_counter WHERE year = ?1", [y], |r| r.get(0))
+        .unwrap_or(1);
+    format!("P-{:04}-{:04}", y, serial)
+}
+
+/// 【v4】从 meta 里取 v4 那几个真列：(source_kind, warn, status, code)
+/// 一律容错：meta 不是合法 JSON、字段缺失 → 空串（交给 SQL 的 CASE 保留旧值）
+fn lib_qmeta_cols(meta: &str) -> (String, String, String, String) {
+    let v: serde_json::Value = serde_json::from_str(if meta.is_empty() { "{}" } else { meta })
+        .unwrap_or(serde_json::Value::Object(Default::default()));
+    let gs = |k: &str| {
+        v.get(k)
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let paper = gs("paperName");
+    let source_kind = if paper.is_empty() {
+        String::new()
+    } else {
+        source_normalize::kind_of(&paper).to_string()
+    };
+    (source_kind, gs("warn"), gs("status"), gs("code"))
+}
+
+/// 【v4】题目写库前规整 meta（**唯一入口**）：
+///   - paperName → 来源归一（§3 规约；校本别名从库外配置读）
+///   - status   → 缺省 published（老题 / 手工题行为不变）
+///   - code     → 缺省按年度分配 P-{年}-{四位}
+fn lib_prepare_qmeta(
+    conn: &rusqlite::Connection,
+    meta: &str,
+    map: &std::collections::HashMap<String, String>,
+) -> String {
+    let mut m: serde_json::Value =
+        serde_json::from_str(if meta.trim().is_empty() { "{}" } else { meta })
+            .unwrap_or_else(|_| serde_json::json!({}));
+    let Some(obj) = m.as_object_mut() else {
+        return meta.to_string();
+    };
+    if let Some(v) = obj.get("paperName").and_then(|x| x.as_str()) {
+        let n = source_normalize::normalize(v, map);
+        obj.insert("paperName".to_string(), serde_json::json!(n));
+    }
+    let has_status = obj
+        .get("status")
+        .and_then(|x| x.as_str())
+        .map(|t| !t.trim().is_empty())
+        .unwrap_or(false);
+    if !has_status {
+        obj.insert("status".to_string(), serde_json::json!("published"));
+    }
+    let has_code = obj
+        .get("code")
+        .and_then(|x| x.as_str())
+        .map(|t| !t.trim().is_empty())
+        .unwrap_or(false);
+    if !has_code {
+        let year = obj
+            .get("year")
+            .and_then(|x| x.as_i64().or_else(|| x.as_str().and_then(|t| t.trim().parse().ok())))
+            .unwrap_or(0);
+        // 新建题没写年份 → 用当前年（今天录的题，年份大概率是今年）
+        let code = lib_next_code(conn, if year > 0 { year } else { current_year() });
+        obj.insert("code".to_string(), serde_json::json!(code));
+    }
+    serde_json::to_string(&m).unwrap_or_else(|_| meta.to_string())
 }
 
 /// 【题库 v3】从 meta(JSON) 里取要抽成真列的筛选字段：(qtype, level, difficulty, year, paper)
@@ -649,9 +750,15 @@ fn lib_sync_qcols(conn: &rusqlite::Connection, id: i64, kind: &str, meta: &str) 
         return Ok(());
     }
     let (qtype, level, difficulty, year, paper) = lib_qcols_of(meta);
+    let (source_kind, warn, status, code) = lib_qmeta_cols(meta);
+    // ⚠ code / status 用 CASE 保留旧值：老题的 meta 里没有这两个键，
+    //    不能因为一次 patch 就把迁移回填好的编号/状态冲成空 ✗
     conn.execute(
-        "UPDATE library_item SET qtype=?1, level=?2, difficulty=?3, year=?4, paper=?5 WHERE id=?6",
-        rusqlite::params![qtype, level, difficulty, year, paper, id],
+        "UPDATE library_item SET qtype=?1, level=?2, difficulty=?3, year=?4, paper=?5, \
+         source_kind=CASE WHEN ?6='' THEN source_kind ELSE ?6 END, warn=?7, \
+         status=CASE WHEN ?8='' THEN status ELSE ?8 END, \
+         code=CASE WHEN ?9='' THEN code ELSE ?9 END WHERE id=?10",
+        rusqlite::params![qtype, level, difficulty, year, paper, source_kind, warn, status, code, id],
     )
     .map_err(|e| format!("同步题库筛选字段失败: {}", e))?;
     conn.execute("DELETE FROM question_kp WHERE qid = ?1", [id])
@@ -753,6 +860,104 @@ fn lib_migrate(conn: &rusqlite::Connection) -> Result<(), String> {
             [backfilled.to_string()],
         );
         v = 3;
+    }
+
+    // ---- v3 → v4：题目生命周期（status）+ 可读编号（code）+ 来源类别（source_kind）+ 告警（warn）
+    //      另建 kp_catalog（**板块级**受控词表：11 板块 + 30 方法；考点级留给后续按需扩）
+    //  为什么：169 道题没有 status（没法分草稿/正式）、没有 code（老师没法口头引用）、
+    //          来源不成规约（129 空 + 13 可疑年份）、知识点 0 条。
+    if v == 3 {
+        lib_backup_before(4)?;
+        for (name, ddl) in [
+            ("code", "TEXT DEFAULT ''"),
+            ("status", "TEXT DEFAULT ''"),
+            ("source_kind", "TEXT DEFAULT ''"),
+            ("warn", "TEXT DEFAULT ''"),
+        ] {
+            let has: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('library_item') WHERE name = ?1",
+                    [name],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if has == 0 {
+                conn.execute_batch(&format!("ALTER TABLE library_item ADD COLUMN {} {}", name, ddl))
+                    .map_err(|e| format!("迁移 v3→v4 加列 {} 失败: {}", name, e))?;
+            }
+        }
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_q_code ON library_item(type, code);
+             CREATE INDEX IF NOT EXISTS idx_q_status ON library_item(type, status);
+             CREATE INDEX IF NOT EXISTS idx_q_source_kind ON library_item(type, source_kind);
+             CREATE TABLE IF NOT EXISTS question_code_counter (year INTEGER PRIMARY KEY, serial INTEGER NOT NULL DEFAULT 0);
+             CREATE TABLE IF NOT EXISTS kp_catalog (
+               kp TEXT PRIMARY KEY, kind TEXT NOT NULL, aliases TEXT DEFAULT '',
+               parent TEXT DEFAULT '', status TEXT NOT NULL DEFAULT 'published'
+             );",
+        )
+        .map_err(|e| format!("迁移 v3→v4 建索引/表失败: {}", e))?;
+
+        // 回填 ①：老题一律 published（**行为完全不变**，不会因为多了状态就看不见）
+        conn.execute(
+            "UPDATE library_item SET status = 'published' WHERE type = 'question' AND (status IS NULL OR status = '')",
+            [],
+        )
+        .map_err(|e| format!("迁移 v3→v4 回填 status 失败: {}", e))?;
+
+        // 回填 ②：source_kind（由 paper 现算）+ code（按年 + id 顺序分配，确定性）
+        let rows: Vec<(i64, i64, String)> = {
+            let mut st = conn
+                .prepare("SELECT id, year, paper FROM library_item WHERE type = 'question' ORDER BY year, id")
+                .map_err(|e| format!("迁移 v3→v4 读旧题失败: {}", e))?;
+            let it = st
+                .query_map([], |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
+                })
+                .map_err(|e| format!("迁移 v3→v4 读旧题失败: {}", e))?;
+            it.filter_map(|x| x.ok()).collect()
+        };
+        let mut coded: i64 = 0;
+        for (id, year, paper) in rows {
+            let sk = source_normalize::kind_of(&paper);
+            let code = lib_next_code(conn, year);
+            let _ = conn.execute(
+                "UPDATE library_item SET code = ?1, source_kind = ?2 WHERE id = ?3",
+                rusqlite::params![code, sk, id],
+            );
+            coded += 1;
+        }
+        let _ = conn.execute(
+            "INSERT INTO library_meta(k, v) VALUES('v4_coded', ?1) ON CONFLICT(k) DO UPDATE SET v = ?1",
+            [coded.to_string()],
+        );
+
+        // 回填 ③：播种板块级受控词表（kind = knowledge / method）
+        const KP_BLOCKS: &[&str] = &[
+            "集合与逻辑", "函数与导数", "三角函数与向量", "数列", "不等式",
+            "立体几何", "解析几何", "概率与统计", "复数", "计数原理",
+        ];
+        const KP_METHODS: &[&str] = &[
+            "定义法", "分类讨论", "数形结合", "换元法", "待定系数法", "分离参数法",
+            "构造函数", "基本不等式法", "韦达定理", "配方法", "消元法", "坐标法",
+            "向量法", "空间向量法", "等价转化", "放缩法", "数学建模", "特殊值法",
+            "排除法", "综合法", "分析法", "反证法", "裂项相消法", "错位相减法",
+            "数学归纳法", "分类计数原理", "古典概型计算", "导数法", "定义域优先",
+            "端点与无穷检查",
+        ];
+        for kp in KP_BLOCKS {
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO kp_catalog(kp, kind, aliases, parent, status) VALUES(?1, 'knowledge', '', '高中', 'published')",
+                [kp],
+            );
+        }
+        for kp in KP_METHODS {
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO kp_catalog(kp, kind, aliases, parent, status) VALUES(?1, 'method', '', '', 'published')",
+                [kp],
+            );
+        }
+        v = 4;
     }
 
     conn.execute(
@@ -1058,9 +1263,14 @@ fn lib_q_patch(id: i64, patch: serde_json::Value) -> serde_json::Value {
         serde_json::from_str(if meta.is_empty() { "{}" } else { &meta }).unwrap_or_else(|_| serde_json::json!({}));
     if let Some(obj) = m.as_object_mut() {
         if let Some(p) = patch.as_object() {
+            // 【v4】来源归一：手工改的也走同一份规约（别名表从库外配置读）
+            let sn_map = source_normalize::load_map();
             for (k, v) in p {
                 if v.is_null() {
                     obj.remove(k);
+                } else if k == "paperName" {
+                    let n = source_normalize::normalize(v.as_str().unwrap_or(""), &sn_map);
+                    obj.insert(k.clone(), serde_json::json!(n));
                 } else {
                     obj.insert(k.clone(), v.clone());
                 }
@@ -1111,6 +1321,8 @@ fn lib_q_batch(ops: Vec<serde_json::Value>) -> serde_json::Value {
     // 【M4 加固】这次要删东西 → **先整库备份**（4MB 拷贝，代价极小；失败也不拦，照删）
     let will_delete = ops.iter().any(|o| o.get("delete").and_then(|v| v.as_bool()).unwrap_or(false));
     let backup = if will_delete { lib_backup_tagged("qdel") } else { String::new() };
+    // 【v4】别名表只读一次（整批共用）
+    let sn_map = source_normalize::load_map();
     let tx = match conn.transaction() {
         Ok(t) => t,
         Err(e) => return serde_json::json!({ "ok": false, "error": format!("事务失败: {}", e) }),
@@ -1154,6 +1366,9 @@ fn lib_q_batch(ops: Vec<serde_json::Value>) -> serde_json::Value {
             for (k, v) in p {
                 if v.is_null() {
                     obj.remove(k);
+                } else if k == "paperName" {
+                    let n = source_normalize::normalize(v.as_str().unwrap_or(""), &sn_map);
+                    obj.insert(k.clone(), serde_json::json!(n));
                 } else {
                     obj.insert(k.clone(), v.clone());
                 }
@@ -1193,6 +1408,99 @@ fn lib_q_batch(ops: Vec<serde_json::Value>) -> serde_json::Value {
         return serde_json::json!({ "ok": false, "error": format!("提交失败: {}", e) });
     }
     serde_json::json!({ "ok": true, "updated": updated, "deleted": deleted, "backup": backup, "rows": rows })
+}
+
+/// 【v4】知识点 / 方法受控词表（**板块级**）：给前端渲染分类与选择用 ✓
+#[tauri::command]
+fn lib_kp_catalog() -> serde_json::Value {
+    match lib_open() {
+        Ok(conn) => {
+            let mut st = match conn
+                .prepare("SELECT kp, kind, aliases, parent FROM kp_catalog ORDER BY kind, parent, kp")
+            {
+                Ok(x) => x,
+                Err(e) => return serde_json::json!({ "ok": false, "error": format!("读词表失败: {}", e) }),
+            };
+            let items: Vec<serde_json::Value> = st
+                .query_map([], |r| {
+                    Ok(serde_json::json!({
+                        "kp": r.get::<_, String>(0)?,
+                        "kind": r.get::<_, String>(1)?,
+                        "aliases": r.get::<_, String>(2)?,
+                        "parent": r.get::<_, String>(3)?,
+                    }))
+                })
+                .map(|it| it.filter_map(|x| x.ok()).collect())
+                .unwrap_or_default();
+            serde_json::json!({ "ok": true, "items": items })
+        }
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
+/// 【v4】来源合规报告：给「来源规约」这一步一个可验收的产出 ✓
+#[tauri::command]
+fn lib_source_report() -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let rows: Vec<(i64, String, String)> = {
+        let mut st = match conn.prepare("SELECT id, title, paper FROM library_item WHERE type = 'question'") {
+            Ok(x) => x,
+            Err(e) => return serde_json::json!({ "ok": false, "error": format!("读题目失败: {}", e) }),
+        };
+        st.query_map([], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        })
+        .map(|it| it.filter_map(|x| x.ok()).collect())
+        .unwrap_or_default()
+    };
+    // ⚠ 「空值」不能算合规 —— 169 道里 129 道 paper 是空的，混进分子会看着很漂亮却毫无意义 ✗
+    let pct = |num: i64, den: i64| -> f64 {
+        if den > 0 {
+            ((num as f64) * 1000.0 / (den as f64)).round() / 10.0
+        } else {
+            100.0
+        }
+    };
+    let mut by_kind: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    let mut total: i64 = 0;
+    let mut empty: i64 = 0;
+    let mut canonical: i64 = 0;
+    let mut needs: Vec<serde_json::Value> = Vec::new();
+    for (id, title, paper) in rows {
+        total += 1;
+        let p = paper.trim();
+        let ok = !p.is_empty() && source_normalize::is_canonical(p);
+        if p.is_empty() {
+            empty += 1;
+        } else if ok {
+            canonical += 1;
+        }
+        let k = source_normalize::kind_of(p).to_string();
+        *by_kind.entry(k.clone()).or_insert(0) += 1;
+        if !p.is_empty() && !ok {
+            let t: String = title.chars().take(24).collect();
+            needs.push(serde_json::json!({ "id": id, "title": t, "paper": paper, "kind": k }));
+        }
+    }
+    let filled = total - empty;
+    let items: Vec<serde_json::Value> = by_kind
+        .iter()
+        .map(|(k, n)| serde_json::json!({ "kind": k, "count": n }))
+        .collect();
+    serde_json::json!({
+        "ok": true,
+        "total": total,
+        "empty": empty,
+        "canonical": canonical,
+        "needsWork": needs,
+        // 有来源的比例（覆盖率）
+        "fillRate": pct(filled, total),
+        // 「有来源的里面有多少是成型的」—— 这才是规约真正的验收指标
+        "canonicalRate": pct(canonical, filled),
+    })
 }
 
 /// 库信息：路径 + 条目数（前端显示与诊断用）。
@@ -1302,6 +1610,12 @@ fn lib_save(item: serde_json::Value) -> serde_json::Value {
     let meta = {
         let m = gs("meta");
         if m.is_empty() { "{}".to_string() } else { m }
+    };
+    // 【v4】题目写库前规整 meta：来源归一 + status/code 缺省（唯一入口）
+    let meta = if kind == "question" {
+        lib_prepare_qmeta(&conn, &meta, &source_normalize::load_map())
+    } else {
+        meta
     };
     let builtin = item.get("builtin").and_then(|v| v.as_i64()).unwrap_or(0);
     let id = item.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -1505,6 +1819,8 @@ fn lib_save_many(items: Vec<serde_json::Value>) -> serde_json::Value {
         Ok(t) => t,
         Err(e) => return serde_json::json!({ "ok": false, "error": format!("事务失败: {}", e) }),
     };
+    // 【v4】别名表只读一次（整批共用，避免每条都读盘）
+    let sn_map = source_normalize::load_map();
     let now = now_stamp();
     let mut added: i64 = 0;
     let mut skipped: i64 = 0;
@@ -1536,6 +1852,12 @@ fn lib_save_many(items: Vec<serde_json::Value>) -> serde_json::Value {
         let meta = {
             let m = gs("meta");
             if m.is_empty() { "{}".to_string() } else { m }
+        };
+        // 【v4】批量导入同样走唯一入口（来源归一 + status/code 缺省）
+        let meta = if kind == "question" {
+            lib_prepare_qmeta(&tx, &meta, &sn_map)
+        } else {
+            meta
         };
         let r = tx.execute(
             concat!(
@@ -2159,6 +2481,8 @@ pub fn run() {
         lib_q_search,
         lib_q_patch,
         lib_q_batch,
+        lib_kp_catalog,
+        lib_source_report,
         ai_chat,
         asset_get,
             lib_query,
