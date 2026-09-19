@@ -38,3 +38,18 @@ const files = fs.readdirSync('dist/assets');
 const html = fs.readFileSync('dist/index.html', 'utf8');
 const refs = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map((m) => m[1]);
 console.log('构建后校验：dist/assets 共 ' + files.length + ' 个文件；index.html 引用 ' + refs.length + ' 个');
+
+// 【v1438】把入口 HTML 再放一份到 dist/app/index.html ——
+// 原因（本机实测）：Tauri 打包时 frontendDist **根目录下的文件会被漏掉**
+// （dist/index.html → 运行时 "asset not found: index.html"；dist/probe-root.txt 也没进 exe；
+//   而 dist/assets/*.js、dist/three/*、dist/geogebra/…/GeoGebra.html 这些**子目录里的**都在 ✓）。
+// 所以窗口 URL 改成 app/index.html（见 src-tauri/tauri.conf.json 的 url），根级 index.html 保留不影响 ✓。
+const path = require('path');
+try {
+  const dir = path.join('dist', 'app');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(path.join('dist', 'index.html'), path.join(dir, 'index.html'));
+  console.log('已复制入口：dist/app/index.html（供 Tauri 窗口加载，绕开根级文件被漏掉的问题）');
+} catch (e) {
+  console.log('复制 dist/app/index.html 失败：' + (e && e.message));
+}

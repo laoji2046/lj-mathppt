@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- 入口被 Tauri 打包到 app/index.html（根级文件在本机打包时会被漏掉，见 clean-dist.cjs 注释）；
+       有 <base> 后 desmos/ geogebra/ mathjax/ pdfjs/ 这些相对路径仍按站点根解析 ✓ -->
+  <base href="/" />
   <title>LJ-MathSlides — 幻灯片编辑器</title>
 </head>
 <body>

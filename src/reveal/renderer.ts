@@ -28,6 +28,25 @@ export interface RenderOptions {
    * 宿主（TopToolbar 导出）收到信号后即可 print() 或 html2canvas 截图。
    */
   print?: boolean
+  /** 【3D 嵌入】three 的地址；默认按 assets 自动取（local=应用 origin / cdn=jsdelivr 的 UMD 版） */
+  threeSrc?: string
+}
+
+/** 3D 嵌入生成的 HTML 里 three 默认写死成 /three/three.iife.js；
+ *  渲染时按 local/cdn **换源**（导出独立文件走 CDN，应用内/打印走应用 origin ✓） */
+let CUR_THREE_SRC = '/three/three.iife.js'
+function swapThreeSrc(html: string): string {
+  if (!html || CUR_THREE_SRC === '/three/three.iife.js' || html.indexOf('/three/three.iife.js') < 0) return html
+  return html.split('/three/three.iife.js').join(CUR_THREE_SRC)
+}
+/** dataBase64（UTF-8）→ 文本；坏数据给空串，不抛 */
+function b64ToText(b64: string): string {
+  try {
+    const bin = atob(b64)
+    const arr = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+    return new TextDecoder('utf-8').decode(arr)
+  } catch { return '' }
 }
 
 function esc(s: string): string {
@@ -576,11 +595,14 @@ function elementToHtmlInner(el: SlideElement): string {
     if (el.kind === 'pdf') {
       return `<div style="${box}${rot}"${cls}${fragIdx}><div class="fx-doc" data-pdf-b64="${esc(el.dataBase64)}" style="width:100%;height:100%;background:#f3f1ee;border:1px solid #e3dfd5;border-radius:4px;overflow:auto"></div></div>`
     }
-    const src = el.dataBase64
-      ? `data:${esc(el.mime || 'text/html')};base64,${el.dataBase64}`
-      : esc(el.url || '')
+    // 【v1438 修】内嵌 HTML 走 **srcdoc** 而不是 data: URL ——
+    // data:/blob: 文档里相对路径（如 /three/three.iife.js）解析不出来，3D 嵌入会白屏 ✗；srcdoc 继承宿主 base ✓
+    const innerHtml = el.dataBase64 ? swapThreeSrc(b64ToText(el.dataBase64)) : ''
+    const frameAttr = innerHtml
+      ? `srcdoc="${esc(innerHtml)}"`
+      : (el.url ? `src="${esc(el.url)}"` : '')
     return `<div style="${box}${rot}"${cls}${fragIdx}><div style="position:relative;width:100%;height:100%">` +
-      (src ? `<iframe src="${src}" style="width:100%;height:100%;border:1px solid #e3dfd5;border-radius:4px" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" referrerpolicy="no-referrer"></iframe>` : `<div style="width:100%;height:100%;background:#f1efe8;border-radius:4px"></div>`) +
+      (frameAttr ? `<iframe ${frameAttr} style="width:100%;height:100%;border:1px solid #e3dfd5;border-radius:4px" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" referrerpolicy="no-referrer"></iframe>` : `<div style="width:100%;height:100%;background:#f1efe8;border-radius:4px"></div>`) +
       (el.kind === 'url' && el.url ? `<a href="${esc(el.url)}" target="_blank" rel="noopener" style="position:absolute;left:6px;bottom:6px;font-size:11px;color:#fff;background:rgba(20,24,34,0.72);padding:3px 8px;border-radius:6px;text-decoration:none;z-index:2;max-width:calc(100% - 12px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">↗ 打开链接</a>` : '') +
       `</div></div>`
   }
@@ -658,7 +680,6 @@ export function slideToHtml(s: Slide): string {
 /** 生成完整的独立演示页 HTML */
 export function renderDeckToRevealHtml(deck: Deck, opts: RenderOptions = {}): string {
   const local = (opts.assets ?? 'local') === 'local'
-  const slides = renderSlidesStack(deck.slides)
   // 数学图形 / 公式 / 混排，以及**表格单元格里写了 \(LaTeX\)** —— 都要把 MathJax 带上
   const hasMath = deck.slides.some((s) => s.elements.some((e) =>
     e.type === 'math' || e.type === 'richtex' ||
@@ -689,6 +710,11 @@ export function renderDeckToRevealHtml(deck: Deck, opts: RenderOptions = {}): st
   const dsmSrc = local ? `${O}desmos/index.js` : 'https://www.desmos.com/api/v1.13/calculator.js?apiKey=dcb31709b452b1cf9dc26972add0fda6'
   const pdfSrc = local ? `${O}pdfjs/pdf.min.js` : 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js'
   const pdfWorker = local ? `${O}pdfjs/pdf.worker.min.js` : 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'
+  // 【3D 嵌入】three：应用内/打印走应用 origin（blob 页解析不了相对路径 ✓）；导出独立文件走 CDN。
+  // three 0.150 是最后一个还带 UMD 版 build/three.min.js 的版本（0.186 只有 ESM）✓
+  CUR_THREE_SRC = opts.threeSrc || (local ? `${O}three/three.iife.js` : 'https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js')
+  // ⚠ 必须在设好 CUR_THREE_SRC 之后才渲染元素（内嵌 HTML 要按模式换源）
+  const slides = renderSlidesStack(deck.slides)
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">

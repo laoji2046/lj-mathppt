@@ -6,6 +6,9 @@ import { mathTemplates } from '@/templates/mathTemplates'
 import { mathBundles } from '@/templates/mathBundles'
 import { proTemplates, proBundles } from '@/templates/proTemplates'
 import { mathAppletTemplates } from '@/templates/mathAppletTemplates'
+import { aiChat, isTauri } from '@/composables/useTauri'
+import { parseScene3d, SCENE3D_SYSTEM } from '@/composables/aiScene3d'
+import { applet3dElement } from '@/composables/applet3d'
 
 const store = useDeckStore()
 const props = defineProps<{ mode?: 'replace' | 'add' | 'addSub' }>()
@@ -93,6 +96,43 @@ for (const b of proBundles) { try { regBundlePreview(b.id, b.slides as any[]) } 
 for (const t of mathAppletTemplates) { try { regPreview(t.id, (t.build() as any[]).flat()) } catch {} }
 function previewOf(id: string) { return previewMap.get(id) ?? [] }
 function animatedOf(id: string) { return animatedIds.has(id) }
+
+// ---- 一句话生成 3D 场景（v1438）：AI 只回 Scene3D **数据**，白名单过滤后插进当前页 ----
+const AI_KEY = 'lj-mathslides:ai-key'
+const ai3dText = ref('')
+const ai3dBusy = ref(false)
+const ai3dMsg = ref('')
+function aiKeyOf(): string {
+  try { return (localStorage.getItem(AI_KEY) || '').trim() } catch { return '' }
+}
+async function gen3d() {
+  if (ai3dBusy.value) return
+  if (!isTauri()) { ai3dMsg.value = 'AI 生成只在桌面端可用（离线时可用下面现成的 3D 模板 ✓）'; return }
+  const key = aiKeyOf()
+  if (!key) { ai3dMsg.value = '先在「试题库 → 批量导入」里填一次 AI API Key（只存本机、不写进源码）'; return }
+  const ask = ai3dText.value.trim()
+  if (!ask) { ai3dMsg.value = '先写一句话，例如：正方体 ABCD-A₁B₁C₁D₁，画出体对角线 AC₁'; return }
+  ai3dBusy.value = true
+  ai3dMsg.value = 'AI 正在设计场景…（约 10~20 秒）'
+  try {
+    const r = await aiChat({ apiKey: key, system: SCENE3D_SYSTEM, userText: ask })
+    if (!r || !r.ok) throw new Error(r && r.error ? String(r.error) : '未知错误')
+    const ps = parseScene3d(String(r.content || ''))
+    if (ps.error || !ps.scene) throw new Error(ps.error || '没解析出场景')
+    const scene = ps.scene
+    // 连着生成多个时错开一点，别叠在同一处（第 2 个起往右下挪 28px）✓
+    const k = (store.currentSlide?.elements.length || 0) % 5
+    store.addElement('embed', Object.assign(applet3dElement(scene), { x: 560 + k * 28, y: 250 + k * 28 }))
+    const n = scene.objects.length
+    const pts = scene.objects.filter((o) => o.kind === 'point' && (o as { label?: string }).label).length
+    ai3dMsg.value = '✓ 已插入当前页：' + (scene.title || ask) + '（' + n + ' 个对象' + (pts ? '、' + pts + ' 个标注点' : '') + '）—— 拖一下就能转'
+    setTimeout(() => emit('close'), 700)
+  } catch (e) {
+    ai3dMsg.value = '✗ ' + String((e as Error)?.message || e)
+  } finally {
+    ai3dBusy.value = false
+  }
+}
 
 function apply(id: string) {
   const m = props.mode ?? 'replace'
@@ -190,6 +230,19 @@ function applyBundle(id: string) {
         </div>
       </template>
       <template v-else-if="library === 'mathApplet'">
+        <div class="panel__ai3d">
+          <input
+            v-model="ai3dText"
+            class="panel__ai3d-input"
+            placeholder="一句话描述图形，例如：正方体 ABCD-A₁B₁C₁D₁，画出体对角线 AC₁（回车或点右侧按钮）"
+            :disabled="ai3dBusy"
+            @keydown.enter="gen3d"
+          />
+          <button class="panel__ai3d-btn" :disabled="ai3dBusy" :title="'用 AI（DeepSeek）把一句话变成可旋转的 3D 场景，插到当前页'" @click="gen3d">
+            {{ ai3dBusy ? '生成中…' : '✦ 一句话生成 3D' }}
+          </button>
+        </div>
+        <div v-if="ai3dMsg" class="panel__ai3d-msg">{{ ai3dMsg }}</div>
         <div class="panel__body">
           <div class="panel__grid">
             <button v-for="t in mathAppletTemplates" :key="t.id" class="card" :title="t.desc" @click="apply(t.id)">
@@ -256,6 +309,13 @@ function applyBundle(id: string) {
 .panel__tab { padding: 7px 18px; border: 1px solid var(--border-strong); border-radius: 9px; background: #fff; font-size: 14px; font-weight: 600; cursor: pointer; color: var(--text); }
 .panel__tab--active { background: var(--brand); border-color: var(--brand); color: #fff; }
 .panel__cats { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 22px; }
+/* 一句话生成 3D（v1438）：输入框 + 生成按钮 + 状态行 */
+.panel__ai3d { display: flex; gap: 8px; padding: 12px 22px 0; }
+.panel__ai3d-input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid #d8d5cb; border-radius: 8px; font-size: 13px; background: #fff; color: #1a1a1a; }
+.panel__ai3d-input:disabled { background: #f7f6f2; color: #8a8aa0; }
+.panel__ai3d-btn { height: 34px; padding: 0 14px; border: 1px solid #534ab7; border-radius: 8px; background: #534ab7; color: #fff; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.panel__ai3d-btn:disabled { opacity: .55; cursor: default; }
+.panel__ai3d-msg { padding: 8px 22px 0; font-size: 12.5px; line-height: 1.5; color: #5f5e5a; word-break: break-all; }
 .panel__cat { padding: 5px 12px; border: 1px solid var(--border-strong); background: #fff; border-radius: var(--radius-xl); font-size: 13px; cursor: pointer; color: var(--text); }
 .panel__cat--active { background: var(--brand); border-color: var(--brand); color: #fff; }
 .panel__body { flex: 1; overflow-y: auto; padding: 2px 22px 22px; }

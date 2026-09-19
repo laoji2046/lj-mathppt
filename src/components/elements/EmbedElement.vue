@@ -14,8 +14,15 @@ const imageSrc = computed(() => {
   return props.el.url
 })
 
-// ---- 网页(html)/外部链接 用 iframe（blob 或外部 src） ----
+// ---- 网页(html)/外部链接 用 iframe ----
+// 【v1438 修】内嵌 HTML 改走 **srcdoc**，不再用 blob:。
+// 原因（实测）：blob: 文档里做 URL 解析会失败 ——
+//   blob:http://tauri.localhost/<uuid> 作为 base，'/three/three.iife.js' 解析不出绝对地址
+//   （控制台报 Failed to parse URL），于是 <script src="/three/..."> 根本不加载 ✗。
+// srcdoc 文档继承父文档的 base/origin，相对路径照常解析 ✓（实测 typeof THREE === 'object'）。
 const iframeSrc = ref('')
+/** 内嵌 HTML 的正文（走 srcdoc；和 iframeSrc 二选一） */
+const iframeSrcdoc = ref('')
 /** 【3D 嵌入】这种 iframe 要"自己收拖拽"才能转场景 → 指针事件放开；
  *  其它嵌入仍是 none（点/拖任意处都能选中并移动元素 ✓）。
  *  ⚠ 不能把类型断言写进模板（Vue 模板表达式的解析器不认 `as` ✗）→ 放这算 ✓ */
@@ -23,14 +30,15 @@ const framePE = computed(() => ((props.el as unknown as { applet3d?: boolean }).
 let blobUrl = ''
 function makeBlob() {
   if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = '' }
+  iframeSrcdoc.value = ''
   if (props.el.kind === 'pdf' || props.el.kind === 'image') { iframeSrc.value = ''; return }
   if (props.el.dataBase64) {
     try {
       const bytes = atob(props.el.dataBase64)
       const arr = new Uint8Array(bytes.length)
       for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i)
-      blobUrl = URL.createObjectURL(new Blob([arr], { type: props.el.mime || 'text/html' }))
-      iframeSrc.value = blobUrl
+      iframeSrcdoc.value = new TextDecoder('utf-8').decode(arr)
+      iframeSrc.value = ''
     } catch { iframeSrc.value = props.el.url }
   } else {
     iframeSrc.value = props.el.url
@@ -121,8 +129,9 @@ const isDoc = computed(() => props.el.kind === 'doc')
     />
     <div v-else-if="el.kind === 'pdf'" ref="pdfHost" class="embed-el__pdf" :style="{ pointerEvents: contentPE }"></div>
     <iframe
-      v-else-if="iframeSrc"
-      :src="iframeSrc"
+      v-else-if="iframeSrcdoc || iframeSrc"
+      :src="iframeSrcdoc ? undefined : iframeSrc"
+      :srcdoc="iframeSrcdoc || undefined"
       class="embed-el__frame"
       :style="{ pointerEvents: framePE }"
       sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"

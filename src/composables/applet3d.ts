@@ -9,6 +9,8 @@
  *    —— iframe 自己是 `pointer-events:auto`（否则收不到拖拽 ✓），所以"移动元素"这件事必须由它转发给父页面 ✓
  */
 
+import type { SlideElement } from '@/types'
+
 /** 场景里能画的物体（**数据**，不是代码 ✓） */
 export type Scene3DObject =
   | { kind: 'box'; size?: number[]; at?: number[]; color?: string; edges?: boolean }
@@ -52,16 +54,23 @@ export function applet3dHtml(spec: Scene3D, opt?: { threeSrc?: string; height?: 
     'var SPEC = ' + data + ';',
     'var ELID = ' + JSON.stringify(elId) + ';',
     'var host = document.getElementById("h");',
+    'try { document.getElementById("t").textContent = SPEC.title || ""; } catch (e) {}',
     'var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });',
     'renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));',
     'host.appendChild(renderer.domElement);',
     'var scene = new THREE.Scene();',
     'var camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);',
     'var dist = SPEC.dist || 6, yaw = -0.6, pitch = 0.5;',
+    // 自动取景：先量出所有物体的包围盒，再对准盒心、按盒半径把相机退到能看全的距离 ✓
+    // （模型把顶点画在原点、主体画在别的 y 上时，原来的固定 lookAt(0,0,.6) 会让画面偏掉 ✗ —— 截图抓到过）
+    'var bb = new THREE.Box3();',
+    'var center = new THREE.Vector3(0, 0, 0.6);',
+    'function markBox(c, e) { if (!c) return; for (var i = 0; i < 8; i++) bb.expandByPoint(new THREE.Vector3(c[0] + e[0] * (i & 1 ? 1 : -1), c[1] + e[1] * (i & 2 ? 1 : -1), c[2] + e[2] * (i & 4 ? 1 : -1))); }',
+    'function markPoint(q) { if (q) bb.expandByPoint(new THREE.Vector3(q[0], q[1], q[2])); }',
     'function place() {',
     '  var r = dist, cp = Math.cos(pitch);',
-    '  camera.position.set(r * cp * Math.sin(yaw), r * Math.sin(pitch), r * cp * Math.cos(yaw));',
-    '  camera.lookAt(0, 0, 0.6);',
+    '  camera.position.set(center.x + r * cp * Math.sin(yaw), center.y + r * Math.sin(pitch), center.z + r * cp * Math.cos(yaw));',
+    '  camera.lookAt(center);',
     '}',
     'place();',
     'scene.add(new THREE.AmbientLight(0xffffff, 0.75));',
@@ -72,47 +81,72 @@ export function applet3dHtml(spec: Scene3D, opt?: { threeSrc?: string; height?: 
     '  var e = new THREE.EdgesGeometry(g);',
     '  scene.add(new THREE.LineSegments(e, new THREE.LineBasicMaterial({ color: color || 0x1a1a1a })));',
     '}',
+    'function makeLabel(text, color) {',
+    '  var cv = document.createElement("canvas"); cv.width = 256; cv.height = 128;',
+    '  var cx = cv.getContext("2d");',
+    '  cx.font = "bold 76px system-ui, sans-serif"; cx.textAlign = "center"; cx.textBaseline = "middle";',
+    '  cx.fillStyle = color || "#1a1a1a"; cx.fillText(String(text), 128, 68);',
+    '  var tex = new THREE.CanvasTexture(cv); tex.minFilter = THREE.LinearFilter;',
+    '  var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));',
+    '  sp.scale.set(0.8, 0.4, 1);',
+    '  return sp;',
+    '}',
     'function add(o) {',
     '  var col = o.color || "#5b8ff9";',
     '  var at = o.at || [0, 0, 0];',
     '  if (o.kind === "box") {',
     '    var s = o.size || [1, 1, 1];',
+    '    markBox(at, [s[0] / 2, s[1] / 2, s[2] / 2]);',
     '    var g = new THREE.BoxGeometry(s[0], s[1], s[2]);',
     '    var m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity: 0.55 }));',
     '    m.position.set(at[0], at[1], at[2]); scene.add(m);',
     '    if (o.edges !== false) { var e = new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color: 0x1a1a1a })); e.position.copy(m.position); scene.add(e); }',
     '  } else if (o.kind === "sphere") {',
     '    var g2 = new THREE.SphereGeometry(o.r || 1, 32, 20);',
+    '    markBox(at, [o.r || 1, o.r || 1, o.r || 1]);',
     '    var m2 = new THREE.Mesh(g2, new THREE.MeshLambertMaterial({ color: col, wireframe: !!o.wire, transparent: !o.wire, opacity: 0.6 }));',
     '    m2.position.set(at[0], at[1], at[2]); scene.add(m2);',
     '  } else if (o.kind === "cylinder" || o.kind === "cone") {',
     '    var g3 = o.kind === "cylinder" ? new THREE.CylinderGeometry(o.r || 1, o.r || 1, o.h || 2, 40) : new THREE.ConeGeometry(o.r || 1, o.h || 2, 40);',
+    '    markBox(at, [o.r || 1, (o.h || 2) / 2, o.r || 1]);',
     '    var m3 = new THREE.Mesh(g3, new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity: 0.55 }));',
-    '    m3.position.set(at[0], at[1] + (o.h || 2) / 2, at[2]); scene.add(m3);',
-    '    if (o.edges !== false) { var e3 = new THREE.LineSegments(new THREE.EdgesGeometry(g3), new THREE.LineBasicMaterial({ color: 0x1a1a1a })); e3.position.copy(m3.position); scene.add(e3); }',
+    '    m3.position.set(at[0], at[1], at[2]); scene.add(m3);',
+    '    if (o.edges !== false) { var e3 = new THREE.LineSegments(new THREE.EdgesGeometry(g3, 20), new THREE.LineBasicMaterial({ color: 0x1a1a1a })); e3.position.copy(m3.position); scene.add(e3); }',
     '  } else if (o.kind === "plane") {',
     '    var s2 = o.size || [3, 3];',
+    '    markBox(at, [s2[0] / 2, s2[1] / 2, 0.05]);',
     '    var g4 = new THREE.PlaneGeometry(s2[0], s2[1]);',
     '    var m4 = new THREE.Mesh(g4, new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity: o.opacity == null ? 0.35 : o.opacity, side: THREE.DoubleSide }));',
     '    m4.position.set(at[0], at[1], at[2]);',
     '    if (o.rot) m4.rotation.set(o.rot[0] || 0, o.rot[1] || 0, o.rot[2] || 0);',
     '    scene.add(m4);',
     '  } else if (o.kind === "line") {',
+    '    markPoint(o.from); markPoint(o.to);',
     '    var gm = new THREE.BufferGeometry().setFromPoints([V(o.from), V(o.to)]);',
     '    scene.add(new THREE.Line(gm, new THREE.LineBasicMaterial({ color: o.color || 0xc0392b })));',
     '  } else if (o.kind === "point") {',
+    '    markPoint(at);',
     '    var p = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12), new THREE.MeshBasicMaterial({ color: o.color || 0xc0392b }));',
     '    p.position.set(at[0], at[1], at[2]); scene.add(p);',
+    '    if (o.label) { var lb = makeLabel(o.label, "#1a1a1a"); lb.position.set(at[0] + 0.28, at[1] + 0.28, at[2]); scene.add(lb); }',
     '  }',
     '}',
     '(SPEC.objects || []).forEach(add);',
+    'if (!bb.isEmpty()) {',
+    '  center.copy(bb.getCenter(new THREE.Vector3()));',
+    '  var rad = bb.getSize(new THREE.Vector3()).length() / 2;',
+    '  dist = Math.max(dist * 0.9, rad * 2.4);',
+    '}',
+    'place();',
     'if (SPEC.axis !== false) {',
     '  var ax = new THREE.AxesHelper(3); scene.add(ax);',
     '  var gr = new THREE.GridHelper(6, 12, 0xd8dee9, 0xeef2f7); scene.add(gr);',
     '}',
     'function resize() {',
     '  var w = host.clientWidth || 640, h = host.clientHeight || 400;',
-    '  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();',
+    // ⚠ updateStyle 必须为 true（默认）：否则 canvas 只设了 drawing buffer，CSS 尺寸还是 1600×1040，
+    //   在高 DPI 下只能看到画面左上角 1/4（实测截图发现 ✗）
+    '  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();',
     '}',
     'window.addEventListener("resize", resize); resize();',
     'var dragging = false, lx = 0, ly = 0, parentDrag = false;',
@@ -140,10 +174,22 @@ export function applet3dHtml(spec: Scene3D, opt?: { threeSrc?: string; height?: 
     '<!doctype html><html><head><meta charset="utf-8"><style>',
     'html,body{margin:0;height:100%;overflow:hidden;background:transparent;font-family:system-ui,sans-serif}',
     '#h{width:100%;height:' + (opt?.height || '100%') + '}',
-    '#t{position:absolute;left:8px;top:6px;font-size:13px;color:#475569}',
+    '#t{position:absolute;left:8px;top:6px;max-width:calc(100% - 16px);font-size:13px;line-height:1.5;color:#475569;background:rgba(255,255,255,.82);padding:2px 8px;border-radius:8px;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
     '</style></head><body><div id="h"></div><div id="t"></div>',
     '<script src="' + src + '"><\/script>',
     '<script>' + js + '<\/script>',
     '</body></html>',
   ].join('')
+}
+
+/** 把场景包成**可直接插进画布**的 embed 元素（模板卡片与 AI 生成共用这一条路 ✓） */
+export function applet3dElement(scene: Scene3D, opt?: { x?: number; y?: number; w?: number; h?: number; id?: string }): SlideElement {
+  const id = opt?.id || 'el_' + Math.random().toString(36).slice(2, 10)
+  const bytes = new TextEncoder().encode(applet3dHtml(scene, { elId: id }))
+  let bin = ''
+  for (const b of bytes) bin += String.fromCharCode(b)
+  return {
+    id, type: 'embed', x: opt?.x ?? 560, y: opt?.y ?? 250, w: opt?.w ?? 800, h: opt?.h ?? 520,
+    rot: 0, kind: 'html', url: '', dataBase64: btoa(bin), mime: 'text/html', applet3d: true,
+  } as unknown as SlideElement
 }
