@@ -280,6 +280,32 @@ function isSegmentHead(t: string): boolean {
 /** 「一、选择题：本题共 8 小题…」这行告诉我们**这一段的题型** —— 这是试卷里最可靠的题型信号
  *  （比"看有没有选项"稳：解答题里也会出现选项字母；而选择题可能一个选项都没切出来）。
  *  返回 '' = 认不出（那就退回结构推断）。 */
+/** 【救回被吃掉的选项】MinerU 的 full.md 偶尔把 A 选项并进公式 —— 实测同一次识别的块原文是
+ *  `… 则 $P = A$ 。1 B. 2 C. 4 D. 8`（MD 里丢了那个 `1` ✗），也就是 **content_list.json 里还留着**。
+ *  于是：题干里出现“= A$”这种可疑痕迹、且切出来的选项从 B 开始 → 把“题干与 B. 之间”的碎片捞回来当 A 选项 ✓
+ *  ⚠ 宁可不救也不许救错：只有“可疑痕迹 + 明确的首个选项标记 + 短碎片（≤8 字）”三条同时成立才动手。
+ *  @param letters 已经切出来的选项字母（如 ['B','C','D']）
+ *  @param options 已经切出来的选项文本（顺序同 letters）
+ *  @param content 该题在 content_list 里的原文（没有就原样返回）
+ */
+export function recoverLeadingOption(content: string | undefined, letters: string[], options: string[]): string[] {
+  if (!content || !options.length || options.length >= 4) return options
+  const found = Array.from(new Set(letters)).filter((L) => 'ABCD'.indexOf(L) >= 0).sort()
+  if (!found.length || found.indexOf('A') >= 0) return options      // A 在，不用救
+  const first = found[0]                                            // 通常 'B'
+  const re = new RegExp('[（(]?\\s*' + first + '\\s*[.、．)）]')
+  const i = content.search(re)
+  if (i <= 0) return options
+  const head = content.slice(0, i)
+  if (!/\$[^$]*=\s*[A-D]\s*\$/.test(head)) return options          // 没有“= A$”痕迹 → 别乱救
+  const m = head.match(/[。．.,，]\s*([^。．.,，]{1,8})\s*$/)
+  if (!m) return options
+  const frag = m[1].replace(/\$/g, '').trim()
+  if (!frag || /^[A-D]$/.test(frag)) return options
+  const out = options.slice()
+  out.unshift(frag)
+  return out
+}
 export function typeOfSegmentHead(t: string): string {
   const s = t.replace(/[#*`_\s]/g, '')
   if (/多选|多项选择|有多项符合/.test(s)) return 'multi'
