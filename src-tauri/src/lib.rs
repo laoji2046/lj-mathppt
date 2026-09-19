@@ -1006,6 +1006,60 @@ fn mineru_stage_pdf(data_base64: String, file_name: String) -> Result<String, St
 /// 单张超 4MB / 一批超 16MB 的图直接跳过（防止一张大图把 IPC 与 SQLite 撑死）。
 /// 把 content_list.json 里所有 **text 块**的文字拼起来 —— 给前端"救回被 full.md 吃掉的选项"用
 /// （实测：MD 里 Q6 的 "A. 1" 丢了，content_list 里还留着 `。1` ✓）。读不到就返回空串，前端退回补占位 ✓
+/// 【AI 结构化/校正】把一段试卷正文交给大模型，拿回结构化 JSON（v1429）。
+/// 为什么放 Rust 侧：网页端直连 api.deepseek.com 会被 CORS 挡 ✗（和 MinerU 同理）。
+/// base_url / model 都可传，方便以后换服务商；api_key 只从设置里来，**绝不写进源码** ✓
+#[tauri::command]
+fn ai_chat(base_url: String, api_key: String, model: String, system: String, user_text: String) -> serde_json::Value {
+    let url = if base_url.trim().is_empty() {
+        "https://api.deepseek.com/chat/completions".to_string()
+    } else {
+        let b = base_url.trim().trim_end_matches('/');
+        if b.ends_with("/chat/completions") { b.to_string() } else { format!("{}/chat/completions", b) }
+    };
+    let model = if model.trim().is_empty() { "deepseek-chat".to_string() } else { model.trim().to_string() };
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let client = match reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(20))
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("HTTP 客户端创建失败: {}", e) }),
+    };
+    let body = serde_json::json!({
+        "model": model,
+        "temperature": 0,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": user_text }
+        ]
+    });
+    let resp = match client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", api_key.trim()))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+    {
+        Ok(r) => r,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("请求失败: {}", e) }),
+    };
+    let status = resp.status();
+    let text = resp.text().unwrap_or_default();
+    if !status.is_success() {
+        return serde_json::json!({ "ok": false, "status": status.as_u16(), "error": mineru_short(&text, 400) });
+    }
+    let v: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(_) => return serde_json::json!({ "ok": false, "error": format!("返回非 JSON: {}", mineru_short(&text, 200)) }),
+    };
+    let content = v.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content")).and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let usage = v.get("usage").cloned().unwrap_or(serde_json::Value::Null);
+    serde_json::json!({ "ok": true, "content": content, "usage": usage })
+}
+
 /// 把 content_list.json 组装成"**按块、一行一块**"的正文文本 —— 这是我们的解析主入口（v1428 起）：
 /// - `header / footer / page_number` **直接跳过** ✓（页眉页脚混进题干是老毛病 ✗）
 /// - `text / equation` → 原样一行 ✓（**块边界就是行边界**，选项不会被 MD 那种合并吃掉 ✓）
@@ -1434,6 +1488,7 @@ pub fn run() {
             list_windows,
             capture_window,
             lib_info,
+        ai_chat,
         asset_get,
             lib_query,
             lib_save,
