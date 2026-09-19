@@ -1461,6 +1461,8 @@ fn mineru_parse(
         // 产物落盘位置，前端提示与「后续做插图」都用得上
         "mdPath": md_path.to_string_lossy(),
         "jsonPath": json_path.to_string_lossy(),
+        // contentJson：content_list.json 的**原文** —— 前端用它做 bbox 列检测（双栏重排 ✓）
+        "contentJson": std::fs::read_to_string(&json_path).unwrap_or_default(),
         // mdText：前端直接灌进批量导入面板
         "mdText": md_text,
         "contentText": content_text,

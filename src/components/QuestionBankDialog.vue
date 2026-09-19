@@ -13,6 +13,7 @@ import {
 } from '@/composables/useQuestionLibrary'
 import type { QuestionEntry, QuestionMeta, QType, Level, PaperRule, RuleResult, PaperGroup, JunkItem } from '@/composables/useQuestionLibrary'
 import { parseQuestionsWithInfo, PARSE_HELP, detectPaperInfo, setContentList } from '@/composables/parseQuestions'
+import { assembleContentDoc } from '@/composables/contentDoc'
 import type { QuestionImage, ParsedQuestion } from '@/composables/parseQuestions'
 import { linkMineruImages, imagesForText, questionTextOf } from '@/composables/mineruImages'
 import { saveTextFile, isTauri, listenTauri, mineruStagePdf, mineruParse, aiChat } from '@/composables/useTauri'
@@ -321,7 +322,9 @@ async function runMineru(pdfPath: string) {
     // 入库时按题拆开写进 meta.images —— 题库不存磁盘路径（产物目录会被清/换机就没了）。
     // v1428：优先用 **content_list 组装出来的正文**（一块一行 → 选项不会被 MD 那种合并吃掉 ✓、
     //   页眉页脚/页码已剔除 ✓）；而且它就是交给解析器的那份文本 → 「被吃掉的选项」能按题干末尾精确定位 ✓
-    const doc = String(r?.contentText || '').trim() || md
+    // v1434：优先用 **content_list + bbox 列检测**在 TS 侧装配（双栏卷会被重排成"先左后右" ✓）
+    const doc = (r?.contentJson ? assembleContentDoc(String(r.contentJson)) : '').trim()
+      || String(r?.contentText || '').trim() || md
     const linked = linkMineruImages(doc, r?.images)
     batchImages.value = linked.images
     setContentList(doc)

@@ -222,6 +222,8 @@ export interface MineruResult {
   mdText?: string
   /** content_list.json 的文字块（拼成一串）—— 救回被 full.md 吃掉的选项用 */
   contentText?: string
+  /** content_list.json 的原文（前端用它做 bbox 列检测/装配 ✓）*/
+  contentJson?: string
   pages?: number
   seconds?: number
   mode?: string
