@@ -448,6 +448,20 @@ const shown = computed(() => filterQuestions(list.value, {
     onlyImage: onlyImage.value,
     review: onlyReview.value,
 }))
+/** 清空全部筛选（健康度那一排按钮先调它 —— 否则残留筛选会叠加出空列表 ✗） */
+function clearFilters() {
+  q.value = ''
+  pickedTags.value = []
+  pickedType.value = ''
+  pickedSection.value = ''
+  pickedChapter.value = ''
+  pickedLevel.value = ''
+  pickedDiff.value = null
+  onlyMissing.value = false
+  onlyReview.value = false
+  onlyImage.value = false
+}
+
 const selected = computed(() => list.value.find((x) => x.id === selectedId.value) || null)
 
 /** 「待核对」的题数 + 每道的原因（v1411 P1）—— 按字段现算，老师改完自动消失 ✓ */
@@ -685,11 +699,11 @@ function close() { emit('close') }
         <!-- 筛选：题型 / 难度分级 / 板块 / 只看缺答案 -->
         <!-- 题库健康度（v1414 P3）：一眼看到"库怎么样"，点数字旁边的筛选就知道该补哪里 -->
         <div class="qb__health">
-          <span>共 <b>{{ health.total }}</b> 道</span>
-          <span :class="{ 'qb__h--warn': health.unclassified > 0 }" title="这些题没有板块，用「未分类」筛选能看全">未分类 {{ health.unclassified }}</span>
-          <span :class="{ 'qb__h--warn': health.noAnswer > 0 }" title="没答案的题：可用「自动补答案」或手工补">缺答案 {{ health.noAnswer }}</span>
-          <span :class="{ 'qb__h--warn': health.todo > 0 }" title="选项不全 / 没答案 / 题干过短 —— 点筛选条「只看待核对」逐个过">待核对 {{ health.todo }}</span>
-          <span title="题里带插图的题数（[图N]）">含图 {{ health.withImage }}</span>
+          <button class="qb__hbtn" title="点它清空所有筛选（回到全部）" @click="clearFilters">共 <b>{{ health.total }}</b> 道</button>
+          <button class="qb__hbtn" :class="{ 'qb__h--warn': health.unclassified > 0 }" title="点它只看没有板块的题" @click="clearFilters(); pickedSection = '未分类'">未分类 {{ health.unclassified }}</button>
+          <button class="qb__hbtn" :class="{ 'qb__h--warn': health.noAnswer > 0 }" title="点它只看没答案的题（可用「自动补答案」或手工补）" @click="clearFilters(); onlyMissing = true">缺答案 {{ health.noAnswer }}</button>
+          <button class="qb__hbtn" :class="{ 'qb__h--warn': health.todo > 0 }" title="点它只看待核对的题（选项不全/没答案/题干过短）" @click="clearFilters(); onlyReview = true">待核对 {{ health.todo }}</button>
+          <button class="qb__hbtn" title="点它只看带插图的题" @click="clearFilters(); onlyImage = true">含图 {{ health.withImage }}</button>
         </div>
         <div class="qb__filters">
           <span class="qb__fg" v-if="pickedSection || pickedChapter">章节
@@ -1035,6 +1049,8 @@ B. 2
 .qb__prow--paper { display: flex; align-items: center; gap: 8px; }
 .qb__ptitle { flex: 1; min-width: 0; font-weight: 600; }
 .qb__warn { margin-left: 6px; font-weight: 400; font-size: 11.5px; color: #b25f00; }
+.qb__hbtn { padding: 1px 6px; border: 1px solid transparent; border-radius: 6px; background: transparent; font: inherit; font-size: 12.5px; color: #475569; cursor: pointer; }
+.qb__hbtn:hover { background: #eef2f7; border-color: #dbe6f1; }
 .qb__health { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 6px 12px; margin: 0 0 6px; background: #f8fafc; border: 1px solid #eef2f7; border-radius: 8px; font-size: 12.5px; color: #475569; }
 .qb__health b { color: #1e293b; }
 .qb__h--warn { color: #b25f00; font-weight: 600; }
