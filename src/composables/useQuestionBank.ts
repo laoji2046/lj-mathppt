@@ -605,3 +605,14 @@ export async function exportVault(dir: string): Promise<{ ok: boolean; dir: stri
     return { ok: false, dir, count: 0, total: 0, index: '', error: String((e as Error)?.message || e) }
   }
 }
+
+/** 【规范】写一个文本文件到老师选的目录（录入窗口「导出规范 MD」用 ✓） */
+export async function writeTextFile(dir: string, name: string, text: string): Promise<{ ok: boolean; path: string; error?: string }> {
+  try {
+    const r = await invoke<{ ok?: boolean; path?: string; error?: string }>('lib_write_text_file', { dir, name, text })
+    if (r && r.ok) return { ok: true, path: String(r.path || '') }
+    return { ok: false, path: '', error: (r && r.error) || '写入失败' }
+  } catch (e) {
+    return { ok: false, path: '', error: String((e as Error)?.message || e) }
+  }
+}

@@ -529,6 +529,8 @@ export function parseVaultMarkdown(raw: string): ParsedQuestion | null {
     yearExplicit: yStr || undefined,
     paperName: source || undefined,
     region: String(d.grade || d.semester || ''),
+    // 【规范】把 number 也读回 no：这样「规范化 → 再规范化」题号不漂 ✓（v1459 起 no 是题内图号/答案配对的依据）
+    no: Number(String(d.number || '').replace(/[^0-9]/g, '')) || undefined,
   }
   return p
 }
@@ -687,3 +689,96 @@ export function parseAnyJson(raw: string): { list: ParsedQuestion[]; error?: str
   const r = parseQuestionsJson(raw)
   return { ...r, mode: 'bank' }
 }
+
+/* ---------------- 【规范】把题目写成「题库单题格式」的 Markdown ---------------- */
+
+/** YAML 标量（与 Rust 的 lib_yaml_scalar 同一套规则 ✓） */
+function vaultScalar(v: unknown): string {
+  const s = String(v == null ? '' : v).replace(/[\n\r]/g, ' ').trim()
+  const need = !s || /[:#'"]/.test(s) || /^[-[{]/.test(s)
+  return need ? '"' + s.replace(/"/g, "'") + '"' : s
+}
+
+/** 难度档 1-5 → 系数（与 Rust lib_diff_coef 逐档一致 ✓） */
+function vaultCoef(d: number): string {
+  const n = Number(d)
+  if (n <= 1) return '0.94'
+  if (n === 2) return '0.80'
+  if (n === 3) return '0.65'
+  if (n === 4) return '0.45'
+  return '0.20'
+}
+
+/** 难度档 1-5 → 中文档（与 Rust lib_diff_level 一致 ✓） */
+function vaultLevel(d: number): string {
+  const n = Number(d)
+  if (n <= 2) return '基础'
+  if (n === 3) return '中档'
+  return '拔高'
+}
+
+/**
+ * 【规范】题目数组 → 「题库单题格式」的 Markdown。
+ *
+ *   **与 Rust 导出（lib_export_vault）逐字段对齐** —— 所以「导出 → 改 → 再导入」不丢东西 ✓
+ *   一个文件可以放多道：导入侧 "parseVaultMarkdownMany" 按 front-matter 开头切块 ✓
+ *
+ * 用途：老师手上任意来源的 md（AI 给的 / 别人发的 / 旧的 / 从 PDF 里抠的）先在校对表里核一遍，
+ * 再**一键落成这个格式** → 以后所有题都长一样，导入结果可预期 ✓
+ */
+export function toVaultMarkdown(list: ParsedQuestion[], opt?: { paper?: string; now?: number }): string {
+  const now = opt && opt.now ? opt.now : Math.floor(Date.now() / 1000)
+  const blocks: string[] = []
+  ;(list || []).forEach((q, i) => {
+    const paper = String(q.paperName || (opt && opt.paper) || q.region || '').trim()
+    const no = Number(q.no) > 0 ? Number(q.no) : i + 1
+    const y = Number(q.yearExplicit || q.year) || 0
+    const L: string[] = []
+    L.push('---')
+    // ⚠ 第一行要是 qid / source / number 之一（导入侧的切块正则靠它 ✓）
+    L.push('qid: ' + (i + 1))                       // 占位：导入时按新编号分配 ✓
+    L.push('source: ' + vaultScalar(paper || '未知'))
+    L.push("number: '" + no + "'")
+    if (q.qtype) L.push('type: ' + vaultScalar(q.qtype))
+    if (q.section) L.push('section: ' + vaultScalar(q.section))
+    L.push('year: ' + y)
+    L.push('level: ' + vaultLevel(q.difficulty))
+    L.push('difficulty: ' + vaultCoef(q.difficulty))
+    L.push("updatedAt: '" + now + "'")
+    const ks = (q.knowledge || []).map((x) => String(x).trim()).filter(Boolean)
+    if (!ks.length) L.push('knowledge: []')
+    else {
+      L.push('knowledge:')
+      for (const k of ks) L.push('- ' + vaultScalar(k))
+    }
+    L.push('---')
+    L.push('')
+    L.push('## 题目')
+    L.push('')
+    L.push(String(q.stem || '').trim())
+    const opts = (q.options || []).map((o) => String(o).trim()).filter(Boolean)
+    if (opts.length) {
+      L.push('')
+      L.push('## 选项')
+      L.push('')
+      opts.forEach((o, k) => L.push(String.fromCharCode(65 + (k % 26)) + '．' + o))
+    }
+    const ans = String(q.answer || '').trim()
+    if (ans) {
+      L.push('')
+      L.push('## 答案')
+      L.push('')
+      L.push(ans)
+    }
+    const sol = String(q.solution || '').trim()
+    if (sol) {
+      L.push('')
+      L.push('## 解析')
+      L.push('')
+      L.push(sol)
+    }
+    blocks.push(L.join('\n'))
+  })
+  return blocks.join('\n\n') + '\n'
+}
+

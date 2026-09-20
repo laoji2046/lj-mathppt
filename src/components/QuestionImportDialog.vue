@@ -26,12 +26,13 @@ import {
   linkMineruImages,
   questionTextOf,
 } from '@/composables/mineruImages'
+import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
 import type { QuestionImage } from '@/composables/parseQuestions'
 import { setContentList } from '@/composables/parseQuestions'
 import type { ParsedQuestion } from '@/composables/parseQuestions'
 import {
   importParsedQuestions, metaOfParsed, draftFromMeta,
-  parseAnyMarkdown, parseAnyJson, parseVaultMarkdownMany,
+  parseAnyMarkdown, parseAnyJson, parseVaultMarkdownMany, toVaultMarkdown,
 } from '@/composables/useQuestionImport'
 import { SECTIONS, QTYPE_LABEL, qFacets, stemPreviewText, importBegin, importAddDrafts, idemKeyOf, matchStems } from '@/composables/useQuestionBank'
 import { typesetHosts } from '@/composables/useMathJax'
@@ -259,6 +260,21 @@ function doParseJson() { fileMode.value = 'json'; parseJson(text.value) }
 /* ---------------- ③ 校对 ---------------- */
 
 function toggleAll() { const v = !allOn.value; rows.value.forEach((r) => { r.on = v }) }
+/**
+ * 【规范】把校对过的题导出成**规范 MD**（一道题一个 front-matter 块，可直接再导入 ✓）
+ *   老师手上任意来源的 md 都能先核一遍再落成这个格式 —— 以后所有题都长一样，导入结果可预期 ✓
+ */
+async function doExportNormMd() {
+  const list = rows.value.filter((r) => r.on).map((r) => r.q)
+  if (!list.length) { flash('先勾选要导出的题'); return }
+  const paper = batchPaper.value.trim() || detected.value.paperName || ''
+  const text = toVaultMarkdown(list, { paper })
+  const dir = await firstUserDir('导出规范 MD')
+  if (!dir) { flash('没选目录（已取消）'); return }
+  const w = await writeTextFile(dir, (paper || '题库规范') + '（规范）.md', text)
+  flash(w.ok ? '✓ 规范 MD 已写出：' + w.path : '✗ ' + (w.error || '写入失败'))
+}
+
 function applyBatchSource() {
   const y = batchYear.value.trim()
   const p = batchPaper.value.trim()
@@ -515,6 +531,7 @@ function optsText(o: string[]): string {
               <input v-model="batchYear" class="qi__mini" placeholder="年份" />
               <input v-model="batchPaper" class="qi__mini qi__mini--wide" placeholder="试卷名 / 来源" />
               <button class="qi__btn" :disabled="!batchYear.trim() && !batchPaper.trim()" @click="applyBatchSource">批量填来源</button>
+              <button class="qi__btn" title="把勾选的题导出成**规范格式**的 Markdown（一道题一个 front-matter 块，可再导入、可当模板）" @click="doExportNormMd">导出规范 MD</button>
             </div>
             <div v-if="detected.year || detected.paperName" class="qi__hint">原文里认出：{{ detected.year }} {{ detected.paperName }}（点「批量填来源」套用）</div>
             <div class="qi__list">

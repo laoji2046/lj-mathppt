@@ -3258,6 +3258,39 @@ fn lib_mineru_contract(dir: String) -> serde_json::Value {
     mineru_contract_scan(&d)
 }
 
+/// 【优化】安全文件名：去掉路径非法字符（**中文保留** ✓；空则回退）
+fn lib_safe_file_name(s: &str) -> String {
+    let mut out = String::new();
+    for c in s.chars() {
+        if c.is_control() || "\\/:*?\"<>|".contains(c) {
+            continue;
+        }
+        out.push(c);
+    }
+    let t = out.trim().trim_matches('.').to_string();
+    if t.is_empty() {
+        "questions.md".to_string()
+    } else {
+        t
+    }
+}
+
+/// 【优化】把一段文本写成文件 —— 导入侧「导出规范 MD」用：
+///   老师手上任意来源的 md（AI 给的 / 别人发的 / 旧的）→ 校对一遍 → **落成规范格式**，
+///   以后就拿规范文件当模板 ✓（目录由老师选，文件名由前端给 ✓）
+#[tauri::command]
+fn lib_write_text_file(dir: String, name: String, text: String) -> serde_json::Value {
+    let d = std::path::PathBuf::from(dir.trim());
+    if !d.is_dir() {
+        return serde_json::json!({ "ok": false, "error": "目录不存在" });
+    }
+    let p = d.join(lib_safe_file_name(&name));
+    match std::fs::write(&p, text.as_bytes()) {
+        Ok(_) => serde_json::json!({ "ok": true, "path": p.to_string_lossy(), "bytes": text.len() }),
+        Err(e) => serde_json::json!({ "ok": false, "error": format!("写入失败: {}", e) }),
+    }
+}
+
 /// 【P2a】把整个题库导出成「一道题一个 .md」的 Markdown 题库。
 ///
 /// 格式与「录入 → 题库单题格式」**完全一致**（YAML front-matter + ## 题目 / 选项 / 答案 / 解析），
@@ -4763,6 +4796,7 @@ pub fn run() {
             lib_mineru_cache_text,
             lib_q_backfill_answers,
             lib_q_refresh_warn,
+            lib_write_text_file,
             mineru_stage_pdf
         ])
         .run(tauri::generate_context!())
