@@ -21,6 +21,10 @@ import {
 } from '@/composables/useQuestionBank'
 import type { QFacets, QFilter, QItem, SourceReport, SourcePlan } from '@/composables/useQuestionBank'
 import { applyAnswerBackfill, scanAnswerBackfill } from '@/composables/useAnswerBackfill'
+import { openFigPalette } from '@/ui/figPalette'
+import { geom3dOpen, geom3dSink, openGeom3D } from '@/ui/geom3d'
+import { svgTextToPngUrl, svgToPngUrl } from '@/composables/svgPng'
+import type { QuestionImage } from '@/composables/parseQuestions'
 import type { AnsScan } from '@/composables/useAnswerBackfill'
 
 /** 试题录入（M4）：体量不小，按需加载 ✓ */
@@ -225,6 +229,149 @@ async function reload() {
   }
 }
 onMounted(() => { void reload(); void loadKpCatalog() })
+/* ---------------- 【v1466】题图编辑：上传 / 粘贴 / 数学图形 / 三维图 ---------------- */
+/** 单张图上限（超过先压一下再传 —— 库是自包含的，图直接进 meta ✓） */
+const MAX_FIG_BYTES = 4 * 1024 * 1024
+const figBusy = ref(false)
+const figMsg = ref('')
+
+/** 这道题已有的图（meta.images：{ n, src, caption }） */
+function figsOf(it: QItem | null): QuestionImage[] {
+  if (!it) return []
+  const raw = metaOf(it).images
+  return Array.isArray(raw) ? (raw as QuestionImage[]).filter((x) => x && x.src) : []
+}
+
+async function saveFig(patch: Record<string, unknown>, okMsg: string) {
+  const it = sel.value
+  if (!it) return
+  figBusy.value = true
+  try {
+    const r = await qPatch(Number(it.id), patch)
+    if (r && r.ok) {
+      figMsg.value = '✓ ' + okMsg
+      await reload()
+      await nextTick(renderPreview)
+    } else figMsg.value = '✗ ' + ((r && r.error) || '保存失败')
+  } finally {
+    figBusy.value = false
+  }
+}
+
+/** 加一张题图；题干里没有 [图N] 就补一个（预览/导出都靠这个标记就地插图 ✓） */
+async function addQuestionFigure(src: string, caption = '') {
+  const it = sel.value
+  if (!it || !src) return
+  const list = figsOf(it).slice()
+  const n = list.length + 1
+  list.push({ n, src, caption: caption || '' })
+  const m = metaOf(it)
+  const stem = String(m.stem || it.body || '')
+  const has = new RegExp('\\[图\\s*' + n + '\\s*\\]').test(stem)
+  const stem2 = has ? stem : stem + (stem.trim() ? '\n\n' : '') + '[图' + n + ']'
+  await saveFig({ images: list, stem: stem2 }, '已加第 ' + n + ' 张题图')
+}
+
+async function removeQuestionFigure(n: number) {
+  const it = sel.value
+  if (!it) return
+  const list = figsOf(it)
+    .filter((x) => Number(x.n) !== Number(n))
+    .map((x, i) => ({ ...x, n: i + 1 }))
+  await saveFig({ images: list }, '已删除该图（其余图号自动重排）')
+}
+
+/** 【v1466】改图注（就地编辑 ✓ —— 提示里承诺「可换图注」，此前没有能改的地方 ✗） */
+async function setFigCaption(n: number, e: Event) {
+  const input = e.target as HTMLInputElement
+  const cap = input.value.trim()
+  const cur = figsOf(sel.value)
+  const one = cur.filter((x) => Number(x.n) === Number(n))[0]
+  if (!one || String(one.caption || '') === cap) return
+  const list = cur.map((x) => (Number(x.n) === Number(n) ? { ...x, caption: cap } : x))
+  await saveFig({ images: list }, '已更新图注')
+}
+
+function fileToDataUrl(f: File): Promise<string> {
+  return new Promise((res, rej) => {
+    const r = new FileReader()
+    r.onload = () => res(String(r.result || ''))
+    r.onerror = () => rej(new Error('读文件失败'))
+    r.readAsDataURL(f)
+  })
+}
+
+async function addFigFiles(files: File[]) {
+  let ok = 0
+  for (const f of files) {
+    if (!/^image\//.test(f.type)) { figMsg.value = '只收图片（png / jpg / webp / gif / svg）'; continue }
+    if (f.size > MAX_FIG_BYTES) { figMsg.value = '这张太大（' + Math.round(f.size / 1024) + 'KB > 4MB），先压一下再传'; continue }
+    await addQuestionFigure(await fileToDataUrl(f), '')
+    ok++
+  }
+  if (ok) figMsg.value = '✓ 已加 ' + ok + ' 张（可删、可换图注）'
+}
+
+function onPickFigFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = input.files ? (Array.prototype.slice.call(input.files) as File[]) : []
+  input.value = ''
+  if (files.length) void addFigFiles(files)
+}
+
+/** 面板开着时 Ctrl+V 直接贴图 ✓（只认剪贴板里的图片） */
+function onPanelPaste(e: ClipboardEvent) {
+  if (!sel.value) return
+  const dt = e.clipboardData
+  if (!dt) return
+  const files: File[] = []
+  const items = Array.prototype.slice.call(dt.items || []) as DataTransferItem[]
+  for (const it of items) {
+    if (it.kind === 'file' && /^image\//.test(it.type)) {
+      const f = it.getAsFile()
+      if (f) files.push(f)
+    }
+  }
+  if (!files.length) return
+  e.preventDefault()
+  void addFigFiles(files)
+}
+
+/** 直接用**我们的数学图形**：打开图形面板，点哪张哪张就成为题图（面板的 sink 模式 ✓） */
+function pickMathFigure() {
+  if (!sel.value) { figMsg.value = '先选一道题'; return }
+  openFigPalette((svg, label) => {
+    void (async () => {
+      try { await addQuestionFigure(await svgToPngUrl(svg), label || '') }
+      catch (e) { figMsg.value = '✗ 图形转图片失败：' + String((e as Error)?.message || e) }
+    })()
+  })
+  figMsg.value = '在图形面板里点一张 → 它就成为本题的题图 ✓'
+}
+
+/** 三维立体图：靠 geom3dSink 接收（用完立刻清掉，免得影响画布 ✓） */
+function pickGeom3DFigure() {
+  if (!sel.value) { figMsg.value = '先选一道题'; return }
+  geom3dSink.value = (svgText: string, label: string) => {
+    geom3dSink.value = null
+    void (async () => {
+      try { await addQuestionFigure(await svgTextToPngUrl(svgText), label || '三维图') }
+      catch (e) { figMsg.value = '✗ 三维图转图片失败：' + String((e as Error)?.message || e) }
+    })()
+  }
+  openGeom3D()
+  // 【v1466】插件被关掉时 openGeom3D() 是**空操作** ✓ —— 提示不能还喊"去三维窗口里点插入" ✗
+  //   （requireAddon 会弹 3.2 秒的全局提示 ✓，这里再在题图区说明一次 ✓）
+  if (geom3dOpen.value) {
+    figMsg.value = '在三维窗口里调好 → 点「插入到当前页」就落到本题 ✓'
+  } else {
+    geom3dSink.value = null
+    figMsg.value = '三维立体图已在「功能管理」里关掉 —— 打开它才能用'
+  }
+}
+
+
+
 
 /**
  * 【修】Esc 关面板 —— 关闭按钮的 title 一直写着「关闭 (Esc)」，但以前**没有实现** ✗
@@ -235,8 +382,15 @@ function onPanelKey(e: KeyboardEvent) {
   if (importOpen.value || draftOpen.value || reportOpen.value || ansOpen.value) return
   emit('close')
 }
-onMounted(() => document.addEventListener('keydown', onPanelKey))
-onBeforeUnmount(() => document.removeEventListener('keydown', onPanelKey))
+onMounted(() => {
+  document.addEventListener('keydown', onPanelKey)
+  // 【v1466】面板开着时 Ctrl+V 直接贴图（只认剪贴板里的图片 ✓）
+  document.addEventListener('paste', onPanelPaste)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onPanelKey)
+  document.removeEventListener('paste', onPanelPaste)
+})
 
 function pickSection(s: string) {
   f.value.section = f.value.section === s ? undefined : s
@@ -571,6 +725,38 @@ async function batchDelete() {
             </div>
             <div v-if="sel.warn" class="qb__warnbox">⚠ {{ sel.warn }}</div>
             <div ref="previewHost" class="qb__preview" @click="onPreviewClick"></div>
+            <!-- 【v1466】题图：上传 / Ctrl+V 粘贴 / 直接用我们的数学图形 —— 存进 meta.images，题干自动补 [图N] ✓ -->
+            <div class="qb__figs">
+              <div class="qb__t1">
+                题图
+                <span class="qb__hint2">{{ figMsg || '可上传、可直接 Ctrl+V 粘贴，也能用「数学图形」现画一张 ✓' }}</span>
+              </div>
+              <div v-if="figsOf(sel).length" class="qb__figrow">
+                <div v-for="im in figsOf(sel)" :key="im.n" class="qb__figitem">
+                  <img :src="im.src" :alt="im.caption || ('图' + im.n)" />
+                  <span class="qb__figcap">图{{ im.n }}</span>
+                  <!-- 【v1466】图注就地改 —— 提示里写着「可换图注」，可之前根本没有能改的地方 ✗ -->
+                  <input
+                    class="qb__figcapin"
+                    :value="im.caption || ''"
+                    :title="'图' + im.n + ' 的图注（改完回车或点开别处即存 ✓）'"
+                    placeholder="图注…"
+                    @change="setFigCaption(Number(im.n), $event)"
+                  />
+                  <button class="qb__figdel" title="删除这张图（其余图号自动重排）" @click="removeQuestionFigure(Number(im.n))">✕</button>
+                </div>
+              </div>
+              <div v-else class="qb__hint">这道题还没有图</div>
+              <div class="qb__figbtns">
+                <label class="qb__btn" :title="'上传图片（png / jpg / webp / gif / svg，单张 ≤ 4MB）'">
+                  上传图片<input type="file" accept="image/*" multiple style="display:none" @change="onPickFigFile" />
+                </label>
+                <button class="qb__btn" :disabled="figBusy" title="打开数学图形面板：点哪张，哪张就成为本题的题图（函数图像 / 圆锥曲线 / 平面几何 / 立体几何 …）" @click="pickMathFigure">数学图形</button>
+                <button class="qb__btn" :disabled="figBusy" title="三维立体图：在三维窗口里调好后插到本题" @click="pickGeom3DFigure">三维图</button>
+              </div>
+            </div>
+
+
             <div class="qb__form">
               <label>章节
                 <select v-model="form.section">
@@ -798,6 +984,20 @@ async function batchDelete() {
 .qb__preview :deep(.qb__fig img) { max-width: min(100%, 320px); max-height: 150px; object-fit: contain; cursor: zoom-in; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
 .qb__preview :deep(.qb__fig--zoom img) { max-width: 100%; max-height: none; cursor: zoom-out; }
 .qb__preview :deep(.qb__fig figcaption) { font-size: 11px; color: var(--muted); }
+
+/* 【v1466】题图编辑区（上传 / 粘贴 / 数学图形 / 三维图） */
+.qb__figs { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
+.qb__figrow { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.qb__figitem { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.qb__figitem img { max-width: 120px; max-height: 90px; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.qb__figcap { font-size: 10.5px; color: var(--muted); }
+.qb__figcapin { width: 112px; padding: 1px 3px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: 10.5px; color: var(--text); text-align: center; }
+.qb__figcapin:hover, .qb__figcapin:focus { border-color: var(--border); background: #fff; outline: none; }
+.qb__figdel { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; line-height: 16px; text-align: center; border-radius: 50%; border: 1px solid var(--border-strong); background: #fff; color: var(--gray-600); cursor: pointer; font-size: 11px; }
+.qb__figdel:hover { color: #b42318; border-color: #b42318; }
+.qb__figbtns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.qb__figbtns .qb__btn { cursor: pointer; }
+
 .qb__form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
 .qb__form label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--muted); }
 .qb__full { grid-column: 1 / -1; }
