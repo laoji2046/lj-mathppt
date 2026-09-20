@@ -206,12 +206,32 @@ export function stemPreviewText(raw: string, n = 260): string {
   return s.length > n ? s.slice(0, n) + '…' : s
 }
 
+/** 【v1455】题图 → HTML：题干里的 [图N] 用它**就地换掉**，换不到的追加到末尾（终于能看见图 ✓） */
+export function figHtmlOf(im: QuestionImage): string {
+  const src = String((im && im.src) || '')
+  if (!src) return ''
+  const e = (t: unknown) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  const cap = String((im && im.caption) || '').trim()
+  const label = '图' + ((im && im.n) || '') + (cap ? ' · ' + cap : '')
+  return '<figure class="qb__fig"><img src="' + e(src) + '" alt="' + e(label) + '" /><figcaption>' + e(label) + '</figcaption></figure>'
+}
 /** 预览用的 HTML：题干 + 选项 + 答案 + 解析（走 typesetMixed，公式按编辑器同一套渲染 ✓） */
-export function previewHtmlOf(it: QItem): string {
+export function previewHtmlOf(it: QItem, imgs?: QuestionImage[]): string {
   const m = metaOf(it)
   const esc = (t: string) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const stem = String(m.stem || it.body || it.title || '')
-  let out = '<div class="qb__sec">' + esc(stem) + '</div>'
+  // 【v1455】题图：把题干里的 [图N] **就地换成真图**（换不到的追加到末尾）
+  //   —— 以前这里**完全不渲染图**，所以图存进去了也看不见 ✗
+  const byN = new Map<number, QuestionImage>()
+  for (const im of imgs || []) byN.set(Number(im.n) || 0, im)
+  const used = new Set<number>()
+  const stemHtml = esc(stem).replace(/\[图\s*(\d+)(?::[^\]]*)?\]/g, (whole: string, n: string) => {
+    const im = byN.get(Number(n))
+    if (!im) return whole
+    used.add(Number(im.n) || 0)
+    return figHtmlOf(im)
+  })
+  let out = '<div class="qb__sec">' + stemHtml + '</div>'
   const opts = Array.isArray(m.options) ? (m.options as unknown[]).map((x) => String(x)) : []
   if (opts.length) {
     out += '<div class="qb__sec">' + opts.map((o, i) => '<div>' + 'ABCDEFGH'[i] + '．' + esc(o) + '</div>').join('') + '</div>'
@@ -220,6 +240,9 @@ export function previewHtmlOf(it: QItem): string {
   out += '<div class="qb__sec qb__sec--ans">答案：' + (ans ? esc(ans) : '<span class="qb__miss">（原卷没有 / 尚未录入）</span>') + '</div>'
   const sol = String(m.solution || '').trim()
   if (sol) out += '<div class="qb__sec">解析：' + esc(sol) + '</div>'
+  // 题干里没引用到的图也摆出来（宁可多看见一张，也别让人以为没图 ✓）
+  const rest = (imgs || []).filter((im) => !used.has(Number(im.n) || 0)).map(figHtmlOf).join('')
+  if (rest) out += '<div class="qb__sec">' + rest + '</div>'
   return out
 }
 

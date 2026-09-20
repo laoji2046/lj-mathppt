@@ -144,11 +144,35 @@ function loadRows(list: ParsedQuestion[], tip: string) {
     : ''
   flash(tip + '：识别出 ' + list.length + ' 道' + imgNote + ' —— 请核对后点「入库」')
   void renderCardStems()
+  void renderCardFigures()
 }
 
 /** 卡片题数上限：超过就不跑 MathJax（纯文本已保留公式，不至于卡） */
 const STEM_MATH_MAX = 120
 
+/**
+ * 【v1455】把校对表每张卡**该题的图**画出来 —— 核对阶段就要能看见图（归属对不对一眼便知 ✓）
+ * ⚠ 图此时还是 data URL（入库前没转资源），直接塞 src 即可；
+ *   放在**独立容器** .qi__figs 里，MathJax 那一遍（会重写 .qi__stem）不会把它冲掉 ✓
+ */
+function renderCardFigures() {
+  const hosts = Array.from(document.querySelectorAll<HTMLElement>('.qi__figs'))
+  const list = rows.value
+  const e = (t: unknown) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  hosts.forEach((h, i) => {
+    const q = i < list.length ? list[i].q : null
+    const imgs = (q && q.images) || []
+    h.innerHTML = imgs
+      .map((im) => {
+        const src = String(im.src || '')
+        if (!src) return ''
+        const cap = String(im.caption || '').trim()
+        const label = '图' + (im.n || '') + (cap ? ' · ' + cap : '')
+        return '<figure class="qi__fig"><img src="' + e(src) + '" alt="' + e(label) + '" /><figcaption>' + e(label) + '</figcaption></figure>'
+      })
+      .join('')
+  })
+}
 /**
  * 把校对表每张卡的题干渲染出来 —— **必须保留公式** ✓
  *   ① 先落纯文本（$…$ 原样可见）→ 即使 MathJax 失败也不是空白；
@@ -179,6 +203,7 @@ async function renderCardStems() {
 function removeRow(i: number) {
   rows.value.splice(i, 1)
   void renderCardStems()
+  void renderCardFigures()
 }
 
 function parseMd(raw: string, prefix = '') {
@@ -473,6 +498,7 @@ function optsText(o: string[]): string {
               <div v-for="(r, i) in rows" :key="i" class="qi__card" :class="{ 'qi__card--on': r.on }">
                 <label class="qi__pick" title="勾选（不勾就不入库）" @click.stop><input v-model="r.on" type="checkbox" /></label>
                 <div class="qi__stem" :data-qi="i"></div>
+            <div class="qi__figs" :data-qi="i"></div>
                 <div class="qi__fields">
                   <select v-model="r.q.qtype" class="qi__mini">
                     <option value="">未判</option>
@@ -547,6 +573,11 @@ function optsText(o: string[]): string {
 .qi__card--on { border-color: var(--brand-600, #534AB7); }
 .qi__pick { position: absolute; left: 8px; top: 10px; }
 .qi__stem { font-size: 12.5px; color: var(--text); line-height: 1.7; margin-bottom: 6px; overflow-x: auto; }
+/* 【v1455】校对表里的题图（入库前是 data URL，直接显示） */
+.qi__figs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.qi__fig { margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.qi__fig img { max-width: 220px; max-height: 160px; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.qi__fig figcaption { font-size: 10.5px; color: var(--muted); }
 .qi__stem :deep(mjx-container) { font-size: inherit; max-width: 100%; }
 .qi__stem :deep(mjx-container[display="true"]) { margin: 2px 0; }
 .qi__fields { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }

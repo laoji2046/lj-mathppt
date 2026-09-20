@@ -207,7 +207,9 @@ async function renderPreview() {
   const it = sel.value
   if (!host || !it) return
   try {
-    await typesetMixed(host, previewHtmlOf(it))
+    // 【v1455】先把题图水合出来（assetId → data URL）再渲染，否则预览里永远看不到图 ✗
+    const imgs = await pickImages(it)
+    await typesetMixed(host, previewHtmlOf(it, imgs))
   } catch {
     host.textContent = previewHtmlOf(it).replace(/<[^>]+>/g, ' ')
   }
@@ -664,6 +666,10 @@ async function batchDelete() {
 .qb__kps { margin-top: 3px; font-size: 11px; color: var(--brand-600, #534AB7); }
 .qb__view { border-left: 1px solid var(--border); overflow-y: auto; padding: 10px 12px; }
 .qb__preview { font-size: 13px; line-height: 1.7; color: var(--text); margin-bottom: 10px; }
+/* 【v1455】题图 */
+.qb__fig { margin: 6px 0; display: flex; flex-direction: column; gap: 2px; }
+.qb__fig img { max-width: 100%; max-height: 260px; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.qb__fig figcaption { font-size: 11px; color: var(--muted); }
 .qb__form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
 .qb__form label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--muted); }
 .qb__full { grid-column: 1 / -1; }
