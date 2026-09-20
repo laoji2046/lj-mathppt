@@ -2424,6 +2424,22 @@ fn lib_safe_name(s: &str) -> String {
     }
 }
 
+
+/// 【v1456】把题干里的 [图N] / [图 N] / [图N:参数] 换成 markdown 图片链接（找不到就原样返回）
+fn lib_put_fig(s: &str, n: i64, link: &str) -> String {
+    for key in [format!("[图{}", n), format!("[图 {}", n)] {
+        if let Some(i) = s.find(&key) {
+            if let Some(j) = s[i..].find(']') {
+                let mut out = String::with_capacity(s.len() + link.len());
+                out.push_str(&s[..i]);
+                out.push_str(link);
+                out.push_str(&s[i + j + 1..]);
+                return out;
+            }
+        }
+    }
+    s.to_string()
+}
 /// 难度档 1-5 → 系数（difficultyFromCoefficient 的逆）。导出用系数是为了**原样回灌** ✓
 fn lib_diff_coef(d: i64) -> &'static str {
     match d {
@@ -2451,6 +2467,8 @@ fn lib_diff_level(d: i64) -> &'static str {
 /// 所以导出的目录**可以直接再导入回来** —— 这比什么都重要：数据不被锁死 ✓
 #[tauri::command]
 fn lib_export_vault(dir: String) -> serde_json::Value {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
     let dest = dir.trim().to_string();
     if dest.is_empty() {
         return serde_json::json!({ "ok": false, "error": "导出目录是空的" });
@@ -2490,6 +2508,9 @@ fn lib_export_vault(dir: String) -> serde_json::Value {
     };
     let root = std::path::PathBuf::from(&dest);
     let qdir = root.join("questions");
+    // 【v1456】题图目录（一道题的图放这里，正文用相对路径引用 ✓）
+    let adir = root.join("assets");
+    let mut img_count = 0usize;
     if let Err(e) = std::fs::create_dir_all(&qdir) {
         return serde_json::json!({ "ok": false, "error": format!("建目录失败: {}", e) });
     }
@@ -2520,6 +2541,87 @@ fn lib_export_vault(dir: String) -> serde_json::Value {
         } else {
             lib_safe_name(code)
         };
+        // ---- 【v1456】题图也导出去（P2a 的缺口）：图写成真文件，正文里 [图N] → ![图N · 图注](assets/…) ----
+        //   为什么必须做：以前导出只留 [图N] 标记、图不在目录里 → 别人打开这份备份是**缺图**的 ✗
+        let mut stem_out = stem.clone();
+        let mut extra_links: Vec<String> = Vec::new();
+        let imgs: Vec<serde_json::Value> = m
+            .get("images")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        if !imgs.is_empty() {
+            let _ = std::fs::create_dir_all(&adir);
+            for im in imgs.iter() {
+                let n = im.get("n").and_then(|v| v.as_i64()).unwrap_or(0);
+                let cap = im.get("caption").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+                let mut src = im.get("src").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if src.is_empty() {
+                    if let Some(aid) = im.get("assetId").and_then(|v| v.as_i64()) {
+                        if let Ok(am) = conn.query_row(
+                            "SELECT COALESCE(meta,'{}') FROM library_item WHERE id = ?1 AND type = 'asset'",
+                            [aid],
+                            |r| r.get::<_, String>(0),
+                        ) {
+                            if let Ok(av) = serde_json::from_str::<serde_json::Value>(&am) {
+                                src = av.get("src").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                            }
+                        }
+                    }
+                }
+                if !src.starts_with("data:") {
+                    continue;
+                }
+                let (mime, b64) = match src.split_once(',') {
+                    Some((head, body)) => (
+                        head.trim_start_matches("data:")
+                            .split(';')
+                            .next()
+                            .unwrap_or("image/png")
+                            .to_string(),
+                        body.to_string(),
+                    ),
+                    None => continue,
+                };
+                let bytes = match B64.decode(b64.as_bytes()) {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                };
+                let ext = if mime.contains("jpeg") || mime.contains("jpg") {
+                    "jpg"
+                } else if mime.contains("webp") {
+                    "webp"
+                } else if mime.contains("gif") {
+                    "gif"
+                } else if mime.contains("svg") {
+                    "svg"
+                } else {
+                    "png"
+                };
+                let fname = format!("{}-{}.{}", name, n, ext);
+                if std::fs::write(adir.join(&fname), &bytes).is_err() {
+                    continue;
+                }
+                img_count += 1;
+                let label = if cap.is_empty() {
+                    format!("图{}", n)
+                } else {
+                    format!("图{} · {}", n, cap)
+                };
+                let label = label.replace(['[', ']'], " ");
+                let link = format!("![{}](assets/{})", label, fname);
+                let before = stem_out.clone();
+                stem_out = lib_put_fig(&stem_out, n, &link);
+                if stem_out == before {
+                    extra_links.push(link);
+                }
+            }
+        }
+        if !extra_links.is_empty() {
+            // 题干里没引用到的图也列出来（宁可多给一张，也别让人以为没图 ✓）
+            stem_out.push_str("\n\n");
+            stem_out.push_str(&extra_links.join("\n\n"));
+        }
         let mut buf = String::new();
         buf.push_str("---\n");
         // ⚠ 第一行必须是 qid / source / number 之一：导入侧的「一个文件多道题」切块正则靠它 ✓
@@ -2549,7 +2651,8 @@ fn lib_export_vault(dir: String) -> serde_json::Value {
             }
         }
         buf.push_str("---\n\n## 题目\n\n");
-        buf.push_str(stem.trim());
+        // 【v1456】用替换过图片链接的正文（stem_out）✓
+        buf.push_str(stem_out.trim());
         buf.push('\n');
         if !options.is_empty() {
             buf.push_str("\n## 选项\n\n");
@@ -2580,7 +2683,7 @@ fn lib_export_vault(dir: String) -> serde_json::Value {
     let mut idx = String::new();
     idx.push_str("# 题库导出\n\n");
     idx.push_str(&format!(
-        "共 {} 道 · 题目在 questions/ 下（一道题一个 .md）\n\n> 这个目录**可以直接再导入回来**：录入 → 导入 .md 文件 ✓\n",
+        "共 {} 道 · 题目在 questions/ 下（一道题一个 .md）；题图在 assets/ 下（正文用 ![图N](assets/…) 引用）\n\n> 这个目录**可以直接再导入回来**：录入 → 导入 .md 文件 ✓\n",
         written.len()
     ));
     let mut cur = String::from("\u{0}");
@@ -2601,6 +2704,7 @@ fn lib_export_vault(dir: String) -> serde_json::Value {
         "dir": dest,
         "count": written.len(),
         "total": total,
+        "images": img_count,
         "index": index_file.to_string_lossy(),
         "questions": qdir.to_string_lossy(),
     })
