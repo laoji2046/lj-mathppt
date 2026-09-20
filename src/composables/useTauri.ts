@@ -230,6 +230,20 @@ export interface MineruResult {
   outDir?: string
   /** 正文引用到的插图（Rust 读成 base64）：前端转成 data URL 随题入库，见 mineruImages.ts */
   images?: { path: string; mime?: string; bytes?: number; dataBase64: string }[]
+  /** 【v1457】产物契约探测：认出的版本 / content_list 类别 / 告警（4.0 新契约、只有 V2、轻量接口没图…） */
+  contract?: {
+    ok?: boolean
+    jsonKind?: string
+    jsonPath?: string
+    mdPath?: string
+    middle?: string
+    middleVersion?: string
+    middleSchema?: string
+    images?: number
+    warn?: string
+    error?: string
+    names?: string[]
+  }
 }
 
 /**

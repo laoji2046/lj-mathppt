@@ -2461,6 +2461,517 @@ fn lib_diff_level(d: i64) -> &'static str {
     }
 }
 
+/// 【v1457】中文数字 → 阿拉伯（一…二十三）。**认不出返回 0**：宁可退回顺序号，也不猜 ✓
+fn lib_cn_num(s: &str) -> i64 {
+    let one = |c: char| -> i64 {
+        match c {
+            '一' => 1,
+            '二' => 2,
+            '三' => 3,
+            '四' => 4,
+            '五' => 5,
+            '六' => 6,
+            '七' => 7,
+            '八' => 8,
+            '九' => 9,
+            _ => 0,
+        }
+    };
+    let t: Vec<char> = s.chars().collect();
+    if t.is_empty() {
+        return 0;
+    }
+    if t[0] == '十' {
+        return if t.len() == 1 {
+            10
+        } else if t.len() == 2 {
+            10 + one(t[1])
+        } else {
+            0
+        };
+    }
+    let v = one(t[0]);
+    if v == 0 {
+        return 0;
+    }
+    if t.len() == 1 {
+        return v;
+    }
+    if t[1] == '十' {
+        return if t.len() == 2 {
+            v * 10
+        } else if t.len() == 3 {
+            v * 10 + one(t[2])
+        } else {
+            0
+        };
+    }
+    0
+}
+
+/// 【v1457】1..=20 → 中文数字（正文里写「图二」也能找到落点 ✓；超出范围回空串）
+fn lib_cn_str(n: i64) -> String {
+    const D: [&str; 10] = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+    match n {
+        1..=9 => D[n as usize].to_string(),
+        10 => "十".to_string(),
+        11..=19 => format!("十{}", D[(n - 10) as usize]),
+        20 => "二十".to_string(),
+        _ => String::new(),
+    }
+}
+
+/// 【v1457】图注里的图号：「图1 / 图一 / (图二) / 图 3」→ Some(数字)；认不出 None（不猜 ✓）
+fn lib_cap_fig_no(cap: &str) -> Option<i64> {
+    let cs: Vec<char> = cap.chars().collect();
+    for (i, ch) in cs.iter().enumerate() {
+        if *ch != '图' {
+            continue;
+        }
+        let mut j = i + 1;
+        while j < cs.len() && cs[j] == ' ' {
+            j += 1;
+        }
+        if j >= cs.len() {
+            continue;
+        }
+        let c = cs[j];
+        if c.is_ascii_digit() {
+            let mut k = j;
+            let mut v: i64 = 0;
+            while k < cs.len() && cs[k].is_ascii_digit() {
+                v = v * 10 + (cs[k] as i64 - 48);
+                k += 1;
+            }
+            if (1..=60).contains(&v) {
+                return Some(v);
+            }
+        } else if "一二三四五六七八九十".contains(c) {
+            let mut k = j;
+            let mut buf = String::new();
+            while k < cs.len() && "一二三四五六七八九十".contains(cs[k]) {
+                buf.push(cs[k]);
+                k += 1;
+            }
+            let v = lib_cn_num(&buf);
+            if (1..=60).contains(&v) {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
+/// 【v1457】正文里找「图N / 图X」引用：后面紧跟着数字/中文数字的不算（**图1 不能切走 图12** ✓）
+fn lib_find_ref(line: &str, keys: &[String]) -> i64 {
+    for k in keys.iter() {
+        if k.is_empty() {
+            continue;
+        }
+        let mut from = 0usize;
+        while let Some(rel) = line[from..].find(k.as_str()) {
+            let i = from + rel;
+            let nx = line[i + k.len()..].chars().next();
+            let bad = match nx {
+                Some(c) => c.is_ascii_digit() || "一二三四五六七八九十".contains(c),
+                None => false,
+            };
+            if !bad {
+                return i as i64;
+            }
+            from = i + k.len();
+        }
+    }
+    -1
+}
+
+/// 【v1457】只含 [图N] 标记和空白？—— 「末尾标记」的判据：
+///   这种标记**不就地**，交给末尾按题内图号排（否则图会按录入顺序排，图2 跑到图1 前面 ✗）
+fn lib_only_marks(s: &str) -> bool {
+    let mut t = s.to_string();
+    loop {
+        match t.find("[图") {
+            Some(p) => match t[p..].find(']') {
+                Some(rel) => t = format!("{}{}", &t[..p], &t[p + rel + 1..]),
+                None => return false,
+            },
+            None => break,
+        }
+    }
+    t.trim().is_empty()
+}
+
+/// 【v1457】找 [图N] 标记的区间（含「[图 N]」「[图N:参数]」两种写法）
+fn lib_marker_span(s: &str, n: i64) -> Option<(usize, usize)> {
+    for key in [format!("[图{}", n), format!("[图 {}", n)] {
+        if let Some(p) = s.find(key.as_str()) {
+            if let Some(rel) = s[p..].find(']') {
+                return Some((p, p + rel + 1));
+            }
+        }
+    }
+    None
+}
+
+/// 【v1457】清掉残留的 @@FIG:i@@ 占位（最后的安全网：绝不让占位符出现在导出正文里 ✗）
+fn lib_strip_marks(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(a) = rest.find("@@FIG:") {
+        out.push_str(&rest[..a]);
+        let after = &rest[a + 6..];
+        match after.find("@@") {
+            Some(b) => rest = &after[b + 2..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// 【v1457】一道题的图 → 落点。返回 (带 @@FIG:i@@ 占位的题干, [(标签, 题内图号)])。
+/// 规则（与前端 mineruImages.ts 的 placeFigures **同一套**，两边必须一致）：
+///   ① 图注写了「图一 / (图2)」就照它当**题内**图号，否则按顺序 1..k；
+///   ② 题干里已有的 [图N] 标记 → 就地换（N 先试录入号、再试题内号）；
+///   ③ 没标记的，看图在**哪一行**被提到（图N / 图X）→ 插在那行后面；同一行多图按顺序排；
+///   ④ 一行都没提到 → 排到题干末尾（**一张都不丢** ✓）
+fn lib_fig_plan(stem: &str, imgs: &[serde_json::Value]) -> (String, Vec<(String, i64)>) {
+    let mut out = stem.to_string();
+    let mut meta: Vec<(String, i64)> = Vec::new();
+    for (i, im) in imgs.iter().enumerate() {
+        let cap = im
+            .get("caption")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let no = lib_cap_fig_no(&cap);
+        let disp = no.unwrap_or((i + 1) as i64);
+        let label = if no.is_some() {
+            cap.clone()
+        } else if cap.is_empty() {
+            format!("图{}", disp)
+        } else {
+            format!("图{} · {}", disp, cap)
+        };
+        meta.push((label, disp));
+    }
+    let mut pend: Vec<usize> = Vec::new();
+    for (i, im) in imgs.iter().enumerate() {
+        let orig = im.get("n").and_then(|v| v.as_i64()).unwrap_or(0);
+        let mut done = false;
+        for n in [orig, meta[i].1] {
+            if n <= 0 {
+                continue;
+            }
+            if let Some((a, b)) = lib_marker_span(&out, n) {
+                // 末尾标记（后面只剩别的标记/空白）→ 不就地，交给按题内图号排的末尾 ✓
+                if lib_only_marks(&out[b..]) {
+                    out = format!("{}{}", &out[..a], &out[b..]);
+                    break;
+                }
+                out = format!("{}\n@@FIG:{}@@\n{}", &out[..a], i, &out[b..]);
+                done = true;
+                break;
+            }
+        }
+        if !done {
+            pend.push(i);
+        }
+    }
+    // 【v1457】按**题内图号**排（图1 在图2 前面）—— 图的采集顺序未必等于文档顺序 ✓
+    pend.sort_by_key(|&i| meta[i].1);
+    if !pend.is_empty() {
+        let lines: Vec<String> = out.split('\n').map(|x| x.to_string()).collect();
+        let mut extra: Vec<Vec<usize>> = vec![Vec::new(); lines.len()];
+        let mut rest: Vec<usize> = Vec::new();
+        for &i in pend.iter() {
+            let d = meta[i].1;
+            let keys = [format!("图{}", d), format!("图{}", lib_cn_str(d))];
+            let mut hit: i64 = -1;
+            for (l, line) in lines.iter().enumerate() {
+                if lib_find_ref(line, &keys) >= 0 {
+                    hit = l as i64;
+                }
+            }
+            if hit < 0 {
+                rest.push(i);
+            } else {
+                extra[hit as usize].push(i);
+            }
+        }
+        let mut outl: Vec<String> = Vec::new();
+        for (l, line) in lines.iter().enumerate() {
+            outl.push(line.clone());
+            for &i in extra[l].iter() {
+                outl.push(format!("@@FIG:{}@@", i));
+            }
+        }
+        for &i in rest.iter() {
+            outl.push(format!("@@FIG:{}@@", i));
+        }
+        out = outl.join("\n");
+    }
+    (out, meta)
+}
+
+/// 【v1457】官方 Content List **V2**（按页分组、字段嵌套）→ 内部统一的 V1 扁平结构。
+///   官方文档里 V1/V2 都是正式输出（CONTENT_LIST / CONTENT_LIST_V2），
+///   而我们的装配/几何/前端全按 V1 写 —— 所以**只在 Rust 这一处转换**，别处不用认识 V2 ✓
+fn mineru_v2_to_v1(v2: &serde_json::Value) -> serde_json::Value {
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    let pages = match v2.as_array() {
+        Some(a) => a,
+        None => return serde_json::json!([]),
+    };
+    for (pi, page) in pages.iter().enumerate() {
+        let blocks = match page.as_array() {
+            Some(a) => a,
+            None => continue,
+        };
+        for b in blocks.iter() {
+            let t = b.get("type").and_then(|x| x.as_str()).unwrap_or("");
+            let c = b.get("content").cloned().unwrap_or(serde_json::json!({}));
+            let bbox = b.get("bbox").cloned().unwrap_or(serde_json::json!([]));
+            let sget = |k: &str| {
+                c.get(k)
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let join_of = |k: &str| -> String {
+                c.get(k)
+                    .and_then(|x| x.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .map(|x| x.get("content").and_then(|y| y.as_str()).unwrap_or(""))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .unwrap_or_default()
+            };
+            let path = c
+                .get("image_source")
+                .and_then(|x| x.get("path"))
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            let mut o = serde_json::Map::new();
+            o.insert("page_idx".to_string(), serde_json::json!(pi));
+            o.insert("bbox".to_string(), bbox);
+            match t {
+                "title" => {
+                    o.insert("type".to_string(), serde_json::json!("text"));
+                    o.insert("text".to_string(), serde_json::json!(join_of("title_content")));
+                    o.insert(
+                        "text_level".to_string(),
+                        c.get("level").cloned().unwrap_or(serde_json::json!(1)),
+                    );
+                }
+                "paragraph" => {
+                    o.insert("type".to_string(), serde_json::json!("text"));
+                    o.insert("text".to_string(), serde_json::json!(join_of("paragraph_content")));
+                }
+                "image" => {
+                    o.insert("type".to_string(), serde_json::json!("image"));
+                    o.insert("img_path".to_string(), serde_json::json!(path));
+                    o.insert("content".to_string(), serde_json::json!(sget("content")));
+                    o.insert(
+                        "image_caption".to_string(),
+                        c.get("image_caption").cloned().unwrap_or(serde_json::json!([])),
+                    );
+                    o.insert(
+                        "image_footnote".to_string(),
+                        c.get("image_footnote").cloned().unwrap_or(serde_json::json!([])),
+                    );
+                }
+                "table" => {
+                    o.insert("type".to_string(), serde_json::json!("table"));
+                    o.insert("img_path".to_string(), serde_json::json!(path));
+                    o.insert(
+                        "table_body".to_string(),
+                        c.get("html").cloned().unwrap_or(serde_json::json!("")),
+                    );
+                    o.insert(
+                        "table_caption".to_string(),
+                        c.get("table_caption").cloned().unwrap_or(serde_json::json!([])),
+                    );
+                    o.insert(
+                        "table_footnote".to_string(),
+                        c.get("table_footnote").cloned().unwrap_or(serde_json::json!([])),
+                    );
+                }
+                "equation_interline" => {
+                    o.insert("type".to_string(), serde_json::json!("equation"));
+                    // V1 的公式 text 自带 $$ 定界（下游按 V1 解析）→ 这里补齐 ✓
+                    let m = sget("math_content");
+                    let fmt = sget("math_type");
+                    let txt = if fmt == "latex" && !m.trim().is_empty() {
+                        format!("$$\n{}\n$$", m)
+                    } else {
+                        m
+                    };
+                    o.insert("text".to_string(), serde_json::json!(txt));
+                    o.insert("text_format".to_string(), serde_json::json!(fmt));
+                }
+                "page_header" => {
+                    o.insert("type".to_string(), serde_json::json!("header"));
+                    o.insert("text".to_string(), serde_json::json!(join_of("page_header_content")));
+                }
+                "page_footer" => {
+                    o.insert("type".to_string(), serde_json::json!("footer"));
+                    o.insert("text".to_string(), serde_json::json!(join_of("page_footer_content")));
+                }
+                "page_number" => {
+                    o.insert("type".to_string(), serde_json::json!("page_number"));
+                    o.insert("text".to_string(), serde_json::json!(join_of("page_number_content")));
+                }
+                _ => {
+                    // 认不出的新类型：**原样带过去**（宁可下游忽略，也不静默丢 ✓）
+                    o.insert("type".to_string(), serde_json::json!(t));
+                    if !path.is_empty() {
+                        o.insert("img_path".to_string(), serde_json::json!(path));
+                    }
+                    o.insert("text".to_string(), serde_json::json!(join_of("paragraph_content")));
+                }
+            }
+            out.push(serde_json::Value::Object(o));
+        }
+    }
+    serde_json::json!(out)
+}
+
+/// 【v1457】产物**契约探测**：认出服务端给的是哪一代产物；**有图却没有 content_list 就 fail-closed**。
+///   背景（对着官方文档核过）：3.x 的 ZIP 是 layout.json(pdf_info/_version_name) + *_content_list.json；
+///   4.0 换成 middle_json.json(schema=docvortex.middle) + 新条目名。文件名一变，我们以前会**悄悄**
+///   拿不到 content_list（选项/图位一起降级）—— 那正是「图又丢了」的老剧本，所以这里必须报错 ✗
+fn mineru_contract_scan(dir: &std::path::Path) -> serde_json::Value {
+    let mut md = String::new();
+    let mut v1 = String::new();
+    let mut v2 = String::new();
+    let mut middle = String::new();
+    let mut images: i64 = 0;
+    let mut names: Vec<String> = Vec::new();
+    let mut stack: Vec<std::path::PathBuf> = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let rd = match std::fs::read_dir(&d) {
+            Ok(x) => x,
+            Err(_) => continue,
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().to_string();
+            if p.is_dir() {
+                if name == "images" {
+                    if let Ok(r2) = std::fs::read_dir(&p) {
+                        images += r2.flatten().filter(|x| x.path().is_file()).count() as i64;
+                    }
+                }
+                stack.push(p);
+                continue;
+            }
+            if names.len() < 40 {
+                names.push(name.clone());
+            }
+            if name == "full.md" && md.is_empty() {
+                md = p.to_string_lossy().to_string();
+            } else if name.ends_with("_content_list_v2.json") && v2.is_empty() {
+                v2 = p.to_string_lossy().to_string();
+            } else if name.ends_with("_content_list.json") && v1.is_empty() {
+                v1 = p.to_string_lossy().to_string();
+            } else if (name == "layout.json" || name.ends_with("middle_json.json") || name.ends_with("_middle.json"))
+                && middle.is_empty()
+            {
+                middle = p.to_string_lossy().to_string();
+            }
+        }
+    }
+    let md_has_img = if md.is_empty() {
+        false
+    } else {
+        std::fs::read_to_string(&md)
+            .map(|s| s.contains("!["))
+            .unwrap_or(false)
+    };
+    let mut warn = String::new();
+    let mut error = String::new();
+    let mut kind = "none";
+    let mut jpath = String::new();
+    if v1.is_empty() && v2.is_empty() {
+        if images > 0 || md_has_img {
+            error = format!(
+                "产物里没有 content_list（服务端可能已升级到 4.0 新契约）：找到 {} 张图但既没有 *_content_list.json 也没有 *_content_list_v2.json —— 已拒绝入库，避免**静默丢图**。\n产物目录：{}\n条目：{}",
+                images,
+                dir.display(),
+                names.join(" / ")
+            );
+        } else {
+            warn = "产物里没有 content_list，只按 Markdown 入库（本卷没插图，影响有限）".to_string();
+        }
+    } else if !v1.is_empty() {
+        kind = "v1";
+        jpath = v1.clone();
+    } else {
+        kind = "v2";
+        jpath = v2.clone();
+        warn = "服务端只给了 Content List V2，已按官方 V2 结构归一化成内部 V1 格式 ✓".to_string();
+    }
+    if md.is_empty() && error.is_empty() {
+        error = format!("产物里没有 full.md（目录：{}）", dir.display());
+    }
+    let (mver, mschema) = if middle.is_empty() {
+        (String::new(), String::new())
+    } else {
+        std::fs::read_to_string(&middle)
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .map(|j| {
+                (
+                    j.get("_version_name")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    j.get("schema")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                )
+            })
+            .unwrap_or((String::new(), String::new()))
+    };
+    let mname = std::path::Path::new(&middle)
+        .file_name()
+        .map(|x| x.to_string_lossy().to_string())
+        .unwrap_or_default();
+    serde_json::json!({
+        "ok": error.is_empty(),
+        "error": error,
+        "warn": warn,
+        "jsonKind": kind,
+        "jsonPath": jpath,
+        "mdPath": md,
+        "middle": mname,
+        "middleVersion": mver,
+        "middleSchema": mschema,
+        "images": images,
+        "names": names,
+        "dir": dir.to_string_lossy(),
+    })
+}
+
+/// 【v1457】给真机探针/诊断用：扫一个产物目录回契约判定（**只读，不改任何文件** ✓）
+#[tauri::command]
+fn lib_mineru_contract(dir: String) -> serde_json::Value {
+    let d = std::path::PathBuf::from(dir.trim());
+    if !d.is_dir() {
+        return serde_json::json!({ "ok": false, "error": "目录不存在" });
+    }
+    mineru_contract_scan(&d)
+}
+
 /// 【P2a】把整个题库导出成「一道题一个 .md」的 Markdown 题库。
 ///
 /// 格式与「录入 → 题库单题格式」**完全一致**（YAML front-matter + ## 题目 / 选项 / 答案 / 解析），
@@ -2543,18 +3054,19 @@ fn lib_export_vault(dir: String) -> serde_json::Value {
         };
         // ---- 【v1456】题图也导出去（P2a 的缺口）：图写成真文件，正文里 [图N] → ![图N · 图注](assets/…) ----
         //   为什么必须做：以前导出只留 [图N] 标记、图不在目录里 → 别人打开这份备份是**缺图**的 ✗
-        let mut stem_out = stem.clone();
-        let mut extra_links: Vec<String> = Vec::new();
+        // 【v1457】图号改用**题内**图号（图注写了「图一/(图2)」就照图注），落点由 lib_fig_plan 统一决定 ✓
         let imgs: Vec<serde_json::Value> = m
             .get("images")
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
+        let (stem_marked, fig_meta) = lib_fig_plan(&stem, &imgs);
+        let mut stem_out = stem_marked;
         if !imgs.is_empty() {
             let _ = std::fs::create_dir_all(&adir);
-            for im in imgs.iter() {
-                let n = im.get("n").and_then(|v| v.as_i64()).unwrap_or(0);
-                let cap = im.get("caption").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            for (i, im) in imgs.iter().enumerate() {
+                let (label, disp) = (fig_meta[i].0.clone(), fig_meta[i].1);
+                let mark = format!("@@FIG:{}@@", i);
                 let mut src = im.get("src").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 if src.is_empty() {
                     if let Some(aid) = im.get("assetId").and_then(|v| v.as_i64()) {
@@ -2570,6 +3082,8 @@ fn lib_export_vault(dir: String) -> serde_json::Value {
                     }
                 }
                 if !src.starts_with("data:") {
+                    // 图数据读不出来 → 用一句实话顶掉占位（**不留 @@FIG 垃圾、也不假装有图** ✓）
+                    stem_out = stem_out.replace(&mark, &format!("（{}：图数据读不出来，没能导出）", label));
                     continue;
                 }
                 let (mime, b64) = match src.split_once(',') {
@@ -2581,11 +3095,17 @@ fn lib_export_vault(dir: String) -> serde_json::Value {
                             .to_string(),
                         body.to_string(),
                     ),
-                    None => continue,
+                    None => {
+                        stem_out = stem_out.replace(&mark, &format!("（{}：图数据格式不对，没能导出）", label));
+                        continue;
+                    }
                 };
                 let bytes = match B64.decode(b64.as_bytes()) {
                     Ok(b) => b,
-                    Err(_) => continue,
+                    Err(_) => {
+                        stem_out = stem_out.replace(&mark, &format!("（{}：图数据坏掉了，没能导出）", label));
+                        continue;
+                    }
                 };
                 let ext = if mime.contains("jpeg") || mime.contains("jpg") {
                     "jpg"
@@ -2598,29 +3118,18 @@ fn lib_export_vault(dir: String) -> serde_json::Value {
                 } else {
                     "png"
                 };
-                let fname = format!("{}-{}.{}", name, n, ext);
+                // 文件名也用**题内图号**：assets/P-2026-0099-1.jpg ✓
+                let fname = format!("{}-{}.{}", name, disp, ext);
                 if std::fs::write(adir.join(&fname), &bytes).is_err() {
+                    stem_out = stem_out.replace(&mark, &format!("（{}：写文件失败，没能导出）", label));
                     continue;
                 }
                 img_count += 1;
-                let label = if cap.is_empty() {
-                    format!("图{}", n)
-                } else {
-                    format!("图{} · {}", n, cap)
-                };
-                let label = label.replace(['[', ']'], " ");
-                let link = format!("![{}](assets/{})", label, fname);
-                let before = stem_out.clone();
-                stem_out = lib_put_fig(&stem_out, n, &link);
-                if stem_out == before {
-                    extra_links.push(link);
-                }
+                let link = format!("![{}](assets/{})", label.replace(['[', ']'], " "), fname);
+                stem_out = stem_out.replace(&mark, &link);
             }
-        }
-        if !extra_links.is_empty() {
-            // 题干里没引用到的图也列出来（宁可多给一张，也别让人以为没图 ✓）
-            stem_out.push_str("\n\n");
-            stem_out.push_str(&extra_links.join("\n\n"));
+            // 最后的安全网：万一还有没换掉的占位，清掉 —— 绝不让 @@FIG 出现在导出正文里 ✓
+            stem_out = lib_strip_marks(&stem_out);
         }
         let mut buf = String::new();
         buf.push_str("---\n");
@@ -3810,7 +4319,7 @@ fn mineru_parse(
     // ---------- ④ 下载产物并落到 %APPDATA%\lj-mathslides\mineru\<时间戳>\ ----------
     let dir = mineru_out_dir();
     let out_dir = dir.to_string_lossy().into_owned();
-    let (md_path, json_path, md_text) = if effective == "agent" {
+    let (md_path, mut json_path, md_text, contract) = if effective == "agent" {
         let url = md_url.ok_or_else(|| "MinerU 未返回 Markdown 地址".to_string())?;
         let resp = client
             .get(&url)
@@ -3819,7 +4328,16 @@ fn mineru_parse(
         let text = resp.text().map_err(|e| format!("读取 Markdown 失败: {}", e))?;
         let p = dir.join("full.md");
         fs::write(&p, text.as_bytes()).map_err(|e| format!("写入 full.md 失败: {}", e))?;
-        (p, PathBuf::new(), text)
+        (
+            p,
+            PathBuf::new(),
+            text,
+            serde_json::json!({
+                "jsonKind": "none",
+                "images": 0,
+                "warn": "轻量接口（免 token）官方只回 Markdown —— **拿不到插图**；要图请用带 token 的精准解析 ✓"
+            }),
+        )
     } else {
         let url = zip_url.ok_or_else(|| "MinerU 未返回 zip 地址".to_string())?;
         let resp = client.get(&url).send().map_err(|e| format!("下载 zip 失败: {}", e))?;
@@ -3829,8 +4347,6 @@ fn mineru_parse(
         let zb = resp.bytes().map_err(|e| format!("读取 zip 失败: {}", e))?;
         let mut ar = zip::ZipArchive::new(std::io::Cursor::new(zb))
             .map_err(|e| format!("解析 zip 失败: {}", e))?;
-        let mut found_md: Option<PathBuf> = None;
-        let mut found_json: Option<PathBuf> = None;
         for i in 0..ar.len() {
             let mut f = ar
                 .by_index(i)
@@ -3852,24 +4368,33 @@ fn mineru_parse(
             f.read_to_end(&mut buf)
                 .map_err(|e| format!("解压 {:?} 失败: {}", safe, e))?;
             fs::write(&dest, &buf).map_err(|e| format!("写入 {:?} 失败: {}", safe, e))?;
-            let base = safe
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_string();
-            if base == "full.md" && found_md.is_none() {
-                found_md = Some(dest.clone());
-            }
-            if base.ends_with("_content_list.json")
-                && !base.ends_with("_v2.json")
-                && found_json.is_none()
-            {
-                found_json = Some(dest.clone());
+
+        }
+        // 【v1457】产物契约探测：认出是哪一代产物；**有图没 content_list 就报错**（不静默丢图 ✓）
+        let contract = mineru_contract_scan(&dir);
+        if !contract.get("ok").and_then(|x| x.as_bool()).unwrap_or(false) {
+            return Err(contract
+                .get("error")
+                .and_then(|x| x.as_str())
+                .unwrap_or("MinerU 产物缺少必要文件")
+                .to_string());
+        }
+        let md = PathBuf::from(contract.get("mdPath").and_then(|x| x.as_str()).unwrap_or(""));
+        let text = fs::read_to_string(&md).map_err(|e| format!("读取 full.md 失败: {}", e))?;
+        let mut jp = PathBuf::from(contract.get("jsonPath").and_then(|x| x.as_str()).unwrap_or(""));
+        // 只给了 V2 → 归一化成 V1 再落盘：下游（前端装配 / 几何 / 导出）全都按 V1 解析 ✓
+        if contract.get("jsonKind").and_then(|x| x.as_str()) == Some("v2") && !jp.as_os_str().is_empty() {
+            if let Ok(raw) = fs::read_to_string(&jp) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    let v1 = mineru_v2_to_v1(&v);
+                    let np = jp.with_file_name("content_list.normalized.json");
+                    if fs::write(&np, v1.to_string()).is_ok() {
+                        jp = np;
+                    }
+                }
             }
         }
-        let md = found_md.ok_or_else(|| format!("zip 里没有 full.md（已解压到 {}）", out_dir))?;
-        let text = fs::read_to_string(&md).map_err(|e| format!("读取 full.md 失败: {}", e))?;
-        (md, found_json.unwrap_or_default(), text)
+        (md, jp, text, contract)
     };
 
     // 正文引用到的插图：读成 base64 一起回传（必须在 md_text 被 json! 移走之前）
@@ -3883,6 +4408,8 @@ fn mineru_parse(
         // 产物落盘位置，前端提示与「后续做插图」都用得上
         "mdPath": md_path.to_string_lossy(),
         "jsonPath": json_path.to_string_lossy(),
+        // 【v1457】产物契约判定（版本 / content_list 类别 / 告警）——前端据此提示用户 ✓
+        "contract": contract,
         // contentJson：content_list.json 的**原文** —— 前端用它做 bbox 列检测（双栏重排 ✓）
         "contentJson": std::fs::read_to_string(&json_path).unwrap_or_default(),
         // mdText：前端直接灌进批量导入面板
@@ -3945,6 +4472,7 @@ pub fn run() {
             lib_tags,
             lib_save_many,
             mineru_parse,
+            lib_mineru_contract,
             mineru_stage_pdf
         ])
         .run(tauri::generate_context!())

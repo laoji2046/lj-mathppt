@@ -18,7 +18,14 @@ import AppIcon from './AppIcon.vue'
 import { isTauri, listenTauri, mineruParse, mineruStagePdf } from '@/composables/useTauri'
 import type { MineruProgress } from '@/composables/useTauri'
 import { assembleContentDoc, blockGeometry, imagePositions } from '@/composables/contentDoc'
-import { attachOrphans, imagesForText, linkMineruImages, questionTextOf } from '@/composables/mineruImages'
+import {
+  attachOrphans,
+  dispNoOf,
+  figLabelOf,
+  imagesForText,
+  linkMineruImages,
+  questionTextOf,
+} from '@/composables/mineruImages'
 import type { QuestionImage } from '@/composables/parseQuestions'
 import { setContentList } from '@/composables/parseQuestions'
 import type { ParsedQuestion } from '@/composables/parseQuestions'
@@ -163,11 +170,11 @@ function renderCardFigures() {
     const q = i < list.length ? list[i].q : null
     const imgs = (q && q.images) || []
     h.innerHTML = imgs
-      .map((im) => {
+      .map((im, k) => {
         const src = String(im.src || '')
         if (!src) return ''
-        const cap = String(im.caption || '').trim()
-        const label = '图' + (im.n || '') + (cap ? ' · ' + cap : '')
+        // 【v1457】题内图号：图注写了「图一/(图2)」就照图注 ✓
+        const label = figLabelOf(im, dispNoOf(im, k))
         return '<figure class="qi__fig"><img src="' + e(src) + '" alt="' + e(label) + '" /><figcaption>' + e(label) + '</figcaption></figure>'
       })
       .join('')
@@ -426,7 +433,12 @@ async function runMineru(pdfPath: string) {
     }
     pendingGeo.value = { where, blocks: blockGeometry(cj) }
     text.value = linked.text
-    parseMd(linked.text, 'MinerU 识别完成（' + (r.seconds ?? '?') + 's / ' + (r.pages || '?') + ' 页，插图 ' + linked.images.length + ' 张）')
+    // 【v1457】契约告警要说给用户听（4.0 新契约 / 只有 V2 / 轻量接口没有图）—— 不静默 ✓
+    const cw = String(r?.contract?.warn || '')
+    parseMd(
+      linked.text,
+      'MinerU 识别完成（' + (r.seconds ?? '?') + 's / ' + (r.pages || '?') + ' 页，插图 ' + linked.images.length + ' 张）' + (cw ? ' ⚠ ' + cw : ''),
+    )
     mineruProg.value = '✓ ' + (mode === 'precise' ? '精准解析' : '轻量接口') + ' 完成，已填进校对表'
   } catch (e) {
     const m = errText(e)

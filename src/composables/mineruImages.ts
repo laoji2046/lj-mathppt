@@ -198,3 +198,141 @@ export function attachOrphans(
 export function questionTextOf(q: { stem?: string; options?: string[]; solution?: string }): string {
   return [q.stem || '', (q.options || []).join('\n'), q.solution || ''].join('\n')
 }
+
+/* ------------------------------------------------------------------ *
+ * 【v1457】题内图号 + 图落点
+ *   —— 预览 / 校对表 / 导出 Markdown 三处**共用这一套规则**（Rust 侧 lib_fig_plan 是同一套）
+ *   为什么：录入时的图号是**全卷**的（第 3、4 张），而正文里写的是**本题**的「如图1」「如图2」——
+ *     导出后读者看见「图3/图4」，跟正文对不上 ✗
+ * ------------------------------------------------------------------ */
+
+/** 中文数字 → 阿拉伯（一…二十三；认不出返回 0 = 不猜 ✓） */
+export function cnNum(s: string): number {
+  const t = String(s || '')
+  if (!t) return 0
+  const one = (c: string) => ('一二三四五六七八九'.indexOf(c) + 1)
+  if (t[0] === '十') return t.length === 1 ? 10 : t.length === 2 ? 10 + one(t[1]) : 0
+  const v = one(t[0])
+  if (!v) return 0
+  if (t.length === 1) return v
+  if (t[1] === '十') return t.length === 2 ? v * 10 : t.length === 3 ? v * 10 + one(t[2]) : 0
+  return 0
+}
+
+/** 1..=20 → 中文数字（正文里写「图二」也能找到落点 ✓；超出范围回空串） */
+export function cnStr(n: number): string {
+  const D = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九']
+  if (n >= 1 && n <= 9) return D[n]
+  if (n === 10) return '十'
+  if (n >= 11 && n <= 19) return '十' + D[n - 10]
+  if (n === 20) return '二十'
+  return ''
+}
+
+/** 图注里的图号：「图1 / 图一 / (图二)」→ 数字；认不出返回 0（不猜 ✓） */
+export function captionFigNo(cap: string): number {
+  const m = String(cap || '').match(/图\s*([0-9]{1,2}|[一二三四五六七八九十]{1,3})/)
+  if (!m) return 0
+  const n = /^[0-9]/.test(m[1]) ? Number(m[1]) : cnNum(m[1])
+  return n >= 1 && n <= 60 ? n : 0
+}
+
+/** 题内图号：图注写了就用图注的，否则按顺序 1..k ✓ */
+export function dispNoOf(im: QuestionImage | undefined, idx: number): number {
+  const n = captionFigNo(String((im && im.caption) || ''))
+  return n || idx + 1
+}
+
+/** 图的显示标签：图注本身就是「图N」时只留图注（不再啰嗦成「图3 · 图1」✓） */
+export function figLabelOf(im: QuestionImage | undefined, disp: number): string {
+  const cap = String((im && im.caption) || '').trim()
+  if (captionFigNo(cap)) return cap
+  return '图' + disp + (cap ? ' · ' + cap : '')
+}
+
+/** 正文里找「图N / 图X」引用：后面紧跟数字/中文数字的不算（图1 不能切走 图12 ✓） */
+function findRef(line: string, keys: string[]): number {
+  for (const k of keys) {
+    if (!k) continue
+    let from = 0
+    for (;;) {
+      const i = line.indexOf(k, from)
+      if (i < 0) break
+      const nx = line.slice(i + k.length, i + k.length + 1)
+      if (!/[0-9一二三四五六七八九十]/.test(nx)) return i
+      from = i + k.length
+    }
+  }
+  return -1
+}
+
+
+/** 【v1457】只含 [图N] 标记和空白？—— 「末尾标记」的判据 ✓ */
+function onlyMarks(s: string): boolean {
+  let t = String(s || '')
+  for (;;) {
+    const p = t.indexOf('[图')
+    if (p < 0) break
+    const rel = t.slice(p).indexOf(']')
+    if (rel < 0) return false
+    t = t.slice(0, p) + t.slice(p + rel + 1)
+  }
+  return !t.trim()
+}
+
+/**
+ * 把题干里的图位统一成 @@FIG:<i>@@（i = 图数组下标）——渲染方只需认识这一个占位符 ✓
+ *   ① 题干里已有的 [图N] 标记 → 就地换（N 先试录入号、再试题内号）
+ *   ② 没标记的：图在哪一行被提到 → 插在那行后面（同一行多图按顺序排）
+ *   ③ 一行都没提到 → 排到题干末尾（**一张都不丢** ✓）
+ */
+export function placeFigures(text: string, imgs: QuestionImage[] | undefined): string {
+  let out = String(text == null ? '' : text)
+  const list = imgs || []
+  if (!out || !list.length) return out
+  const pend: number[] = []
+  for (let i = 0; i < list.length; i++) {
+    const orig = Number(list[i].n) || 0
+    const disp = dispNoOf(list[i], i)
+    let done = false
+    for (const n of [orig, disp]) {
+      if (n <= 0) continue
+      const re = new RegExp('\\[图\\s*' + n + '(?::[^\\]]*)?\\]')
+      const m = out.match(re)
+      if (!m || m.index == null) continue
+      const at = m.index
+      // 【v1457】位于**题干末尾**的图标记 → 不就地，交给「按题内图号排」的末尾
+      //   （否则图按录入顺序排，图2 会跑到图1 前面 ✗）
+      if (onlyMarks(out.slice(at + m[0].length))) {
+        out = out.slice(0, at) + out.slice(at + m[0].length)
+        break
+      }
+      out = out.slice(0, at) + '\n@@FIG:' + i + '@@\n' + out.slice(at + m[0].length)
+      done = true
+      break
+    }
+    if (!done) pend.push(i)
+  }
+  // 【v1457】按**题内图号**排（图1 在图2 前面）—— 图的采集顺序未必等于文档顺序 ✓
+  pend.sort((a, b) => dispNoOf(list[a], a) - dispNoOf(list[b], b))
+  if (!pend.length) return out
+  const lines = out.split('\n')
+  const extra: number[][] = lines.map(() => [])
+  const rest: number[] = []
+  for (const i of pend) {
+    const disp = dispNoOf(list[i], i)
+    const keys = ['图' + disp, '图' + cnStr(disp)]
+    let hit = -1
+    for (let L = 0; L < lines.length; L++) if (findRef(lines[L], keys) >= 0) hit = L
+    if (hit < 0) rest.push(i)
+    else extra[hit].push(i)
+  }
+  const outLines: string[] = []
+  lines.forEach((L, k) => {
+    outLines.push(L)
+    for (const i of extra[k]) outLines.push('@@FIG:' + i + '@@')
+  })
+  for (const i of rest) outLines.push('@@FIG:' + i + '@@')
+  return outLines.join('\n')
+}
+
