@@ -10,7 +10,7 @@
  *  - 筛选用 SQL 做（facets/search），界面不做全量过滤 ✓
  *  - 保存后**就地更新那一条 + 重算计数**，不整屏重载（免得滚动位置丢失 ✗）
  */
-import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { typesetMixed } from '@/composables/useMathJax'
 import {
@@ -225,6 +225,18 @@ async function reload() {
   }
 }
 onMounted(() => { void reload(); void loadKpCatalog() })
+
+/**
+ * 【修】Esc 关面板 —— 关闭按钮的 title 一直写着「关闭 (Esc)」，但以前**没有实现** ✗
+ *   ⚠ 子浮层（录入/草稿箱/来源报告/补答案）开着时不抢 Esc：先关它们、别把整屏面板一起关掉 ✓
+ */
+function onPanelKey(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  if (importOpen.value || draftOpen.value || reportOpen.value || ansOpen.value) return
+  emit('close')
+}
+onMounted(() => document.addEventListener('keydown', onPanelKey))
+onBeforeUnmount(() => document.removeEventListener('keydown', onPanelKey))
 
 function pickSection(s: string) {
   f.value.section = f.value.section === s ? undefined : s
@@ -455,7 +467,10 @@ async function batchDelete() {
 </script>
 
 <template>
-  <div class="qb" @click.self="emit('close')">
+  <!-- 【修】以前是 @click.self="emit('close')"：点面板**外面任何地方**就关 ——
+       而面板是 96vw×88vh，外面那圈很窄，鼠标移出去后只要有一次点击（含从别的窗口点回来重新聚焦）就丢了 ✗
+       现在只认 ✕ 和 Esc（Esc 以前只在 title 里写着，其实没实现 ✓） -->
+  <div class="qb">
     <div class="qb__box">
       <header class="qb__head">
         <span class="qb__title">试题库</span>
