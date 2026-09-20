@@ -719,9 +719,11 @@ function answersFromLines(ans: string, into: Map<number, AnsEntry>): void {
       }
       const mA = rest.match(/^([A-H])(?:\s|$|[.、．)）])([\s\S]*)$/)
       if (mA) { if (!into.has(curNo)) into.set(curNo, { answer: mA[1], solution: mA[2].trim() }); continue }
-      // 填空/解答：第一句短就当答案，长就整段当解析（不硬塞 ✓）
+      // 填空/解答：第一句短、**且不像解释**才当答案；否则整段当解析（不硬塞 ✓）
+      //   ⚠ 实测坑：答案区写成「Q7 这是说明文字」时，整句被当成答案 → 答案字段塞进一段话 ✗
       const first = (rest.split(/[。．.;；]/)[0] || '').trim()
-      const short = first.length > 0 && first.length <= 24 && !/^[(（]\s*[1-9]\s*[)）]/.test(first)
+      const explain = /因为|所以|故选|由题|解得|可得|证明|析|解:/.test(first)
+      const short = first.length > 0 && first.length <= 24 && !explain && !/^[(（]\s*[1-9]\s*[)）]/.test(first)
       if (!into.has(curNo)) into.set(curNo, short ? { answer: first, solution: rest.slice(first.length).trim() } : { answer: '', solution: rest })
       continue
     }

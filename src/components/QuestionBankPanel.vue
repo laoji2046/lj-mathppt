@@ -20,6 +20,8 @@ import {
   firstUserDir, exportVault,
 } from '@/composables/useQuestionBank'
 import type { QFacets, QFilter, QItem, SourceReport, SourcePlan } from '@/composables/useQuestionBank'
+import { applyAnswerBackfill, scanAnswerBackfill } from '@/composables/useAnswerBackfill'
+import type { AnsScan } from '@/composables/useAnswerBackfill'
 
 /** 试题录入（M4）：体量不小，按需加载 ✓ */
 const QuestionImportDialog = defineAsyncComponent(() => import('./QuestionImportDialog.vue'))
@@ -61,6 +63,57 @@ async function openReport() {
     await loadPlan()
   } finally {
     reportBusy.value = false
+  }
+}
+
+/* ---------------- 【优化】补答案：从录入时的产物缓存重新拆（纯本地、只补不覆盖 ✓） ---------------- */
+const ansOpen = ref(false)
+const ansBusy = ref(false)
+const ansMsg = ref('')
+const ansScan = ref<AnsScan | null>(null)
+const ansPicked = ref<Record<number, boolean>>({})
+
+function ansPickedN(): number {
+  return ansScan.value ? ansScan.value.candidates.filter((c) => ansPicked.value[c.id]).length : 0
+}
+
+async function openAnswerFill() {
+  ansOpen.value = true
+  ansBusy.value = true
+  ansScan.value = null
+  ansMsg.value = '正在扫描产物缓存…'
+  try {
+    const r = await scanAnswerBackfill((d, t) => { ansMsg.value = '正在扫描产物缓存… ' + d + '/' + t })
+    ansScan.value = r
+    const p: Record<number, boolean> = {}
+    for (const c of r.candidates) p[c.id] = true
+    ansPicked.value = p
+    ansMsg.value =
+      '扫了 ' + r.caches + ' 份产物缓存（' + r.cachesWithAns + ' 份含答案 · 共 ' + r.answers + ' 条），库里 ' +
+      r.questions + ' 题、缺答案 ' + r.missing + ' 题 → 可补 ' + r.candidates.length + ' 题'
+  } catch (e) {
+    ansMsg.value = '扫描失败：' + String((e as Error)?.message || e)
+  } finally {
+    ansBusy.value = false
+  }
+}
+
+function toggleAns(id: number) {
+  ansPicked.value = { ...ansPicked.value, [id]: !ansPicked.value[id] }
+}
+
+async function doAnswerFill() {
+  const list = (ansScan.value ? ansScan.value.candidates : []).filter((c) => ansPicked.value[c.id])
+  if (!list.length) { ansMsg.value = '没勾选任何题'; return }
+  ansBusy.value = true
+  try {
+    const r = await applyAnswerBackfill(list)
+    ansMsg.value = r.ok
+      ? '已补 ' + r.updated + ' 题（跳过 ' + r.skipped + ' 题：题里本来就有答案）· 备份 ' + String(r.backup || '').split('\\').pop()
+      : '补失败：' + (r.error || '')
+    if (r.ok) await reload()
+  } finally {
+    ansBusy.value = false
   }
 }
 
@@ -412,6 +465,7 @@ async function batchDelete() {
           <button class="qb__btn" title="导出成一道题一个 .md 的 Markdown 题库（Obsidian 可开、能再导入回来）" @click="exportVaultMd">导出 Markdown</button>
           <button class="qb__btn" title="AI / OCR 的产出先落草稿，人工确认后才进正式库" @click="draftOpen = true">草稿箱</button>
           <button class="qb__btn" title="来源合规报告：多少题有来源 / 有多少已成模板 / 哪几道要处理" @click="openReport">来源报告</button>
+          <button class="qb__btn" title="从录入时的 MinerU 产物缓存重新拆答案补给缺答案的题（纯本地、只补不覆盖）" @click="openAnswerFill">补答案</button>
           <button class="qb__btn qb__btn--main" title="从 Markdown / JSON / PDF 批量录入试题" @click="importOpen = true">录入试题</button>
           <button class="qb__close" title="关闭 (Esc)" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
         </span>
@@ -571,6 +625,48 @@ async function batchDelete() {
 
     <!-- 【P0b】知识点建议：来自受控词表 kp_catalog（kind=knowledge 的板块级词）✓ -->
     <datalist id="qb-kp"><option v-for="k in kpOptions" :key="k" :value="k"></option></datalist>
+
+    <!-- 【优化】补答案：从产物缓存重新拆（对不上不动、只补不覆盖 ✓） -->
+    <div v-if="ansOpen" class="qb__rpt" @click.self="ansOpen = false">
+      <div class="qb__rptbox">
+        <header class="qb__rpthead">
+          <span class="qb__title">补答案</span>
+          <span class="qb__sub">从录入时的产物缓存重新拆 · 纯本地 · <b>只补不覆盖</b></span>
+          <button class="qb__close" title="关闭" @click="ansOpen = false"><AppIcon name="close" :size="13" /></button>
+        </header>
+        <div class="qb__rptbody">
+          <div class="qb__hint">{{ ansMsg }}</div>
+          <div v-if="ansBusy" class="qb__empty">正在跑…</div>
+          <template v-else-if="ansScan">
+            <div class="qb__rptcards">
+              <div class="qb__rptcard"><b>{{ ansScan.caches }}</b><span>产物缓存</span></div>
+              <div class="qb__rptcard"><b>{{ ansScan.cachesWithAns }}</b><span>含答案的缓存</span></div>
+              <div class="qb__rptcard"><b>{{ ansScan.answers }}</b><span>缓存里的答案</span></div>
+              <div class="qb__rptcard"><b>{{ ansScan.missing }}</b><span>库里缺答案</span></div>
+              <div class="qb__rptcard" :class="{ 'qb__rptcard--warn': ansScan.candidates.length > 0 }"><b>{{ ansScan.candidates.length }}</b><span>可补</span></div>
+            </div>
+            <div v-if="!ansScan.candidates.length" class="qb__hint2">这批卷的产物缓存里没有答案区（或题干对不上）→ 没有可补的 ✓</div>
+            <template v-else>
+              <div class="qb__rptrow qb__rptrow--head">
+                <span class="qb__rptcode">编号</span>
+                <span class="qb__rptpaper">题干</span>
+                <span class="qb__rptarrow">配</span>
+                <span class="qb__rptnew">拆到的答案</span>
+              </div>
+              <div v-for="c in ansScan.candidates" :key="c.id" class="qb__rptrow">
+                <label class="qb__rptcode"><input type="checkbox" :checked="!!ansPicked[c.id]" @change="toggleAns(c.id)" /> {{ c.code }}</label>
+                <span class="qb__rptpaper">{{ c.stem }}</span>
+                <span class="qb__rptarrow" :title="c.match === 'exact' ? '题干整篇一致' : '前 30 字一致（识别差异），请重点核对'">{{ c.match === 'exact' ? '=' : '≈' }}</span>
+                <span class="qb__rptnew">{{ c.answer || '（只有解析）' }}</span>
+              </div>
+              <div style="margin-top: 8px">
+                <button class="qb__btn qb__btn--main" :disabled="ansBusy || !ansPickedN()" @click="doAnswerFill">补到勾选的 {{ ansPickedN() }} 道</button>
+              </div>
+            </template>
+          </template>
+        </div>
+      </div>
+    </div>
 
     <!-- 【P0b】来源报告：把 lib_source_report 的数字摊开（覆盖率 ≠ 成型率，两个都摆出来 ✓） -->
     <div v-if="reportOpen" class="qb__rpt" @click.self="reportOpen = false">

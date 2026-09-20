@@ -2962,6 +2962,178 @@ fn mineru_contract_scan(dir: &std::path::Path) -> serde_json::Value {
     })
 }
 
+/// 【优化】MinerU 产物**缓存根目录**（%APPDATA%\lj-mathslides\mineru）
+///   ⚠ 别调 mineru_out_dir()——它会顺手**新建**一个时间戳目录 ✗
+fn mineru_cache_root() -> std::path::PathBuf {
+    let base = std::env::var("APPDATA").unwrap_or_default();
+    std::path::PathBuf::from(base).join("lj-mathslides").join("mineru")
+}
+
+/// 【优化】列出产物缓存（只回目录名与体积，正文按需再取 —— 免得一次传好几 MB ✓）
+#[tauri::command]
+fn lib_mineru_caches() -> serde_json::Value {
+    let root = mineru_cache_root();
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&root) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if !p.is_dir() {
+                continue;
+            }
+            let ms = e.file_name().to_string_lossy().to_string();
+            let (mut has_md, mut has_cl) = (false, false);
+            let (mut md_bytes, mut cl_bytes): (u64, u64) = (0, 0);
+            if let Ok(rd2) = std::fs::read_dir(&p) {
+                for f in rd2.flatten() {
+                    let n = f.file_name().to_string_lossy().to_string();
+                    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+                    if n == "full.md" {
+                        has_md = true;
+                        md_bytes = len;
+                    } else if n.ends_with("_content_list.json") && !n.ends_with("_v2.json") {
+                        has_cl = true;
+                        cl_bytes = len;
+                    }
+                }
+            }
+            if !has_md && !has_cl {
+                continue;
+            }
+            out.push(serde_json::json!({ "ms": ms, "jsonBytes": cl_bytes, "mdBytes": md_bytes }));
+        }
+    }
+    out.sort_by(|a, b| {
+        b.get("ms")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .cmp(a.get("ms").and_then(|x| x.as_str()).unwrap_or(""))
+    });
+    serde_json::json!({ "ok": true, "root": root.to_string_lossy(), "caches": out })
+}
+
+/// 【优化】取一份缓存的正文（content_list 优先；只给 V2 就归一到 V1；再退回 full.md ✓）
+#[tauri::command]
+fn lib_mineru_cache_text(ms: String) -> serde_json::Value {
+    let p = mineru_cache_root().join(ms.trim());
+    if !p.is_dir() {
+        return serde_json::json!({ "ok": false, "error": "缓存目录不存在" });
+    }
+    let mut content_json = String::new();
+    let mut md = String::new();
+    let mut v2_path: Option<std::path::PathBuf> = None;
+    if let Ok(rd) = std::fs::read_dir(&p) {
+        for f in rd.flatten() {
+            let n = f.file_name().to_string_lossy().to_string();
+            if n == "full.md" {
+                md = std::fs::read_to_string(f.path()).unwrap_or_default();
+            } else if n.ends_with("_content_list.json") && !n.ends_with("_v2.json") && content_json.is_empty() {
+                content_json = std::fs::read_to_string(f.path()).unwrap_or_default();
+            } else if n.ends_with("_content_list_v2.json") && v2_path.is_none() {
+                v2_path = Some(f.path());
+            }
+        }
+    }
+    if content_json.is_empty() {
+        if let Some(vp) = v2_path {
+            if let Ok(raw) = std::fs::read_to_string(&vp) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    content_json = mineru_v2_to_v1(&v).to_string();
+                }
+            }
+        }
+    }
+    serde_json::json!({ "ok": true, "contentJson": content_json, "md": md })
+}
+
+/// 【优化】把从产物缓存重新拆出的答案补到缺答案的题上。
+///   ⚠ **只补不覆盖**：题目里已有 answer/solution 的一律跳过 —— 这条在 Rust 侧强制（前端绕不过去 ✓）
+///   ⚠ 写之前自动留一份整库备份（bak-ans），每条改动留一份修订快照 ✓
+#[tauri::command]
+fn lib_q_backfill_answers(items: Vec<serde_json::Value>) -> serde_json::Value {
+    if items.is_empty() {
+        return serde_json::json!({ "ok": false, "error": "没有要补的题" });
+    }
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let backup = lib_backup_tagged("ans");
+    let mut updated = 0i64;
+    let mut skipped = 0i64;
+    let mut rows: Vec<serde_json::Value> = Vec::new();
+    for it in items.iter() {
+        let id = it.get("id").and_then(|x| x.as_i64()).unwrap_or(0);
+        if id <= 0 {
+            skipped += 1;
+            continue;
+        }
+        let answer = it.get("answer").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        let solution = it.get("solution").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        let source = it.get("source").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        if answer.is_empty() && solution.is_empty() {
+            skipped += 1;
+            continue;
+        }
+        let (kind, meta): (String, String) = match conn.query_row(
+            "SELECT type, COALESCE(meta,'{}') FROM library_item WHERE id = ?1",
+            [id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        ) {
+            Ok(x) => x,
+            Err(_) => {
+                skipped += 1;
+                continue;
+            }
+        };
+        if kind != "question" {
+            skipped += 1;
+            continue;
+        }
+        let mut m: serde_json::Value = serde_json::from_str(&meta).unwrap_or_else(|_| serde_json::json!({}));
+        let old_a = m.get("answer").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        let old_s = m.get("solution").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        let mut did = false;
+        if let Some(o) = m.as_object_mut() {
+            if old_a.is_empty() && !answer.is_empty() {
+                o.insert("answer".to_string(), serde_json::json!(answer));
+                did = true;
+            }
+            if old_s.is_empty() && !solution.is_empty() {
+                o.insert("solution".to_string(), serde_json::json!(solution));
+                did = true;
+            }
+            if did {
+                // 标明来源 + 保留原有告警（顺手清掉「没有识别到答案」这条已经不成立的 ✓）
+                let w = o.get("warn").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                let mut parts: Vec<String> = w
+                    .split('；')
+                    .map(|x| x.trim().to_string())
+                    .filter(|x| !x.is_empty() && !x.contains("没有识别到答案"))
+                    .collect();
+                let src = if source.is_empty() { "未知来源".to_string() } else { source };
+                parts.push(format!("答案从 MinerU 产物缓存重新拆出（{}），请核对", src));
+                o.insert("warn".to_string(), serde_json::json!(parts.join("；")));
+            }
+        }
+        if !did {
+            skipped += 1;
+            continue;
+        }
+        let meta2 = serde_json::to_string(&m).unwrap_or_else(|_| "{}".to_string());
+        if let Err(e) = conn.execute(
+            "UPDATE library_item SET meta = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![meta2, now_stamp(), id],
+        ) {
+            return serde_json::json!({ "ok": false, "error": format!("更新 #{} 失败: {}", id, e), "backup": backup });
+        }
+        let _ = lib_sync_qcols(&conn, id, "question", &meta2);
+        let _ = lib_snapshot_revision(&conn, id, "answer-backfill");
+        updated += 1;
+        rows.push(serde_json::json!({ "id": id }));
+    }
+    serde_json::json!({ "ok": true, "updated": updated, "skipped": skipped, "backup": backup, "rows": rows })
+}
+
 /// 【v1457】给真机探针/诊断用：扫一个产物目录回契约判定（**只读，不改任何文件** ✓）
 #[tauri::command]
 fn lib_mineru_contract(dir: String) -> serde_json::Value {
@@ -4473,6 +4645,9 @@ pub fn run() {
             lib_save_many,
             mineru_parse,
             lib_mineru_contract,
+            lib_mineru_caches,
+            lib_mineru_cache_text,
+            lib_q_backfill_answers,
             mineru_stage_pdf
         ])
         .run(tauri::generate_context!())
