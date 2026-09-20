@@ -696,6 +696,117 @@ fn lib_prepare_qmeta(
     serde_json::to_string(&m).unwrap_or_else(|_| meta.to_string())
 }
 
+/// 【修】保存时清掉**已经不成立**的告警。
+///   为什么：告警是**导入当时**写进 "meta.warn" 的一段文本（「没有识别到答案」…）。老师后来在界面上把答案补上了，
+///   那段文本没人清 → 列表里一直挂着 ⚠「告警」，看着像没补上 ✗（老师实测就是这么被困惑的）
+///   规则（只在**确凿不成立**时才删，其它一律保留 ✓）：
+///     ① 有 answer 或 solution → 删「没有识别到答案」「卷尾答案区里没找到这道题的答案」
+///     ② 有 answer 或 solution → 删**答案类**的「请核对」提醒（多卷合一 / 按顺序配 / 从缓存重新拆出）
+///        —— 老师手工确认过并**保存**了，提醒就该退场 ✓
+///     ③ options ≥ 2 → 删「选择题但只切出 N 个选项」那条
+///   ⚠ 导入路径（lib_import_commit）**不调用**它：那时告警刚写、正是要给人看的 ✓
+fn lib_prune_stale_warn(meta: &str) -> String {
+    let mut m: serde_json::Value = match serde_json::from_str(if meta.trim().is_empty() { "{}" } else { meta }) {
+        Ok(v) => v,
+        Err(_) => return meta.to_string(),
+    };
+    let Some(obj) = m.as_object_mut() else {
+        return meta.to_string();
+    };
+    let ans_a = obj.get("answer").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+    let ans_s = obj.get("solution").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+    let has_ans = !ans_a.is_empty() || !ans_s.is_empty();
+    let n_opt = obj.get("options").and_then(|x| x.as_array()).map(|a| a.len()).unwrap_or(0);
+    let w = obj.get("warn").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let parts: Vec<String> = w
+        .split('；')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if parts.is_empty() {
+        return meta.to_string();
+    }
+    let kept: Vec<String> = parts
+        .iter()
+        .filter(|t| {
+            let s = t.as_str();
+            if has_ans && (s.contains("没有识别到答案") || s.contains("卷尾答案区里没找到")) {
+                return false;
+            }
+            if has_ans && s.contains("请核对") && (s.contains("答案") || s.contains("题号")) {
+                return false;
+            }
+            if n_opt >= 2 && s.contains("个选项") {
+                return false;
+            }
+            true
+        })
+        .cloned()
+        .collect();
+    if kept.len() == parts.len() {
+        return meta.to_string();
+    }
+    if kept.is_empty() {
+        obj.remove("warn");
+    } else {
+        obj.insert("warn".to_string(), serde_json::json!(kept.join("；")));
+    }
+    serde_json::to_string(&m).unwrap_or_else(|_| meta.to_string())
+}
+
+/// 【维护】把整库的**失效告警**清一遍 —— 老师手工补完答案后，一次性让旧告警退场 ✓
+///   ⚠ 写前自动留一份整库备份（bak-warn）；只动 meta.warn 这一个字段 ✓
+#[tauri::command]
+fn lib_q_refresh_warn() -> serde_json::Value {
+    let conn = match lib_open() {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+    };
+    let rows: Vec<(i64, String)> = {
+        let mut st = match conn.prepare("SELECT id, COALESCE(meta,'{}') FROM library_item WHERE type = 'question'") {
+            Ok(x) => x,
+            Err(e) => return serde_json::json!({ "ok": false, "error": format!("读题目失败: {}", e) }),
+        };
+        st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    };
+    let backup = lib_backup_tagged("warn");
+    let mut scanned = 0i64;
+    let mut changed = 0i64;
+    let mut samples: Vec<serde_json::Value> = Vec::new();
+    for (id, meta) in rows.iter() {
+        scanned += 1;
+        let m2 = lib_prune_stale_warn(meta);
+        if m2 == *meta {
+            continue;
+        }
+        if conn
+            .execute(
+                "UPDATE library_item SET meta = ?1, updated_at = ?2 WHERE id = ?3",
+                rusqlite::params![m2, now_stamp(), id],
+            )
+            .is_err()
+        {
+            continue;
+        }
+        let _ = lib_sync_qcols(&conn, *id, "question", &m2);
+        changed += 1;
+        if samples.len() < 3 {
+            let grab = |s: &str| {
+                serde_json::from_str::<serde_json::Value>(s)
+                    .ok()
+                    .and_then(|v| v.get("warn").and_then(|x| x.as_str()).map(|t| t.to_string()))
+                    .unwrap_or_default()
+            };
+            samples.push(serde_json::json!({ "id": id, "before": grab(meta), "after": grab(&m2) }));
+        }
+    }
+    serde_json::json!({ "ok": true, "scanned": scanned, "changed": changed, "backup": backup, "samples": samples })
+}
+
+
+
 /// 【题库 v3】从 meta(JSON) 里取要抽成真列的筛选字段：(qtype, level, difficulty, year, paper)
 /// 一律**容错**：meta 不是合法 JSON、字段缺失、类型不对 → 给默认值
 /// （迁移/保存都不能因为一条脏数据就卡住整个库 ✗）
@@ -1372,6 +1483,8 @@ fn lib_q_patch(id: i64, patch: serde_json::Value) -> serde_json::Value {
         }
     }
     let meta2 = serde_json::to_string(&m).unwrap_or_else(|_| "{}".to_string());
+    // 【修】用户保存时顺手清掉已经不成立的告警（补上答案后「没有识别到答案」不该再挂着 ✓）
+    let meta2 = lib_prune_stale_warn(&meta2);
     if let Err(e) = conn.execute(
         "UPDATE library_item SET meta = ?1, updated_at = ?2 WHERE id = ?3",
         rusqlite::params![meta2, now_stamp(), id],
@@ -1476,6 +1589,7 @@ fn lib_q_batch(ops: Vec<serde_json::Value>) -> serde_json::Value {
             }
         }
         let meta2 = serde_json::to_string(&m).unwrap_or_else(|_| "{}".to_string());
+        let meta2 = lib_prune_stale_warn(&meta2);   // 【修】同上：保存时清掉失效告警 ✓
         if let Err(e) = tx.execute(
             "UPDATE library_item SET meta = ?1, updated_at = ?2 WHERE id = ?3",
             rusqlite::params![meta2, now, id],
@@ -3683,7 +3797,7 @@ fn lib_save(item: serde_json::Value) -> serde_json::Value {
     };
     // 【v4】题目写库前规整 meta：来源归一 + status/code 缺省（唯一入口）
     let meta = if kind == "question" {
-        lib_prepare_qmeta(&conn, &meta, &source_normalize::load_map())
+        lib_prune_stale_warn(&lib_prepare_qmeta(&conn, &meta, &source_normalize::load_map()))
     } else {
         meta
     };
@@ -3929,7 +4043,7 @@ fn lib_save_many(items: Vec<serde_json::Value>) -> serde_json::Value {
         };
         // 【v4】批量导入同样走唯一入口（来源归一 + status/code 缺省）
         let meta = if kind == "question" {
-            lib_prepare_qmeta(&tx, &meta, &sn_map)
+            lib_prune_stale_warn(&lib_prepare_qmeta(&tx, &meta, &sn_map))
         } else {
             meta
         };
@@ -4648,6 +4762,7 @@ pub fn run() {
             lib_mineru_caches,
             lib_mineru_cache_text,
             lib_q_backfill_answers,
+            lib_q_refresh_warn,
             mineru_stage_pdf
         ])
         .run(tauri::generate_context!())
