@@ -363,6 +363,14 @@ function paperNameOf(line: string): string {
   // ⚠ 考生须知/答题卡那句也含「试卷」二字（「考生务必将答案答在答题卡上，在试卷上作答无效」）——
   //   实测它是**最大的误报源**，必须先挡掉 ✗
   if (RE_NOTE_HEAD.test(s) || isScoreOnlyLine(s) || isPaperInfoLine(s) || noteHits(s) >= 1 || isShortNote(s)) return ''
+  // ⚠ 实测误报（21 套真题抓出来的）：「第I卷 / 第Ⅱ卷」是**卷次**不是卷名；
+  //   「数学试卷 / 数学试题卷」这种通用名没区分度；「本卷命题范围…」是说明行 ✓
+  if (/^第\s*[ⅠⅡⅢⅣⅤIVX一二三四五]+\s*卷/.test(s)) return ''
+  if (/^[数学语文英语物理化学生物政治历史地理]{2,4}(试题|试卷|试题卷)$/.test(s)) return ''
+  if (/命题范围|考试范围|注意事项/.test(s)) return ''
+  // ⚠ 「数学参考答案、提示及评分细则」「完卷时间：120 分钟；满分：150 分」也不是卷名（实测误报源）✓
+  if (/答案|解析|评分细则|评分标准/.test(s)) return ''
+  if (/完卷时间|考试时间|答题时间|满分|分钟/.test(s)) return ''
   if (isSegmentHead(s)) return ''                          // 「一、单选题」是小节标题，不是卷名
   if (RE_NUM.test(s) || /^[(（]\s*\d/.test(s)) return ''  // 「1. 已知…」「(17) (本小题 13 分)」
   if (/[？?]\s*$/.test(s) || /_{3,}/.test(s)) return ''    // 问句 / 填空线 → 是题干
@@ -645,7 +653,10 @@ function t_all(block: string): string {
  */
 function isAnswerHead(t: string): boolean {
   const s = t.replace(/^#{1,6}\s*/, '').trim()
-  if (!s || s.length > 30) return false
+  // 【修】实测有卷的答案区标题很长（「…第一次月考·数学参考答案、提示及评分细则」≈ 40 字）——
+  //   卡在 30 字会**不认**，于是整段答案区被当题目切（那套从 ~19 题变 39 题 ✗）
+  if (!s || s.length > 60) return false
+  if (hasQuestionFeature(s)) return false
   if (/参考\s*答案|答案与解析|答案及评分|答案和解析/.test(s)) return true
   return /^答\s*案$/.test(s)
 }
@@ -655,6 +666,18 @@ function splitAnswerRegion(raw: string): { body: string; ans: string } {
   const ls = raw.replace(/\r\n?/g, '\n').split('\n')
   for (let i = 0; i < ls.length; i++) {
     if (isAnswerHead(ls[i])) return { body: ls.slice(0, i).join('\n'), ans: ls.slice(i).join('\n') }
+    // 【修】有的卷**没有「参考答案」标题**，答案区直接就是一张「题号/答案」表（实测 2 套）——
+    //   也把它当答案区起点，否则表后面那堆答案会被当题目切 ✗
+    //   ⚠ 只在**后半篇**找，免得把题干里的「题号/答案」统计表也当答案区 ✓
+    //   ⚠ 不按位置卡（实测一套的答案表在 28% 处）—— 判据改成**表内特征**：
+    //     同一张表里既有「题号」行又有「答案」行，且有 ≥4 个编号格 ✓
+    if (ls[i].indexOf('<table') >= 0) {
+      const win = ls.slice(i, i + 4).join(' ')
+      const nums = (win.match(/<td>\s*\d{1,3}\s*<\/td>/g) || []).length
+      if (/题号/.test(win) && /答案/.test(win) && nums >= 4) {
+        return { body: ls.slice(0, i).join('\n'), ans: ls.slice(i).join('\n') }
+      }
+    }
   }
   return { body: raw, ans: '' }
 }
@@ -755,11 +778,16 @@ function applyAnswers(out: ParsedQuestion[], ans: string): void {
   answersFromTable(ans, map)
   answersFromLines(ans, map)
   if (!map.size) return
-  const papers = new Set(out.map((q) => String(q.paperName || '').trim()).filter(Boolean))
-  if (papers.size > 1) {
-    out.forEach((q) => { q.warn = [q.warn, '卷尾答案区只按一份卷的题号列出，多卷未自动配答案'].filter(Boolean).join('；') })
-    return
+  // 多卷合一：答案区**紧跟在最后一份卷的题目后面** → 只配「最后一份卷」的题
+  //   （这是排版上的确定事实，不是猜 ✓；实测 3 套真题因为「假卷名」触发了旧的全禁规则，答案白丢）
+  const order: string[] = []
+  for (const q of out) {
+    const p = String(q.paperName || '').trim()
+    if (p && order.indexOf(p) < 0) order.push(p)
   }
+  const multi = order.length > 1
+  const lastPaper = multi ? order[order.length - 1] : ''
+  const mine = (q: ParsedQuestion) => !multi || String(q.paperName || '').trim() === lastPaper
   const put = (q: ParsedQuestion, e: AnsEntry | undefined, note?: string) => {
     if (!e) return false
     let did = false
@@ -773,12 +801,22 @@ function applyAnswers(out: ParsedQuestion[], ans: string): void {
   }
   let hit = 0
   const withNo = out.filter((q) => q.no).length
+  const note = multi ? '多卷合一：答案按「紧跟在答案区前面的最后一份卷」配（' + lastPaper + '），请核对' : ''
   if (withNo >= Math.ceil(out.length * 0.6)) {
-    for (const q of out) { if (put(q, q.no ? map.get(q.no) : undefined)) hit++ }
+    for (const q of out) {
+      if (!mine(q)) continue
+      if (put(q, q.no ? map.get(q.no) : undefined, note)) hit++
+    }
   }
-  if (!hit && map.size === out.length) {
+  if (!hit && !multi && map.size === out.length) {
     const keys = Array.from(map.keys())
     out.forEach((q, i) => { if (put(q, map.get(keys[i]), '答案按**顺序**从卷尾答案区配来（题号对不上），请核对')) hit++ })
+  }
+  if (multi && hit) {
+    // 别的卷说明一句（它们没被配，别让人以为漏了 ✓）
+    out.forEach((q) => {
+      if (!mine(q)) q.warn = [q.warn, '多卷合一：卷尾答案区属于最后一份卷（' + lastPaper + '），本卷未自动配答案'].filter(Boolean).join('；')
+    })
   }
   if (hit) {
     out.forEach((q) => { if (!q.answer && !q.solution) q.warn = [q.warn, '卷尾答案区里没找到这道题的答案'].filter(Boolean).join('；') })
