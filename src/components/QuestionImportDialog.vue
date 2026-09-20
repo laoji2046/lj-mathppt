@@ -17,7 +17,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { isTauri, listenTauri, mineruParse, mineruStagePdf } from '@/composables/useTauri'
 import type { MineruProgress } from '@/composables/useTauri'
-import { assembleContentDoc } from '@/composables/contentDoc'
+import { assembleContentDoc, blockGeometry, imagePositions } from '@/composables/contentDoc'
 import { attachOrphans, imagesForText, linkMineruImages, questionTextOf } from '@/composables/mineruImages'
 import type { QuestionImage } from '@/composables/parseQuestions'
 import { setContentList } from '@/composables/parseQuestions'
@@ -49,6 +49,8 @@ const pendingImages = ref<QuestionImage[]>([])
 /** 【v1451】兜底归属要用：装配后的正文 + 每个图号在正文里的位置 ✓ */
 const pendingText = ref('')
 const pendingMarks = ref<Record<number, number>>({})
+/** 【v1454】几何：图号 → {页, y}，以及正文块的几何序列（按位置归属图要用 ✓） */
+const pendingGeo = ref<{ where: Record<number, { page: number; y: number }>; blocks: { head: string; page: number; y: number }[] } | null>(null)
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const fileMode = ref<'md' | 'json' | 'pdf'>('md')
@@ -132,7 +134,7 @@ function loadRows(list: ParsedQuestion[], tip: string) {
       if (imgs.length) q.images = imgs
     }
     // 【v1451 修】没被任何题引用的图 → 按位置兜底挂到最近的一道题并标 warn，**不许静默丢** ✓
-    orphans = attachOrphans(pendingText.value, list, pendingImages.value, pendingMarks.value).orphans
+    orphans = attachOrphans(pendingText.value, list, pendingImages.value, pendingMarks.value, pendingGeo.value || undefined).orphans
   }
   rows.value = list.map((q) => ({ on: true, q }))
   report.value = ''
@@ -389,6 +391,15 @@ async function runMineru(pdfPath: string) {
     pendingImages.value = linked.images
     pendingMarks.value = linked.marks
     pendingText.value = linked.text
+    // 【v1454】从 content_list 取几何：图号 → 该图所在 (页, y)；以及正文块的几何序列 ✓
+    const cj = String(r?.contentJson || '')
+    const pos = imagePositions(cj)
+    const where: Record<number, { page: number; y: number }> = {}
+    for (const k of Object.keys(linked.paths || {})) {
+      const p = pos[linked.paths[Number(k)]]
+      if (p) where[Number(k)] = p
+    }
+    pendingGeo.value = { where, blocks: blockGeometry(cj) }
     text.value = linked.text
     parseMd(linked.text, 'MinerU 识别完成（' + (r.seconds ?? '?') + 's / ' + (r.pages || '?') + ' 页，插图 ' + linked.images.length + ' 张）')
     mineruProg.value = '✓ ' + (mode === 'precise' ? '精准解析' : '轻量接口') + ' 完成，已填进校对表'

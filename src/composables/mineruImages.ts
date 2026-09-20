@@ -53,14 +53,14 @@ function toDataUrl(raw: MineruRawImage): string {
 export function linkMineruImages(
   md: string,
   raw: MineruRawImage[] | undefined,
-): { text: string; images: QuestionImage[]; marks: Record<number, number> } {
+): { text: string; images: QuestionImage[]; marks: Record<number, number>; paths: Record<number, string> } {
   const text0 = String(md || '')
   const byPath = new Map<string, MineruRawImage>()
   for (const r of raw || []) {
     const k = normPath(r && r.path)
     if (k && r && r.dataBase64) byPath.set(k, r)
   }
-  if (!byPath.size) return { text: text0, images: [], marks: {} }
+  if (!byPath.size) return { text: text0, images: [], marks: {}, paths: {} }
 
   // 正文里已有的 [图N] 全部占位，避免新号撞上去
   const taken = new Set<number>()
@@ -75,6 +75,8 @@ export function linkMineruImages(
   const images: QuestionImage[] = []
   /** 图号 → 它在正文里的字符位置（【v1451】兜底归属时要用：图落在哪道题之后，就挂给哪道题 ✓） */
   const marks: Record<number, number> = {}
+  /** 【v1454】图号 → 原路径：几何（页 + y）是从路径查出来的，所以要有这张反查表 ✓ */
+  const paths: Record<number, string> = {}
   const numOf = new Map<string, number>() // 地址 → 已编的号
   const text = text0.replace(MD_IMG, (whole: string, cap: string, url: string, offset: number) => {
     const key = normPath(url)
@@ -85,12 +87,13 @@ export function linkMineruImages(
       n = alloc()
       numOf.set(key, n)
       marks[n] = offset
+      paths[n] = key
       images.push({ n, src: toDataUrl(hit), caption: (cap || '').trim() || undefined })
     }
     return '[图' + n + ']'
   })
   images.sort((a, b) => a.n - b.n)
-  return { text, images, marks }
+  return { text, images, marks, paths }
 }
 
 /** 文本里引用到的图号 */
@@ -120,10 +123,14 @@ export function imagesForText(text: string, images: QuestionImage[] | undefined)
   return out
 }
 /**
- * 【v1451 修】没被任何题引用的图 → **按位置兜底挂到它前面最近的那道题**，并在这道题上标 warn。
+ * 【v1451 / v1454】没被任何题引用的图 → 兜底挂到**它前面最近的那道题**，并在这道题上标 warn。
  *
  * 为什么需要：MinerU 把图形判成 table、把公式裁成图时，图的引用可能落在**卷头 / 题与题之间**，
  * 于是 imagesForText 谁都不认领，图就静默消失了（实测 15 张只收到 4 张 ✗）。
+ *
+ * 归属优先级（【v1454】借 gaokao-math-questions「文件名带几何」的思路，改从 content_list 取）：
+ *   ① **几何**：图的 (页, y) 落在哪道题的 (页, y) 之后 → 挂那道题（同页 + y 最近，最稳 ✓）
+ *   ② 退回**字符偏移**：图号在正文里的位置落在哪道题之后
  * 纪律：**不许悄悄丢** —— 挂错也比丢了强，但要**标出来让人核对** ✓
  */
 export function attachOrphans(
@@ -131,6 +138,7 @@ export function attachOrphans(
   list: { stem?: string; options?: string[]; solution?: string; images?: QuestionImage[]; warn?: string }[],
   all: QuestionImage[],
   marks: Record<number, number>,
+  geo?: { where: Record<number, { page: number; y: number }>; blocks: { head: string; page: number; y: number }[] },
 ): { attached: number; orphans: number[] } {
   if (!list.length || !all.length) return { attached: 0, orphans: [] }
   const used = new Set<number>()
@@ -142,16 +150,45 @@ export function attachOrphans(
     const head = String(q.stem || q.solution || '').trim().slice(0, 12)
     return head ? String(text || '').indexOf(head) : -1
   })
+  // 【v1454】每道题落在哪个正文块上（按字符起点找）—— 有几何时用它拿「题在哪一页 / y」
+  const G = geo && geo.blocks && geo.blocks.length ? geo : null
+  const qAt: number[] = G
+    ? at.map((off) => {
+        if (off < 0) return -1
+        let best = -1
+        for (let j = 0; j < G.blocks.length; j++) {
+          const o = String(text || '').indexOf(G.blocks[j].head)
+          if (o >= 0 && o <= off) best = j
+        }
+        return best
+      })
+    : []
+  const yx = (p: { page: number; y: number }) => p.page * 100000 + p.y
   let attached = 0
   for (const im of left) {
     const off = marks[im.n] ?? -1
     let pick = 0
-    if (off >= 0) {
+    let byGeo = false
+    const w = G && G.where ? G.where[im.n] : null
+    if (w && G && qAt.length) {
+      let bestY = -1
+      for (let i = 0; i < list.length; i++) {
+        const j = qAt[i]
+        if (j < 0) continue
+        const g = G.blocks[j]
+        if (yx(g) <= yx(w) && yx(g) > bestY) {
+          bestY = yx(g)
+          pick = i
+          byGeo = true
+        }
+      }
+    }
+    if (!byGeo && off >= 0) {
       for (let i = 0; i < list.length; i++) if (at[i] >= 0 && at[i] <= off) pick = i
     }
     const q = list[pick]
     q.images = [...(q.images || []), { n: im.n, src: im.src, caption: im.caption }]
-    q.warn = [q.warn, '第 ' + im.n + ' 张图没找到所属题，已按位置挂到这里，请核对'].filter(Boolean).join('；')
+    q.warn = [q.warn, '第 ' + im.n + ' 张图没找到所属题，已按' + (byGeo ? '原图页/位置' : '正文位置') + '挂到这里，请核对'].filter(Boolean).join('；')
     attached++
   }
   return { attached, orphans: left.map((x) => x.n) }
