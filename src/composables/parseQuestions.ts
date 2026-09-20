@@ -103,6 +103,9 @@ export interface ParsedQuestion {
   paperName?: string
   year: string
   region: string
+  /** 【优化】题面上的**原始题号**（1..N；多卷时每卷各自从 1 开始）——
+   *  卷尾答案区要靠它把答案配回来 ✓（以前这个号被切题时丢掉了） */
+  no?: number
   /** 题干/选项里引用的插图（[图N] 对应的图）—— MinerU 导入时填，其余来源留空 */
   images?: QuestionImage[]
   warn?: string
@@ -346,6 +349,86 @@ export function typeOfSegmentHead(t: string): string {
   return ''
 }
 
+/**
+ * 【优化】卷名行 → 卷名（认不出返回空串）
+ *   真实场景：**一个 PDF 里拼了好几份卷**（实测一份 4 卷 / 118 题），卷名写成
+ *   「2025年全国I卷」「2025 年北京卷」「2025年上海卷(春)」「北京市丰台区 2027 届高三开学练习卷」。
+ *   这些行其实一直在正文里（content_list 的 text_level 块），只是被压成普通行、没人认 →
+ *   每道题的 paperName 都是空 → 库里「未归档」一大片 ✗
+ *   只认**短、没有题目特征**的行，免得把题干里提到的卷名当真 ✓
+ */
+function paperNameOf(line: string): string {
+  const s = stripMark(line).trim()
+  if (!s || s.length > 40) return ''
+  // ⚠ 考生须知/答题卡那句也含「试卷」二字（「考生务必将答案答在答题卡上，在试卷上作答无效」）——
+  //   实测它是**最大的误报源**，必须先挡掉 ✗
+  if (RE_NOTE_HEAD.test(s) || isScoreOnlyLine(s) || isPaperInfoLine(s) || noteHits(s) >= 1 || isShortNote(s)) return ''
+  if (isSegmentHead(s)) return ''                          // 「一、单选题」是小节标题，不是卷名
+  if (RE_NUM.test(s) || /^[(（]\s*\d/.test(s)) return ''  // 「1. 已知…」「(17) (本小题 13 分)」
+  if (/[？?]\s*$/.test(s) || /_{3,}/.test(s)) return ''    // 问句 / 填空线 → 是题干
+  if (hasQuestionFeature(s)) return ''
+  const hasJuan = /(卷|高考|真题)/.test(s)
+  const hasYear = /((?:19|20)\d{2})/.test(s)
+  const hasWord = RE_TITLE_WORD.test(s)
+  if (!(hasJuan || (hasYear && hasWord))) return ''
+  return s
+}
+
+/** 「XX卷」里的年份（认不出返回空串） */
+function yearInPaper(s: string): string {
+  const m = s.match(/((?:19|20)\d{2})/)
+  return m ? m[1] : ''
+}
+
+/**
+ * 【优化】在**原始文本**上按「卷名行」切段，并数出每段里有几个题号
+ *   —— 用来把**卷名按顺序发给题**（与 segmentTypesOf 回填题型是同一套思路：**不动切题主流程** ✓）
+ *   ⚠ 到「参考答案」就停（答案区里也可能出现卷名样的行）
+ *   ⚠ head = 第一份卷名**之前**的题号数（那些题不属于任何一份卷）
+ *   ⚠ 同一份卷的标题常连着两行（「XX区2027届…卷」+「数学试卷」）→ 取**最具体**的那行
+ *     （有年份优先，其次更长的那行）✓
+ */
+function paperSegmentsOf(raw: string): { head: number; segs: { paper: string; year: string; nums: number }[] } {
+  const segs: { paper: string; year: string; nums: number }[] = []
+  let run: { s: string; y: string }[] = []
+  let cur: { paper: string; year: string; nums: number } | null = null
+  let head = 0
+  const norm = (x: string) => x.replace(/\s+/g, '')
+  const flush = () => {
+    if (!run.length) return
+    const best = run
+      .slice()
+      .sort((a, b) => (b.y ? 1 : 0) - (a.y ? 1 : 0) || b.s.length - a.s.length)[0]
+    // ⚠ 同一份卷换个写法又出现（实测「2025年天津卷」与「2025 年天津卷」被拆成两份）→
+    //   忽略空白后同名就**不新开段**，继续数同一份卷 ✓
+    const last = segs.length ? segs[segs.length - 1] : null
+    if (last && norm(last.paper) === norm(best.s)) {
+      cur = last
+      run = []
+      return
+    }
+    cur = { paper: best.s, year: best.y, nums: 0 }
+    segs.push(cur)
+    run = []
+  }
+  for (const line of raw.replace(/\r\n?/g, '\n').split('\n')) {
+    const t = line.trim()
+    if (isAnswerSectionHead(t)) break
+    const p = paperNameOf(t)
+    if (p) { flush(); run.push({ s: p, y: yearInPaper(p) }); continue }
+    if (!t) continue                                        // 空行不断开候选串（标题之间常有空行）
+    flush()
+    if (segs.length === 0) {
+      if (RE_NUM.test(t)) head++
+    } else {
+      const c = cur as { paper: string; year: string; nums: number } | null
+      if (c && RE_NUM.test(t)) c.nums++
+    }
+  }
+  flush()
+  return { head, segs }
+}
+
 /** 按「小节标题」把整篇切成若干段，每段带上题型（标题行本身不再进题面） */
 export function splitBySegmentHeads(text: string): { text: string; qtype: string }[] {
   const out: { text: string; qtype: string }[] = []
@@ -556,13 +639,159 @@ function t_all(block: string): string {
   return block.split('\n').join(' ')
 }
 
+/**
+ * 【优化】**拆答案**：答案区标题（「数学参考答案」「参考答案及评分标准」「答案与解析」…）
+ *   实测 17 份 MinerU 缓存里 **8 份带答案区**，而我们以前是**整段截断扔掉**的 ✗
+ */
+function isAnswerHead(t: string): boolean {
+  const s = t.replace(/^#{1,6}\s*/, '').trim()
+  if (!s || s.length > 30) return false
+  if (/参考\s*答案|答案与解析|答案及评分|答案和解析/.test(s)) return true
+  return /^答\s*案$/.test(s)
+}
+
+/** 【优化】整篇 → 「题目区 / 答案区」（答案区不再丢，交给 applyAnswers 按题号配回去 ✓） */
+function splitAnswerRegion(raw: string): { body: string; ans: string } {
+  const ls = raw.replace(/\r\n?/g, '\n').split('\n')
+  for (let i = 0; i < ls.length; i++) {
+    if (isAnswerHead(ls[i])) return { body: ls.slice(0, i).join('\n'), ans: ls.slice(i).join('\n') }
+  }
+  return { body: raw, ans: '' }
+}
+
+interface AnsEntry { answer: string; solution: string }
+
+/** 答案表（MinerU 把「题号/答案」表给成 <table>）：题号行 + 答案行 → 题号 → 答案 ✓ */
+function answersFromTable(html: string, into: Map<number, AnsEntry>): void {
+  const rows = html.match(/<tr[\s\S]*?<\/tr>/gi) || []
+  const cells = (r: string) =>
+    (r.match(/<t[dh][^>]*>[\s\S]*?<\/t[dh]>/gi) || []).map((c) =>
+      c.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim(),
+    )
+  let nums: number[] = []
+  for (const r of rows) {
+    const cs = cells(r)
+    if (!cs.length) continue
+    const head = cs[0].replace(/\s/g, '')
+    if (/题号/.test(head)) { nums = cs.slice(1).map((x) => Number((x.match(/\d{1,3}/) || ['0'])[0])); continue }
+    if (/答案/.test(head)) {
+      cs.slice(1).forEach((v, i) => {
+        const no = nums[i]
+        // 题干本来就带答案的（【答案】A）不覆盖 ✓
+        if (no && v && !into.has(no)) into.set(no, { answer: v.replace(/\s+/g, ''), solution: '' })
+      })
+    }
+  }
+}
+
+/** 逐题 / 串式答案 —— 真实写法：`1. B 将样本数据…故选B.`、`1-5 ACBDA`、`【答案】…【解析】…` ✓ */
+function answersFromLines(ans: string, into: Map<number, AnsEntry>): void {
+  const ls = ans.replace(/<table[\s\S]*?<\/table>/gi, '').split('\n')
+  let curNo = 0
+  for (const rawLine of ls) {
+    const line = rawLine.trim()
+    if (!line || isAnswerHead(line)) continue
+    // ① 答案串：`1-5 ACBDA` / `9~10：BC`
+    const mRun = line.match(/^[(（]?\s*(\d{1,3})\s*[-~—]\s*(\d{1,3})\s*[)）]?\s*[:：.、]?\s*([A-H]{2,})\s*$/)
+    if (mRun) {
+      const a = Number(mRun[1])
+      mRun[3].split('').forEach((v, i) => { const no = a + i; if (!into.has(no)) into.set(no, { answer: v, solution: '' }) })
+      continue
+    }
+    // ② 一行多组：`1.A 2.B 3.C`
+    const pairs = Array.from(line.matchAll(/(\d{1,3})\s*[.、．)）]\s*([A-H])(?![A-Za-z0-9])/g))
+    if (pairs.length >= 2) {
+      for (const p of pairs) { const no = Number(p[1]); if (!into.has(no)) into.set(no, { answer: p[2], solution: '' }) }
+      continue
+    }
+    const m = line.match(/^[(（]?\s*(\d{1,3})\s*[)）.、．]\s*([\s\S]*)$/)
+    if (m) {
+      curNo = Number(m[1])
+      const rest = m[2].trim()
+      const tagged = rest.match(/^【答案】\s*([\s\S]*?)(?:【解析】|【详解】|$)([\s\S]*)$/)
+      const coloned = rest.match(/^答案\s*[:：]\s*([\s\S]*?)(?:解析\s*[:：]|$)([\s\S]*)$/)
+      const g = tagged || coloned
+      if (g) {
+        // 解析正文里别再带「【解析】」标签（存进库的应该是纯解析 ✓）
+        const sol = String(g[2] || '').replace(/^\s*(【解析】|【详解】|解析\s*[:：])\s*/, '').trim()
+        if (!into.has(curNo)) into.set(curNo, { answer: g[1].trim(), solution: sol })
+        continue
+      }
+      const mA = rest.match(/^([A-H])(?:\s|$|[.、．)）])([\s\S]*)$/)
+      if (mA) { if (!into.has(curNo)) into.set(curNo, { answer: mA[1], solution: mA[2].trim() }); continue }
+      // 填空/解答：第一句短就当答案，长就整段当解析（不硬塞 ✓）
+      const first = (rest.split(/[。．.;；]/)[0] || '').trim()
+      const short = first.length > 0 && first.length <= 24 && !/^[(（]\s*[1-9]\s*[)）]/.test(first)
+      if (!into.has(curNo)) into.set(curNo, short ? { answer: first, solution: rest.slice(first.length).trim() } : { answer: '', solution: rest })
+      continue
+    }
+    // ③ 续行 → 挂到当前题号的解析上
+    if (curNo && into.has(curNo)) {
+      const e = into.get(curNo) as AnsEntry
+      e.solution = (e.solution ? e.solution + '\n' : '') + line
+    }
+  }
+}
+
+/** 清掉一条具体的告警（配到答案后「没有识别到答案」就不该再挂着 ✓） */
+function clearWarn(q: ParsedQuestion, kw: string): void {
+  const w = String(q.warn || '')
+  if (!w) return
+  const left = w.split('；').filter((x) => x.trim() && x.indexOf(kw) < 0).join('；')
+  q.warn = left || undefined
+}
+
+/**
+ * 【优化】把卷尾答案区配到题上。规则（**能对上的才配，对不上就留空 + 说明**）：
+ *   ① 优先按**题号**配（题目自带 no，答案区也按题号列）；
+ *   ② 题号一个都没配到、但答案条数正好等于题数 → 按顺序配，并挂 warn 提醒核对；
+ *   ③ **多卷合一**的卷先不自动配（答案区通常只列一份卷的题号，配错比不配更糟 ✗）→ 留空 + 说明。
+ */
+function applyAnswers(out: ParsedQuestion[], ans: string): void {
+  if (!out.length || !ans.trim()) return
+  const map = new Map<number, AnsEntry>()
+  answersFromTable(ans, map)
+  answersFromLines(ans, map)
+  if (!map.size) return
+  const papers = new Set(out.map((q) => String(q.paperName || '').trim()).filter(Boolean))
+  if (papers.size > 1) {
+    out.forEach((q) => { q.warn = [q.warn, '卷尾答案区只按一份卷的题号列出，多卷未自动配答案'].filter(Boolean).join('；') })
+    return
+  }
+  const put = (q: ParsedQuestion, e: AnsEntry | undefined, note?: string) => {
+    if (!e) return false
+    let did = false
+    if (!q.answer && e.answer) { q.answer = e.answer; did = true }
+    if (!q.solution && e.solution) { q.solution = e.solution; did = true }
+    if (did) {
+      clearWarn(q, '没有识别到答案')
+      if (note) q.warn = [q.warn, note].filter(Boolean).join('；')
+    }
+    return did
+  }
+  let hit = 0
+  const withNo = out.filter((q) => q.no).length
+  if (withNo >= Math.ceil(out.length * 0.6)) {
+    for (const q of out) { if (put(q, q.no ? map.get(q.no) : undefined)) hit++ }
+  }
+  if (!hit && map.size === out.length) {
+    const keys = Array.from(map.keys())
+    out.forEach((q, i) => { if (put(q, map.get(keys[i]), '答案按**顺序**从卷尾答案区配来（题号对不上），请核对')) hit++ })
+  }
+  if (hit) {
+    out.forEach((q) => { if (!q.answer && !q.solution) q.warn = [q.warn, '卷尾答案区里没找到这道题的答案'].filter(Boolean).join('；') })
+  }
+}
+
 export function parseQuestions(raw: string): ParsedQuestion[] {
   // ⚠⚠ 顺序很关键：**先整篇剥掉"非题目行"（其中「参考答案」要整段截断），再按小节切段**。
   //   反过来（先切段再剥）会踩一个大坑：答案区里也有「## 四、解答题」这种小节标题 →
   //   它被当成新一段的开始，而这一段的文本里已经没有「参考答案」那行标题了 →
   //   **答案被当成好几道题** ✗（实测真卷 19 题变 24 题，多出来的 5 条正是填空/解答答案）
   // 结构化正文（content_list）开头常有抬头 → 先按结构跳到第一道题 ✓
-  const body = stripLeadingMatter(raw)
+  // 【优化】答案区**不再整段丢弃**：先拆出来（body 走原来的路；ans 交给 applyAnswers）✓
+  const { body: rawMain, ans: rawAns } = splitAnswerRegion(raw)
+  const body = stripLeadingMatter(rawMain)
   const stripped = stripNonQuestionLines(body)
   skippedNonQuestion = stripped.skipped
   // 小节标题（一、选择题…）由 splitBlocks 当成分块边界、在块内循环里被识别成题型 ✓
@@ -571,11 +800,24 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
   //   按顺序把该段的题型发给对应的题。这条不依赖"标题有没有被当成分块边界"，
   //   所以标题行怎么被剥、被合块都不影响结果 ✓（实测原来 multi/blank 一个都出不来）
   let qi = 0
-  for (const seg of segmentTypesOf(raw)) {
+  for (const seg of segmentTypesOf(rawMain)) {
     for (let k = 0; k < seg.nums && qi < out.length; k++, qi++) {
       if (seg.type) out[qi].qtype = seg.type
     }
   }
+  // ⭐⭐ 【优化】卷名回填（同一套「区段计数」思路，**不动切题主流程**）：
+  //   一个 PDF 里拼了好几份卷时（实测一份 4 卷 / 118 题），每道题该带上**自己那份卷**的卷名 ——
+  //   以前全是空 → 库里「未归档」一大片；而卷名一直就在正文里，只是被压成普通行、没人认 ✗
+  const pseg = paperSegmentsOf(rawMain)
+  let pi = pseg.head
+  for (const seg of pseg.segs) {
+    for (let k = 0; k < seg.nums && pi < out.length; k++, pi++) {
+      out[pi].paperName = seg.paper
+      if (seg.year && !out[pi].yearExplicit) out[pi].year = seg.year
+    }
+  }
+  // ⭐⭐ 【优化】拆答案：卷尾答案区 → 按题号配到题上（配不上留空 + 说明，**不猜** ✓）
+  if (rawAns) applyAnswers(out, rawAns)
   return out
 }
 
@@ -602,6 +844,13 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
     if (isNonQuestionBlock(block)) { skippedNonQuestion += 1; continue }
     // 先把"被吞进公式的选项标记"吐出来（参考实现的 fixFormulaBoundary）→ 后面照常切选项 ✓
     const ls = fixFormulaBoundary(block).text.split('\n')
+    // 【优化】块的第一行就是题号行（splitBlocks 就是按题号行切块的）→ 记下这道题的原始题号 ✓
+    let no = 0
+    {
+      const firstLine = ls.find((x) => x.trim() && !isSegmentHead(x)) || ''
+      const mn = firstLine.match(/^\s*[(（]?\s*(\d{1,3})\s*[.、．)）]/)
+      if (mn) no = Number(mn[1])
+    }
     const stemParts: string[] = []
     const options: string[] = []
     const optLetters: string[] = []          // 选项字母（结构体检用：判断"是不是缺了 A"）
@@ -739,6 +988,7 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
       date,
       yearExplicit,
       paperName,
+      no,
       year,
       region,
       warn: !answer && !options.length ? '没有识别到答案'

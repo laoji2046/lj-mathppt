@@ -230,7 +230,10 @@ function parseMd(raw: string, prefix = '') {
     if (!r.list.length) { flash('没切出题目 —— 通用格式要「1. 2. 3.」题号；题库单题格式要有 YAML front-matter + ## 题目'); return }
     if (r.detected.year || r.detected.paperName) {
       batchYear.value = r.detected.year || ''
-      batchPaper.value = r.detected.paperName || ''
+      // 【优化】多卷合一的 PDF：每题已经带了自己那份卷的卷名 →
+      //   **不要**拿第一份的名字去预填「批量填来源」，否则用户一点就把 4 份卷盖成一份 ✗
+      const papers = new Set(r.list.map((q) => String(q.paperName || '').trim()).filter(Boolean))
+      batchPaper.value = papers.size > 1 ? '' : (r.detected.paperName || '')
     }
     const how = r.mode === 'vault' ? '题库单题格式' : '通用切题'
     loadRows(r.list, (prefix ? prefix + '；' : '') + how + '解析完成' + (r.mode === 'text' && r.skipped ? '（过滤说明行 ' + r.skipped + '）' : ''))
