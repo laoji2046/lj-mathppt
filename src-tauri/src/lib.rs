@@ -1835,6 +1835,11 @@ fn lib_import_add_drafts(payload: serde_json::Value) -> serde_json::Value {
         }
         ids.push(id);
     }
+    // 【修 v1465】批次上的题数要跟着更新（以前一直是 0 → 草稿箱里看着像空批 ✗）
+    let _ = conn.execute(
+        "UPDATE import_batch SET question_count = (SELECT COUNT(*) FROM import_draft WHERE batch_id = ?1) WHERE id = ?1",
+        [&batch],
+    );
     serde_json::json!({ "ok": true, "added": total, "needReview": need, "ids": ids })
 }
 
@@ -2058,6 +2063,17 @@ fn lib_import_commit(ids: Vec<String>) -> serde_json::Value {
         }
         if !batch_id.is_empty() {
             m["batchId"] = serde_json::json!(batch_id);
+        }
+        // 【修 v1465】草稿里的图（extra.images）要收进新题 —— 否则「先存草稿再入库」这条路线**丢图** ✗
+        let extra_raw = v.get("extra").and_then(|x| x.as_str()).unwrap_or("");
+        if !extra_raw.trim().is_empty() {
+            if let Ok(ex) = serde_json::from_str::<serde_json::Value>(extra_raw) {
+                if let Some(imgs) = ex.get("images").and_then(|x| x.as_array()) {
+                    if !imgs.is_empty() {
+                        m["images"] = serde_json::json!(imgs);
+                    }
+                }
+            }
         }
         // 【P1c】targetQid > 0 = **改已有题**（来源归一走这条）：按 extra.patch 列出的键
         //   把它合进原题的 meta —— **不是新建一道**，所以正式库题数不变 ✓

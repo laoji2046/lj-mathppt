@@ -275,6 +275,9 @@ export function draftFromMeta(q: QMeta, sourceLabel = '', sourceItemId = '') {
     paper: q.paperName || '',
     warn: q.warn || '',
     images: q.images || [],
+    // 【修 v1465】图必须进 extra 才存得下来：Rust 的 import_draft 表只有 extra 这一列能装图
+    //   （顶层 images 只被闸门用来**数**张数，不落库 ✗ —— 结果草稿路线把图丢了）
+    extra: q.images && q.images.length ? JSON.stringify({ images: q.images, from: 'MinerU' }) : '',
   }
 }
 
