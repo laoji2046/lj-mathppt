@@ -162,6 +162,14 @@ const STEM_MATH_MAX = 120
  * ⚠ 图此时还是 data URL（入库前没转资源），直接塞 src 即可；
  *   放在**独立容器** .qi__figs 里，MathJax 那一遍（会重写 .qi__stem）不会把它冲掉 ✓
  */
+/** 【v1458】校对卡片上的图也能点开放大（卡片窄，默认只给缩略图 ✓） */
+function onFigClick(e: MouseEvent) {
+  const t = e.target as HTMLElement | null
+  if (!t || t.tagName !== 'IMG') return
+  const fig = t.closest('.qi__fig')
+  if (fig) fig.classList.toggle('qi__fig--zoom')
+}
+
 function renderCardFigures() {
   const hosts = Array.from(document.querySelectorAll<HTMLElement>('.qi__figs'))
   const list = rows.value
@@ -510,7 +518,7 @@ function optsText(o: string[]): string {
               <div v-for="(r, i) in rows" :key="i" class="qi__card" :class="{ 'qi__card--on': r.on }">
                 <label class="qi__pick" title="勾选（不勾就不入库）" @click.stop><input v-model="r.on" type="checkbox" /></label>
                 <div class="qi__stem" :data-qi="i"></div>
-            <div class="qi__figs" :data-qi="i"></div>
+            <div class="qi__figs" :data-qi="i" @click="onFigClick"></div>
                 <div class="qi__fields">
                   <select v-model="r.q.qtype" class="qi__mini">
                     <option value="">未判</option>
@@ -586,10 +594,12 @@ function optsText(o: string[]): string {
 .qi__pick { position: absolute; left: 8px; top: 10px; }
 .qi__stem { font-size: 12.5px; color: var(--text); line-height: 1.7; margin-bottom: 6px; overflow-x: auto; }
 /* 【v1455】校对表里的题图（入库前是 data URL，直接显示） */
+/* 【v1455/v1458】校对卡片题图 —— 同样必须 :deep()（figure 是 innerHTML 注入的）✓ */
 .qi__figs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
-.qi__fig { margin: 0; display: flex; flex-direction: column; gap: 2px; }
-.qi__fig img { max-width: 220px; max-height: 160px; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
-.qi__fig figcaption { font-size: 10.5px; color: var(--muted); }
+.qi__figs :deep(.qi__fig) { margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.qi__figs :deep(.qi__fig img) { max-width: 150px; max-height: 110px; object-fit: contain; cursor: zoom-in; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.qi__figs :deep(.qi__fig--zoom img) { max-width: 100%; max-height: none; cursor: zoom-out; }
+.qi__figs :deep(.qi__fig figcaption) { font-size: 10.5px; color: var(--muted); }
 .qi__stem :deep(mjx-container) { font-size: inherit; max-width: 100%; }
 .qi__stem :deep(mjx-container[display="true"]) { margin: 2px 0; }
 .qi__fields { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }

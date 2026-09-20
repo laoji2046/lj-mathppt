@@ -216,6 +216,20 @@ async function renderPreview() {
 }
 watch(selId, () => { void nextTick(renderPreview) })
 
+/**
+ * 【v1458】点题图放大 / 缩小
+ *   为什么：预览列只有 ~320px 宽，原尺寸的题图会占满整屏（用户反馈「导入的图片尺寸过大」）——
+ *   所以默认收小，想看细节点一下 ✓（缩放态只加一个 class，不动数据）
+ */
+function onPreviewClick(e: MouseEvent) {
+  const t = e.target as HTMLElement | null
+  if (!t || t.tagName !== 'IMG') return
+  const fig = t.closest('.qb__fig')
+  if (!fig) return
+  fig.classList.toggle('qb__fig--zoom')
+  t.setAttribute('title', fig.classList.contains('qb__fig--zoom') ? '点击缩小' : '点击放大')
+}
+
 /** 知识点输入：中英文逗号/顿号/分号都当分隔符 ✓（老师怎么写都能拆对） */
 function kpListOf(text: string): string[] {
   return Array.from(new Set(String(text || '').split(/[，,、;；]/).map((s) => s.trim()).filter(Boolean)))
@@ -487,7 +501,7 @@ async function batchDelete() {
               <span class="qb__chip">{{ sel.difficulty ? '难度 ' + sel.difficulty : '难度未填' }}</span>
             </div>
             <div v-if="sel.warn" class="qb__warnbox">⚠ {{ sel.warn }}</div>
-            <div ref="previewHost" class="qb__preview"></div>
+            <div ref="previewHost" class="qb__preview" @click="onPreviewClick"></div>
             <div class="qb__form">
               <label>章节
                 <select v-model="form.section">
@@ -667,9 +681,12 @@ async function batchDelete() {
 .qb__view { border-left: 1px solid var(--border); overflow-y: auto; padding: 10px 12px; }
 .qb__preview { font-size: 13px; line-height: 1.7; color: var(--text); margin-bottom: 10px; }
 /* 【v1455】题图 */
-.qb__fig { margin: 6px 0; display: flex; flex-direction: column; gap: 2px; }
-.qb__fig img { max-width: 100%; max-height: 260px; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
-.qb__fig figcaption { font-size: 11px; color: var(--muted); }
+/* 【v1455/v1458】题图 —— ⚠ 必须用 :deep()：figure 是 innerHTML 注入的，
+   拿不到 scoped 的 data-v 属性（v1455 的样式**一直没生效**，图按原尺寸撑满整屏 ✗ 现已修 ✓） */
+.qb__preview :deep(.qb__fig) { margin: 6px 0; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+.qb__preview :deep(.qb__fig img) { max-width: min(100%, 320px); max-height: 150px; object-fit: contain; cursor: zoom-in; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.qb__preview :deep(.qb__fig--zoom img) { max-width: 100%; max-height: none; cursor: zoom-out; }
+.qb__preview :deep(.qb__fig figcaption) { font-size: 11px; color: var(--muted); }
 .qb__form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
 .qb__form label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--muted); }
 .qb__full { grid-column: 1 / -1; }

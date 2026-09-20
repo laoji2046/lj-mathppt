@@ -214,7 +214,10 @@ export function figHtmlOf(im: QuestionImage, disp?: number, label?: string): str
   const e = (t: unknown) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   const d = disp || Number((im && im.n) || 0)
   const lab = label || figLabelOf(im, d)
-  return '<figure class="qb__fig"><img src="' + e(src) + '" alt="' + e(lab) + '" /><figcaption>' + e(lab) + '</figcaption></figure>'
+  return (
+    '<figure class="qb__fig"><img src="' + e(src) + '" alt="' + e(lab) + '" title="点击放大" loading="lazy" />' +
+    '<figcaption>' + e(lab) + '</figcaption></figure>'
+  )
 }
 /** 预览用的 HTML：题干 + 选项 + 答案 + 解析（走 typesetMixed，公式按编辑器同一套渲染 ✓） */
 export function previewHtmlOf(it: QItem, imgs?: QuestionImage[]): string {
