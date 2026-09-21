@@ -392,6 +392,7 @@ onMounted(() => {
     if (w && typeof w.x === 'number' && typeof w.y === 'number') {
       dragOff.value = { x: w.x, y: w.y }
       collapsed.value = !!w.mini
+      dockRight.value = !!w.dock
     }
   } catch { /* 坏数据就当没存过 ✓ */ }
   document.addEventListener('keydown', onPanelKey)
@@ -409,10 +410,12 @@ onBeforeUnmount(() => {
 /* ---------------- 【v1472】浮窗：拖动 / 收起 / 记住位置 ---------------- */
 const WIN_KEY = 'lj-mathslides:qbwin'
 const collapsed = ref(false)
+/** 【v1473】靠右停靠（右侧半屏，左边留给画布 ✓）—— 老师要的「题库和画布能来回用」✓ */
+const dockRight = ref(false)
 const dragOff = ref({ x: 0, y: 0 })
 let dragFrom: { mx: number; my: number; ox: number; oy: number } | null = null
 function saveWin() {
-  try { localStorage.setItem(WIN_KEY, JSON.stringify({ x: dragOff.value.x, y: dragOff.value.y, mini: collapsed.value })) } catch { /* 存不上不影响用 */ }
+  try { localStorage.setItem(WIN_KEY, JSON.stringify({ x: dragOff.value.x, y: dragOff.value.y, mini: collapsed.value, dock: dockRight.value })) } catch { /* 存不上不影响用 */ }
 }
 function onHeadDown(e: MouseEvent) {
   const t = e.target as HTMLElement | null
@@ -433,6 +436,12 @@ function onHeadUp() {
   window.removeEventListener('mouseup', onHeadUp)
 }
 function toggleMini() { collapsed.value = !collapsed.value; saveWin() }
+function toggleDock() {
+  dockRight.value = !dockRight.value
+  collapsed.value = false
+  saveWin()
+  flash(dockRight.value ? '已靠右停靠 —— 左边就是画布与缩略图，点一下就能切过去 ✓' : '已回到整屏模式 ✓')
+}
 function resetWin() { dragOff.value = { x: 0, y: 0 }; collapsed.value = false; saveWin(); flash('已复位（居中、展开）') }
 
 function pickSection(s: string) {
@@ -720,13 +729,14 @@ async function batchDelete() {
   <!-- 【修】以前是 @click.self="emit('close')"：点面板**外面任何地方**就关 ——
        而面板是 96vw×88vh，外面那圈很窄，鼠标移出去后只要有一次点击（含从别的窗口点回来重新聚焦）就丢了 ✗
        现在只认 ✕ 和 Esc（Esc 以前只在 title 里写着，其实没实现 ✓） -->
-  <div class="qb">
+  <div class="qb" :class="{ 'qb--dock': dockRight && !collapsed }">
     <div
       class="qb__box" :class="{ 'qb__box--mini': collapsed }"
-      :style="{ transform: 'translate(' + dragOff.x + 'px, ' + dragOff.y + 'px)' }"
+      :style="{ transform: dockRight ? 'none' : 'translate(' + dragOff.x + 'px, ' + dragOff.y + 'px)' }"
     >
       <header class="qb__head" title="按住标题栏可以拖动这个窗口（位置会记住 ✓）" @mousedown="onHeadDown">
         <button class="qb__btn qb__btn--mini" :title="collapsed ? '展开（看题、挑题）' : '收起成一条标题栏 —— 收起后能看清幻灯片 / 试卷，点这里再展开 ✓'" @click="toggleMini">{{ collapsed ? '▣ 展开' : '— 收起' }}</button>
+        <button class="qb__btn qb__btn--mini" :title="dockRight ? '取消靠右停靠，回到整屏模式' : '靠右停靠：题库只占右半屏，左边留给画布和缩略图（两边都能点 ✓）'" @click="toggleDock">{{ dockRight ? '⛶ 整屏' : '⇥ 靠右' }}</button>
         <button class="qb__btn qb__btn--mini" title="位置复位到屏幕中央并展开" @click="resetWin">⟳</button>
         <span class="qb__title">试题库</span>
         <span class="qb__sub">共 {{ facets.total }} 道 · 当前筛出 {{ total }} 道</span>
@@ -1085,6 +1095,13 @@ async function batchDelete() {
 .qb__btn { height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; background: #fff; font-size: 12.5px; cursor: pointer; color: var(--text); }
 .qb__btn--main { background: var(--brand-600, #534AB7); border-color: var(--brand-600, #534AB7); color: #fff; }
 .qb__btn:disabled { opacity: .6; cursor: default; }
+/* 【v1473】靠右停靠：题库只占右侧 ~46vw，**左边整块留给画布与缩略图列表** ✓
+   —— 实测（v2900 探针）：整屏浮窗虽然不拦点击 ✓，但它盖住 78% 的面积 ✗（缩略图列表 x≈108 正好被压住 ✗），
+   真鼠标点第 2 页**没反应** ✗ —— 老师说的「题库和画布不能切换」就是这个 ✗。 */
+.qb--dock { justify-content: flex-end; align-items: center; padding-right: 8px; }
+.qb--dock .qb__box { width: 46vw; max-width: 920px; height: 92vh; }
+.qb--dock .qb__tree { display: none; }                                   /* 左树藏掉（省 200px，章节筛选仍可从筛选条/整屏模式用 ✓） */
+.qb--dock .qb__body { grid-template-columns: 1fr 380px; }
 .qb__body { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px 1fr 400px; }
 .qb__tree { border-right: 1px solid var(--border); overflow-y: auto; padding: 8px 6px; }
 .qb__t1 { font-size: 11px; font-weight: 700; color: var(--muted); padding: 8px 6px 4px; letter-spacing: .04em; }
