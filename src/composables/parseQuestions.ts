@@ -957,21 +957,28 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
       if (m) { solution += (solution ? '\n' : '') + m[1].trim(); mode = 'solution'; continue }
 
       if (mode === 'stem') {
-        const mo = line.match(RE_OPT)
+        // 【v1469】选项字母常被 MinerU 包进**加粗 / LaTeX** ✗ —— 实测（老师的 2025年.pdf）：
+        //   `\$\mathbf{A}\$ . \{x…\}`（选项都在同一行）与 `\mathbf {C}. y > x > z`（选项各占一个 `$$` 块）
+        //   这种写法**一个选项都切不出来** ✗（两道题被判「选择题但 0 个选项」✗）→ 先还原成普通 `A.` ✓
+        const norm = line
+          .replace(/\$?\s*\\mathbf\s*\{?\s*([A-H])\s*\}?\s*\$?\s*[.．、)）]/g, '$1.')
+          .replace(/\*\*\s*([A-H])\s*[.．、)）]\s*\*\*/g, '$1.')
+        if (/^\s*\$\$\s*$/.test(norm)) continue      // 纯公式围栏行不留进题面 ✓
+        const mo = norm.match(RE_OPT)
         if (mo) {
-          optLetters.push(...optionLetters(line))
-          const many = splitOptionsLine(line)
+          optLetters.push(...optionLetters(norm))
+          const many = splitOptionsLine(norm)
           if (many.length > 1) options.push(...many.map(stripMd))
           else options.push(stripMd(mo[1]))
           continue
         }
         // 首个选项跟题干排在同一行（MinerU 混排）—— 从标记处切开：前半当题干，后半拆成选项
-        const mi = findInlineOptionMark(line)
+        const mi = findInlineOptionMark(norm)
         if (mi > 0) {
-          const head = stripMd(line.slice(0, mi))
+          const head = stripMd(norm.slice(0, mi))
           if (head) stemParts.push(head)
-          optLetters.push(...optionLetters(line.slice(mi)))
-          options.push(...splitOptionsLine(line.slice(mi)).map(stripMd))
+          optLetters.push(...optionLetters(norm.slice(mi)))
+          options.push(...splitOptionsLine(norm.slice(mi)).map(stripMd))
           continue
         }
         stemParts.push(stripMd(line))
