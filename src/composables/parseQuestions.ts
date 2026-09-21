@@ -368,6 +368,12 @@ function paperNameOf(line: string): string {
   if (/^第\s*[ⅠⅡⅢⅣⅤIVX一二三四五]+\s*卷/.test(s)) return ''
   if (/^[数学语文英语物理化学生物政治历史地理]{2,4}(试题|试卷|试题卷)$/.test(s)) return ''
   if (/命题范围|考试范围|注意事项/.test(s)) return ''
+  // 【v1468】「第X套 / 套X」是**分套标题** ✓ —— 一份 PDF 拼好几套练习时最常见的写法（「第一套」「第2套」✗）
+  //   以前不认 → 那几套全落「未归档」✗，而且标题行还会被**上一题的解析吞掉** ✗（合成用例 C 实测 ✓）。
+  //   ⚠ 只认「第…套」这种明确分套的写法 ✓：不碰「第I卷」（卷次，上一行已挡 ✗），
+  //     也不认「练习一 / 专题一」（正文里出现太多，容易撞车 ✗）。
+  if (/^第\s*[0-9一二三四五六七八九十百]+\s*套/.test(s)) return s
+  if (/^套\s*[0-9一二三四五六七八九十百]+\s*$/.test(s)) return s
   // ⚠ 「数学参考答案、提示及评分细则」「完卷时间：120 分钟；满分：150 分」也不是卷名（实测误报源）✓
   if (/答案|解析|评分细则|评分标准/.test(s)) return ''
   if (/完卷时间|考试时间|答题时间|满分|分钟/.test(s)) return ''
@@ -939,6 +945,12 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
         if (y) year = y[0]
         continue
       }
+      // 【v1468】卷名行**不该进任何题的正文** ✗
+      //   一份 PDF 里拼好几套时，**下一套的标题行会落进上一题的块里**（splitBlocks 只按题号/小节标题切 ✗），
+      //   于是被当成"解析/答案的续行"吞掉 ✗（实测：上一题的解析尾巴上多一行「2025年北京市西城区高三一模」✗）。
+      //   卷名归属由 paperSegmentsOf 在整篇上单独回填 ✓，这里直接丢掉这行 ✓。
+      //   ⚠ 只在**已经过了题干**之后丢（mode !== 'stem'）：万一某行的题干本身像卷名，也不至于把题干吃掉 ✗
+      if (mode !== 'stem' && paperNameOf(line)) continue
       m = line.match(RE_ANSWER)
       if (m) { answer = m[1].trim(); mode = 'answer'; continue }
       m = line.match(RE_SOLUTION)
