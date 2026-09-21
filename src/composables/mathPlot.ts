@@ -243,6 +243,8 @@ export function histogramParams(): ParamSpec[] {
     { key: 'start', label: '起始边界', def: 345, min: -1000, max: 100000, step: 1 },
     { key: 'bw', label: '组距', def: 10, min: 0.1, max: 10000, step: 1 },
     { key: 'n', label: '组数', def: 8, min: 1, max: HIST_MAX, step: 1 },
+    { key: 'ymax', label: '纵轴最大值（0=自动）', def: 0, min: 0, max: 1, step: 0.001 },
+    { key: 'ystep', label: '纵轴刻度步长（0=自动）', def: 0, min: 0, max: 1, step: 0.001 },
   ]
   // 默认给一组**像真题那样**的样例 ✓（一打开就有柱子 ✓ 老师粘自己的数据就把它们覆盖掉 ✓）
   const sample = [0.005, 0.01, 0.02, 0.025, 0.015, 0.01, 0.005, 0.005, 0, 0]
@@ -259,7 +261,20 @@ export function histogramFigure(w: number, h: number, stroke: string, sw: number
   const start = Number.isFinite(p.start) ? p.start : 0
   const vals: number[] = []
   for (let i = 0; i < n; i++) vals.push(Math.max(0, p['h' + (i + 1)] || 0))
-  const ymax = Math.max(0.0001, ...vals) * 1.15
+  const mv = Math.max(0.0001, ...vals)
+  /** 「好看的步长」= 1 / 2 / 2.5 / 5 × 10ⁿ ✓ —— 老师要的是书上那种整齐刻度（0.005 / 0.01 / 0.015 …）✓ */
+  const niceStep = (raw: number): number => {
+    if (!(raw > 0)) return 1
+    const e = Math.pow(10, Math.floor(Math.log10(raw)))
+    const m = raw / e
+    const k = m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10
+    return k * e
+  }
+  const ymaxFix = Number(p.ymax) || 0            // 手填了就用它 ✓（0 = 自动 ✓）
+  const stepY = Number(p.ystep) > 0 ? Number(p.ystep) : niceStep(mv / 4)
+  let ymax = ymaxFix > 0 ? ymaxFix : Math.ceil(mv / stepY) * stepY
+  if (ymaxFix <= 0 && ymax - mv < stepY * 0.2) ymax += stepY   // 最高的柱子别顶到框 ✓
+  if (ymax < mv) ymax = Math.ceil(mv / stepY) * stepY
   // ⚠ 左/上要**留出写字的地方** ✗ —— 原来 padL=46 太窄 ✓，纵轴刻度数字（anchor=end ✓）
   //   和「频率 / 组距」两行标题会挤在同一块地方叠在一起 ✗（老师截图 ✓）
   const padL = 74, padR = 30, padT = 34, padB = 40
@@ -285,14 +300,14 @@ export function histogramFigure(w: number, h: number, stroke: string, sw: number
     if (a === 0) return '0'
     return String(Number(v.toFixed(4)))
   }
-  const stepY = ymax / 5
   for (let i = 0; i < n; i++) {
     const v = vals[i]
     if (v <= 0) continue
     const xa = X(start + i * bw), xb = X(start + (i + 1) * bw), yv = Y(v)
     L.push('<rect x="' + n1(xa) + '" y="' + n1(yv) + '" width="' + n1(xb - xa) + '" height="' + n1(y0 - yv) + '" fill="none" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
   }
-  for (let k = 1; k <= 4; k++) {
+  // 刻度线画到**最上面一档之下** ✓（最顶那格留给「频率 / 组距」✓）
+  for (let k = 1; stepY * k < ymax - stepY * 1e-6; k++) {
     const yy = Y(stepY * k)
     L.push('<line x1="' + n1(x0) + '" y1="' + n1(yy) + '" x2="' + n1(X(start + n * bw)) + '" y2="' + n1(yy) + '" stroke="#666" stroke-width="1" stroke-dasharray="5 4"/>')
     L.push('<text x="' + n1(x0 - 8) + '" y="' + n1(yy + fs * 0.35) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="end">' + num(stepY * k) + '</text>')
