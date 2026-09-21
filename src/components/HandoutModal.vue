@@ -14,8 +14,9 @@ import { typesetMixed } from '@/composables/useMathJax'
 import {
   HD_BOOKS, HD_LABEL, HD_NUMBERED, HD_PRESSES, handout, hdVersion, makeBlock, outlineOf, pageHtmlOf,
   rendered, saveHandout, setHandout, handoutToText, handoutPathOf, syncAutoTitle, autoTitleOf,
-  initHandoutLib, openHandout, newHandout, deleteHandout, handoutTree, lib, curId,
+  initHandoutLib, openHandout, newHandout, deleteHandout, handoutTree, lib, curId, markSaved, currentSaved,
 } from '@/composables/useHandout'
+import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
 import { loadAssets, assetSrc, saveAsset } from '@/composables/useAssets'
 /* 【M2.6】把「数学图形」打通进讲义 ✓ —— 与题库那双按钮同一套（v1466 ✓）：面板 sink 给 SVG → svgToPngUrl → 入库 */
 import { openFigPalette } from '@/ui/figPalette'
@@ -363,6 +364,34 @@ function importJson(e: Event) {
   }
   r.readAsText(f)
 }
+/* ---------------- 【M2.9】保存讲义（写成文件 ✓） ---------------- */
+const savedInfo = ref(currentSaved())
+const saving = ref(false)
+/** 文件名安全化 ✓ */
+function safeName(s: string): string {
+  return String(s || '讲义').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 60) || '讲义'
+}
+/**
+ * 保存到文件：文档\LJ讲义\<标题>.json ✓
+ *   localStorage 那份只是**工作副本** ✓；写出来的文件才是能带走、能备份的 ✓（老师要的"保存"就是这个 ✓）
+ */
+async function saveToFile() {
+  const base = await firstUserDir('文档')
+  if (!base) { flash('✗ 拿不到「文档」目录，保存失败'); return }
+  saving.value = true
+  try {
+    saveHandout(h.value)                       // 先落工作副本 ✓
+    const dir = base + '\\LJ讲义'
+    const name = safeName(h.value.meta.title) + '.json'
+    const text = JSON.stringify({ app: 'LJ-MathSlides', kind: 'handout', savedAt: new Date().toISOString(), doc: h.value }, null, 1)
+    const r = await writeTextFile(dir, name, text)
+    if (!r.ok) { flash('✗ 保存失败：' + (r.error || '未知错误')); return }
+    const path = r.path || (dir + '\\' + name)
+    markSaved(path)
+    savedInfo.value = currentSaved()
+    flash('✓ 已保存到 ' + path)
+  } finally { saving.value = false }
+}
 function onKey(e: KeyboardEvent) { if (e.key === 'Escape') emit('close') }
 onMounted(() => {
   document.addEventListener('keydown', onKey)
@@ -401,7 +430,8 @@ watch(ver, () => { void refreshNow() })
             <button class="hd__btn" :class="{ 'hd__btn--on': drawer === 'pick' }" title="从题库插题：挑一道 → 例题/练习 + 解析 + 答案三块 ✓" @click="openDrawer('pick')">插题</button>
             <button class="hd__btn" :class="{ 'hd__btn--on': drawer === 'draw' }" title="按 册/章节/难度 抽 N 道，插成例题池或练习池 ✓" @click="openDrawer('draw')">抽题</button>
             <button class="hd__btn" :class="{ 'hd__btn--on': drawer === 'kb' }" title="知识底座：常用公式 / 模型 / 易错点，按教材存着，一键插成知识梳理块 ✓" @click="openDrawer('kb')">知识底座</button>
-            <button class="hd__btn hd__btn--main" title="打印 / 另存为 PDF（矢量文字 ✓）" @click="printPdf">打印 / PDF</button>
+            <button class="hd__btn hd__btn--main" :disabled="saving" title="保存讲义：写到「文档\LJ讲义\标题.json」✓（平时改动也一直自动存在工作副本里 ✓，这个按钮是存成文件 ✓）" @click="saveToFile">{{ saving ? '保存中…' : '保存' }}</button>
+            <button class="hd__btn" title="打印 / 另存为 PDF（矢量文字 ✓）" @click="printPdf">打印 / PDF</button>
             <button class="hd__btn" title="导出纯文本（当前版本）" @click="exportText">导出文本</button>
             <button class="hd__btn" title="导出讲义 JSON（可再导入 ✓）" @click="exportJson">导出 JSON</button>
             <label class="hd__btn" title="导入讲义 JSON">
@@ -631,6 +661,9 @@ watch(ver, () => { void refreshNow() })
         <footer class="hd__foot">
           <button class="hd__btn" title="把引用了题库的块按库里最新内容刷新（题改过之后点一下 ✓）" @click="syncRefs">↻ 同步题库</button>
           <span class="hd__dhint">题目是**引用**（块上显示 题 #id ✓），改题不必重插 ✓</span>
+          <span class="hd__saved" :title="savedInfo.savedPath || ''">
+            {{ savedInfo.savedAt ? '已保存到文件：' + savedInfo.savedAt + ' ✓' : '还没保存成文件（改动一直自动存在工作副本里 ✓）' }}
+          </span>
         </footer>
       </div>
     </div>
@@ -713,6 +746,7 @@ watch(ver, () => { void refreshNow() })
 .hd__dbtns button { flex: 1; height: 24px; border: 1px solid var(--border); border-radius: 6px; background: #fff; font-size: 11.5px; cursor: pointer; }
 .hd__dbtns button:hover { background: var(--brand-soft, #f2f0fb); }
 .hd__foot { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-top: 1px solid var(--border); }
+.hd__saved { margin-left: auto; font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46%; }
 /* 讲义库目录树 */
 .hd__lb1 { font-size: 12.5px; font-weight: 700; padding: 4px 4px 2px; color: var(--text); }
 .hd__lb2 { font-size: 12px; padding: 3px 4px 2px 14px; color: var(--text); }
@@ -773,6 +807,9 @@ watch(ver, () => { void refreshNow() })
 .hd-fig--left { text-align: left; }
 .hd-fig--right { text-align: right; }
 .hd-fig--center img { display: block; margin: 0 auto; }
+/* 【M2.9】图注**始终居中** ✓ —— 老师要求：图注不跟着图形的左/右跑 ✓
+   （选择器权重比 .hd-fig--left/right 高 ✓ 不用 !important ✓） */
+.hd-fig figcaption { text-align: center; }
 .hd-fig--float-left { float: left; margin: 4px 10px 6px 0; }
 .hd-fig--float-right { float: right; margin: 4px 0 6px 10px; }
 /* 带底色的块自成一体 ✓（否则浮动图会被块底色压住 ✗）；正文段落仍可绕排 ✓ */

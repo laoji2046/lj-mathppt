@@ -327,7 +327,13 @@ export function autoTitleOf(h: Handout): string {
 /* ---------------- 【M2.5】讲义库（多份）+ 图片块 ---------------- */
 
 /** 一份讲义 = 内容 + id + 时间 ✓ */
-export interface HdDoc extends Handout { id: string; updatedAt: string }
+export interface HdDoc extends Handout {
+  id: string
+  updatedAt: string
+  /** 【M2.9】上次"保存到文件"的时间与路径 ✓（localStorage 只是工作副本 ✓，文件才是能带走的 ✓） */
+  savedAt?: string
+  savedPath?: string
+}
 
 const LIB_KEY = 'lj-mathslides-vue:handout-lib'
 const CUR_KEY = 'lj-mathslides-vue:handout-cur'
@@ -386,6 +392,18 @@ export function saveHandoutLibrary() {
   d.updatedAt = nowStamp()
   writeLib()
   try { localStorage.setItem(CUR_KEY, curId.value) } catch { /* 忽略 */ }
+}
+
+/** 【M2.9】记下"已保存到文件" ✓ */
+export function markSaved(path: string) {
+  const d = lib.value.find((x) => x.id === curId.value)
+  if (d) { d.savedAt = nowStamp(); d.savedPath = path; writeLib() }
+}
+
+/** 当前这份的保存信息（footer 显示 ✓） */
+export function currentSaved(): { savedAt?: string; savedPath?: string } {
+  const d = lib.value.find((x) => x.id === curId.value)
+  return { savedAt: d?.savedAt, savedPath: d?.savedPath }
 }
 
 /** 打开另一份 ✓（会先把当前这份存好 ✓） */

@@ -3315,8 +3315,15 @@ fn lib_safe_file_name(s: &str) -> String {
 #[tauri::command]
 fn lib_write_text_file(dir: String, name: String, text: String) -> serde_json::Value {
     let d = std::path::PathBuf::from(dir.trim());
+    if d.as_os_str().is_empty() {
+        return serde_json::json!({ "ok": false, "error": "目录是空的" });
+    }
+    // 【v1484】目录不存在就**建出来** ✓ —— 以前一律「目录不存在」✗，
+    //   于是「保存讲义」到 文档\LJ讲义 这种**新目录**必然失败 ✗（老师实测：点了保存没反应 ✓）
     if !d.is_dir() {
-        return serde_json::json!({ "ok": false, "error": "目录不存在" });
+        if let Err(e) = std::fs::create_dir_all(&d) {
+            return serde_json::json!({ "ok": false, "error": format!("建目录失败: {}", e) });
+        }
     }
     let p = d.join(lib_safe_file_name(&name));
     match std::fs::write(&p, text.as_bytes()) {
