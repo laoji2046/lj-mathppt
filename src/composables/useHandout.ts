@@ -43,7 +43,15 @@ export interface HdBlock {
   /** 【M2】知识底座条目的标题（插进来时带的 ✓） */
   kbTitle?: string
   /** 【M2.5】插图（type = 'figure' 时用 ✓）—— 大图走内容库 assetId ✓（与题库同一套，省 localStorage ✓） */
-  img?: { src?: string; assetId?: number; caption?: string }
+  img?: {
+    src?: string
+    assetId?: number
+    caption?: string
+    /** 【M2.7】位置：居中 / 居左 / 居右 / 左浮动 / 右浮动 ✓（对齐「PDF 生成」那套写法 ✓） */
+    layout?: 'center' | 'left' | 'right' | 'float-left' | 'float-right'
+    /** 【M2.7】宽度（% ✓ 10–100）—— 浮动时建议 35–50 ✓ */
+    width?: number
+  }
 }
 
 export interface HandoutMeta {
@@ -170,7 +178,13 @@ function normalize(h: unknown): Handout {
           render: { ...HD_DEFAULT_RENDER[t], ...(b.render || {}) },
           ref: Number(b.ref) || undefined,
           kbTitle: b.kbTitle ? String(b.kbTitle) : undefined,
-          img: b.img && (b.img.src || b.img.assetId) ? { src: b.img.src ? String(b.img.src) : undefined, assetId: Number(b.img.assetId) || undefined, caption: b.img.caption ? String(b.img.caption) : undefined } : undefined,
+          img: b.img && (b.img.src || b.img.assetId) ? {
+            src: b.img.src ? String(b.img.src) : undefined,
+            assetId: Number(b.img.assetId) || undefined,
+            caption: b.img.caption ? String(b.img.caption) : undefined,
+            layout: (b.img.layout as HdBlock['img'] extends undefined ? never : 'center' | 'left' | 'right' | 'float-left' | 'float-right') || undefined,
+            width: Number(b.img.width) || undefined,
+          } : undefined,
         } as HdBlock
       })
     : []
@@ -496,7 +510,11 @@ export function pageHtmlOf(h: Handout, v: HdVersion, imgMap: Record<string, stri
     if (t === 'figure') {
       const src = imgMap[it.b.id] || it.b.img?.src || ''
       if (src) {
-        L.push('<figure class="hd-fig"' + id + '><img src="' + hdEsc(src) + '" alt="' + hdEsc(it.b.img?.caption || '插图') + '" />'
+        const lay = it.b.img?.layout || 'center'
+        const w = Number(it.b.img?.width) || 0
+        const style = (lay.indexOf('float') === 0 ? 'float:' + (lay === 'float-left' ? 'left' : 'right') + ';' : '')
+          + (w > 0 ? 'width:' + Math.max(10, Math.min(100, w)) + '%;' : (lay.indexOf('float') === 0 ? 'width:45%;' : ''))
+        L.push('<figure class="hd-fig hd-fig--' + lay + '"' + id + (style ? ' style="' + style + '"' : '') + '><img src="' + hdEsc(src) + '" alt="' + hdEsc(it.b.img?.caption || '插图') + '" />'
           + (it.b.img?.caption ? '<figcaption>' + hdEsc(it.b.img.caption) + '</figcaption>' : '') + '</figure>')
       } else {
         L.push('<div class="hd-fig hd-fig--empty"' + id + '>（插图：还没选图片）</div>')

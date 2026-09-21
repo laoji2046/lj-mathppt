@@ -133,6 +133,20 @@ function setFigCaption(v: string) {
   b.img = { ...(b.img || {}), caption: v }
   void nextTick(() => refreshNow())
 }
+function setFigLayout(v: string) {
+  const b = sel.value
+  if (!b) return
+  b.img = { ...(b.img || {}), layout: v as 'center' | 'left' | 'right' | 'float-left' | 'float-right' }
+  if (v.indexOf('float') === 0 && !Number(b.img.width)) b.img = { ...b.img, width: 45 }
+  void nextTick(() => refreshNow())
+}
+function setFigWidth(v: string) {
+  const b = sel.value
+  if (!b) return
+  const n = Math.max(10, Math.min(100, Number(v) || 0))
+  b.img = { ...(b.img || {}), width: n || undefined }
+  void nextTick(() => refreshNow())
+}
 function clearFigure() {
   const b = sel.value
   if (!b) return
@@ -475,6 +489,21 @@ watch(ver, () => { void refreshNow() })
                   <button class="hd__btn" title="三维立体图：在三维窗口里调好后点「插入到当前页」即落到讲义 ✓" @click="insert3DFigure">三维图</button>
                 </div>
                 <label>图注<input :value="sel.img?.caption || ''" placeholder="例如：图 1 椭圆与两条切线" @input="setFigCaption(($event.target as HTMLInputElement).value)" /></label>
+                <!-- 【M2.7】位置与宽度：与「PDF 生成」那套一致（居中/居左/居右/左浮/右浮 + 宽度% ✓） -->
+                <div class="hd__row2">
+                  <label>位置
+                    <select :value="sel.img?.layout || 'center'" @change="setFigLayout(($event.target as HTMLSelectElement).value)">
+                      <option value="center">居中</option>
+                      <option value="left">居左</option>
+                      <option value="right">居右</option>
+                      <option value="float-left">左浮动（文字绕排）</option>
+                      <option value="float-right">右浮动（文字绕排）</option>
+                    </select>
+                  </label>
+                  <label>宽度 %
+                    <input :value="sel.img?.width || ''" type="number" min="10" max="100" step="5" :placeholder="(sel.img?.layout || '').indexOf('float') === 0 ? '45' : '100'" @input="setFigWidth(($event.target as HTMLInputElement).value)" />
+                  </label>
+                </div>
                 <button v-if="sel.img" class="hd__btn hd__btn--wide" @click="clearFigure">清掉这张插图</button>
                 <div class="hd__hint2">插图会跟着两个版本一起显示 ✓；大图存进内容库（与题库同一套 ✓），讲义 JSON 不会变胖 ✓</div>
               </template>
@@ -586,7 +615,9 @@ watch(ver, () => { void refreshNow() })
 </template>
 
 <style scoped>
-.hd { position: fixed; inset: 0; z-index: 2600; background: rgba(20, 24, 34, 0.45); display: flex; align-items: center; justify-content: center; }
+/* 【M2.7】z-index 从 2600 降到 **2100** ✓ —— 2600 会把**从讲义里打开的**图形面板(2200)/三维窗口(3200) 盖住 ✗
+   （老师实测：图形弹窗被讲义遮挡 ✓）。现在：**高于试卷(2000)** ✓、**低于图形面板(2200)与三维(3200)** ✓ */
+.hd { position: fixed; inset: 0; z-index: 2100; background: rgba(20, 24, 34, 0.45); display: flex; align-items: center; justify-content: center; }
 .hd__box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: 97vw; max-width: 1500px; height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
 .hd__head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
 .hd__title { font-size: 15px; font-weight: 700; }
@@ -715,6 +746,12 @@ watch(ver, () => { void refreshNow() })
 .hd-blank { border: 1px dashed #c9c6bd; border-radius: 4px; margin: 8px 0; color: #bdbab2; font-size: 9.5pt; padding: 4px 6px; box-sizing: border-box; }
 .hd-fig { margin: 10px 0; text-align: center; }
 .hd-fig img { max-width: 100%; max-height: 90mm; }
+.hd-fig--left { text-align: left; }
+.hd-fig--right { text-align: right; }
+.hd-fig--float-left { float: left; margin: 4px 10px 6px 0; }
+.hd-fig--float-right { float: right; margin: 4px 0 6px 10px; }
+/* 带底色的块自成一体 ✓（否则浮动图会被块底色压住 ✗）；正文段落仍可绕排 ✓ */
+.hd-bx { clear: both; }
 .hd-fig figcaption { font-size: 9.5pt; color: #666; margin-top: 3px; }
 .hd-fig--empty { border: 1px dashed #c9c6bd; border-radius: 4px; color: #bdbab2; font-size: 9.5pt; padding: 6px; }
 .hd-pagebreak { border-top: 1px dashed #bbb; text-align: center; color: #999; font-size: 9.5pt; margin: 12px 0; }
