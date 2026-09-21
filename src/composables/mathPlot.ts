@@ -230,10 +230,72 @@ export interface FunctionDef {
 
 /** 取某个图形的可调参数说明（无参数返回空数组） */
 export function figureParams(kind: string): ParamSpec[] {
+  if (kind === 'histogram') return histogramParams()          // 【M2.11】统计图 ✓
   return FUNCTIONS[kind]?.params ?? CONICS[kind]?.params ?? []
 }
 
 /** 把外部参数与默认值合并 */
+/** 【M2.11】频率分布直方图：可调参数（组距 / 起点 / 箱数 / 各箱高度=频率·组距 ✓）
+ *  h1..h10 就是图上每根柱子的高度 ✓（可直接照书上数字填 ✓，也可以用属性面板里的"粘贴原始数据"自动算 ✓） */
+const HIST_MAX = 10
+export function histogramParams(): ParamSpec[] {
+  const out: ParamSpec[] = [
+    { key: 'start', label: '起始边界', def: 345, min: -1000, max: 100000, step: 1 },
+    { key: 'bw', label: '组距', def: 10, min: 0.1, max: 10000, step: 1 },
+    { key: 'n', label: '组数', def: 8, min: 1, max: HIST_MAX, step: 1 },
+  ]
+  // 默认给一组**像真题那样**的样例 ✓（一打开就有柱子 ✓ 老师粘自己的数据就把它们覆盖掉 ✓）
+  const sample = [0.005, 0.01, 0.02, 0.025, 0.015, 0.01, 0.005, 0.005, 0, 0]
+  for (let i = 1; i <= HIST_MAX; i++) {
+    out.push({ key: 'h' + i, label: '第 ' + i + ' 组 频率/组距', def: sample[i - 1] || 0, min: 0, max: 1, step: 0.001, showIf: (p: Record<string, number>) => Number(p.n || 8) >= i })
+  }
+  return out
+}
+/** 频率分布直方图：自己算坐标（不依赖其它图元的助手 ✓，改起来不怕碰坏别人 ✓） */
+export function histogramFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>): string {
+  const p = withParams('histogram', params)
+  const n = Math.max(1, Math.min(HIST_MAX, Math.round(p.n || 8)))
+  const bw = p.bw > 0 ? p.bw : 10
+  const start = Number.isFinite(p.start) ? p.start : 0
+  const vals: number[] = []
+  for (let i = 0; i < n; i++) vals.push(Math.max(0, p['h' + (i + 1)] || 0))
+  const ymax = Math.max(0.0001, ...vals) * 1.15
+  const padL = 46, padR = 26, padT = 26, padB = 40
+  const X = (v: number) => padL + ((v - start) / (n * bw)) * (w - padL - padR)
+  const Y = (v: number) => h - padB - (v / ymax) * (h - padT - padB)
+  const ink = stroke || '#111'          // 用元素自己的描边色 ✓（主题深浅都能看清 ✓）
+  const fs = Math.max(11, Math.round(h * 0.055))
+  const L: string[] = []
+  // 纵轴（带原点断口 ✓ —— 表示纵轴不从 0 起 ✓）
+  const x0 = X(start), y0 = Y(0), yTop = Y(ymax)
+  L.push('<path d="M ' + n1(x0) + ' ' + n1(y0) + ' L ' + n1(x0 - 7) + ' ' + n1(y0 - 4) + ' L ' + n1(x0 - 4) + ' ' + n1(y0 - 8) + ' L ' + n1(x0) + ' ' + n1(y0 - 12) + '" fill="none" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+  L.push('<line x1="' + n1(x0) + '" y1="' + n1(y0 - 12) + '" x2="' + n1(x0) + '" y2="' + n1(yTop - 4) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+  L.push('<line x1="' + n1(x0) + '" y1="' + n1(y0) + '" x2="' + n1(X(start + n * bw) + 8) + '" y2="' + n1(y0) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+  // 柱体 + 纵轴虚线 + 刻度
+  const stepY = ymax / 5
+  for (let i = 0; i < n; i++) {
+    const v = vals[i]
+    if (v <= 0) continue
+    const xa = X(start + i * bw), xb = X(start + (i + 1) * bw), yv = Y(v)
+    L.push('<rect x="' + n1(xa) + '" y="' + n1(yv) + '" width="' + n1(xb - xa) + '" height="' + n1(y0 - yv) + '" fill="none" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+  }
+  for (let k = 1; k <= 5; k++) {
+    const yy = Y(stepY * k)
+    L.push('<line x1="' + n1(x0) + '" y1="' + n1(yy) + '" x2="' + n1(X(start + n * bw)) + '" y2="' + n1(yy) + '" stroke="#666" stroke-width="1" stroke-dasharray="5 4"/>')
+    L.push('<text x="' + n1(x0 - 8) + '" y="' + n1(yy + fs * 0.35) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="end">' + n1(stepY * k) + '</text>')
+  }
+  // 横轴边界刻度（只标边界值 ✓ 与书上一致 ✓）
+  for (let i = 0; i <= n; i++) {
+    const xv = X(start + i * bw)
+    L.push('<text x="' + n1(xv) + '" y="' + n1(y0 + fs * 1.35) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">' + n1(start + i * bw) + '</text>')
+  }
+  L.push('<text x="' + n1(x0 + 4) + '" y="' + n1(y0 + fs * 2.7) + '" font-size="' + fs + '" fill="' + ink + '">O</text>')
+  // 轴标题
+  L.push('<text x="' + n1(x0 - 10) + '" y="' + n1(yTop - 12) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">频率</text>')
+  L.push('<text x="' + n1(x0 - 10) + '" y="' + n1(yTop + 2) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">组距</text>')
+  L.push('<text x="' + n1(X(start + n * bw) + 10) + '" y="' + n1(y0 - fs * 0.3) + '" font-size="' + fs + '" fill="' + ink + '">分组</text>')
+  return L.join('')
+}
 export function withParams(kind: string, params?: Record<string, number>): Record<string, number> {
   const out: Record<string, number> = {}
   for (const sp of figureParams(kind)) out[sp.key] = typeof params?.[sp.key] === 'number' ? (params as any)[sp.key] : sp.def
@@ -1763,6 +1825,7 @@ export function viewAspect(kind: string): number | null {
   const v = FUNCTIONS[kind]?.view ?? CONICS[kind]?.view
   if (v) return (v.xmax - v.xmin) / (v.ymax - v.ymin)
   // 带控制点的平面图形（圆弧 / 指定半径圆）：给 6:5 的框 —— 圆与圆弧才不会被压成椭圆
+  if (kind === 'histogram') return 1.45                        // 【M2.11】频率分布直方图：略扁一点像书上 ✓
   if (kind === 'arcAngle' || kind === 'arc3pt' || kind === 'circleR' || kind === 'ellipseArc' || kind === 'ellipseAB') return 1.2
   return null
 }

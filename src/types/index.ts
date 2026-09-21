@@ -376,12 +376,16 @@ export type MathFigureKind =
   | 'thmLinePlanePara' | 'thmLinePlaneProp' | 'thmPlanePlanePerp' | 'thmPlanePlaneProp'
   // ---- 辅助线 / 标注 ----
   | 'auxLine' | 'rightAngle' | 'equalMark' | 'parallelMark' | 'angleArc' | 'section'
+  // ---- 统计图（【M2.11】复刻真题里的图 ✓） ----
+  | 'histogram'
 
 /** 数学图形分类（面板按这个分组显示） */
 export type MathFigureCat = '平面图形' | '立体几何' | '复刻图形' | '函数图像' | '圆锥曲线' | '辅助标注'
 export const MATH_FIGURE_CATS: MathFigureCat[] = ['平面图形', '立体几何', '复刻图形', '函数图像', '圆锥曲线', '辅助标注']
 
 export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathFigureCat }[] = [
+  // ---- 统计图（【M2.11】） ----
+  { v: 'histogram', label: '频率分布直方图', cat: '复刻图形' },
   // ---- 函数图像 ----
   { v: 'linear', label: '一次函数 y=x+1', cat: '函数图像' },
   { v: 'parabola', label: '二次函数 y=x²', cat: '函数图像' },

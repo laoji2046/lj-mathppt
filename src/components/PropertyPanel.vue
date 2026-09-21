@@ -146,6 +146,38 @@ function figParamVal(key: string, def: number) {
   const v = mathfig.value?.params?.[key]
   return typeof v === 'number' ? v : def
 }
+/* ---------------- 【M2.11】频率分布直方图：粘贴原始数据 → 自动分箱 ✓ ---------------- */
+const isHistogram = computed(() => String(mathfig.value?.kind || '') === 'histogram')
+const histRaw = ref('')
+const histMsg = ref('')
+/** 支持 空格 / 逗号 / 顿号 / 分号 / 换行 / 制表符 分隔（从 Word、Excel 直接复制都行 ✓） */
+function histParse(s: string): number[] {
+  return String(s || '').split(/[\s,，、;；]+/).map((x) => Number(x)).filter((x) => Number.isFinite(x))
+}
+/** 按当前 组距 分箱，把结果写进参数 ✓（左闭右开 ✓ 最后一组右闭 ✓） */
+function applyHistRaw() {
+  const xs = histParse(histRaw.value)
+  if (xs.length < 2) { histMsg.value = '✗ 没解析出数据（粘贴一列数就行 ✓）'; return }
+  const bw0 = figParamVal('bw', 10) || 10
+  const lo = Math.min(...xs), hi = Math.max(...xs)
+  // 起始边界：优先用面板里填的 ✓；没填过（默认值）就取"向下取整到组距" ✓
+  let start = figParamVal('start', 0)
+  if (!Number.isFinite(start) || start > lo) start = Math.floor(lo / bw0) * bw0
+  let n = Math.ceil((hi - start) / bw0)
+  if (n > 10) { histMsg.value = '✗ 需要 ' + n + ' 组，最多 10 组 —— 把「组距」调大一点 ✓'; return }
+  const c = new Array(n).fill(0)
+  for (const v of xs) {
+    let k = Math.floor((v - start) / bw0)
+    if (k < 0) k = 0
+    if (k > n - 1) k = n - 1
+    c[k]++
+  }
+  setFigParam('start', start)
+  setFigParam('n', n)
+  for (let i = 1; i <= 10; i++) setFigParam('h' + i, i <= n ? c[i - 1] / xs.length / bw0 : 0)
+  histMsg.value = '✓ ' + xs.length + ' 个数据 → ' + n + ' 组（起始 ' + start + '，组距 ' + bw0 + '）已填进 h1…h' + n + ' ✓'
+  window.setTimeout(() => { histMsg.value = '' }, 6000)
+}
 function setFigParam(key: string, v: number) {
   const p: Partial<SlideElement> & { pointLinks?: (PointLink | null)[] } = {
     params: { ...(mathfig.value?.params || {}), [key]: v },
@@ -1529,6 +1561,16 @@ function layerTypeLabel(type: string) {
           </div>
         </template>
         <p v-if="figParams.length" class="panel__hint">改参数后图形立即重绘（适合讲"图象变换 / 含参讨论"）。</p>
+            <!-- 【M2.11】频率分布直方图：粘贴原始数据 → 自动分箱 ✓ -->
+            <div v-if="isHistogram" class="hist">
+              <div class="hist__t">粘贴原始数据 → 自动分组</div>
+              <textarea v-model="histRaw" class="hist__ta" rows="3" placeholder="把一列数粘进来（空格 / 逗号 / 换行都认）"></textarea>
+              <div class="hist__row">
+                <button class="hist__btn" @click="applyHistRaw">按上面「组距 / 起始边界」分箱 ✓</button>
+              </div>
+              <div v-if="histMsg" class="hist__msg">{{ histMsg }}</div>
+              <div class="hist__hint">分箱用面板里的「组距」与「起始边界」✓；结果写进下面 h1…h10（还能手改单根柱高 ✓）</div>
+            </div>
         <template v-if="pointN > 0">
           <label v-for="i in pointN" :key="'pl' + i" class="field">
             <span>点{{ i }} 名称</span>
