@@ -12,8 +12,8 @@
  *   其余段落             → 正文块 ✓
  *   --- 分隔线忽略 ✓；表格原样留在正文里 ✓（讲义渲染暂不支持表格 ✓）
  */
-import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
-import { autoTitleOf, hdId, lib, makeBlock } from '@/composables/useHandout'
+import { hdDocText, hdFileName, hdFolderDir, hdFolderWrite } from '@/composables/useHandoutFolder'
+import { autoTitleOf, folderFiles, hdId, lib, makeBlock } from '@/composables/useHandout'
 import type { HdBlock, HdDoc, HandoutMeta } from '@/composables/useHandout'
 
 /** 从文件名读 章 / 节 / 名字 ✓ */
@@ -105,22 +105,24 @@ export function mdToHandout(fileName: string, text: string): { meta: HandoutMeta
   return { meta, blocks }
 }
 
-/** 批量导入（顺手把每份写成文件 ✓ —— 老师要求「导入并保存」✓） */
+/** 批量导入（每份**直接写成库目录里的一个 .json** ✓ —— 老师要求「导入并保存」✓）
+ *  【M4】写的是 **exe 同级的 LJ-讲义**（库跟着 exe 走 ✓），不再写 文档\LJ讲义 ✗ */
 export async function importMdFiles(files: { name: string; text: string }[], writeFiles = true): Promise<{ added: number; titles: string[]; dir: string; failed: number }> {
   const titles: string[] = []
   let failed = 0
-  const dirBase = writeFiles ? await firstUserDir('文档') : ''
-  const dir = dirBase ? dirBase + '\\LJ讲义' : ''
+  const dir = writeFiles ? await hdFolderDir() : ''
   for (const f of files) {
     const { meta, blocks } = mdToHandout(f.name, f.text)
     const doc: HdDoc = { id: hdId(), updatedAt: new Date().toISOString().slice(0, 16).replace('T', ' '), meta, blocks }
-    lib.value = [...lib.value, doc]
     titles.push(doc.meta.title || f.name)
     if (dir) {
-      const safe = String(doc.meta.title || f.name).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60)
-      const r = await writeTextFile(dir, safe + '.json', JSON.stringify({ app: 'LJ-MathSlides', kind: 'handout', doc }, null, 1))
-      if (!r.ok) failed++
+      const r = await hdFolderWrite(hdFileName(doc.meta.title || f.name) + '.json', hdDocText(doc))
+      if (r.ok) {
+        doc.file = r.name
+        if (doc.file) folderFiles.value = Array.from(new Set([...folderFiles.value, doc.file]))
+      } else failed++
     }
+    lib.value = [...lib.value, doc]      // ⚠ 写在 push **之前**：doc.file 才带得上 ✓
   }
   return { added: titles.length, titles, dir, failed }
 }

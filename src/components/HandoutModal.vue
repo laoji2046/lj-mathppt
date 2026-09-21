@@ -14,9 +14,13 @@ import { typesetMixed } from '@/composables/useMathJax'
 import {
   HD_BOOKS, HD_LABEL, HD_NUMBERED, HD_PRESSES, handout, hdVersion, makeBlock, outlineOf, pageHtmlOf,
   rendered, saveHandout, handoutToText, handoutPathOf, syncAutoTitle, autoTitleOf,
-  initHandoutLib, openHandout, newHandout, deleteHandout, handoutTree, lib, curId, markSaved, currentSaved,
+  initHandoutLib, openHandout, newHandout, deleteHandout, handoutTree, lib, curId, currentSaved,
+  /* 【M4】库目录（exe 同级 LJ-讲义）：真身 ✓ */
+  syncHandoutFolder, saveDocToFolder, folderDir, folderFiles, folderError,
 } from '@/composables/useHandout'
-import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
+import { hdDocText, hdFileName, hdFolderImportDir, hdFolderOpen, hdFolderWrite } from '@/composables/useHandoutFolder'
+import type { HdDoc } from '@/composables/useHandout'
+import { firstUserDir } from '@/composables/useQuestionBank'
 import { importMdFiles } from '@/composables/useHandoutMd'
 import { loadAssets, assetSrc, saveAsset } from '@/composables/useAssets'
 /* 【M2.6】把「数学图形」打通进讲义 ✓ —— 与题库那双按钮同一套（v1466 ✓）：面板 sink 给 SVG → svgToPngUrl → 入库 */
@@ -396,8 +400,16 @@ function importJson(e: Event) {
         const doc = j && j.doc ? j.doc : j
         const { meta, blocks } = doc as { meta: never; blocks: never }
         if (!meta || !Array.isArray(blocks)) continue
-        const one = { id: 'h' + Date.now().toString(36) + ok, updatedAt: new Date().toISOString().slice(0, 16).replace('T', ' '), meta, blocks }
-        lib.value = [...lib.value, one as never]
+        const one: HdDoc = {
+          id: 'h' + Date.now().toString(36) + ok,
+          updatedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+          meta: meta as HdDoc['meta'],
+          blocks: blocks as HdDoc['blocks'],
+        }
+        // 【M4】导入 = **直接写成库目录里的一个 .json** ✓（库跟着 exe 走 ✓，不再只躺在 localStorage ✓）
+        const w = await hdFolderWrite(hdFileName(one.meta.title || '未命名讲义') + '.json', hdDocText(one))
+        if (w.ok) one.file = w.name
+        lib.value = [...lib.value, one]
         ok++
       } catch { /* 单个文件坏了不影响其它 ✓ */ }
     }
@@ -414,35 +426,52 @@ function importJson(e: Event) {
 /* ---------------- 【M2.9】保存讲义（写成文件 ✓） ---------------- */
 const savedInfo = ref(currentSaved())
 const saving = ref(false)
-/** 文件名安全化 ✓ */
-function safeName(s: string): string {
-  return String(s || '讲义').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 60) || '讲义'
-}
+/** 【M4】还没落盘的份数（库里没有对应文件 ✓）—— 抽屉头上提醒一句 ✓ */
+const unsavedN = computed(() => lib.value.filter((d) => !d.file).length)
+/* 文件名安全化挪到 useHandoutFolder.hdFileName() 了 ✓ —— 那里与 Rust 的 hd_safe_name() 同口径 ✓ */
 /**
  * 保存到文件：文档\LJ讲义\<标题>.json ✓
  *   localStorage 那份只是**工作副本** ✓；写出来的文件才是能带走、能备份的 ✓（老师要的"保存"就是这个 ✓）
  */
 async function saveToFile() {
-  const base = await firstUserDir('文档')
-  if (!base) { flash('✗ 拿不到「文档」目录，保存失败'); return }
   saving.value = true
   try {
-    saveHandout(h.value)                       // 先落工作副本 ✓
-    const dir = base + '\\LJ讲义'
-    const name = safeName(h.value.meta.title) + '.json'
-    const text = JSON.stringify({ app: 'LJ-MathSlides', kind: 'handout', savedAt: new Date().toISOString(), doc: h.value }, null, 1)
-    const r = await writeTextFile(dir, name, text)
+    saveHandout(h.value)                                  // 先落工作副本 ✓
+    // 【M4】真身 = **exe 同级的 LJ-讲义\\**：保存 = 写进那个文件夹（库跟着 exe 走 ✓，但不打进 exe ✓）
+    const r = await saveDocToFolder(curId.value)
     if (!r.ok) { flash('✗ 保存失败：' + (r.error || '未知错误')); return }
-    const path = r.path || (dir + '\\' + name)
-    markSaved(path)
     savedInfo.value = currentSaved()
-    flash('✓ 已保存到 ' + path)
+    flash('✓ 已保存到 ' + (r.path || folderDir.value))
   } finally { saving.value = false }
+}
+
+/** 【M4】一键把老的 `文档\LJ讲义\` 搬进库目录（**复制**，同名跳过 ✓ 不动老文件 ✓） */
+const migrating = ref(false)
+async function migrateOldFolder() {
+  const base = await firstUserDir('文档')
+  if (!base) { flash('✗ 拿不到「文档」目录'); return }
+  migrating.value = true
+  try {
+    const r = await hdFolderImportDir(base + '\\LJ讲义')
+    if (!r.ok) { flash('✗ 搬家失败：' + (r.error || '未知错误')); return }
+    await syncHandoutFolder()
+    flash('✓ 搬进库目录 ' + r.copied + ' 份' + (r.skipped ? '（同名跳过 ' + r.skipped + ' 份 ✓）' : '') + (r.failed ? ' · 失败 ' + r.failed + ' ✗' : '') + ' —— 库目录：' + folderDir.value)
+  } finally { migrating.value = false }
+}
+/** 【M4】资源管理器打开库目录 ✓ */
+async function openFolder() {
+  const ok = await hdFolderOpen()
+  if (!ok) flash('✗ 打不开库目录：' + (folderDir.value || '还没读到路径'))
 }
 function onKey(e: KeyboardEvent) { if (e.key === 'Escape') emit('close') }
 onMounted(() => {
   document.addEventListener('keydown', onKey)
   initHandoutLib()                       // 【M2.5】载入讲义库（首次会把单份讲义迁进来 ✓）
+  // 【M4】再把 exe 同级 LJ-讲义 目录读回来对账（库跟着 exe 走 ✓；谁新用谁 ✓）
+  void syncHandoutFolder().then((r) => {
+    if (r.files) flash('库目录里有 ' + r.files + ' 份讲义（新增 ' + r.added + ' 份 ✓）')
+    if (folderError.value) flash('✗ 库目录读写有问题：' + folderError.value)
+  })
   void buildImgMap().then(() => refreshNow())
 })
 onBeforeUnmount(() => { document.removeEventListener('keydown', onKey); if (timer) window.clearTimeout(timer) })
@@ -477,7 +506,7 @@ watch(ver, () => { void refreshNow() })
             <button class="hd__btn" :class="{ 'hd__btn--on': drawer === 'pick' }" title="从题库插题：挑一道 → 例题/练习 + 解析 + 答案三块 ✓" @click="openDrawer('pick')">插题</button>
             <button class="hd__btn" :class="{ 'hd__btn--on': drawer === 'draw' }" title="按 册/章节/难度 抽 N 道，插成例题池或练习池 ✓" @click="openDrawer('draw')">抽题</button>
             <button class="hd__btn" :class="{ 'hd__btn--on': drawer === 'kb' }" title="知识底座：常用公式 / 模型 / 易错点，按教材存着，一键插成知识梳理块 ✓" @click="openDrawer('kb')">知识底座</button>
-            <button class="hd__btn hd__btn--main" :disabled="saving" title="保存讲义：写到「文档\LJ讲义\标题.json」✓（平时改动也一直自动存在工作副本里 ✓，这个按钮是存成文件 ✓）" @click="saveToFile">{{ saving ? '保存中…' : '保存' }}</button>
+            <button class="hd__btn hd__btn--main" :disabled="saving" title="保存讲义：写进 **exe 同级的 LJ-讲义\<标题>.json** ✓（平时改动会自动落盘 ✓，这个按钮是「马上存一次」✓）" @click="saveToFile">{{ saving ? '保存中…' : '保存' }}</button>
             <button class="hd__btn" title="打印 / 另存为 PDF（矢量文字 ✓）" @click="printPdf">打印 / PDF</button>
             <button class="hd__btn" title="导出纯文本（当前版本）" @click="exportText">导出文本</button>
             <button class="hd__btn" title="导出讲义 JSON（可再导入 ✓）" @click="exportJson">导出 JSON</button>
@@ -632,7 +661,16 @@ watch(ver, () => { void refreshNow() })
           </div>
 
           <template v-if="drawer === 'lib'">
-            <div class="hd__dhint">当前：<b>{{ h.meta.title || '未命名讲义' }}</b>（{{ curId ? curId.slice(0, 6) : '—' }}）· 共 {{ lib.length }} 份</div>
+            <div class="hd__dhint">当前：<b>{{ h.meta.title || '未命名讲义' }}</b>（{{ curId ? curId.slice(0, 6) : '—' }}）· 共 {{ lib.length }} 份<template v-if="unsavedN">，其中 <b>{{ unsavedN }}</b> 份还没落盘</template></div>
+            <!-- 【M4】库目录：exe 同级的 LJ-讲义 —— 库跟着 exe 走 ✓（拷这个文件夹过去就带着全套讲义 ✓） -->
+            <div class="hd__dhint hd__dlib">
+              库目录：<b class="hd__dpath" :title="folderDir">{{ folderDir || '（没读到）' }}</b>
+              <span v-if="folderFiles.length">· 里头 {{ folderFiles.length }} 个文件 ✓</span>
+            </div>
+            <div class="hd__drow">
+              <button class="hd__btn hd__btn--half" :disabled="migrating" title="把老位置 文档\LJ讲义 里的 .json **复制**进库目录（同名跳过 ✓ 老文件不动 ✓）" @click="migrateOldFolder">{{ migrating ? '搬迁中…' : '从 文档\LJ讲义 导入' }}</button>
+              <button class="hd__btn hd__btn--half" title="用资源管理器打开库目录（备份、拷贝到别的机器、直接改 json 都行 ✓）" @click="openFolder">打开库目录</button>
+            </div>
             <div class="hd__drow">
               <label class="hd__btn hd__btn--file hd__btn--half" :title="'导入老师的 Markdown 讲义：文件名形如 1.1-集合的概念.md ✓ 每份变成一个讲义，并按 必修一/第X章/第Y节 归到目录树里 ✓'">
                 {{ importing ? '导入中…' : '导入 MD（可多选）' }}
@@ -652,13 +690,15 @@ watch(ver, () => { void refreshNow() })
                       :class="{ 'hd__ldoc--on': d.id === curId }" @click="doOpen(d.id)"
                     >
                       <span class="hd__ldocname">{{ d.meta.period ? '第 ' + d.meta.period + ' 课时' : '（未填课时）' }} · {{ d.meta.title || '未命名讲义' }}</span>
-                      <span class="hd__ldocdel" title="删除这份讲义" @click.stop="doDelete(d.id)">✕</span>
+                      <span v-if="!d.file" class="hd__ldocnew" title="还没写进库目录 —— 点右上「保存讲义」就落盘（之后改动会自动落盘 ✓）">未保存</span>
+                      <span class="hd__ldocdel" title="删除这份讲义（库目录里的文件会挪进 .deleted，不是真删 ✓）" @click.stop="doDelete(d.id)">✕</span>
                     </div>
                   </template>
                 </template>
               </template>
             </div>
-            <div class="hd__dhint">点一条即打开 ✓（会自动把当前这份存好 ✓）；课时、章、节在右边「教材定位」里填 ✓</div>
+            <div class="hd__dhint">点一条即打开 ✓（会自动把当前这份存好 ✓）；课时、章、节在右边「教材定位」里填 ✓<br />
+              <b>库跟着 exe 走</b>：每份讲义都写成 exe 同级 <b>LJ-讲义\</b> 里的一个 .json ✓ —— 换机器拷这个文件夹就行 ✓；改动会自动落盘（2.5 秒防抖 ✓），不确定时点右上「保存讲义」✓</div>
           </template>
 
           <template v-else-if="drawer === 'pick'">
@@ -717,8 +757,8 @@ watch(ver, () => { void refreshNow() })
         <footer class="hd__foot">
           <button class="hd__btn" title="把引用了题库的块按库里最新内容刷新（题改过之后点一下 ✓）" @click="syncRefs">↻ 同步题库</button>
           <span class="hd__dhint">题目是**引用**（块上显示 题 #id ✓），改题不必重插 ✓</span>
-          <span class="hd__saved" :title="savedInfo.savedPath || ''">
-            {{ savedInfo.savedAt ? '已保存到文件：' + savedInfo.savedAt + ' ✓' : '还没保存成文件（改动一直自动存在工作副本里 ✓）' }}
+          <span class="hd__saved" :title="savedInfo.savedPath || folderDir">
+            {{ savedInfo.savedAt ? '已落盘：' + savedInfo.savedAt + ' ✓' : '还没落盘（改动自动存在工作副本里，点「保存讲义」写进库目录 ✓）' }}
           </span>
         </footer>
       </div>
@@ -813,6 +853,10 @@ watch(ver, () => { void refreshNow() })
 .hd__ldocname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hd__ldocdel { flex: none; color: var(--muted); font-size: 11px; }
 .hd__ldocdel:hover { color: #b42318; }
+/* 【M4】库目录（exe 同级 LJ-讲义）—— 没落盘的那份挂个提醒 ✓ */
+.hd__ldocnew { flex: none; font-size: 10px; padding: 0 5px; border-radius: 999px; background: #fdf3e3; color: #9a6212; }
+.hd__dlib { display: flex; align-items: baseline; gap: 4px; }
+.hd__dpath { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10.5px; color: #3a4252; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 插图 */
 .hd__figbox { border: 1px solid var(--border); border-radius: 8px; padding: 6px; margin-bottom: 6px; text-align: center; background: #fff; }
 .hd__figbox img { max-width: 100%; max-height: 180px; object-fit: contain; }

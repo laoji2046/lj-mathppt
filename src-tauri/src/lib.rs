@@ -210,6 +210,190 @@ fn read_local_image(name: String) -> serde_json::Value {
 }
 
 
+// ---------------------------------------------------------------------------
+// 讲义库：exe 同级的 LJ-讲义 目录（一份讲义一个 .json）
+//
+// 老师要的是「**库跟着 exe 走**，但别打进 exe」✓ —— 拷一个文件夹过去就有全套讲义，
+// 而且这些文件能直接改、能备份、能进 git（打进二进制的改不了 ✗）。
+// 与 images/ 同一套路：program_dir() = exe 所在目录，**运行时读盘、不重新打包** ✓。
+// 工作副本仍在 localStorage（边改边存、断电也不丢 ✓），**这里是真身**（能带走的 ✓）。
+// ---------------------------------------------------------------------------
+
+const HD_DIR_NAME: &str = "LJ-讲义";
+
+fn hd_dir_path() -> PathBuf {
+    let mut d = program_dir();
+    d.push(HD_DIR_NAME);
+    let _ = fs::create_dir_all(&d);
+    d
+}
+
+/// 文件名安全化：**只允许一层文件名**（挡掉路径分隔符与 `..` 穿越 ✗）、去掉 Windows 非法字符、限长 60。
+/// ⚠ 与前端 safeName() 同口径 —— 前端生成的名字，Rust 侧再挡一道 ✓
+fn hd_safe_name(name: &str) -> String {
+    let raw = name.trim().trim_end_matches(".json");
+    let mut out = String::new();
+    for ch in raw.chars() {
+        let bad = matches!(ch, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || (ch as u32) < 0x20;
+        out.push(if bad { '_' } else { ch });
+        if out.chars().count() >= 60 {
+            break;
+        }
+    }
+    let out = out.trim().to_string();
+    if out.is_empty() { "讲义".to_string() } else { out }
+}
+
+fn hd_file_of(name: &str) -> PathBuf {
+    let mut p = hd_dir_path();
+    p.push(format!("{}.json", hd_safe_name(name)));
+    p
+}
+
+/// 库目录（不存在则建 ✓）—— 前端拿它显示"库在哪儿" + 打开文件夹 ✓
+#[tauri::command]
+fn hd_dir() -> serde_json::Value {
+    let d = hd_dir_path();
+    serde_json::json!({ "ok": true, "dir": d.to_string_lossy() })
+}
+
+/// 列出库里的 .json（名字 / 字节 / 修改时间毫秒 ✓）
+#[tauri::command]
+fn hd_list() -> serde_json::Value {
+    let dir = hd_dir_path();
+    let mut items: Vec<serde_json::Value> = Vec::new();
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if !p.is_file() {
+                continue;
+            }
+            let is_json = p.extension().and_then(|x| x.to_str()).map(|x| x.eq_ignore_ascii_case("json")).unwrap_or(false);
+            if !is_json {
+                continue;
+            }
+            let name = match p.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            let meta = e.metadata().ok();
+            let bytes = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            let mtime = meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            items.push(serde_json::json!({ "name": name, "bytes": bytes, "mtime": mtime }));
+        }
+    }
+    items.sort_by(|a, b| a["name"].as_str().unwrap_or("").cmp(b["name"].as_str().unwrap_or("")));
+    serde_json::json!({ "ok": true, "dir": dir.to_string_lossy(), "items": items })
+}
+
+/// 读一份讲义（UTF-8 文本 ✓）
+#[tauri::command]
+fn hd_read(name: String) -> serde_json::Value {
+    let p = hd_file_of(&name);
+    match fs::read_to_string(&p) {
+        Ok(t) => serde_json::json!({ "ok": true, "text": t, "path": p.to_string_lossy() }),
+        Err(e) => serde_json::json!({ "ok": false, "error": format!("读取失败: {}", e), "path": p.to_string_lossy() }),
+    }
+}
+
+/// 写一份讲义（覆盖 ✓）。**同名 = 同一份**；改名 = 写新的 + 删旧的（前端做 ✓）
+#[tauri::command]
+fn hd_write(name: String, data_base64: String) -> serde_json::Value {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+    let bytes = match B64.decode(data_base64.trim()) {
+        Ok(b) => b,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("base64 解码失败: {}", e) }),
+    };
+    let p = hd_file_of(&name);
+    match fs::write(&p, &bytes) {
+        Ok(_) => serde_json::json!({
+            "ok": true,
+            "path": p.to_string_lossy(),
+            "name": p.file_name().and_then(|n| n.to_str()).unwrap_or(""),
+        }),
+        Err(e) => serde_json::json!({ "ok": false, "error": format!("写入失败: {}", e), "path": p.to_string_lossy() }),
+    }
+}
+
+/// 删一份讲义 —— **不是真删**：挪进 LJ-讲义\.deleted\<时间戳>-<原名> ✓（手滑能捞回来 ✓）
+#[tauri::command]
+fn hd_delete(name: String) -> serde_json::Value {
+    let p = hd_file_of(&name);
+    if !p.is_file() {
+        return serde_json::json!({ "ok": true, "moved": "", "note": "文件本来就不在" });
+    }
+    let mut trash = hd_dir_path();
+    trash.push(".deleted");
+    if let Err(e) = fs::create_dir_all(&trash) {
+        return serde_json::json!({ "ok": false, "error": format!("建回收目录失败: {}", e) });
+    }
+    let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("讲义.json").to_string();
+    trash.push(format!("{}-{}", now_stamp().replace([':', ' '], "-"), fname));
+    match fs::rename(&p, &trash) {
+        Ok(_) => serde_json::json!({ "ok": true, "moved": trash.to_string_lossy() }),
+        Err(e) => serde_json::json!({ "ok": false, "error": format!("移入回收目录失败: {}", e) }),
+    }
+}
+
+/// 把一个目录（如 `文档\LJ讲义`）里的 .json **复制**进来 —— 一键搬家 ✓ 同名跳过（不覆盖 ✓）
+#[tauri::command]
+fn hd_import_dir(from: String) -> serde_json::Value {
+    let src = PathBuf::from(from.trim());
+    if !src.is_dir() {
+        return serde_json::json!({ "ok": false, "error": "目录不存在" });
+    }
+    let dst = hd_dir_path();
+    let mut copied = 0;
+    let mut skipped = 0;
+    let mut failed = 0;
+    if let Ok(entries) = fs::read_dir(&src) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if !p.is_file() {
+                continue;
+            }
+            let is_json = p.extension().and_then(|x| x.to_str()).map(|x| x.eq_ignore_ascii_case("json")).unwrap_or(false);
+            if !is_json {
+                continue;
+            }
+            let name = match p.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            let target = dst.join(&name);
+            if target.exists() {
+                skipped += 1;
+                continue;
+            }
+            match fs::copy(&p, &target) {
+                Ok(_) => copied += 1,
+                Err(_) => failed += 1,
+            }
+        }
+    }
+    serde_json::json!({ "ok": true, "copied": copied, "skipped": skipped, "failed": failed, "dir": dst.to_string_lossy() })
+}
+
+/// 用资源管理器打开库目录 ✓（老师要往里拷 / 备份 ✓）
+#[tauri::command]
+fn hd_open_dir() -> serde_json::Value {
+    let d = hd_dir_path();
+    #[cfg(target_os = "windows")]
+    let r = std::process::Command::new("explorer").arg(&d).spawn();
+    #[cfg(not(target_os = "windows"))]
+    let r = std::process::Command::new("xdg-open").arg(&d).spawn();
+    match r {
+        Ok(_) => serde_json::json!({ "ok": true, "dir": d.to_string_lossy() }),
+        Err(e) => serde_json::json!({ "ok": false, "error": format!("打开目录失败: {}", e) }),
+    }
+}
+
 /// 原生截屏：把**整个虚拟桌面**（多显示器按实际位置拼起来）截成一张 PNG，返回 base64。
 ///
 /// 为什么要在 Rust 里做：浏览器只能截"用户授权共享的那个源"，而且必须先弹一次共享选择器 ✗。
@@ -4794,6 +4978,13 @@ pub fn run() {
             export_json,
             images_dir,
             read_local_image,
+            hd_dir,
+            hd_list,
+            hd_read,
+            hd_write,
+            hd_delete,
+            hd_import_dir,
+            hd_open_dir,
             capture_screens,
             set_capture_mode,
             list_windows,

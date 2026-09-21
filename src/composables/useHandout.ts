@@ -10,6 +10,7 @@
  * 详细调研见 docs/数学讲义-研究.md ✓
  */
 import { ref, computed } from 'vue'
+import { hdDocFromText, hdDocText, hdFileName, hdFolderDelete, hdFolderDir, hdFolderList, hdFolderRead, hdFolderWrite } from './useHandoutFolder'
 
 export type HdVersion = 'student' | 'teacher'
 /** 一个块在某个版本里怎么呈现 */
@@ -333,6 +334,9 @@ export interface HdDoc extends Handout {
   /** 【M2.9】上次"保存到文件"的时间与路径 ✓（localStorage 只是工作副本 ✓，文件才是能带走的 ✓） */
   savedAt?: string
   savedPath?: string
+  /** 【M4】这一份在库目录（exe 同级 LJ-讲义）里的文件名 ✓
+   *  有它 = 已在库里（能跟着 exe 走 ✓）；没有 = 还没落盘的"未保存"份 ✓ */
+  file?: string
 }
 
 const LIB_KEY = 'lj-mathslides-vue:handout-lib'
@@ -392,6 +396,7 @@ export function saveHandoutLibrary() {
   d.updatedAt = nowStamp()
   writeLib()
   try { localStorage.setItem(CUR_KEY, curId.value) } catch { /* 忽略 */ }
+  scheduleFolderWrite()      // 【M4】改过就自动落盘（2.5 秒防抖 ✓，真身是库目录里的文件 ✓）
 }
 
 /** 【M2.9】记下"已保存到文件" ✓ */
@@ -405,6 +410,100 @@ export function currentSaved(): { savedAt?: string; savedPath?: string } {
   const d = lib.value.find((x) => x.id === curId.value)
   return { savedAt: d?.savedAt, savedPath: d?.savedPath }
 }
+
+/* ---------------- 【M4】库目录（exe 同级 LJ-讲义）：**真身** ✓ ---------------- */
+
+/** 库目录路径（Rust 给的 ✓；空 = 还没读到 / 不在桌面端 ✓） */
+export const folderDir = ref('')
+/** 库里现有哪些文件（名字带 .json ✓）—— 界面用它显示「已落盘 / 未保存」✓ */
+export const folderFiles = ref<string[]>([])
+/** 库目录读写出错的原因（**写不进去必须明说** ✗ 不能让老师以为存上了 ✓） */
+export const folderError = ref('')
+/** 写失败一次就不再反复试（免得每 2.5 秒弹一次错 ✓） */
+let folderWritable = true
+let folderTimer: number | undefined
+
+/** 自动落盘（2.5 秒防抖 ✓）—— 只有**已经在库里**的那份才自动写 ✓
+ *  （新建的那份要老师点一次「保存讲义」：免得库里堆一堆"未命名讲义"文件 ✗） */
+function scheduleFolderWrite() {
+  if (!folderWritable || typeof window === 'undefined') return
+  if (folderTimer) window.clearTimeout(folderTimer)
+  folderTimer = window.setTimeout(() => {
+    folderTimer = undefined
+    const d = lib.value.find((x) => x.id === curId.value)
+    if (d && d.file) void saveDocToFolder(d.id)
+  }, 2500)
+}
+
+/** 把一份讲义写进库目录 ✓（标题改了 = 写新名字 + 把旧文件挪进 .deleted ✓） */
+export async function saveDocToFolder(id: string): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const d = lib.value.find((x) => x.id === id)
+  if (!d) return { ok: false, error: '这一份不在库里' }
+  const want = hdFileName(d.meta.title || '未命名讲义') + '.json'
+  const r = await hdFolderWrite(want, hdDocText({ id: d.id, updatedAt: d.updatedAt, meta: d.meta, blocks: d.blocks }))
+  if (!r.ok) {
+    folderWritable = false
+    folderError.value = r.error || '写入库目录失败'
+    return { ok: false, error: r.error }
+  }
+  folderError.value = ''
+  const old = d.file
+  d.file = r.name || want
+  d.savedAt = nowStamp()
+  d.savedPath = r.path
+  writeLib()
+  if (old && old !== d.file) void hdFolderDelete(old)      // 改名 → 旧文件挪走（不真删 ✓）
+  const set = new Set(folderFiles.value)
+  if (old) set.delete(old)
+  set.add(d.file)
+  folderFiles.value = Array.from(set)
+  if (!folderDir.value) folderDir.value = await hdFolderDir()
+  return { ok: true, path: r.path }
+}
+
+/**
+ * 从库目录读回全部讲义，和 localStorage 工作副本**对账** ✓（打开讲义时调一次 ✓）
+ * 对账规则：先按文件名认，再按标题认（第一次搬家时 file 还没写上 ✓）；
+ * 同一份两边都有 → **谁新用谁**（工作副本通常更新 ✓，文件那份是"上次保存的"✓）。
+ */
+export async function syncHandoutFolder(): Promise<{ files: number; added: number; kept: number }> {
+  const dir = await hdFolderDir()
+  if (!dir) return { files: 0, added: 0, kept: 0 }
+  folderDir.value = dir
+  const files = await hdFolderList()
+  folderFiles.value = files.map((x) => x.name)
+  let added = 0
+  let kept = 0
+  for (const f of files) {
+    const raw = hdDocFromText(await hdFolderRead(f.name))
+    if (!raw) continue
+    const norm = normalize({ meta: raw.meta, blocks: raw.blocks })
+    const doc: HdDoc = {
+      meta: norm.meta,
+      blocks: norm.blocks,
+      id: String((raw as { id?: unknown }).id || hdId()),
+      updatedAt: String((raw as { updatedAt?: unknown }).updatedAt || nowStamp()),
+      file: f.name,
+    }
+    const hit = lib.value.find((x) => x.file === f.name)
+      || lib.value.find((x) => !x.file && (x.meta.title || '') === (doc.meta.title || ''))
+    if (!hit) { lib.value = [...lib.value, doc]; added++; continue }
+    kept++
+    if (String(hit.updatedAt || '') >= String(doc.updatedAt || '')) { hit.file = f.name; continue }
+    hit.meta = doc.meta
+    hit.blocks = doc.blocks
+    hit.updatedAt = doc.updatedAt
+    hit.file = f.name
+  }
+  writeLib()
+  return { files: files.length, added, kept }
+}
+
+/** 库目录里是否有这个文件（界面判断"未保存"用 ✓） */
+export function inFolder(name?: string): boolean {
+  return !!name && folderFiles.value.indexOf(name) >= 0
+}
+
 
 /** 打开另一份 ✓（会先把当前这份存好 ✓） */
 export function openHandout(id: string) {
@@ -438,15 +537,26 @@ export function newHandout(): void {
   try { localStorage.setItem(CUR_KEY, doc.id) } catch { /* 忽略 */ }
 }
 
-/** 删除一份（库里至少留一份 ✓） */
+/** 【M4】删除一份 —— 库目录里的文件**挪进 `.deleted\`**（不是真删 ✓ 手滑能捞回来 ✓） */
 export function deleteHandout(id: string) {
-  if (lib.value.length <= 1) return
+  const d = lib.value.find((x) => x.id === id)
+  if (!d) return
+  if (d.file) {
+    void hdFolderDelete(d.file).then((r) => {
+      if (r.ok) folderFiles.value = folderFiles.value.filter((n) => n !== d.file)
+    })
+  }
   lib.value = lib.value.filter((x) => x.id !== id)
+  if (!lib.value.length) {
+    // 全删光了 → 自动给一份空白（界面不能没有"当前这份" ✓）
+    lib.value = [{ ...sampleHandout(), id: hdId(), updatedAt: nowStamp() }]
+  }
   writeLib()
   if (curId.value === id) {
     const first = lib.value[0]
     curId.value = first.id
     handout.value = { meta: first.meta, blocks: first.blocks }
+    try { localStorage.setItem(CUR_KEY, curId.value) } catch { /* 忽略 */ }
   }
 }
 

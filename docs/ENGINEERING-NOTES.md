@@ -50,6 +50,9 @@ Reveal 导出（`src/reveal/renderer.ts`）、侧栏缩略图（`SlideThumb.vue`
 
 ## 四、发布流程
 
+> **分发布局（v1505 起）**：`发布/` = exe + `images/` + **`LJ-讲义/`**（讲义库跟着 exe 走 ✓，
+> 一份讲义一个 .json ✓；见 `题库v4-方案.md` §50）。**别把讲义打进 exe** ✗ —— 老师要的是"拷文件夹就有全套" ✓。
+
 改 `package.json` → `node .probe/syncver.cjs`（同步 tauri.conf + README 抬头）→
 `node .probe/patch-chXXXX.cjs`（插 changelog）→ `npm run build` → `node clean-dist.cjs` →
 commit → tag `vYYYY.MM.DDNNNN` → `cargo build --release` → 拷到 `lj-mathslides-demo/lj-mathslides.exe` →
