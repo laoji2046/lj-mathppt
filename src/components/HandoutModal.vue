@@ -17,6 +17,7 @@ import {
   initHandoutLib, openHandout, newHandout, deleteHandout, handoutTree, lib, curId, markSaved, currentSaved,
 } from '@/composables/useHandout'
 import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
+import { importMdFiles } from '@/composables/useHandoutMd'
 import { loadAssets, assetSrc, saveAsset } from '@/composables/useAssets'
 /* 【M2.6】把「数学图形」打通进讲义 ✓ —— 与题库那双按钮同一套（v1466 ✓）：面板 sink 给 SVG → svgToPngUrl → 入库 */
 import { openFigPalette } from '@/ui/figPalette'
@@ -183,6 +184,34 @@ function doNew() {
   imgMap.value = {}
   void refreshNow()
   flash('已新建一份讲义（沿用上次的教材定位 ✓）')
+}
+/** 【M2.10】导入老师的 Markdown 讲义（可多选 ✓）→ 每份成一个讲义 + 写成文件 ✓ */
+const importing = ref(false)
+async function onImportMd(e: Event) {
+  const input = e.target as HTMLInputElement
+  const list = input.files ? (Array.prototype.slice.call(input.files) as File[]) : []
+  input.value = ''
+  if (!list.length) return
+  importing.value = true
+  try {
+    const files = await Promise.all(list.map(async (f) => ({ name: f.name, text: await f.text() })))
+    const r = await importMdFiles(files, true)
+    const first = lib.value[lib.value.length - 1]
+    if (first) { curId.value = first.id; handout.value = { meta: first.meta, blocks: first.blocks }; selIdx.value = 0 }
+    await buildImgMap()
+    await refreshNow()
+    flash('✓ 已导入 ' + r.added + ' 份讲义' + (r.dir ? '（同时写到 ' + r.dir + (r.failed ? '，' + r.failed + ' 份写文件失败 ✗' : ' ✓') + '）' : '') + ' —— 左侧「讲义库」目录树里找 ✓')
+  } catch (err) { flash('✗ 导入失败：' + String((err as Error)?.message || err)) }
+  finally { importing.value = false }
+}
+/** 清空当前这份讲义的内容（保留教材定位/标题 ✓） */
+function clearBlocks() {
+  if (!h.value.blocks.length) { flash('本来就是空的 ✓'); return }
+  if (!window.confirm('清空本讲义的全部内容？（教材定位与标题保留 ✓ 不可撤销 ✓）')) return
+  h.value.blocks = []
+  selIdx.value = 0
+  void refreshNow()
+  flash('已清空本讲义内容 ✓（要连这份一起去掉，用左侧目录树里的 ✕ ✓）')
 }
 function doDelete(id: string) {
   const d = lib.value.find((x) => x.id === id)
@@ -352,17 +381,35 @@ function exportJson() {
   a.click(); URL.revokeObjectURL(a.href)
   flash('已导出讲义 JSON（可再导入 ✓）')
 }
+/** 导入讲义 JSON（**可多选** ✓ —— 支持一次把 文档\LJ讲义 里的一批读回来 ✓） */
 function importJson(e: Event) {
   const input = e.target as HTMLInputElement
-  const f = input.files && input.files[0]
+  const list = input.files ? (Array.prototype.slice.call(input.files) as File[]) : []
   input.value = ''
-  if (!f) return
-  const r = new FileReader()
-  r.onload = () => {
-    try { setHandout(JSON.parse(String(r.result || ''))); selIdx.value = 0; void refreshNow(); flash('已导入讲义 ✓') }
-    catch { flash('✗ 这个文件不是讲义 JSON') }
-  }
-  r.readAsText(f)
+  if (!list.length) return
+  void (async () => {
+    let ok = 0
+    for (const f of list) {
+      try {
+        const txt = await f.text()
+        const j = JSON.parse(txt)
+        const doc = j && j.doc ? j.doc : j
+        const { meta, blocks } = doc as { meta: never; blocks: never }
+        if (!meta || !Array.isArray(blocks)) continue
+        const one = { id: 'h' + Date.now().toString(36) + ok, updatedAt: new Date().toISOString().slice(0, 16).replace('T', ' '), meta, blocks }
+        lib.value = [...lib.value, one as never]
+        ok++
+      } catch { /* 单个文件坏了不影响其它 ✓ */ }
+    }
+    if (!ok) { flash('✗ 这几个文件都不是讲义 JSON'); return }
+    const last = lib.value[lib.value.length - 1]
+    curId.value = last.id
+    handout.value = { meta: last.meta, blocks: last.blocks }
+    selIdx.value = 0
+    await buildImgMap()
+    await refreshNow()
+    flash('✓ 已导入 ' + ok + ' 份讲义（左侧「讲义库」目录树里找 ✓）')
+  })()
 }
 /* ---------------- 【M2.9】保存讲义（写成文件 ✓） ---------------- */
 const savedInfo = ref(currentSaved())
@@ -435,7 +482,7 @@ watch(ver, () => { void refreshNow() })
             <button class="hd__btn" title="导出纯文本（当前版本）" @click="exportText">导出文本</button>
             <button class="hd__btn" title="导出讲义 JSON（可再导入 ✓）" @click="exportJson">导出 JSON</button>
             <label class="hd__btn" title="导入讲义 JSON">
-              导入<input type="file" accept="application/json,.json" style="display:none" @change="importJson" />
+              导入<input type="file" accept="application/json,.json" multiple style="display:none" @change="importJson" />
             </label>
             <button class="hd__close" title="关闭 (Esc)" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
           </span>
@@ -584,6 +631,13 @@ watch(ver, () => { void refreshNow() })
 
           <template v-if="drawer === 'lib'">
             <div class="hd__dhint">当前：<b>{{ h.meta.title || '未命名讲义' }}</b>（{{ curId ? curId.slice(0, 6) : '—' }}）· 共 {{ lib.length }} 份</div>
+            <div class="hd__drow">
+              <label class="hd__btn hd__btn--file hd__btn--half" :title="'导入老师的 Markdown 讲义：文件名形如 1.1-集合的概念.md ✓ 每份变成一个讲义，并按 必修一/第X章/第Y节 归到目录树里 ✓'">
+                {{ importing ? '导入中…' : '导入 MD（可多选）' }}
+                <input type="file" accept=".md,text/markdown" multiple style="display:none" @change="onImportMd" />
+              </label>
+              <button class="hd__btn hd__btn--half" title="清空当前这份讲义的全部内容（教材定位与标题保留 ✓）" @click="clearBlocks">清空本讲义</button>
+            </div>
             <div class="hd__dlist">
               <template v-for="bk in tree" :key="bk.key">
                 <div class="hd__lb1">{{ bk.label }}</div>
@@ -765,6 +819,7 @@ watch(ver, () => { void refreshNow() })
 .hd__figsrc { display: flex; gap: 6px; margin-bottom: 6px; }
 .hd__figsrc .hd__btn { flex: 1; }
 .hd__btn--wide { display: block; width: 100%; margin-top: 4px; }
+.hd__btn--half { flex: 1; text-align: center; line-height: 28px; cursor: pointer; }
 /* 抽屉要压在右栏之上 ✓ */
 .hd__box { position: relative; }
 
