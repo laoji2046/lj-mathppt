@@ -495,18 +495,9 @@ watch(ver, () => { void refreshNow() })
 /* 抽屉要压在右栏之上 ✓ */
 .hd__box { position: relative; }
 
-@media print {
-  @page { size: A4; margin: 0; }   /* 边距由 .hd__page 的 padding 负责 ✓（这样"打印对话框边距=无"也不会贴边 ✓） */
-  body > *:not(.hd) { display: none !important; }
-  .hd { position: static; background: #fff; display: block; }
-  .hd__box { width: auto; height: auto; max-width: none; border: 0; border-radius: 0; box-shadow: none; }
-  .hd__head, .hd__left, .hd__right { display: none !important; }
-  .hd__body { display: block; }
-  .hd__mid { overflow: visible; background: #fff; padding: 0; }
-  /* 【v1478】打印**必须留页边距** ✗ —— 以前这里写 padding:0 ✓，而打印对话框默认边距常是「无」✗
-     → 出来就是"字贴着纸边"（老师截图反馈 ✓）。现在由**我们自己**定边距 ✓：@page 归零 + 页面内边距当边距 ✓ */
-  .hd__page { width: auto; min-height: 0; margin: 0; box-shadow: none; padding: 16mm 15mm; }
-}
+/* ⚠ 打印样式**不能放在 scoped 里** ✗ —— scoped 会给选择器补 [data-v-xxx] ✓，
+   而 body / .app 这些元素上没有那个属性 ✗ → 规则永不命中 ✗ → 打印出来还是整个应用（老师实测 ✓）。
+   → 全部挪到下面那个**非 scoped** 的 <style> 块里 ✓（与试卷 PaperModal 同一做法 ✓） */
 </style>
 
 <!-- ⚠ A4 页面的样式**不能 scoped** ✗ —— 内容是 typesetMixed 注入的 HTML，拿不到 scoped 的 data-v 属性 ✓
@@ -538,7 +529,16 @@ watch(ver, () => { void refreshNow() })
 .hd-endnote { display: flex; gap: 8px; margin: 6px 0; }
 .hd-blank { border: 1px dashed #c9c6bd; border-radius: 4px; margin: 8px 0; color: #bdbab2; font-size: 9.5pt; padding: 4px 6px; box-sizing: border-box; }
 .hd-pagebreak { border-top: 1px dashed #bbb; text-align: center; color: #999; font-size: 9.5pt; margin: 12px 0; }
+/* 【v1479】打印：只留讲义 A4 纸 ✓（与试卷同一套做法：藏 .app + 纸张静态化 + 自己定页边距 ✓） */
 @media print {
+  @page { size: A4; margin: 0; }   /* 边距由 .hd__page 的 padding 负责 ✓（打印对话框边距=无 也不贴边 ✓） */
+  .app { display: none !important; }   /* ✅ 关键：藏掉整个编辑器（scoped 里写这条是无效的 ✗） */
+  .hd { position: static !important; background: #fff !important; display: block !important; }
+  .hd__box { width: auto !important; height: auto !important; max-width: none !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; overflow: visible !important; }
+  .hd__head, .hd__left, .hd__right, .hd__drawer, .hd__foot { display: none !important; }
+  .hd__body { display: block !important; }
+  .hd__mid { overflow: visible !important; background: #fff !important; padding: 0 !important; }
+  .hd__page { width: auto !important; min-height: 0 !important; height: auto !important; margin: 0 !important; box-shadow: none !important; padding: 16mm 15mm !important; }
   .hd-pagebreak { break-after: page; page-break-after: always; border: 0; color: transparent; }
   .hd-blank { border-color: #ddd; }
 }
