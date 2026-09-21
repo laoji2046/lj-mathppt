@@ -276,6 +276,15 @@ export function histogramFigure(w: number, h: number, stroke: string, sw: number
   L.push('<line x1="' + n1(x0) + '" y1="' + n1(y0) + '" x2="' + n1(X(start + n * bw) + 8) + '" y2="' + n1(y0) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
   // 柱体 + 纵轴虚线 + 刻度
   // 纵轴刻度：画 1..4 档 ✓ —— **最上面那档不画** ✓（那一格留给「频率 / 组距」两行标题 ✓ 书上也常这样 ✓）
+  // ⚠ 刻度数字别用 n1 ✗ —— 它是"一位小数"✓，0.005 会被写成 0.0 ✗（老师截图里就是 0.0 ✓）
+  const num = (v: number): string => {
+    if (!Number.isFinite(v)) return '0'
+    const a = Math.abs(v)
+    if (a >= 100) return String(Math.round(v))
+    if (a >= 1) return String(Math.round(v * 1000) / 1000)
+    if (a === 0) return '0'
+    return String(Number(v.toFixed(4)))
+  }
   const stepY = ymax / 5
   for (let i = 0; i < n; i++) {
     const v = vals[i]
@@ -286,12 +295,12 @@ export function histogramFigure(w: number, h: number, stroke: string, sw: number
   for (let k = 1; k <= 4; k++) {
     const yy = Y(stepY * k)
     L.push('<line x1="' + n1(x0) + '" y1="' + n1(yy) + '" x2="' + n1(X(start + n * bw)) + '" y2="' + n1(yy) + '" stroke="#666" stroke-width="1" stroke-dasharray="5 4"/>')
-    L.push('<text x="' + n1(x0 - 8) + '" y="' + n1(yy + fs * 0.35) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="end">' + n1(stepY * k) + '</text>')
+    L.push('<text x="' + n1(x0 - 8) + '" y="' + n1(yy + fs * 0.35) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="end">' + num(stepY * k) + '</text>')
   }
   // 横轴边界刻度（只标边界值 ✓ 与书上一致 ✓）
   for (let i = 0; i <= n; i++) {
     const xv = X(start + i * bw)
-    L.push('<text x="' + n1(xv) + '" y="' + n1(y0 + fs * 1.35) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">' + n1(start + i * bw) + '</text>')
+    L.push('<text x="' + n1(xv) + '" y="' + n1(y0 + fs * 1.35) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">' + num(start + i * bw) + '</text>')
   }
   L.push('<text x="' + n1(x0 + 4) + '" y="' + n1(y0 + fs * 2.7) + '" font-size="' + fs + '" fill="' + ink + '">O</text>')
   // 轴标题
