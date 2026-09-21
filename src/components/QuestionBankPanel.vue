@@ -21,6 +21,7 @@ import {
 } from '@/composables/useQuestionBank'
 import type { QFacets, QFilter, QItem, SourceReport, SourcePlan } from '@/composables/useQuestionBank'
 import { applyAnswerBackfill, scanAnswerBackfill } from '@/composables/useAnswerBackfill'
+import { aiReady, buildTagRow, fieldsOfPatch, patchOfTagRow, tagOne, type TagAi, type TagRow } from '@/composables/useAiTagging'
 import { openFigPalette } from '@/ui/figPalette'
 import { geom3dOpen, geom3dSink, openGeom3D } from '@/ui/geom3d'
 import { svgTextToPngUrl, svgToPngUrl } from '@/composables/svgPng'
@@ -118,6 +119,198 @@ async function doAnswerFill() {
     if (r.ok) await reload()
   } finally {
     ansBusy.value = false
+  }
+}
+
+/* ---------------- 【§49】AI 打标：批量打知识点 / 难度 / 板块 ---------------- */
+/**
+ * 规格见 docs/题库v4-方案.md §49。要点：
+ *  - 对象 = **勾选的题**（一道没勾 = 当前筛选全部 ✓，即「按当前筛选全选」）；
+ *  - 每次跑 **20 道**就停一下（可暂停 / 继续 ✓）—— 省 token，也方便中途看结果 ✓；
+ *  - 结果先落**预览确认表**（题号 | 题干摘要 | 现有标签 | AI 建议 | 是否采纳），确认后才写库 ✓；
+ *  - 写库走 lib_q_patch（每道一份 revision 快照，可回退 ✓），**只填空字段** ✓
+ *    （老师手填过的一律不覆盖 ✗；导入时补的默认档 3/中档 由开关决定 ✓）；
+ *  - 失败逐条列出、绝不静默跳过 ✗（接口错 / AI 没读懂分开写清楚 ✓）。
+ */
+const AI_KEY = 'lj-mathslides:ai-key'
+const AI_BATCH = 20
+const AI_SECTIONS = SECTIONS.filter((s) => s !== '未分类')
+const aiOpen = ref(false)
+const aiBusy = ref(false)
+const aiMsg = ref('')
+const aiItems = ref<QItem[]>([])
+const aiRes = ref<Record<number, { ai: TagAi | null; err: string }>>({})
+const aiRows = ref<TagRow[]>([])
+const aiIdx = ref(0)
+/** 暂停请求：跑完手上这一道就停 ✓（不做硬中断 ✗ —— 半路掐断会留下不明不白的结果） */
+const aiStop = ref(false)
+/** 覆盖「导入时补的默认难度（3 / 中档）」—— 关掉即退回严格「只填空字段」✓ */
+const aiOverwrite = ref(true)
+/** 老师逐条改过的值（重建表格时按 id 盖回去 ✓） */
+const aiEdited = ref<Record<number, Partial<{ kpText: string; level: string; difficulty: number; section: string; adopt: boolean }>>>({})
+
+function aiKeyOf(): string {
+  try { return (localStorage.getItem(AI_KEY) || '').trim() } catch { return '' }
+}
+/** 打标对象：勾了用勾的；一道没勾 = 当前筛选全部 ✓ */
+function aiTargets(): QItem[] { return pickedList.value.length ? pickedList.value : items.value }
+
+/**
+ * 老师说"改过了"的值 —— ⚠ **只能由交互事件记** ✓，绝不能用 watch 记 ✗：
+ *   watch 会把「还没跑 AI 时的空值」也当成"老师改成了空"，一跑完就被盖回去
+ *   （表现为：明明有建议，表里却全空、采纳也不勾 ✗ —— v5002 探针当场抓到 ✓）。
+ */
+function noteAiEdit(r: TagRow) {
+  aiEdited.value = {
+    ...aiEdited.value,
+    [r.id]: { kpText: r.edit.kpText, level: r.edit.level, difficulty: r.edit.difficulty, section: r.edit.section, adopt: r.adopt },
+  }
+}
+/** 这一道拿到**新结果**了 → 把旧的"老师改过值"清掉（以新建议为准 ✓） */
+function clearAiEdit(id: number) {
+  if (aiEdited.value[id] === undefined) return
+  const m = { ...aiEdited.value }
+  delete m[id]
+  aiEdited.value = m
+}
+
+/** 用现有 AI 结果重建确认表（老师改过的值按 id 盖回来 ✓） */
+function rebuildAiRows() {
+  aiRows.value = aiItems.value.map((it) => {
+    const row = buildTagRow(
+      it,
+      aiRes.value[Number(it.id)] || { ai: null, err: '' },
+      { overwriteDefault: aiOverwrite.value, stem: excerptOf(it.body || it.title, 60) },
+    )
+    const e = aiEdited.value[Number(it.id)]
+    if (e) {
+      if (e.kpText !== undefined) row.edit.kpText = e.kpText
+      if (e.level !== undefined) row.edit.level = e.level
+      if (e.difficulty !== undefined) row.edit.difficulty = e.difficulty
+      if (e.section !== undefined) row.edit.section = e.section
+      if (e.adopt !== undefined) row.adopt = e.adopt
+    }
+    return row
+  })
+}
+
+const aiStats = computed(() => {
+  let ok = 0
+  let bad = 0
+  let writable = 0
+  for (const r of aiRows.value) {
+    if (r.err) { bad++; continue }
+    ok++
+    if (r.adopt && !r.written && patchOfTagRow(r)) writable++
+  }
+  return { total: aiItems.value.length, done: aiIdx.value, ok, bad, writable }
+})
+
+/** 这一行「哪些栏不写、为什么」——最多两条，别把表格塞满 ✓ */
+function aiKeepHint(r: TagRow): string {
+  const parts: string[] = []
+  for (const k of ['kp', 'level', 'difficulty', 'section'] as const) if (r.keep[k]) parts.push(r.keep[k])
+  return Array.from(new Set(parts)).slice(0, 2).join(' · ')
+}
+/** 这一行将写哪几栏（人话 ✓） */
+function aiWill(r: TagRow): string { return fieldsOfPatch(patchOfTagRow(r)).join(' / ') }
+
+function openAiTag() {
+  const list = aiTargets()
+  if (!list.length) { flash('先勾选题目，或先筛出一批（一道没勾 = 按当前筛选全选 ✓）'); return }
+  if (!aiReady()) { flash('AI 打标只在桌面端可用（网页端直连大模型会被 CORS 挡 ✗）'); return }
+  if (!aiKeyOf()) { flash('没填 AI Key —— 去「设置 → AI 助手」填一个（只存本机 ✓）'); return }
+  aiItems.value = list.slice()
+  aiRes.value = {}
+  aiEdited.value = {}
+  aiIdx.value = 0
+  aiStop.value = false
+  aiMsg.value = pickedList.value.length
+    ? '对象：勾选的 ' + list.length + ' 道（一次 ' + AI_BATCH + ' 道，可暂停 ✓）'
+    : '对象：当前筛选的全部 ' + list.length + ' 道（一道没勾 = 按筛选全选 ✓）'
+  rebuildAiRows()
+  aiOpen.value = true
+}
+
+/** 跑一批（默认 20 道）：跑满一批 / 点了暂停就停 ✓ */
+async function runAiTag(batch: number) {
+  if (aiBusy.value) return
+  const key = aiKeyOf()
+  if (!key) { aiMsg.value = '没填 AI Key —— 去「设置 → AI 助手」填一个（只存本机 ✓）'; return }
+  const list = aiItems.value
+  if (aiIdx.value >= list.length) { aiMsg.value = '这批已经跑完了 ✓'; return }
+  aiBusy.value = true
+  aiStop.value = false
+  const end = Math.min(list.length, aiIdx.value + batch)
+  try {
+    while (aiIdx.value < end) {
+      if (aiStop.value) break
+      const it = list[aiIdx.value]
+      aiMsg.value = 'AI 正在判第 ' + (aiIdx.value + 1) + '/' + list.length + ' 道…（逐题判，慢是正常的 ✓）'
+      const r = await tagOne(it, key)
+      clearAiEdit(Number(it.id))
+      aiRes.value = { ...aiRes.value, [Number(it.id)]: r }
+      aiIdx.value++
+      rebuildAiRows()
+    }
+    const st = aiStats.value
+    if (aiStop.value) aiMsg.value = '已暂停：跑了 ' + st.done + '/' + st.total + ' 道 —— 点「继续」接着跑 ✓'
+    else if (st.done < st.total) aiMsg.value = '本批 ' + batch + ' 道跑完（' + st.done + '/' + st.total + '）—— 点「继续」跑下一批 ✓'
+    else aiMsg.value = '全部跑完 ✓ 有建议 ' + st.ok + ' 道 · 没读懂/失败 ' + st.bad + ' 道 —— 确认表里改好后点「写库」✓'
+  } finally {
+    aiBusy.value = false
+  }
+}
+
+function pauseAiTag() { if (aiBusy.value) { aiStop.value = true; aiMsg.value = '正在暂停（跑完手上这一道就停 ✓）…' } }
+
+/** 失败的（接口错 / AI 没读懂）单独重试一遍 ✓（§49.3 ④）仍失败就人工处理 ✓ */
+async function retryAiFailed() {
+  if (aiBusy.value) return
+  const key = aiKeyOf()
+  if (!key) { aiMsg.value = '没填 AI Key'; return }
+  const ids = aiRows.value.filter((r) => !!r.err).map((r) => r.id)
+  if (!ids.length) { aiMsg.value = '没有失败的了 ✓'; return }
+  aiBusy.value = true
+  try {
+    let fixed = 0
+    for (const id of ids) {
+      const it = aiItems.value.find((x) => Number(x.id) === id)
+      if (!it) continue
+      aiMsg.value = '重试 ' + (fixed + 1) + '/' + ids.length + ' 道…'
+      const r = await tagOne(it, key)
+      if (!r.err) fixed++
+      clearAiEdit(id)
+      aiRes.value = { ...aiRes.value, [id]: r }
+      rebuildAiRows()
+    }
+    aiMsg.value = '重试完：修好 ' + fixed + '/' + ids.length + ' 道' + (fixed < ids.length ? '（剩下的只能人工填 ✗）' : ' ✓')
+  } finally { aiBusy.value = false }
+}
+
+/** 写库：只写勾了采纳的 ✓ 走 lib_q_patch（每道一份 revision 快照，可回退 ✓） */
+async function applyAiTag() {
+  const rows = aiRows.value.filter((r) => r.adopt && !r.err && !r.written && patchOfTagRow(r))
+  if (!rows.length) { aiMsg.value = '没有可写的（要勾选采纳 + 至少有一栏有内容 ✓）'; return }
+  busy.value = true
+  aiBusy.value = true
+  let ok = 0
+  const fail: string[] = []
+  try {
+    for (const r of rows) {
+      const patch = patchOfTagRow(r)
+      if (!patch) continue
+      const res = await qPatch(r.id, patch)
+      if (res.ok) { ok++; r.written = true }
+      else fail.push((r.code || '#' + r.id) + '：' + (res.error || '写库失败'))
+    }
+    aiMsg.value = '✓ 已写库 ' + ok + '/' + rows.length + ' 道'
+      + (fail.length ? ' · 失败 ' + fail.length + '：' + fail.slice(0, 3).join('；') : '（每道都留了 revision 快照，可回退 ✓）')
+    await reload()
+    if (selId.value) await renderPreview()
+  } finally {
+    busy.value = false
+    aiBusy.value = false
   }
 }
 
@@ -378,11 +571,11 @@ function pickGeom3DFigure() {
 
 /**
  * 【修】Esc 关面板 —— 关闭按钮的 title 一直写着「关闭 (Esc)」，但以前**没有实现** ✗
- *   ⚠ 子浮层（录入/草稿箱/来源报告/补答案）开着时不抢 Esc：先关它们、别把整屏面板一起关掉 ✓
+ *   ⚠ 子浮层（录入/草稿箱/来源报告/补答案/AI 打标）开着时不抢 Esc：先关它们、别把整屏面板一起关掉 ✓
  */
 function onPanelKey(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
-  if (importOpen.value || draftOpen.value || reportOpen.value || ansOpen.value) return
+  if (importOpen.value || draftOpen.value || reportOpen.value || ansOpen.value || aiOpen.value) return
   emit('close')
 }
 onMounted(() => {
@@ -768,6 +961,7 @@ async function batchDelete() {
           <button class="qb__btn" title="AI / OCR 的产出先落草稿，人工确认后才进正式库" @click="draftOpen = true">草稿箱</button>
           <button class="qb__btn" title="来源合规报告：多少题有来源 / 有多少已成模板 / 哪几道要处理" @click="openReport">来源报告</button>
           <button class="qb__btn" title="从录入时的 MinerU 产物缓存重新拆答案补给缺答案的题（纯本地、只补不覆盖）" @click="openAnswerFill">补答案</button>
+          <button class="qb__btn" title="给勾选的题（一道没勾 = 当前筛选全部）自动打知识点 / 难度 / 板块 —— 结果先进确认表，勾选后才写库（只填空字段、可回退）" @click="openAiTag">AI 打标</button>
           <button class="qb__btn qb__btn--main" title="从 Markdown / JSON / PDF 批量录入试题" @click="importOpen = true">录入试题</button>
           <button class="qb__close" title="关闭 (Esc)" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
         </span>
@@ -1021,6 +1215,88 @@ async function batchDelete() {
       </div>
     </div>
 
+        <!-- 【§49】AI 打标：批量打知识点 / 难度 / 板块 —— 结果先进确认表，勾选后才写库 ✓ -->
+    <div v-if="aiOpen" class="qb__rpt" @click.self="aiOpen = false">
+      <div class="qb__rptbox qb__rptbox--wide">
+        <header class="qb__rpthead">
+          <span class="qb__title">AI 打标</span>
+          <span class="qb__sub">知识点 / 难度 / 板块 · <b>只填空字段</b> · 一次 {{ AI_BATCH }} 道（可暂停）· 写库前逐条确认 ✓</span>
+          <button class="qb__close" title="关闭" @click="aiOpen = false"><AppIcon name="close" :size="13" /></button>
+        </header>
+        <div class="qb__rptbody">
+          <div class="qb__hint">{{ aiMsg }}</div>
+
+          <div class="qb__rptcards">
+            <div class="qb__rptcard"><b>{{ aiStats.total }}</b><span>本次对象</span></div>
+            <div class="qb__rptcard"><b>{{ aiStats.done }}</b><span>已问过 AI</span></div>
+            <div class="qb__rptcard"><b>{{ aiStats.ok }}</b><span>有建议</span></div>
+            <div class="qb__rptcard" :class="{ 'qb__rptcard--warn': aiStats.bad > 0 }"><b>{{ aiStats.bad }}</b><span>没读懂 / 失败</span></div>
+            <div class="qb__rptcard" :class="{ 'qb__rptcard--warn': aiStats.writable > 0 }"><b>{{ aiStats.writable }}</b><span>可写库</span></div>
+          </div>
+
+          <div class="qb__aibar">
+            <button class="qb__btn qb__btn--main" :disabled="aiBusy || aiStats.done >= aiStats.total" @click="runAiTag(AI_BATCH)">
+              {{ aiStats.done ? '继续（再跑 ' + AI_BATCH + ' 道）' : '开始打标' }}
+            </button>
+            <button class="qb__btn" :disabled="!aiBusy" @click="pauseAiTag">暂停</button>
+            <button class="qb__btn" :disabled="aiBusy || !aiStats.bad" @click="retryAiFailed">重试失败的 {{ aiStats.bad }} 道</button>
+            <label class="qb__chk" title="导入时补的默认难度是 difficulty=3 + level=中档（线上 156 道全是它）—— 那不是老师手填的，默认允许 AI 覆盖 ✓；关掉就退回严格「只填空字段」✓">
+              <input type="checkbox" v-model="aiOverwrite" @change="rebuildAiRows" />覆盖导入默认难度（3 / 中档）
+            </label>
+            <span class="qb__sep"></span>
+            <button class="qb__btn qb__btn--main" :disabled="aiBusy || !aiStats.writable" @click="applyAiTag">写库（{{ aiStats.writable }} 道）</button>
+          </div>
+
+          <div v-if="!aiStats.done" class="qb__hint2">
+            点「开始打标」：AI 一道一道判，每 {{ AI_BATCH }} 道停一下（省 token，也方便中途看结果 ✓）。
+            没读懂 / 接口失败的会<b>逐条列出来</b>，不会静默跳过 ✓。
+          </div>
+          <template v-else>
+            <div class="qb__airow qb__airow--head">
+              <span class="qb__aichk">采纳</span>
+              <span class="qb__aicode">题号</span>
+              <span class="qb__aistem">题干摘要</span>
+              <span class="qb__aicur">现有标签</span>
+              <span class="qb__aiai">AI 建议（可逐条改 ✓）</span>
+            </div>
+            <div
+              v-for="r in aiRows" :key="r.id" class="qb__airow"
+              :class="{ 'qb__airow--bad': !!r.err, 'qb__airow--done': r.written }"
+            >
+              <label class="qb__aichk"><input type="checkbox" v-model="r.adopt" :disabled="!!r.err || r.written" @change="noteAiEdit(r)" /></label>
+              <span class="qb__aicode">{{ r.code || ('#' + r.id) }}</span>
+              <span class="qb__aistem" :title="r.stem">{{ r.stem || '（题干为空）' }}</span>
+              <span class="qb__aicur" :title="'现有：' + (r.cur.kp.join('、') || '无知识点') + ' · ' + (r.cur.section || '未归类') + ' · ' + (r.cur.difficulty ? '难度 ' + r.cur.difficulty : '难度未填')">
+                <span :class="{ 'qb__miss': !r.cur.kp.length }">{{ r.cur.kp.length ? r.cur.kp.join('、') : '无知识点' }}</span>
+                <span class="qb__aidot">·</span>
+                <span :class="{ 'qb__miss': !r.cur.section }">{{ r.cur.section || '未归类' }}</span>
+                <span class="qb__aidot">·</span>
+                <span :class="{ 'qb__miss': !r.cur.difficulty }">{{ r.cur.difficulty ? '难度 ' + r.cur.difficulty : '难度未填' }}{{ r.cur.level ? ' ' + r.cur.level : '' }}</span>
+              </span>
+              <span class="qb__aiai">
+                <template v-if="r.err"><span class="qb__aiwarn">{{ r.err }}</span></template>
+                <template v-else>
+                  <input v-model="r.edit.kpText" class="qb__aiin" :disabled="!r.adopt || r.written" :placeholder="r.keep.kp || '知识点（、分隔）'" @input="noteAiEdit(r)" />
+                  <select v-model="r.edit.level" class="qb__aisel" :disabled="!r.adopt || r.written" :title="r.keep.level || '难度档'" @change="noteAiEdit(r)">
+                    <option value="">档：不写</option>
+                    <option v-for="l in LEVELS" :key="l" :value="l">{{ l }}</option>
+                  </select>
+                  <input v-model.number="r.edit.difficulty" class="qb__ainum" type="number" min="1" max="5" :disabled="!r.adopt || r.written" :title="r.keep.difficulty || '难度 1-5'" placeholder="难度" @input="noteAiEdit(r)" />
+                  <select v-model="r.edit.section" class="qb__aisel qb__aisel--wide" :disabled="!r.adopt || r.written" :title="r.keep.section || '板块'" @change="noteAiEdit(r)">
+                    <option value="">板块：不写</option>
+                    <option v-for="s in AI_SECTIONS" :key="s" :value="s">{{ s }}</option>
+                  </select>
+                  <span v-if="aiKeepHint(r)" class="qb__aihint">{{ aiKeepHint(r) }}</span>
+                  <span v-if="r.written" class="qb__aidone">✓ 已写库</span>
+                  <span v-else-if="aiWill(r)" class="qb__aiwill">将写：{{ aiWill(r) }}</span>
+                </template>
+              </span>
+            </div>
+          </template>
+          <div class="qb__hint2">写完可回退：每道题都留了 revision 快照（lib_q_patch ✓）；打完标就能在左边按知识点 / 难度筛出来了 ✓</div>
+        </div>
+      </div>
+    </div>
     <!-- 【P0b】来源报告：把 lib_source_report 的数字摊开（覆盖率 ≠ 成型率，两个都摆出来 ✓） -->
     <div v-if="reportOpen" class="qb__rpt" @click.self="reportOpen = false">
       <div class="qb__rptbox">
@@ -1219,4 +1495,25 @@ async function batchDelete() {
 .qb__rptnew--warn { color: #9a6212; }
 .qb__rptactions { display: flex; justify-content: flex-end; margin: 8px 0 4px; }
 .qb__rpttitle { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 【§49】AI 打标：确认表比「补答案」那张宽（5 栏 + 可编辑输入 ✓） */
+.qb__rptbox--wide { width: min(1180px, 96vw); }
+.qb__aibar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.qb__airow { display: grid; grid-template-columns: 40px 84px 1fr 210px 400px; gap: 8px; align-items: center; padding: 4px 2px; border-bottom: 1px dashed var(--border); font-size: 12px; }
+.qb__airow--head { color: var(--muted); font-size: 11px; border-bottom-style: solid; }
+.qb__airow--bad { background: #fdf3f2; }
+.qb__airow--done { opacity: 0.55; }
+.qb__aichk { display: inline-flex; align-items: center; }
+.qb__aicode { color: var(--muted); font-family: ui-monospace, monospace; }
+.qb__aistem { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qb__aicur { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qb__aidot { margin: 0 4px; }
+.qb__aiai { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.qb__aiin { flex: 1 1 150px; min-width: 90px; height: 24px; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+.qb__aisel { height: 24px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; background: #fff; color: var(--text); }
+.qb__aisel--wide { max-width: 132px; }
+.qb__ainum { width: 58px; height: 24px; padding: 0 4px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+.qb__aihint { flex: 1 1 100%; color: #9a6212; font-size: 11px; }
+.qb__aiwarn { color: #b3261e; }
+.qb__aidone { color: #2f6b45; }
+.qb__aiwill { flex: 1 1 100%; color: #2f6b45; font-size: 11px; }
 </style>
