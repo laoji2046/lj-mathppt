@@ -258,7 +258,7 @@ watch(ver, () => { void refreshNow() })
           </span>
         </header>
 
-        <div class="hd__body">
+        <div class="hd__body" :class="{ 'hd__body--drawer': !!drawer }">
           <aside class="hd__left">
             <div class="hd__toc">
               <div class="hd__t1">目录</div>
@@ -349,9 +349,7 @@ watch(ver, () => { void refreshNow() })
             </template>
             <div v-else class="hd__hint">在左边点一块，这里就能改它 ✓</div>
           </aside>
-        </div>
-
-        <!-- 【M2】抽屉：插题 / 抽题 / 知识底座 ✓ -->
+          <!-- 【M2】抽屉：插题 / 抽题 / 知识底座 ✓（在 .hd__body 里当第 4 列 ✓ 不覆盖 A4 ✓） -->
         <div v-if="drawer" class="hd__drawer">
           <div class="hd__dhead">
             <b>{{ drawer === 'pick' ? '从题库插题' : drawer === 'draw' ? '按规则抽题' : '知识底座' }}</b>
@@ -409,6 +407,7 @@ watch(ver, () => { void refreshNow() })
             </div>
           </template>
         </div>
+        </div>
 
         <footer class="hd__foot">
           <button class="hd__btn" title="把引用了题库的块按库里最新内容刷新（题改过之后点一下 ✓）" @click="syncRefs">↻ 同步题库</button>
@@ -432,6 +431,8 @@ watch(ver, () => { void refreshNow() })
 .hd__btn--main { background: #1f6b3a; border-color: #1f6b3a; color: #fff; }
 .hd__close { width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 6px; background: #fff; cursor: pointer; }
 .hd__body { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px 1fr 300px; }
+/* 【v1478】抽屉打开时**多占一列** ✓ —— 以前是绝对定位浮在上面，把 A4 盖住 ✗（老师截图反馈 ✓） */
+.hd__body--drawer { grid-template-columns: 260px 1fr 300px 340px; }
 .hd__left { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
 .hd__toc { border-bottom: 1px solid var(--border); padding: 8px; max-height: 32%; overflow-y: auto; }
 .hd__path { font-size: 11px; color: var(--brand-600, #534AB7); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -472,7 +473,7 @@ watch(ver, () => { void refreshNow() })
 .hd__rndrow select { flex: 1; }
 .hd__page { width: 210mm; min-height: 297mm; margin: 0 auto; background: #fff; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12); padding: 16mm 15mm; box-sizing: border-box; }
 /* 【M2】抽屉 */
-.hd__drawer { position: absolute; right: 14px; top: 54px; bottom: 14px; width: 330px; background: var(--panel, #fff); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; overflow: hidden; z-index: 5; }
+.hd__drawer { min-width: 0; border-left: 1px solid var(--border); background: var(--panel-2, #faf9f6); display: flex; flex-direction: column; overflow: hidden; }
 .hd__dhead { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
 .hd__drow { display: flex; align-items: center; gap: 6px; padding: 6px 10px; }
 .hd__dlab { flex: none; width: 34px; font-size: 11.5px; color: var(--muted); }
@@ -495,13 +496,16 @@ watch(ver, () => { void refreshNow() })
 .hd__box { position: relative; }
 
 @media print {
+  @page { size: A4; margin: 0; }   /* 边距由 .hd__page 的 padding 负责 ✓（这样"打印对话框边距=无"也不会贴边 ✓） */
   body > *:not(.hd) { display: none !important; }
   .hd { position: static; background: #fff; display: block; }
   .hd__box { width: auto; height: auto; max-width: none; border: 0; border-radius: 0; box-shadow: none; }
   .hd__head, .hd__left, .hd__right { display: none !important; }
   .hd__body { display: block; }
   .hd__mid { overflow: visible; background: #fff; padding: 0; }
-  .hd__page { width: auto; min-height: 0; margin: 0; box-shadow: none; padding: 0; }
+  /* 【v1478】打印**必须留页边距** ✗ —— 以前这里写 padding:0 ✓，而打印对话框默认边距常是「无」✗
+     → 出来就是"字贴着纸边"（老师截图反馈 ✓）。现在由**我们自己**定边距 ✓：@page 归零 + 页面内边距当边距 ✓ */
+  .hd__page { width: auto; min-height: 0; margin: 0; box-shadow: none; padding: 16mm 15mm; }
 }
 </style>
 
