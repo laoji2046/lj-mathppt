@@ -316,6 +316,14 @@ function attachFrameMove() {
 }
 
 function onKey(e: KeyboardEvent) {
+  // ★【v1467】**不在演示时一个键都不许抢** ✗
+  //   这个监听是「窗口捕获阶段 + 常驻挂着」的 ✓（App.vue 里 PresentationOverlay 一直渲染，
+  //   只用 :deck="presenting ? deck : null" 表示开没开 ✓），而下面无条件 preventDefault 'l' / 'p' ✗
+  //   → 后果：**整个应用任何输入框都打不出小写 l 和 p** ✗（用户实测：题库「答案」框打不出字母 l ✓）。
+  //   修：没在演示（deck 为空）直接放行 ✓；正在输入框里打字也放行 ✓。
+  if (!props.deck) return
+  const t = e.target as HTMLElement | null
+  if (t?.isContentEditable || t?.tagName === 'INPUT' || t?.tagName === 'SELECT' || t?.tagName === 'TEXTAREA') return
   if (e.key === 'Escape') { e.preventDefault(); close(); return }
   // 兜底快捷键：万一控制条被藏住，也能开关激光笔 / 批注
   const k = e.key.toLowerCase()

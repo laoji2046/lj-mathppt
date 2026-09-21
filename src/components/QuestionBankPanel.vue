@@ -196,7 +196,9 @@ const kpKeys = computed(() => Object.keys(facets.value.byKp || {}))
 const yearKeys = computed(() => Object.keys(facets.value.byYear || {}).filter((k) => k !== '(空)'))
 
 /** 就地表单（保存时按字段 patch 回 meta ✓） */
-const form = ref({ section: '', qtype: '', level: '', year: 0, paperName: '', answer: '', kpText: '', status: '' })
+/** 【v1467】再加三个**正文**字段 —— 以前只能改元数据（章节/题型/年份…）+ 答案 ✗，
+ *  题干 / 选项 / 解析看着是"能编辑"的（就在预览下面 ✗），其实**没有输入框** ✗ →「再编辑」等于做不到 ✗ */
+const form = ref({ section: '', qtype: '', level: '', year: 0, paperName: '', stem: '', optionsText: '', answer: '', solution: '', kpText: '', status: '' })
 
 /* ---------------- M3：多选 + 批量 + 插入 ---------------- */
 const store = useDeckStore()
@@ -414,7 +416,11 @@ function select(it: QItem) {
     level: it.level || '',
     year: it.year || 0,
     paperName: String(m.paperName || it.paper || ''),
+    stem: String(m.stem || ''),
+    // 选项在 meta 里是**数组** ✓，编辑框里一行一个（拆/合都在 optionsOf 与这里 ✓）
+    optionsText: (Array.isArray(m.options) ? (m.options as unknown[]) : []).map((x) => String(x ?? '')).join('\n'),
     answer: String(m.answer || ''),
+    solution: String(m.solution || ''),
     kpText: (it.kp || []).join('、'),
     status: it.status || '',
   }
@@ -454,12 +460,26 @@ function kpListOf(text: string): string[] {
   return Array.from(new Set(String(text || '').split(/[，,、;；]/).map((s) => s.trim()).filter(Boolean)))
 }
 
+/** 【v1467】选项编辑框：一行一个（空行自动去掉 ✓；全空 = 这道题没有选项 ✓） */
+function optionsOf(text: string): string[] {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
 async function save() {
   const it = sel.value
   if (!it) return
   busy.value = true
   try {
+    // 题干决不允许存空 ✗（存空了这道题在库里就成了空壳，导出/组卷全跟着坏 ✓）
+    const stem = String(form.value.stem || '').trim()
+    if (!stem) { flash('✗ 题干不能为空'); return }
     const patch = {
+      stem,
+      options: optionsOf(form.value.optionsText),
+      solution: String(form.value.solution || '').trim(),
       section: form.value.section || '',
       qtype: form.value.qtype || '',
       level: form.value.level || '',
@@ -758,6 +778,14 @@ async function batchDelete() {
 
 
             <div class="qb__form">
+              <!-- 【v1467】再编辑：正文三件（题干 / 选项 / 解析）——
+                   以前这里只有元数据 + 答案 ✗，「再编辑」其实改不了题面 ✗ -->
+              <label class="qb__full">题干（公式写 $…$，图片位置用 [图N] 占位）
+                <textarea v-model="form.stem" rows="5" placeholder="题干正文…"></textarea>
+              </label>
+              <label class="qb__full">选项（一行一个；非选择题留空）
+                <textarea v-model="form.optionsText" rows="3" placeholder="A. …&#10;B. …"></textarea>
+              </label>
               <label>章节
                 <select v-model="form.section">
                   <option value="">未归类</option>
@@ -790,6 +818,9 @@ async function batchDelete() {
               </label>
               <label class="qb__full">答案
                 <textarea v-model="form.answer" rows="2" placeholder="原卷没有就留空 ✓（不要自己解题）"></textarea>
+              </label>
+              <label class="qb__full">解析（可选；公式同样写 $…$）
+                <textarea v-model="form.solution" rows="3" placeholder="原卷没有就留空 ✓（不要自己解题）"></textarea>
               </label>
               <label class="qb__full">知识点（逗号/顿号分隔）
                 <input v-model="form.kpText" list="qb-kp" placeholder="例如：导数、单调性（可点开词表挑 ✓）" />
