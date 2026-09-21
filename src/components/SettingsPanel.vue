@@ -20,6 +20,33 @@ function saveAiKey(v: string) {
     else localStorage.removeItem(AI_KEY)
   } catch { /* 忽略 */ }
 }
+
+// ── 【v1501】MinerU Token 挪到设置里（原来只在「试题录入」对话框里填 ✗ 老师要求挪过来 ✓）
+//    ⚠ 键必须是 'lj-mathslides:mineru-token' ✓ —— 录入对话框读的也是这个 ✓ 两边共用、改哪边都生效 ✓
+const MINERU_KEY = 'lj-mathslides:mineru-token'
+const mineruKey = ref('')
+const mineruShow = ref(false)
+onMounted(() => { try { mineruKey.value = localStorage.getItem(MINERU_KEY) || '' } catch { /* 忽略 */ } })
+function saveMineruKey(v: string) {
+  mineruKey.value = v
+  try {
+    if (v.trim()) localStorage.setItem(MINERU_KEY, v.trim())
+    else localStorage.removeItem(MINERU_KEY)
+  } catch { /* 忽略 */ }
+}
+
+// ── 【v1501】「启动时显示开始向导」开关 —— 关掉后打开应用直接进文稿 ✓
+//    NewDeckWizard 读的就是这个键 ✓（'off' = 不再自动弹 ✓）
+const WIZ_KEY = 'lj-mathslides-vue:newdeck-wizard'
+const wizardOn = ref(true)
+onMounted(() => { try { wizardOn.value = localStorage.getItem(WIZ_KEY) !== 'off' } catch { /* 忽略 */ } })
+function setWizardOn(v: boolean) {
+  wizardOn.value = v
+  try {
+    if (v) localStorage.removeItem(WIZ_KEY)
+    else localStorage.setItem(WIZ_KEY, 'off')
+  } catch { /* 忽略 */ }
+}
 </script>
 
 <template>
@@ -80,6 +107,35 @@ function saveAiKey(v: string) {
           />
         </label>
         <p class="hint">只保存在本机（不上传、不写进源码）；用于「一句话生成 3D 场景」等 AI 功能。留空＝不用 AI，其它功能照常。</p>
+      </div>
+
+      <!-- 【v1501】MinerU Token：PDF 识别用（原来只在「试题录入」里填 ✓ 现在设置里也能填 ✓ 两边共用 ✓） -->
+      <div class="ai">
+        <div class="ai__title">PDF 识别（MinerU）</div>
+        <label class="field"><span>MinerU Token</span>
+          <input
+            class="prop-input"
+            :type="mineruShow ? 'text' : 'password'"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="在 mineru.net 申请，粘到这里"
+            :value="mineruKey"
+            @input="saveMineruKey(($event.target as HTMLInputElement).value)"
+          />
+        </label>
+        <label class="field field--row"><span>显示明文</span>
+          <input type="checkbox" :checked="mineruShow" @change="mineruShow = ($event.target as HTMLInputElement).checked" />
+        </label>
+        <p class="hint">只保存在本机；**试题录入里选 .pdf 时**用它做云端识别（识别产物缓存本机 ✓）。与上面的 AI Key 是两回事 ✓ 都不填也能用 MD / JSON / 粘贴录入 ✓。</p>
+      </div>
+
+      <!-- 【v1501】启动时显示开始向导 -->
+      <div class="ai">
+        <div class="ai__title">启动</div>
+        <label class="field field--row"><span>启动时显示「开始向导」</span>
+          <input type="checkbox" :checked="wizardOn" @change="setWizardOn(($event.target as HTMLInputElement).checked)" />
+        </label>
+        <p class="hint">关掉后打开应用**直接进当前文稿**，不再弹新建向导 ✓（想再打开：勾回来，或点工具栏「新建」✓）</p>
       </div>
 
       <!-- 关于 / 版权：只在设置面板里出现，「演示」与导出的 HTML / PDF 都不带 -->
