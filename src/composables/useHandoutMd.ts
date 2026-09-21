@@ -56,10 +56,14 @@ export function mdToHandout(fileName: string, text: string): { meta: HandoutMeta
   const blocks: HdBlock[] = []
   let h1Title = ''
   let buf: string[] = []
+  /** 【修】目标 / 例题 / 练习 / 小结 这类"容器标题"后面的正文要**收进它自己** ✓
+   *  以前另起一个正文块 ✗ → 「学习目标」成了空框、内容游离在下面 ✗（老师那批 md 实测 ✓） */
+  let attach: HdBlock | null = null
   const flush = () => {
     const raw = buf.join('\n').trim()
     buf = []
     if (!raw) return
+    if (attach) { attach.text = (String(attach.text || '').trim() ? String(attach.text).replace(/\n+$/, '') + '\n' : '') + raw; return }
     const first = raw.split('\n').find((x) => x.trim()) || ''
     blocks.push(makeBlock(paraKind(first), raw))
   }
