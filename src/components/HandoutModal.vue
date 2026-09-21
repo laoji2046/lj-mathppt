@@ -1,20 +1,19 @@
 <script setup lang="ts">
 /**
- * 【M1】数学讲义编辑器
+ * 【M1】数学讲义编辑器（M1.1：教材定位 + 目录树 + 公式渲染修复）
  *
- * 版式：左「块列表」（加块 / 选中 / 上下移 / 删）· 中「A4 纸预览」· 右「块属性 + 讲义信息」
- * 顶部：**学生版 ⇄ 教师版** 一键切换 ✓（这是讲义相对试卷的关键能力 ✓）+ 打印/导出 PDF ✓
+ * 版式：左「目录树 + 块列表」· 中「A4 纸预览」· 右「教材定位 + 讲义信息 + 块属性」
+ * 顶部：**学生版 ⇄ 教师版** 一键切换 ✓ + 打印/导出 PDF ✓
  *
- * 与试卷的关系：都走「A4 + window.print() + @media print」这条矢量打印链 ✓
- *（docs/数学讲义-研究.md §4 ✓）
+ * ⚠ 页面 DOM **不归 Vue 管** ✗：内容整块写成 HTML 字符串交给 typesetMixed ✓
+ *   （MathJax 会改写 DOM；Vue 与它抢同一棵树时，新加的块公式不渲染、点一下才渲染 ✗ —— 老师实测 ✓）
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
-// ⚠ 必须用 typesetHosts（只排版、不写内容 ✓）—— 页面 DOM 归 Vue 管 ✓
-//   用 typesetMixed 会 host.innerHTML = … ✗ 把 Vue 的 DOM 抢掉 → 切版本时页面不再更新（实测踩过 ✓）
-import { typesetHosts } from '@/composables/useMathJax'
+import { typesetMixed } from '@/composables/useMathJax'
 import {
-  HD_LABEL, HD_NUMBERED, handout, hdVersion, makeBlock, rendered, saveHandout, setHandout, handoutToText,
+  HD_BOOKS, HD_LABEL, HD_NUMBERED, HD_PRESSES, handout, hdVersion, makeBlock, outlineOf, pageHtmlOf,
+  rendered, saveHandout, setHandout, handoutToText, handoutPathOf,
 } from '@/composables/useHandout'
 import type { HdBlock, HdBlockType, HdRender } from '@/composables/useHandout'
 
@@ -25,8 +24,9 @@ const ver = hdVersion
 const selIdx = ref(0)
 const msg = ref('')
 const pageHost = ref<HTMLElement | null>(null)
+const outline = computed(() => outlineOf(h.value))
+const path = computed(() => handoutPathOf(h.value))
 
-/** 加块按钮（常用顺序 ✓） */
 const ADD: { t: HdBlockType; label: string }[] = [
   { t: 'h1', label: '章' }, { t: 'h2', label: '节' }, { t: 'para', label: '正文' }, { t: 'formula', label: '公式' },
   { t: 'goal', label: '目标' }, { t: 'knowledge', label: '知识' }, { t: 'example', label: '例题' }, { t: 'variant', label: '变式' },
@@ -40,18 +40,39 @@ const sel = computed<HdBlock | null>(() => h.value.blocks[selIdx.value] || null)
 
 function flash(t: string) { msg.value = t; window.setTimeout(() => { if (msg.value === t) msg.value = '' }, 2600) }
 
+/** 整块重写 A4 页 + 交给 MathJax 排版 ✓（内容一变就重排 → 「加完块公式就渲染」✓） */
+let timer: number | undefined
+async function refreshNow() {
+  saveHandout(h.value)
+  await nextTick()
+  const host = pageHost.value
+  if (!host) return
+  try { await typesetMixed(host, pageHtmlOf(h.value, ver.value)) } catch { /* 排版失败不影响用 ✓ */ }
+}
+function refresh() {
+  if (timer) window.clearTimeout(timer)
+  timer = window.setTimeout(() => { void refreshNow() }, 300)   // 打字时别每键都重排 ✓
+}
+/** 目录树点击 → 在 A4 里跳到那块 ✓（页面里的块带 id="hd-b-<bid>" ✓） */
+function jumpTo(bid: string) {
+  const el = pageHost.value?.querySelector('#hd-b-' + bid) as HTMLElement | null
+  if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  const i = h.value.blocks.findIndex((b) => b.id === bid)
+  if (i >= 0) selIdx.value = i
+}
+
 function addBlock(t: HdBlockType) {
   const b = makeBlock(t)
   const at = Math.min(selIdx.value + 1, h.value.blocks.length)
   h.value.blocks.splice(at, 0, b)
   selIdx.value = at
-  void refresh()
-  flash('已插入「' + HD_LABEL[t] + '」')
+  void nextTick(() => refreshNow())
+  flash('已插入「' + HD_LABEL[t] + '」' + (t === 'h1' || t === 'h2' ? ' —— 目录树里会出现 ✓' : ''))
 }
 function delBlock(i: number) {
   h.value.blocks.splice(i, 1)
   selIdx.value = Math.max(0, Math.min(selIdx.value, h.value.blocks.length - 1))
-  void refresh()
+  void nextTick(() => refreshNow())
 }
 function move(i: number, d: number) {
   const j = i + d
@@ -59,38 +80,25 @@ function move(i: number, d: number) {
   const [x] = h.value.blocks.splice(i, 1)
   h.value.blocks.splice(j, 0, x)
   selIdx.value = j
-  void refresh()
+  void nextTick(() => refreshNow())
 }
 function summary(b: HdBlock): string {
   const t = String(b.text || '').replace(/\s+/g, ' ').trim()
   if (b.type === 'blank') return '留白 ' + (b.blankCm || 4) + 'cm'
-  return t ? t.slice(0, 24) : '（空）'
+  return t ? t.slice(0, 22) : '（空）'
 }
-/** 这块在当前版本里会怎样（列表上一眼能看出来 ✓） */
 function modeOf(b: HdBlock): string {
   const m = b.render[ver.value]
   return m === 'inline' ? '' : '·' + RENDER_LABEL[m]
 }
-
-/** MathJax 排版（每次渲染后重排一次 ✓） */
-async function refresh() {
-  saveHandout(h.value)
-  await nextTick()
-  const host = pageHost.value
-  if (!host) return
-  try { await typesetHosts([host]) } catch { /* 公式排版失败不影响用 ✓ */ }
-}
-
-function setVer(v: 'student' | 'teacher') { ver.value = v; void refresh() }
+function setVer(v: 'student' | 'teacher') { ver.value = v; void refreshNow() }
 function printPdf() { window.print() }
 function exportText() {
-  const txt = handoutToText(h.value, ver.value)
-  const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' })
+  const blob = new Blob([handoutToText(h.value, ver.value)], { type: 'text/plain;charset=utf-8' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   a.download = (h.value.meta.title || '讲义') + '-' + (ver.value === 'student' ? '学生版' : '教师版') + '.txt'
-  a.click()
-  URL.revokeObjectURL(a.href)
+  a.click(); URL.revokeObjectURL(a.href)
   flash('已导出纯文本（' + (ver.value === 'student' ? '学生版' : '教师版') + '）')
 }
 function exportJson() {
@@ -98,8 +106,7 @@ function exportJson() {
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   a.download = (h.value.meta.title || '讲义') + '.json'
-  a.click()
-  URL.revokeObjectURL(a.href)
+  a.click(); URL.revokeObjectURL(a.href)
   flash('已导出讲义 JSON（可再导入 ✓）')
 }
 function importJson(e: Event) {
@@ -109,15 +116,17 @@ function importJson(e: Event) {
   if (!f) return
   const r = new FileReader()
   r.onload = () => {
-    try { setHandout(JSON.parse(String(r.result || ''))); selIdx.value = 0; void refresh(); flash('已导入讲义 ✓') }
+    try { setHandout(JSON.parse(String(r.result || ''))); selIdx.value = 0; void refreshNow(); flash('已导入讲义 ✓') }
     catch { flash('✗ 这个文件不是讲义 JSON') }
   }
   r.readAsText(f)
 }
 function onKey(e: KeyboardEvent) { if (e.key === 'Escape') emit('close') }
-onMounted(() => { document.addEventListener('keydown', onKey); void refresh() })
-onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
-watch(() => [h.value.blocks.length, h.value.meta.title], () => { void refresh() })
+onMounted(() => { document.addEventListener('keydown', onKey); void refreshNow() })
+onBeforeUnmount(() => { document.removeEventListener('keydown', onKey); if (timer) window.clearTimeout(timer) })
+/** 内容一变就重排（深度监听 ✓）—— 加的块、改的公式都会立刻渲染 ✓ */
+watch(() => h.value, () => refresh(), { deep: true })
+watch(ver, () => { void refreshNow() })
 </script>
 
 <template>
@@ -129,7 +138,6 @@ watch(() => [h.value.blocks.length, h.value.meta.title], () => { void refresh() 
           <span class="hd__sub">{{ h.blocks.length }} 块 · {{ rendered.main.length }} 块在本版显示<template v-if="rendered.notes.length"> · {{ rendered.notes.length }} 条排到文末</template></span>
           <span v-if="msg" class="hd__msg">{{ msg }}</span>
           <span class="hd__rt">
-            <!-- 学生版 / 教师版：讲义的核心 ✓ -->
             <button class="hd__btn" :class="{ 'hd__btn--on': ver === 'student' }" title="学生版：答案按各块设置隐藏 / 留白 / 排到文末" @click="setVer('student')">学生版</button>
             <button class="hd__btn" :class="{ 'hd__btn--on': ver === 'teacher' }" title="教师版：答案与解析内联显示" @click="setVer('teacher')">教师版</button>
             <button class="hd__btn hd__btn--main" title="打印 / 另存为 PDF（矢量文字 ✓）" @click="printPdf">打印 / PDF</button>
@@ -143,8 +151,16 @@ watch(() => [h.value.blocks.length, h.value.meta.title], () => { void refresh() 
         </header>
 
         <div class="hd__body">
-          <!-- 左：块列表 -->
           <aside class="hd__left">
+            <div class="hd__toc">
+              <div class="hd__t1">目录</div>
+              <div class="hd__path" :title="path">{{ path || '（未填教材定位）' }}</div>
+              <div v-if="!outline.length" class="hd__hint">加「+章 / +节」块，这里就长出目录 ✓</div>
+              <template v-for="n in outline" :key="n.bid">
+                <div class="hd__toc1" @click="jumpTo(n.bid)">{{ n.title }}</div>
+                <div v-for="k in n.kids" :key="k.bid" class="hd__toc2" @click="jumpTo(k.bid)">{{ k.title }}</div>
+              </template>
+            </div>
             <div class="hd__add">
               <button v-for="a in ADD" :key="a.t" class="hd__addbtn" :title="'插入一块：' + HD_LABEL[a.t]" @click="addBlock(a.t)">+{{ a.label }}</button>
             </div>
@@ -161,57 +177,30 @@ watch(() => [h.value.blocks.length, h.value.meta.title], () => { void refresh() 
                   <button title="删除这块" @click.stop="delBlock(i)">✕</button>
                 </span>
               </div>
-              <div v-if="!h.blocks.length" class="hd__hint">左边点「+知识 / +例题 …」开始写讲义 ✓</div>
+              <div v-if="!h.blocks.length" class="hd__hint">点上面的「+知识 / +例题 …」开始写讲义 ✓</div>
             </div>
           </aside>
 
-          <!-- 中：A4 预览（打印的就是这一块 ✓） -->
           <main class="hd__mid">
-            <div ref="pageHost" class="hd__page">
-              <div class="hd__ptitle">{{ h.meta.title }}</div>
-              <div v-if="h.meta.subtitle" class="hd__psub">{{ h.meta.subtitle }}</div>
-              <div class="hd__pmeta">
-                <span v-if="h.meta.school">{{ h.meta.school }}</span>
-                <span v-if="h.meta.subject">{{ h.meta.subject }}</span>
-                <span v-if="h.meta.grade">{{ h.meta.grade }}</span>
-                <span v-if="h.meta.teacher">教师：{{ h.meta.teacher }}</span>
-                <span v-if="h.meta.date">{{ h.meta.date }}</span>
-                <span class="hd__pv">{{ ver === 'student' ? '学生版' : '教师版' }}</span>
-              </div>
-
-              <template v-for="it in rendered.main" :key="it.b.id">
-                <div v-if="it.b.type === 'pagebreak'" class="hd__pagebreak">— 分页 —</div>
-                <div v-else-if="it.b.type === 'blank'" class="hd__blank" :style="{ height: (it.b.blankCm || 4) + 'cm' }">（留白）</div>
-                <h1 v-else-if="it.b.type === 'h1'" class="hd__h1">{{ it.show }}</h1>
-                <h2 v-else-if="it.b.type === 'h2'" class="hd__h2">{{ it.show }}</h2>
-                <div v-else-if="it.b.type === 'formula'" class="hd__formula">{{ it.show }}</div>
-                <div v-else-if="it.b.type === 'goal'" class="hd__bx hd__bx--goal"><b>学习目标</b><div class="hd__txt">{{ it.show }}</div></div>
-                <div v-else-if="it.b.type === 'knowledge'" class="hd__bx hd__bx--know"><b>知识梳理</b><div class="hd__txt">{{ it.show }}</div></div>
-                <div v-else-if="it.b.type === 'note'" class="hd__bx hd__bx--note"><b>提示</b><div class="hd__txt">{{ it.show }}</div></div>
-                <div v-else-if="it.b.type === 'warn'" class="hd__bx hd__bx--warn"><b>易错警示</b><div class="hd__txt">{{ it.show }}</div></div>
-                <div v-else-if="it.b.type === 'summary'" class="hd__bx hd__bx--sum"><b>归纳小结</b><div class="hd__txt">{{ it.show }}</div></div>
-                <div v-else-if="it.b.type === 'example' || it.b.type === 'variant' || it.b.type === 'exercise'" class="hd__q">
-                  <span class="hd__qnum">{{ it.num }}</span>
-                  <span class="hd__qtext">{{ it.show }}</span>
-                </div>
-                <div v-else-if="it.b.type === 'answer'" class="hd__ans"><b>答案</b>{{ it.show }}</div>
-                <div v-else-if="it.b.type === 'solution'" class="hd__sol"><b>解析</b>{{ it.show }}</div>
-                <div v-else class="hd__para">{{ it.show }}</div>
-              </template>
-
-              <!-- 学生版：排到文末的参考答案 ✓ -->
-              <template v-if="rendered.notes.length">
-                <h1 class="hd__h1 hd__h1--end">参考答案</h1>
-                <div v-for="(it, i) in rendered.notes" :key="'n' + it.b.id" class="hd__endnote">
-                  <span class="hd__qnum">{{ i + 1 }}</span>
-                  <span class="hd__qtext"><b>{{ HD_LABEL[it.b.type] }}</b>{{ it.show }}</span>
-                </div>
-              </template>
-            </div>
+            <div ref="pageHost" class="hd__page"></div>
           </main>
 
-          <!-- 右：块属性 + 讲义信息 -->
           <aside class="hd__right">
+            <div class="hd__t1">教材定位</div>
+            <div class="hd__row2">
+              <label>教材版本
+                <select v-model="h.meta.press"><option v-for="p in HD_PRESSES" :key="p" :value="p">{{ p }}</option></select>
+              </label>
+              <label>模块 / 册
+                <select v-model="h.meta.book"><option v-for="bk in HD_BOOKS" :key="bk" :value="bk">{{ bk }}</option></select>
+              </label>
+            </div>
+            <div class="hd__row2">
+              <label>第几章<input v-model="h.meta.chapter" placeholder="3" /></label>
+              <label>第几节<input v-model="h.meta.section" placeholder="1" /></label>
+            </div>
+            <div class="hd__hint2">抬头显示：{{ path || '（未填）' }} ✓ 目录树按章 / 节块自动长 ✓</div>
+
             <div class="hd__t1">讲义信息</div>
             <label>标题<input v-model="h.meta.title" /></label>
             <label>副标题<input v-model="h.meta.subtitle" /></label>
@@ -237,10 +226,10 @@ watch(() => [h.value.blocks.length, h.value.meta.title], () => { void refresh() 
                 <div class="hd__rndrow"><span>教师版</span>
                   <select v-model="sel.render.teacher"><option v-for="(l, k) in RENDER_LABEL" :key="k" :value="k">{{ l }}</option></select>
                 </div>
-                <div class="hd__hint2">答案/解析默认「学生版排到文末、教师版内联」✓ —— 这就是一份内容两个版本的关键 ✓</div>
+                <div class="hd__hint2">答案 / 解析默认「学生版排到文末、教师版内联」✓</div>
               </div>
             </template>
-            <div v-else class="hd__hint">在左边点一块题，这里就能改它 ✓</div>
+            <div v-else class="hd__hint">在左边点一块，这里就能改它 ✓</div>
           </aside>
         </div>
       </div>
@@ -262,6 +251,11 @@ watch(() => [h.value.blocks.length, h.value.meta.title], () => { void refresh() 
 .hd__close { width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 6px; background: #fff; cursor: pointer; }
 .hd__body { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px 1fr 300px; }
 .hd__left { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.hd__toc { border-bottom: 1px solid var(--border); padding: 8px; max-height: 32%; overflow-y: auto; }
+.hd__path { font-size: 11px; color: var(--brand-600, #534AB7); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hd__toc1 { font-size: 12px; font-weight: 700; padding: 2px 4px; border-radius: 4px; cursor: pointer; }
+.hd__toc2 { font-size: 11.5px; color: var(--muted); padding: 1px 4px 1px 18px; border-radius: 4px; cursor: pointer; }
+.hd__toc1:hover, .hd__toc2:hover { background: var(--brand-soft, #f2f0fb); }
 .hd__add { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border); }
 .hd__addbtn { height: 24px; padding: 0 7px; border: 1px solid var(--border); border-radius: 6px; background: #fff; font-size: 11.5px; cursor: pointer; }
 .hd__addbtn:hover { background: var(--brand-soft, #f2f0fb); border-color: var(--brand-400, #b9b2ec); }
@@ -280,33 +274,6 @@ watch(() => [h.value.blocks.length, h.value.meta.title], () => { void refresh() 
 .hd__blk:hover .hd__ops { display: inline-flex; }
 .hd__ops button { width: 18px; height: 18px; border: 1px solid var(--border); border-radius: 4px; background: #fff; font-size: 10px; cursor: pointer; }
 .hd__mid { overflow: auto; background: #f2f1ec; padding: 14px; }
-.hd__page { width: 210mm; min-height: 297mm; margin: 0 auto; background: #fff; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12); padding: 16mm 15mm; box-sizing: border-box; color: #111; font-size: 12pt; line-height: 1.7; }
-.hd__ptitle { font-size: 19pt; font-weight: 700; text-align: center; }
-.hd__psub { text-align: center; color: #444; margin-top: 2px; }
-.hd__pmeta { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; font-size: 9.5pt; color: #666; border-bottom: 1px solid #ddd; padding-bottom: 6px; margin: 6px 0 12px; }
-.hd__pv { font-weight: 700; color: #1d4e89; }
-.hd__h1 { font-size: 14pt; font-weight: 700; margin: 14px 0 6px; }
-.hd__h1--end { border-top: 1px dashed #bbb; padding-top: 10px; }
-.hd__h2 { font-size: 12.5pt; font-weight: 700; margin: 10px 0 4px; }
-.hd__para { margin: 4px 0; white-space: pre-wrap; }
-.hd__formula { text-align: center; margin: 8px 0; }
-.hd__bx { border: 1px solid #d8d5cc; border-left: 3px solid #b9b2ec; border-radius: 4px; padding: 6px 9px; margin: 8px 0; background: #fbfaff; }
-.hd__bx--goal { background: #f7f9fc; border-left-color: #6f9ad6; }
-.hd__bx--know { background: #f6faf6; border-left-color: #7ab98a; }
-.hd__bx--note { background: #fdfaf3; border-left-color: #d9b45e; }
-.hd__bx--warn { background: #fdf4f3; border-left-color: #cf7b6d; }
-.hd__bx--sum { background: #f8f8f6; border-left-color: #8b8a95; }
-.hd__bx b { font-size: 10.5pt; color: #444; margin-right: 6px; }
-.hd__txt { white-space: pre-wrap; }
-.hd__q { display: flex; gap: 8px; margin: 8px 0; }
-.hd__qnum { flex: none; font-weight: 700; }
-.hd__qtext { white-space: pre-wrap; }
-.hd__ans { margin: 4px 0 4px 18px; }
-.hd__sol { margin: 4px 0 4px 18px; color: #333; }
-.hd__ans b, .hd__sol b { font-size: 10.5pt; color: #9a6212; margin-right: 6px; }
-.hd__endnote { display: flex; gap: 8px; margin: 6px 0; }
-.hd__blank { border: 1px dashed #c9c6bd; border-radius: 4px; margin: 8px 0; color: #bdbab2; font-size: 9.5pt; padding: 4px 6px; box-sizing: border-box; }
-.hd__pagebreak { border-top: 1px dashed #bbb; text-align: center; color: #999; font-size: 9.5pt; margin: 12px 0; }
 .hd__right { border-left: 1px solid var(--border); overflow-y: auto; padding: 10px; }
 .hd__t1 { font-size: 12px; font-weight: 700; color: var(--text); margin: 8px 0 6px; }
 .hd__right label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--muted); margin-bottom: 6px; }
@@ -316,8 +283,8 @@ watch(() => [h.value.blocks.length, h.value.meta.title], () => { void refresh() 
 .hd__rnd { border-top: 1px dashed var(--border); padding-top: 8px; margin-top: 4px; }
 .hd__rndrow { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }
 .hd__rndrow select { flex: 1; }
+.hd__page { width: 210mm; min-height: 297mm; margin: 0 auto; background: #fff; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12); padding: 16mm 15mm; box-sizing: border-box; }
 
-/* 打印：只留 A4 纸 ✓（与试卷同一条思路 ✓） */
 @media print {
   body > *:not(.hd) { display: none !important; }
   .hd { position: static; background: #fff; display: block; }
@@ -326,7 +293,40 @@ watch(() => [h.value.blocks.length, h.value.meta.title], () => { void refresh() 
   .hd__body { display: block; }
   .hd__mid { overflow: visible; background: #fff; padding: 0; }
   .hd__page { width: auto; min-height: 0; margin: 0; box-shadow: none; padding: 0; }
-  .hd__pagebreak { break-after: page; page-break-after: always; border: 0; color: transparent; }
-  .hd__blank { border-color: #ddd; }
+}
+</style>
+
+<!-- ⚠ A4 页面的样式**不能 scoped** ✗ —— 内容是 typesetMixed 注入的 HTML，拿不到 scoped 的 data-v 属性 ✓
+     （与 v1458「题图样式一直没生效」是同一个坑 ✓） -->
+<style>
+.hd__page { color: #111; font-size: 12pt; line-height: 1.7; }
+.hd-ptitle { font-size: 19pt; font-weight: 700; text-align: center; }
+.hd-psub { text-align: center; color: #444; margin-top: 2px; }
+.hd-pmeta { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; font-size: 9.5pt; color: #666; border-bottom: 1px solid #ddd; padding-bottom: 6px; margin: 6px 0 12px; }
+.hd-h1 { font-size: 14pt; font-weight: 700; margin: 14px 0 6px; }
+.hd-h1--end { border-top: 1px dashed #bbb; padding-top: 10px; }
+.hd-h2 { font-size: 12.5pt; font-weight: 700; margin: 10px 0 4px; }
+.hd-para { margin: 4px 0; white-space: pre-wrap; }
+.hd-formula { text-align: center; margin: 8px 0; }
+.hd-bx { border: 1px solid #d8d5cc; border-left: 3px solid #b9b2ec; border-radius: 4px; padding: 6px 9px; margin: 8px 0; background: #fbfaff; }
+.hd-bx--goal { background: #f7f9fc; border-left-color: #6f9ad6; }
+.hd-bx--know { background: #f6faf6; border-left-color: #7ab98a; }
+.hd-bx--note { background: #fdfaf3; border-left-color: #d9b45e; }
+.hd-bx--warn { background: #fdf4f3; border-left-color: #cf7b6d; }
+.hd-bx--sum { background: #f8f8f6; border-left-color: #8b8a95; }
+.hd-bx b { font-size: 10.5pt; color: #444; margin-right: 6px; }
+.hd-txt { white-space: pre-wrap; }
+.hd-q { display: flex; gap: 8px; margin: 8px 0; }
+.hd-qnum { flex: none; font-weight: 700; }
+.hd-qtext { white-space: pre-wrap; }
+.hd-ans { margin: 4px 0 4px 18px; }
+.hd-sol { margin: 4px 0 4px 18px; color: #333; }
+.hd-ans b, .hd-sol b { font-size: 10.5pt; color: #9a6212; margin-right: 6px; }
+.hd-endnote { display: flex; gap: 8px; margin: 6px 0; }
+.hd-blank { border: 1px dashed #c9c6bd; border-radius: 4px; margin: 8px 0; color: #bdbab2; font-size: 9.5pt; padding: 4px 6px; box-sizing: border-box; }
+.hd-pagebreak { border-top: 1px dashed #bbb; text-align: center; color: #999; font-size: 9.5pt; margin: 12px 0; }
+@media print {
+  .hd-pagebreak { break-after: page; page-break-after: always; border: 0; color: transparent; }
+  .hd-blank { border-color: #ddd; }
 }
 </style>

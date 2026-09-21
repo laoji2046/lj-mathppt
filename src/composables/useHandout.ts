@@ -48,6 +48,15 @@ export interface HandoutMeta {
   grade: string
   teacher: string
   date: string
+  /* 【M1.1】教材定位：方便组织内容、便于查找 ✓ */
+  /** 教材版本（默认人教版 ✓） */
+  press: string
+  /** 模块 / 册：必修一 … 选择性必修三 ✓ */
+  book: string
+  /** 第几章（填数字或整句都行 ✓） */
+  chapter: string
+  /** 第几节 ✓ */
+  section: string
 }
 
 export interface Handout {
@@ -108,6 +117,7 @@ export function sampleHandout(): Handout {
     meta: {
       school: '示例中学', subject: '数学', title: '椭圆外点切线的轨迹',
       subtitle: '一轮复习 · 圆锥曲线专题（一）', grade: '高三', teacher: '', date: new Date().toISOString().slice(0, 10),
+      press: '人教版', book: '选择性必修一', chapter: '3', section: '1',
     },
     blocks: [
       mk('h1', '一、知识梳理'),
@@ -133,7 +143,9 @@ function normalize(h: unknown): Handout {
   const o = (h || {}) as Partial<Handout>
   const meta: HandoutMeta = {
     school: '', subject: '数学', title: '未命名讲义', subtitle: '', grade: '', teacher: '',
-    date: new Date().toISOString().slice(0, 10), ...(o.meta || {}),
+    date: new Date().toISOString().slice(0, 10),
+    press: '人教版', book: '必修一', chapter: '', section: '',
+    ...(o.meta || {}),
   }
   const blocks: HdBlock[] = Array.isArray(o.blocks)
     ? o.blocks.filter(Boolean).map((b) => {
@@ -231,3 +243,89 @@ export function handoutToText(h: Handout, v: HdVersion): string {
   }
   return lines.join('\n')
 }
+
+/* ---------------- 【M1.1】教材版本 / 册 / 章 / 节 + 目录树 + A4 页面 HTML ---------------- */
+
+/** 教材版本（默认人教版 ✓） */
+export const HD_PRESSES = ['人教版', '北师大版', '苏教版', '湘教版', '沪教版', '鄂教版', '其他']
+/** 六个模块 ✓（高一到高二的顺序 ✓） */
+export const HD_BOOKS = ['必修一', '必修二', '必修三', '选择性必修一', '选择性必修二', '选择性必修三']
+
+/** HTML 转义（公式的 $…$ 原样留着 ✓） */
+export function hdEsc(s: unknown): string {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/** 目录树：章（h1 块）→ 节（h2 块）✓ —— 左侧「目录」用它 ✓ */
+export interface HdOutlineNode { title: string; bid: string; kids: HdOutlineNode[] }
+export function outlineOf(h: Handout): HdOutlineNode[] {
+  const roots: HdOutlineNode[] = []
+  let chap: HdOutlineNode | null = null
+  for (const b of h.blocks) {
+    if (b.type === 'h1') { chap = { title: b.text || '（未命名章）', bid: b.id, kids: [] }; roots.push(chap) }
+    else if (b.type === 'h2') {
+      const node: HdOutlineNode = { title: b.text || '（未命名节）', bid: b.id, kids: [] }
+      if (chap) chap.kids.push(node); else roots.push(node)
+    }
+  }
+  return roots
+}
+
+/** 抬头那一行：教材版本 · 册 · 第几章 · 第几节 ✓（有才显示 ✓） */
+export function handoutPathOf(h: Handout): string {
+  const m = h.meta
+  const chap = String(m.chapter || '').trim()
+  const sec = String(m.section || '').trim()
+  const ch = chap ? (chap.charAt(0) === '第' || chap.charAt(0) === '（' ? chap : '第 ' + chap + ' 章') : ''
+  const se = sec ? (sec.charAt(0) === '第' || sec.charAt(0) === '（' ? sec : '第 ' + sec + ' 节') : ''
+  return [m.press, m.book, ch, se].filter(Boolean).join(' · ')
+}
+
+/**
+ * A4 页面 → **HTML 字符串** ✓
+ *
+ * ⚠ 为什么改成字符串而不是 Vue 模板 ✗：MathJax 排版要**改写 DOM** ✓，而 Vue 也在管同一棵 DOM ✗ →
+ *   两边打架：**新加的块公式不渲染、点一下才渲染** ✗（老师实测 ✓）。
+ *   改成「Vue 只给一个空容器 + 内容变了整块重写 + typesetMixed 排版」✓ ——
+ *   与题库预览 / 试卷同一条路 ✓（那两处一直没这毛病 ✓）。
+ */
+export function pageHtmlOf(h: Handout, v: HdVersion): string {
+  const { main, notes } = renderFor(h, v)
+  const m = h.meta
+  const L: string[] = []
+  L.push('<div class="hd-ptitle">' + hdEsc(m.title || '未命名讲义') + '</div>')
+  if (m.subtitle) L.push('<div class="hd-psub">' + hdEsc(m.subtitle) + '</div>')
+  const metaBits = [m.school, m.subject, m.grade, m.teacher ? '教师：' + m.teacher : '', m.date, handoutPathOf(h), v === 'student' ? '学生版' : '教师版']
+    .filter(Boolean).map((x) => '<span>' + hdEsc(x) + '</span>').join('')
+  L.push('<div class="hd-pmeta">' + metaBits + '</div>')
+
+  for (const it of main) {
+    const t = it.b.type
+    const body = hdEsc(it.show)
+    const id = ' id="hd-b-' + it.b.id + '"'
+    if (t === 'pagebreak') { L.push('<div class="hd-pagebreak"' + id + '>— 分页 —</div>'); continue }
+    if (t === 'blank') { L.push('<div class="hd-blank"' + id + ' style="height:' + (it.b.blankCm || 4) + 'cm">（留白）</div>'); continue }
+    if (t === 'h1') { L.push('<h1 class="hd-h1"' + id + '>' + body + '</h1>'); continue }
+    if (t === 'h2') { L.push('<h2 class="hd-h2"' + id + '>' + body + '</h2>'); continue }
+    if (t === 'formula') { L.push('<div class="hd-formula"' + id + '>' + body + '</div>'); continue }
+    if (t === 'goal') { L.push('<div class="hd-bx hd-bx--goal"' + id + '><b>学习目标</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'knowledge') { L.push('<div class="hd-bx hd-bx--know"' + id + '><b>知识梳理</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'note') { L.push('<div class="hd-bx hd-bx--note"' + id + '><b>提示</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'warn') { L.push('<div class="hd-bx hd-bx--warn"' + id + '><b>易错警示</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'summary') { L.push('<div class="hd-bx hd-bx--sum"' + id + '><b>归纳小结</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'example' || t === 'variant' || t === 'exercise') {
+      L.push('<div class="hd-q"' + id + '><span class="hd-qnum">' + hdEsc(it.num) + '</span><span class="hd-qtext">' + body + '</span></div>'); continue
+    }
+    if (t === 'answer') { L.push('<div class="hd-ans"' + id + '><b>答案</b>' + body + '</div>'); continue }
+    if (t === 'solution') { L.push('<div class="hd-sol"' + id + '><b>解析</b>' + body + '</div>'); continue }
+    L.push('<div class="hd-para"' + id + '>' + body + '</div>')
+  }
+  if (notes.length) {
+    L.push('<h1 class="hd-h1 hd-h1--end">参考答案</h1>')
+    notes.forEach((it, i) => {
+      L.push('<div class="hd-endnote"><span class="hd-qnum">' + (i + 1) + '</span><span class="hd-qtext"><b>' + hdEsc(HD_LABEL[it.b.type]) + '</b>' + hdEsc(it.show) + '</span></div>')
+    })
+  }
+  return L.join('\n')
+}
+
