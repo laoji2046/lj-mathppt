@@ -260,11 +260,14 @@ export function histogramFigure(w: number, h: number, stroke: string, sw: number
   const vals: number[] = []
   for (let i = 0; i < n; i++) vals.push(Math.max(0, p['h' + (i + 1)] || 0))
   const ymax = Math.max(0.0001, ...vals) * 1.15
-  const padL = 46, padR = 26, padT = 26, padB = 40
+  // ⚠ 左/上要**留出写字的地方** ✗ —— 原来 padL=46 太窄 ✓，纵轴刻度数字（anchor=end ✓）
+  //   和「频率 / 组距」两行标题会挤在同一块地方叠在一起 ✗（老师截图 ✓）
+  const padL = 74, padR = 30, padT = 34, padB = 40
   const X = (v: number) => padL + ((v - start) / (n * bw)) * (w - padL - padR)
   const Y = (v: number) => h - padB - (v / ymax) * (h - padT - padB)
   const ink = stroke || '#111'          // 用元素自己的描边色 ✓（主题深浅都能看清 ✓）
-  const fs = Math.max(11, Math.round(h * 0.055))
+  // 字号按**宽度**算 ✓（图宽而扁时按高度算会变成巨字 ✗）
+  const fs = Math.max(10, Math.min(17, Math.round(w * 0.032)))
   const L: string[] = []
   // 纵轴（带原点断口 ✓ —— 表示纵轴不从 0 起 ✓）
   const x0 = X(start), y0 = Y(0), yTop = Y(ymax)
@@ -272,6 +275,7 @@ export function histogramFigure(w: number, h: number, stroke: string, sw: number
   L.push('<line x1="' + n1(x0) + '" y1="' + n1(y0 - 12) + '" x2="' + n1(x0) + '" y2="' + n1(yTop - 4) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
   L.push('<line x1="' + n1(x0) + '" y1="' + n1(y0) + '" x2="' + n1(X(start + n * bw) + 8) + '" y2="' + n1(y0) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
   // 柱体 + 纵轴虚线 + 刻度
+  // 纵轴刻度：画 1..4 档 ✓ —— **最上面那档不画** ✓（那一格留给「频率 / 组距」两行标题 ✓ 书上也常这样 ✓）
   const stepY = ymax / 5
   for (let i = 0; i < n; i++) {
     const v = vals[i]
@@ -279,7 +283,7 @@ export function histogramFigure(w: number, h: number, stroke: string, sw: number
     const xa = X(start + i * bw), xb = X(start + (i + 1) * bw), yv = Y(v)
     L.push('<rect x="' + n1(xa) + '" y="' + n1(yv) + '" width="' + n1(xb - xa) + '" height="' + n1(y0 - yv) + '" fill="none" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
   }
-  for (let k = 1; k <= 5; k++) {
+  for (let k = 1; k <= 4; k++) {
     const yy = Y(stepY * k)
     L.push('<line x1="' + n1(x0) + '" y1="' + n1(yy) + '" x2="' + n1(X(start + n * bw)) + '" y2="' + n1(yy) + '" stroke="#666" stroke-width="1" stroke-dasharray="5 4"/>')
     L.push('<text x="' + n1(x0 - 8) + '" y="' + n1(yy + fs * 0.35) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="end">' + n1(stepY * k) + '</text>')
@@ -291,8 +295,10 @@ export function histogramFigure(w: number, h: number, stroke: string, sw: number
   }
   L.push('<text x="' + n1(x0 + 4) + '" y="' + n1(y0 + fs * 2.7) + '" font-size="' + fs + '" fill="' + ink + '">O</text>')
   // 轴标题
-  L.push('<text x="' + n1(x0 - 10) + '" y="' + n1(yTop - 12) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">频率</text>')
-  L.push('<text x="' + n1(x0 - 10) + '" y="' + n1(yTop + 2) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">组距</text>')
+  // 「频率 / 组距」写在**最左边那一列** ✓（刻度数字的左边 ✓ 不再叠在一起 ✓）
+  const labX = fs * 1.35
+  L.push('<text x="' + n1(labX) + '" y="' + n1(yTop - fs * 0.15) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">频率</text>')
+  L.push('<text x="' + n1(labX) + '" y="' + n1(yTop + fs * 1.05) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">组距</text>')
   L.push('<text x="' + n1(X(start + n * bw) + 10) + '" y="' + n1(y0 - fs * 0.3) + '" font-size="' + fs + '" fill="' + ink + '">分组</text>')
   return L.join('')
 }
