@@ -17,6 +17,10 @@ import {
   initHandoutLib, openHandout, newHandout, deleteHandout, handoutTree, lib, curId,
 } from '@/composables/useHandout'
 import { loadAssets, assetSrc, saveAsset } from '@/composables/useAssets'
+/* 【M2.6】把「数学图形」打通进讲义 ✓ —— 与题库那双按钮同一套（v1466 ✓）：面板 sink 给 SVG → svgToPngUrl → 入库 */
+import { openFigPalette } from '@/ui/figPalette'
+import { geom3dOpen, geom3dSink, openGeom3D } from '@/ui/geom3d'
+import { svgTextToPngUrl, svgToPngUrl } from '@/composables/svgPng'
 import type { HdBlock, HdBlockType, HdRender } from '@/composables/useHandout'
 import { qFacets } from '@/composables/useQuestionBank'
 import type { QItem } from '@/composables/useQuestionBank'
@@ -65,6 +69,48 @@ async function buildImgMap() {
 }
 /** 插图：文件 → data URL → 大图进内容库 ✓（与题库同一套，省 localStorage ✓） */
 const MAX_INLINE = 150 * 1024
+
+/** 把一张图挂到**当前块**上（自动把块变成 figure ✓）；大图进内容库 ✓ —— 上传 / 数学图形 / 三维图 共用这一条 ✓ */
+async function applyFigureSrc(src: string, caption = '') {
+  const b = h.value.blocks[selIdx.value]
+  if (!b || !src) return
+  b.type = 'figure'
+  const cap = caption || String(b.img?.caption || '')
+  if (src.length > MAX_INLINE) {
+    const id = await saveAsset(src)
+    b.img = id ? { assetId: id, caption: cap } : { src, caption: cap }
+  } else {
+    b.img = { src, caption: cap }
+  }
+  await buildImgMap()
+  void nextTick(() => refreshNow())
+}
+/** 【M2.6】数学图形：打开图形面板，点哪张哪张就进讲义 ✓（面板的 sink 模式 ✓） */
+function insertMathFigure() {
+  if (!sel.value) { flash('先选一块（或先 +插图）✓'); return }
+  if (sel.value.type !== 'figure') { sel.value.type = 'figure'; flash('已把这页改成「插图」块 ✓') }
+  openFigPalette((svg, label) => {
+    void (async () => {
+      try { await applyFigureSrc(await svgToPngUrl(svg), label || ''); flash('已插入数学图形「' + (label || '') + '」✓') }
+      catch (e) { flash('✗ 图形转图片失败：' + String((e as Error)?.message || e)) }
+    })()
+  })
+  flash('在图形面板里点一张 → 它就进讲义 ✓')
+}
+/** 【M2.6】三维立体图：同样走 sink ✓ */
+function insert3DFigure() {
+  if (!sel.value) { flash('先选一块（或先 +插图）✓'); return }
+  if (sel.value.type !== 'figure') { sel.value.type = 'figure' }
+  geom3dSink.value = (svgText: string, label: string) => {
+    geom3dSink.value = null
+    void (async () => {
+      try { await applyFigureSrc(await svgTextToPngUrl(svgText), label || '三维图'); flash('已插入三维图 ✓') }
+      catch (e) { flash('✗ 三维图转图片失败：' + String((e as Error)?.message || e)) }
+    })()
+  }
+  openGeom3D()
+  if (!geom3dOpen.value) { geom3dSink.value = null; flash('三维立体图已在「功能管理」里关掉 ✓') } else flash('在三维窗口里调好 → 点「插入到当前页」就落到讲义 ✓')
+}
 async function pickFigure(e: Event) {
   const input = e.target as HTMLInputElement
   const f = input.files && input.files[0]
@@ -78,18 +124,8 @@ async function pickFigure(e: Event) {
     r.onerror = () => rej(new Error('读文件失败'))
     r.readAsDataURL(f)
   })
-  const b = h.value.blocks[selIdx.value]
-  b.type = 'figure'
-  const cap = String(b.img?.caption || '')
-  if (src.length > MAX_INLINE) {
-    const id = await saveAsset(src)
-    b.img = id ? { assetId: id, caption: cap } : { src, caption: cap }
-  } else {
-    b.img = { src, caption: cap }
-  }
-  await buildImgMap()
-  void nextTick(() => refreshNow())
-  flash('已插图' + (b.img.assetId ? '（大图存进内容库 ✓）' : '') + ' —— 图注可在这里改 ✓')
+  await applyFigureSrc(src, String(h.value.blocks[selIdx.value].img?.caption || ''))
+  flash('已插图' + (h.value.blocks[selIdx.value].img?.assetId ? '（大图存进内容库 ✓）' : '') + ' —— 图注可在这里改 ✓')
 }
 function setFigCaption(v: string) {
   const b = sel.value
@@ -433,6 +469,11 @@ watch(ver, () => { void refreshNow() })
                   {{ sel.img ? '换一张图' : '上传图片' }}
                   <input type="file" accept="image/*" style="display:none" @change="pickFigure" />
                 </label>
+                <!-- 【M2.6】直接用我们的数学图形 / 三维图 ✓（与题库题图同一套 ✓） -->
+                <div class="hd__figsrc">
+                  <button class="hd__btn" title="打开「数学图形」面板：点哪张哪张就进讲义（函数图像 / 圆锥曲线 / 平面几何 / 立体几何 …）✓" @click="insertMathFigure">数学图形</button>
+                  <button class="hd__btn" title="三维立体图：在三维窗口里调好后点「插入到当前页」即落到讲义 ✓" @click="insert3DFigure">三维图</button>
+                </div>
                 <label>图注<input :value="sel.img?.caption || ''" placeholder="例如：图 1 椭圆与两条切线" @input="setFigCaption(($event.target as HTMLInputElement).value)" /></label>
                 <button v-if="sel.img" class="hd__btn hd__btn--wide" @click="clearFigure">清掉这张插图</button>
                 <div class="hd__hint2">插图会跟着两个版本一起显示 ✓；大图存进内容库（与题库同一套 ✓），讲义 JSON 不会变胖 ✓</div>
@@ -633,6 +674,8 @@ watch(ver, () => { void refreshNow() })
 .hd__figbox img { max-width: 100%; max-height: 180px; object-fit: contain; }
 .hd__figempty { color: var(--muted); font-size: 11.5px; padding: 16px 0; }
 .hd__btn--file { display: block; text-align: center; line-height: 28px; margin-bottom: 6px; cursor: pointer; }
+.hd__figsrc { display: flex; gap: 6px; margin-bottom: 6px; }
+.hd__figsrc .hd__btn { flex: 1; }
 .hd__btn--wide { display: block; width: 100%; margin-top: 4px; }
 /* 抽屉要压在右栏之上 ✓ */
 .hd__box { position: relative; }
