@@ -147,7 +147,19 @@ function figParamVal(key: string, def: number) {
   return typeof v === 'number' ? v : def
 }
 /* ---------------- 【M2.11】频率分布直方图：粘贴原始数据 → 自动分箱 ✓ ---------------- */
-const isHistogram = computed(() => String(mathfig.value?.kind || '') === 'histogram')
+/** 【M2.13】四个统计图元：轴标注可填 ✓（频率分布表只用到 x ✓） */
+const STAT_KINDS = ['histogram', 'freqLine', 'scatter', 'freqTable']
+const isStatFig = computed(() => STAT_KINDS.indexOf(String(mathfig.value?.kind || '')) >= 0)
+const isHistogram = computed(() => ['histogram', 'freqLine', 'freqTable'].indexOf(String(mathfig.value?.kind || '')) >= 0)
+function figLabelVal(axis: 'x' | 'y'): string {
+  const l = mathfig.value?.figLabels
+  return String((l && l[axis]) || '')
+}
+function setFigLabel(axis: 'x' | 'y', v: string) {
+  const cur = { ...(mathfig.value?.figLabels || {}) }
+  cur[axis] = v
+  patch({ figLabels: cur } as Partial<SlideElement>)
+}
 const histRaw = ref('')
 const histMsg = ref('')
 /** 支持 空格 / 逗号 / 顿号 / 分号 / 换行 / 制表符 分隔（从 Word、Excel 直接复制都行 ✓） */
@@ -174,8 +186,12 @@ function applyHistRaw() {
   }
   setFigParam('start', start)
   setFigParam('n', n)
-  for (let i = 1; i <= 10; i++) setFigParam('h' + i, i <= n ? c[i - 1] / xs.length / bw0 : 0)
-  histMsg.value = '✓ ' + xs.length + ' 个数据 → ' + n + ' 组（起始 ' + start + '，组距 ' + bw0 + '）已填进 h1…h' + n + ' ✓'
+  const isTable = String(mathfig.value?.kind || '') === 'freqTable'
+  for (let i = 1; i <= 10; i++) {
+    if (isTable) setFigParam('f' + i, i <= n ? c[i - 1] : 0)                       // 频率分布表：填**频数** ✓
+    else setFigParam('h' + i, i <= n ? c[i - 1] / xs.length / bw0 : 0)             // 图：填频率/组距 ✓
+  }
+  histMsg.value = '✓ ' + xs.length + ' 个数据 → ' + n + ' 组（起始 ' + start + '，组距 ' + bw0 + '）已填进 ' + (isTable ? 'f1…f' : 'h1…h') + n + ' ✓'
   window.setTimeout(() => { histMsg.value = '' }, 6000)
 }
 function setFigParam(key: string, v: number) {
@@ -1561,6 +1577,19 @@ function layerTypeLabel(type: string) {
           </div>
         </template>
         <p v-if="figParams.length" class="panel__hint">改参数后图形立即重绘（适合讲"图象变换 / 含参讨论"）。</p>
+            <!-- 【M2.13】统计图：坐标轴文字标注（年龄 / 体重 / 分组… ✓ 手填 ✓） -->
+            <div v-if="isStatFig" class="hist">
+              <div class="hist__t">坐标轴标注</div>
+              <div class="hist__row2">
+                <label class="hist__lab">横轴
+                  <input class="hist__in" :value="figLabelVal('x')" placeholder="如：年龄 / 时间/天" @input="setFigLabel('x', ($event.target as HTMLInputElement).value)" />
+                </label>
+                <label class="hist__lab">纵轴
+                  <input class="hist__in" :value="figLabelVal('y')" placeholder="留空 = 频率/组距" @input="setFigLabel('y', ($event.target as HTMLInputElement).value)" />
+                </label>
+              </div>
+              <div class="hist__hint">纵轴留空就还是「频率/组距」两行 ✓；横轴默认「分组」✓</div>
+            </div>
             <!-- 【M2.11】频率分布直方图：粘贴原始数据 → 自动分箱 ✓ -->
             <div v-if="isHistogram" class="hist">
               <div class="hist__t">粘贴原始数据 → 自动分组</div>

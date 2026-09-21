@@ -377,7 +377,7 @@ export type MathFigureKind =
   // ---- 辅助线 / 标注 ----
   | 'auxLine' | 'rightAngle' | 'equalMark' | 'parallelMark' | 'angleArc' | 'section'
   // ---- 统计图（【M2.11】复刻真题里的图 ✓） ----
-  | 'histogram' | 'freqLine' | 'scatter'
+  | 'histogram' | 'freqLine' | 'scatter' | 'freqTable'
 
 /** 数学图形分类（面板按这个分组显示） */
 export type MathFigureCat = '平面图形' | '立体几何' | '复刻图形' | '函数图像' | '圆锥曲线' | '辅助标注' | '统计图表'
@@ -388,6 +388,7 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   { v: 'histogram', label: '频率分布直方图', cat: '统计图表' },
   { v: 'freqLine', label: '频率分布折线图', cat: '统计图表' },
   { v: 'scatter', label: '散点图', cat: '统计图表' },
+  { v: 'freqTable', label: '频率分布表', cat: '统计图表' },
   // ---- 函数图像 ----
   { v: 'linear', label: '一次函数 y=x+1', cat: '函数图像' },
   { v: 'parabola', label: '二次函数 y=x²', cat: '函数图像' },
@@ -567,6 +568,8 @@ export interface MathFigureElement extends ElementBase {
   points?: number[]
   /** 可调参数（如 y=Asin(ωx+φ) 的 A/ω/φ、含参二次的 a），属性面板可改 */
   params?: Record<string, number>
+  /** 【M2.13】统计图的**坐标轴文字标注**（params 只收数字 ✗，这两个是字符串 ✓）—— 如 x: '年龄'、y: '频率/组距' ✓ */
+  figLabels?: { x?: string; y?: string }
   /** 3D 立体的投影深度(0~1) */
   depth?: number
   /** 每个顶点的字母标注（下标/上标用 _ 和 ^，如 "A_1" "B^2"、\' 加撇），长度与顶点数一致 */

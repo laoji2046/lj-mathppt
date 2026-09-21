@@ -233,6 +233,7 @@ export function figureParams(kind: string): ParamSpec[] {
   if (kind === 'histogram') return histogramParams()          // 【M2.11】统计图 ✓
   if (kind === 'freqLine') return freqLineParams()            // 【M2.12】
   if (kind === 'scatter') return scatterParams()
+  if (kind === 'freqTable') return freqTableParams()
   return FUNCTIONS[kind]?.params ?? CONICS[kind]?.params ?? []
 }
 
@@ -256,7 +257,7 @@ export function histogramParams(): ParamSpec[] {
   return out
 }
 /** 频率分布直方图：自己算坐标（不依赖其它图元的助手 ✓，改起来不怕碰坏别人 ✓） */
-export function histogramFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>): string {
+export function histogramFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>, labels?: { x?: string; y?: string }): string {
   const p = withParams('histogram', params)
   const n = Math.max(1, Math.min(HIST_MAX, Math.round(p.n || 8)))
   const bw = p.bw > 0 ? p.bw : 10
@@ -289,8 +290,9 @@ export function histogramFigure(w: number, h: number, stroke: string, sw: number
   // 纵轴（带原点断口 ✓ —— 表示纵轴不从 0 起 ✓）
   const x0 = X(start), y0 = Y(0), yTop = Y(ymax)
   L.push('<path d="M ' + n1(x0) + ' ' + n1(y0) + ' L ' + n1(x0 - 7) + ' ' + n1(y0 - 4) + ' L ' + n1(x0 - 4) + ' ' + n1(y0 - 8) + ' L ' + n1(x0) + ' ' + n1(y0 - 12) + '" fill="none" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
-  L.push('<line x1="' + n1(x0) + '" y1="' + n1(y0 - 12) + '" x2="' + n1(x0) + '" y2="' + n1(yTop - 4) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
-  L.push('<line x1="' + n1(x0) + '" y1="' + n1(y0) + '" x2="' + n1(X(start + n * bw) + 8) + '" y2="' + n1(y0) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+  // 【M2.13】两轴都带**箭头** ✓（老师要求 ✓）
+  L.push(axisArrow(x0, y0 - 12, x0, yTop - 4, ink, sw))
+  L.push(axisArrow(x0, y0, X(start + n * bw) + 16, y0, ink, sw))
   // 柱体 + 纵轴虚线 + 刻度
   // 纵轴刻度：画 1..4 档 ✓ —— **最上面那档不画** ✓（那一格留给「频率 / 组距」两行标题 ✓ 书上也常这样 ✓）
   // ⚠ 刻度数字别用 n1 ✗ —— 它是"一位小数"✓，0.005 会被写成 0.0 ✗（老师截图里就是 0.0 ✓）
@@ -323,19 +325,86 @@ export function histogramFigure(w: number, h: number, stroke: string, sw: number
   // 轴标题
   // 「频率 / 组距」写在**最左边那一列** ✓（刻度数字的左边 ✓ 不再叠在一起 ✓）
   const labX = fs * 1.35
-  L.push('<text x="' + n1(labX) + '" y="' + n1(yTop - fs * 0.15) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">频率</text>')
-  L.push('<text x="' + n1(labX) + '" y="' + n1(yTop + fs * 1.05) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">组距</text>')
-  L.push('<text x="' + n1(X(start + n * bw) + 10) + '" y="' + n1(y0 - fs * 0.3) + '" font-size="' + fs + '" fill="' + ink + '">分组</text>')
+  // 【M2.13】轴标注可手填 ✓（纵轴默认「频率/组距」两行 ✓，填了就用填的 ✓）
+  const yl = String(labels?.y || '')
+  if (yl) {
+    L.push('<text x="' + n1(fs * 1.35) + '" y="' + n1(yTop + fs * 0.4) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">' + yl + '</text>')
+  } else {
+    L.push('<text x="' + n1(labX) + '" y="' + n1(yTop - fs * 0.15) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">频率</text>')
+    L.push('<text x="' + n1(labX) + '" y="' + n1(yTop + fs * 1.05) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">组距</text>')
+  }
+  L.push('<text x="' + n1(X(start + n * bw) + 12) + '" y="' + n1(y0 - fs * 0.35) + '" font-size="' + fs + '" fill="' + ink + '">' + String(labels?.x || '分组') + '</text>')
   return L.join('')
 }
 
+
+/** 【M2.13】带箭头的坐标轴（统计图共用 ✓）—— 箭头 + 轴末端标注 ✓ */
+export function axisArrow(x1: number, y1: number, x2: number, y2: number, ink: string, sw: number, a = 7): string {
+  const ang = Math.atan2(y2 - y1, x2 - x1)
+  const p = (d: number, off: number) => n1(x2 - d * Math.cos(ang - off)) + ' ' + n1(y2 - d * Math.sin(ang - off))
+  return '<line x1="' + n1(x1) + '" y1="' + n1(y1) + '" x2="' + n1(x2) + '" y2="' + n1(y2) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>'
+    + '<path d="M ' + n1(x2) + ' ' + n1(y2) + ' L ' + p(a, 0.4) + ' L ' + p(a, -0.4) + ' Z" fill="' + ink + '"/>'
+}
+/** 【M2.13】频率分布表：分组区间 / 频数 / 频率 / 频率·组距 ✓（画成一张表 ✓ 可直接插讲义 ✓） */
+export function freqTableParams(): ParamSpec[] {
+  const out: ParamSpec[] = [
+    { key: 'start', label: '起始边界', def: 345, min: -1000, max: 100000, step: 1 },
+    { key: 'bw', label: '组距', def: 10, min: 0.1, max: 10000, step: 1 },
+    { key: 'n', label: '组数', def: 8, min: 1, max: HIST_MAX, step: 1 },
+    { key: 'showDensity', label: '显示「频率/组距」列', def: 0, min: 0, max: 1, step: 1, bool: true },
+  ]
+  const sample = [4, 8, 15, 22, 25, 14, 6, 2, 0, 0]
+  for (let i = 1; i <= HIST_MAX; i++) out.push({ key: 'f' + i, label: '第 ' + i + ' 组 频数', def: sample[i - 1] || 0, min: 0, max: 100000, step: 1, showIf: (q: Record<string, number>) => Number(q.n || 8) >= i })
+  return out
+}
+export function freqTableFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>, labels?: { x?: string; y?: string }): string {
+  const p = withParams('freqTable', params)
+  const n = Math.max(1, Math.min(HIST_MAX, Math.round(p.n || 8)))
+  const bw = p.bw > 0 ? p.bw : 10
+  const start = Number.isFinite(p.start) ? p.start : 0
+  const f: number[] = []
+  for (let i = 0; i < n; i++) f.push(Math.max(0, Math.round(p['f' + i + 1] || 0)))
+  const total = f.reduce((a, b) => a + b, 0) || 1
+  const density = p.showDensity > 0.5
+  const cols = density ? 4 : 3
+  const rowH = (h - 8) / (n + 2)
+  const x0 = 6, tw = w - 12
+  const ink = stroke || '#111'
+  const fs = Math.max(9, Math.min(15, Math.round(rowH * 0.5)))
+  const cw = tw / cols
+  const L: string[] = []
+  const fmt = (v: number) => {
+    const t = Number(v.toFixed(3))
+    return String(t)
+  }
+  const cell = (x: number, y: number, txt: string, bold: boolean) => '<text x="' + n1(x + cw / 2) + '" y="' + n1(y + rowH * 0.66) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle"' + (bold ? ' font-weight="bold"' : '') + '>' + txt + '</text>'
+  const head = density ? ['分组', '频数', '频率', '频率/组距'] : ['分组', '频数', '频率']
+  for (let c = 0; c <= cols; c++) L.push('<line x1="' + n1(x0 + cw * c) + '" y1="' + n1(4) + '" x2="' + n1(x0 + cw * c) + '" y2="' + n1(4 + rowH * (n + 2)) + '" stroke="' + ink + '" stroke-width="' + n1(sw * 0.8) + '"/>')
+  for (let r = 0; r <= n + 2; r++) L.push('<line x1="' + n1(x0) + '" y1="' + n1(4 + rowH * r) + '" x2="' + n1(x0 + tw) + '" y2="' + n1(4 + rowH * r) + '" stroke="' + ink + '" stroke-width="' + n1(sw * 0.8) + '"/>')
+  for (let c = 0; c < cols; c++) L.push(cell(x0 + cw * c, 4, head[c], true))
+  for (let i = 0; i < n; i++) {
+    const y = 4 + rowH * (i + 1)
+    const a = start + i * bw, b = start + (i + 1) * bw
+    L.push(cell(x0, y, '[' + fmt(a) + ', ' + fmt(b) + (i === n - 1 ? ']' : ')'), false))
+    L.push(cell(x0 + cw, y, String(f[i]), false))
+    L.push(cell(x0 + cw * 2, y, (f[i] / total).toFixed(3), false))
+    if (density) L.push(cell(x0 + cw * 3, y, (f[i] / total / bw).toFixed(4), false))
+  }
+  const yt = 4 + rowH * (n + 1)
+  L.push(cell(x0, yt, '合计', true))
+  L.push(cell(x0 + cw, yt, String(total), true))
+  L.push(cell(x0 + cw * 2, yt, '1.000', true))
+  if (density) L.push(cell(x0 + cw * 3, yt, '', true))
+  if (labels?.x) L.push('<text x="' + n1(x0 + tw / 2) + '" y="' + n1(4 + rowH * (n + 2) + fs * 1.2) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">' + labels.x + '</text>')
+  return L.join('')
+}
 /** 【M2.12】频率分布折线图：与直方图同一组分箱参数 ✓（可叠加直方图底稿 ✓） */
 export function freqLineParams(): ParamSpec[] {
   const out = histogramParams().slice()
   out.push({ key: 'bars', label: '叠加直方图底稿', def: 1, min: 0, max: 1, step: 1, bool: true })
   return out
 }
-export function freqLineFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>): string {
+export function freqLineFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>, labels?: { x?: string; y?: string }): string {
   const p = withParams('freqLine', params)
   const n = Math.max(2, Math.min(HIST_MAX, Math.round(p.n || 8)))
   const bw = p.bw > 0 ? p.bw : 10
@@ -350,8 +419,8 @@ export function freqLineFigure(w: number, h: number, stroke: string, sw: number,
   const fs = Math.max(10, Math.min(17, Math.round(w * 0.032)))
   const L: string[] = []
   const x0 = X(start), y0 = Y(0), yTop = Y(ymaxOf(p, mv))
-  L.push('<line x1="' + n1(x0) + '" y1="' + n1(yTop) + '" x2="' + n1(x0) + '" y2="' + n1(y0) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
-  L.push('<line x1="' + n1(x0) + '" y1="' + n1(y0) + '" x2="' + n1(X(start + n * bw) + 8) + '" y2="' + n1(y0) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+  L.push(axisArrow(x0, y0 - 12, x0, yTop - 4, ink, sw))                       // 【M2.13】箭头 ✓
+  L.push(axisArrow(x0, y0, X(start + n * bw) + 16, y0, ink, sw))
   const step = Number(p.ystep) > 0 ? Number(p.ystep) : niceStepOf(mv / 4)
   const ytop = ymaxOf(p, mv)
   for (let k = 1; step * k < ytop - step * 1e-6; k++) {
@@ -375,9 +444,13 @@ export function freqLineFigure(w: number, h: number, stroke: string, sw: number,
   pts.push(n1(X(start + n * bw)) + ',' + n1(y0))
   L.push('<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
   for (let i = 0; i < n; i++) L.push('<circle cx="' + n1(X(start + (i + 0.5) * bw)) + '" cy="' + n1(Y(vals[i])) + '" r="' + n1(sw * 1.3) + '" fill="' + ink + '"/>')
-  L.push('<text x="' + n1(fs * 1.35) + '" y="' + n1(yTop - fs * 0.15) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">频率</text>')
-  L.push('<text x="' + n1(fs * 1.35) + '" y="' + n1(yTop + fs * 1.05) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">组距</text>')
-  L.push('<text x="' + n1(X(start + n * bw) + 10) + '" y="' + n1(y0 - fs * 0.3) + '" font-size="' + fs + '" fill="' + ink + '">分组</text>')
+  const yl2 = String(labels?.y || '')
+  if (yl2) L.push('<text x="' + n1(fs * 1.35) + '" y="' + n1(yTop + fs * 0.4) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">' + yl2 + '</text>')
+  else {
+    L.push('<text x="' + n1(fs * 1.35) + '" y="' + n1(yTop - fs * 0.15) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">频率</text>')
+    L.push('<text x="' + n1(fs * 1.35) + '" y="' + n1(yTop + fs * 1.05) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">组距</text>')
+  }
+  L.push('<text x="' + n1(X(start + n * bw) + 12) + '" y="' + n1(y0 - fs * 0.35) + '" font-size="' + fs + '" fill="' + ink + '">' + String(labels?.x || '分组') + '</text>')
   return L.join('')
 }
 /** 【M2.12】散点图：x1..x12 / y1..y12 ✓（12 个点，够画一道题 ✓） */
@@ -390,7 +463,7 @@ export function scatterParams(): ParamSpec[] {
   }
   return out
 }
-export function scatterFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>): string {
+export function scatterFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>, labels?: { x?: string; y?: string }): string {
   const p = withParams('scatter', params)
   const n = Math.max(1, Math.min(SCATTER_MAX, Math.round(p.n || 6)))
   const pts: { x: number; y: number }[] = []
@@ -413,10 +486,10 @@ export function scatterFigure(w: number, h: number, stroke: string, sw: number, 
       L.push('<line x1="' + n1(padL) + '" y1="' + n1(gy) + '" x2="' + n1(w - padR) + '" y2="' + n1(gy) + '" stroke="#000" stroke-opacity="0.12" stroke-width="1"/>')
     }
   }
-  L.push('<line x1="' + n1(padL) + '" y1="' + n1(ya) + '" x2="' + n1(w - padR) + '" y2="' + n1(ya) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
-  L.push('<line x1="' + n1(xa) + '" y1="' + n1(h - padB) + '" x2="' + n1(xa) + '" y2="' + n1(padT) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
-  L.push('<text x="' + n1(w - padR) + '" y="' + n1(ya + fs * 1.3) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="end">x</text>')
-  L.push('<text x="' + n1(xa + fs * 0.5) + '" y="' + n1(padT + fs) + '" font-size="' + fs + '" fill="' + ink + '">y</text>')
+  L.push(axisArrow(padL, ya, w - padR, ya, ink, sw))     // 【M2.13】箭头 ✓
+  L.push(axisArrow(xa, h - padB, xa, padT, ink, sw))
+  L.push('<text x="' + n1(w - padR) + '" y="' + n1(ya + fs * 1.3) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="end">' + String(labels?.x || 'x') + '</text>')
+  L.push('<text x="' + n1(xa + fs * 0.5) + '" y="' + n1(padT + fs) + '" font-size="' + fs + '" fill="' + ink + '">' + String(labels?.y || 'y') + '</text>')
   L.push('<text x="' + n1(xa - fs * 0.4) + '" y="' + n1(ya + fs * 1.1) + '" font-size="' + fs + '" fill="' + ink + '">O</text>')
   if (p.line > 0.5 && pts.length > 1) L.push('<polyline points="' + pts.map((q) => n1(X(q.x)) + ',' + n1(Y(q.y))).join(' ') + '" fill="none" stroke="' + ink + '" stroke-width="1" stroke-dasharray="4 3"/>')
   for (const q of pts) L.push('<circle cx="' + n1(X(q.x)) + '" cy="' + n1(Y(q.y)) + '" r="' + n1(Math.max(2.6, sw * 1.4)) + '" fill="' + ink + '"/>')
@@ -1976,6 +2049,7 @@ export function viewAspect(kind: string): number | null {
   // 带控制点的平面图形（圆弧 / 指定半径圆）：给 6:5 的框 —— 圆与圆弧才不会被压成椭圆
   if (kind === 'histogram' || kind === 'freqLine') return 1.45 // 【M2.11/M2.12】统计图：略扁一点像书上 ✓
   if (kind === 'scatter') return 1.15
+  if (kind === 'freqTable') return 1.5                         // 【M2.13】频率分布表：按行数定高更合适，这里先用表宽 ✓
   if (kind === 'arcAngle' || kind === 'arc3pt' || kind === 'circleR' || kind === 'ellipseArc' || kind === 'ellipseAB') return 1.2
   return null
 }
