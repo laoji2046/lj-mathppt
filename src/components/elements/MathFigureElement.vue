@@ -4,7 +4,7 @@ import type { MathFigureElement, SlideElement } from '@/types'
 import { lineDashCss } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
 import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg, vertexDotsSvg } from '@/composables/solid3d'
-import { CONIC_KINDS, DEFAULT_PIECEWISE, FUNCTION_KINDS, conicFigure, conicLineDrag, conicLineHandles, conicPointDrag, conicPointHandles, customFigure, functionFigure, histogramFigure, piecewiseFigure } from '@/composables/mathPlot'
+import { CONIC_KINDS, DEFAULT_PIECEWISE, FUNCTION_KINDS, conicFigure, conicLineDrag, conicLineHandles, conicPointDrag, conicPointHandles, customFigure, freqLineFigure, functionFigure, histogramFigure, piecewiseFigure, scatterFigure } from '@/composables/mathPlot'
 import { isPlaneCtrlKind, planeDrag, planeHandles, planeSvg } from '@/composables/planeCtrl'
 import { solidSel, selectSolidVertex, selectSolidEdge, selectSolidFace, clearSolidSel } from '@/composables/solidSel'
 
@@ -90,6 +90,8 @@ const innerHtml = computed(() => {
   }
   // 【M2.11】频率分布直方图（统计图 ✓ 复刻真题里那种 ✓）
   if (kind === 'histogram') return histogramFigure(w, h, stroke, s, props.el.params)
+  if (kind === 'freqLine') return freqLineFigure(w, h, stroke, s, props.el.params)   // 【M2.12】统计图 ✓
+  if (kind === 'scatter') return scatterFigure(w, h, stroke, s, props.el.params)
   if (FUNCTION_KINDS.includes(kind)) return functionFigure(kind, w, h, stroke, s, props.el.params)
   if (CONIC_KINDS.includes(kind)) {
     return conicFigure(kind, w, h, stroke, s, fillColor, props.el.params,

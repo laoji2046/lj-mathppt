@@ -231,6 +231,8 @@ export interface FunctionDef {
 /** 取某个图形的可调参数说明（无参数返回空数组） */
 export function figureParams(kind: string): ParamSpec[] {
   if (kind === 'histogram') return histogramParams()          // 【M2.11】统计图 ✓
+  if (kind === 'freqLine') return freqLineParams()            // 【M2.12】
+  if (kind === 'scatter') return scatterParams()
   return FUNCTIONS[kind]?.params ?? CONICS[kind]?.params ?? []
 }
 
@@ -325,6 +327,123 @@ export function histogramFigure(w: number, h: number, stroke: string, sw: number
   L.push('<text x="' + n1(labX) + '" y="' + n1(yTop + fs * 1.05) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">组距</text>')
   L.push('<text x="' + n1(X(start + n * bw) + 10) + '" y="' + n1(y0 - fs * 0.3) + '" font-size="' + fs + '" fill="' + ink + '">分组</text>')
   return L.join('')
+}
+
+/** 【M2.12】频率分布折线图：与直方图同一组分箱参数 ✓（可叠加直方图底稿 ✓） */
+export function freqLineParams(): ParamSpec[] {
+  const out = histogramParams().slice()
+  out.push({ key: 'bars', label: '叠加直方图底稿', def: 1, min: 0, max: 1, step: 1, bool: true })
+  return out
+}
+export function freqLineFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>): string {
+  const p = withParams('freqLine', params)
+  const n = Math.max(2, Math.min(HIST_MAX, Math.round(p.n || 8)))
+  const bw = p.bw > 0 ? p.bw : 10
+  const start = Number.isFinite(p.start) ? p.start : 0
+  const vals: number[] = []
+  for (let i = 0; i < n; i++) vals.push(Math.max(0, p['h' + (i + 1)] || 0))
+  const mv = Math.max(0.0001, ...vals)
+  const padL = 74, padR = 30, padT = 34, padB = 40
+  const X = (v: number) => padL + ((v - start) / (n * bw)) * (w - padL - padR)
+  const Y = (v: number) => h - padB - (v / ymaxOf(p, mv)) * (h - padT - padB)
+  const ink = stroke || '#111'
+  const fs = Math.max(10, Math.min(17, Math.round(w * 0.032)))
+  const L: string[] = []
+  const x0 = X(start), y0 = Y(0), yTop = Y(ymaxOf(p, mv))
+  L.push('<line x1="' + n1(x0) + '" y1="' + n1(yTop) + '" x2="' + n1(x0) + '" y2="' + n1(y0) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+  L.push('<line x1="' + n1(x0) + '" y1="' + n1(y0) + '" x2="' + n1(X(start + n * bw) + 8) + '" y2="' + n1(y0) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+  const step = Number(p.ystep) > 0 ? Number(p.ystep) : niceStepOf(mv / 4)
+  const ytop = ymaxOf(p, mv)
+  for (let k = 1; step * k < ytop - step * 1e-6; k++) {
+    const yy = Y(step * k)
+    L.push('<line x1="' + n1(x0) + '" y1="' + n1(yy) + '" x2="' + n1(X(start + n * bw)) + '" y2="' + n1(yy) + '" stroke="#666" stroke-width="1" stroke-dasharray="5 4"/>')
+    L.push('<text x="' + n1(x0 - 8) + '" y="' + n1(yy + fs * 0.35) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="end">' + numOf(step * k) + '</text>')
+  }
+  for (let i = 0; i <= n; i++) L.push('<text x="' + n1(X(start + i * bw)) + '" y="' + n1(y0 + fs * 1.35) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">' + numOf(start + i * bw) + '</text>')
+  // 直方图底稿（浅色 ✓）
+  if (p.bars > 0.5) {
+    for (let i = 0; i < n; i++) {
+      const v = vals[i]; if (v <= 0) continue
+      const xa = X(start + i * bw), xb = X(start + (i + 1) * bw), yv = Y(v)
+      L.push('<rect x="' + n1(xa) + '" y="' + n1(yv) + '" width="' + n1(xb - xa) + '" height="' + n1(y0 - yv) + '" fill="#000" fill-opacity="0.05" stroke="' + ink + '" stroke-width="1" stroke-opacity="0.45"/>')
+    }
+  }
+  // 折线：各组**中点**连起来 ✓（首尾落到 x 轴上 ✓ 书上就是这么画的 ✓）
+  const pts: string[] = []
+  pts.push(n1(X(start)) + ',' + n1(y0))
+  for (let i = 0; i < n; i++) pts.push(n1(X(start + (i + 0.5) * bw)) + ',' + n1(Y(vals[i])))
+  pts.push(n1(X(start + n * bw)) + ',' + n1(y0))
+  L.push('<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+  for (let i = 0; i < n; i++) L.push('<circle cx="' + n1(X(start + (i + 0.5) * bw)) + '" cy="' + n1(Y(vals[i])) + '" r="' + n1(sw * 1.3) + '" fill="' + ink + '"/>')
+  L.push('<text x="' + n1(fs * 1.35) + '" y="' + n1(yTop - fs * 0.15) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">频率</text>')
+  L.push('<text x="' + n1(fs * 1.35) + '" y="' + n1(yTop + fs * 1.05) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">组距</text>')
+  L.push('<text x="' + n1(X(start + n * bw) + 10) + '" y="' + n1(y0 - fs * 0.3) + '" font-size="' + fs + '" fill="' + ink + '">分组</text>')
+  return L.join('')
+}
+/** 【M2.12】散点图：x1..x12 / y1..y12 ✓（12 个点，够画一道题 ✓） */
+export const SCATTER_MAX = 12
+export function scatterParams(): ParamSpec[] {
+  const out: ParamSpec[] = [{ key: 'grid', label: '画网格', def: 1, min: 0, max: 1, step: 1, bool: true }, { key: 'line', label: '连成折线', def: 0, min: 0, max: 1, step: 1, bool: true }, { key: 'n', label: '点数', def: 6, min: 1, max: SCATTER_MAX, step: 1 }]
+  for (let i = 1; i <= SCATTER_MAX; i++) {
+    out.push({ key: 'x' + i, label: '点 ' + i + ' 的 x', def: i, min: -1000, max: 1000, step: 0.5, showIf: (q: Record<string, number>) => Number(q.n || 6) >= i })
+    out.push({ key: 'y' + i, label: '点 ' + i + ' 的 y', def: ((i * 7) % 5) + 1, min: -1000, max: 1000, step: 0.5, showIf: (q: Record<string, number>) => Number(q.n || 6) >= i })
+  }
+  return out
+}
+export function scatterFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>): string {
+  const p = withParams('scatter', params)
+  const n = Math.max(1, Math.min(SCATTER_MAX, Math.round(p.n || 6)))
+  const pts: { x: number; y: number }[] = []
+  for (let i = 1; i <= n; i++) pts.push({ x: p['x' + i] || 0, y: p['y' + i] || 0 })
+  const xs = pts.map((q) => q.x), ys = pts.map((q) => q.y)
+  let xmin = Math.min(...xs), xmax = Math.max(...xs), ymin = Math.min(...ys), ymax = Math.max(...ys)
+  const padX = (xmax - xmin || 1) * 0.35, padY = (ymax - ymin || 1) * 0.35
+  xmin -= padX; xmax += padX; ymin -= padY; ymax += padY
+  const padL = 40, padR = 24, padT = 22, padB = 34
+  const X = (v: number) => padL + ((v - xmin) / (xmax - xmin)) * (w - padL - padR)
+  const Y = (v: number) => h - padB - ((v - ymin) / (ymax - ymin)) * (h - padT - padB)
+  const ink = stroke || '#111'
+  const fs = Math.max(10, Math.min(16, Math.round(w * 0.03)))
+  const L: string[] = []
+  const xa = X(0) > padL ? X(0) : padL, ya = Y(0) < h - padB ? Y(0) : h - padB
+  if (p.grid > 0.5) {
+    for (let k = 1; k <= 4; k++) {
+      const gx = padL + ((w - padL - padR) * k) / 5, gy = padT + ((h - padT - padB) * k) / 5
+      L.push('<line x1="' + n1(gx) + '" y1="' + n1(padT) + '" x2="' + n1(gx) + '" y2="' + n1(h - padB) + '" stroke="#000" stroke-opacity="0.12" stroke-width="1"/>')
+      L.push('<line x1="' + n1(padL) + '" y1="' + n1(gy) + '" x2="' + n1(w - padR) + '" y2="' + n1(gy) + '" stroke="#000" stroke-opacity="0.12" stroke-width="1"/>')
+    }
+  }
+  L.push('<line x1="' + n1(padL) + '" y1="' + n1(ya) + '" x2="' + n1(w - padR) + '" y2="' + n1(ya) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+  L.push('<line x1="' + n1(xa) + '" y1="' + n1(h - padB) + '" x2="' + n1(xa) + '" y2="' + n1(padT) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+  L.push('<text x="' + n1(w - padR) + '" y="' + n1(ya + fs * 1.3) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="end">x</text>')
+  L.push('<text x="' + n1(xa + fs * 0.5) + '" y="' + n1(padT + fs) + '" font-size="' + fs + '" fill="' + ink + '">y</text>')
+  L.push('<text x="' + n1(xa - fs * 0.4) + '" y="' + n1(ya + fs * 1.1) + '" font-size="' + fs + '" fill="' + ink + '">O</text>')
+  if (p.line > 0.5 && pts.length > 1) L.push('<polyline points="' + pts.map((q) => n1(X(q.x)) + ',' + n1(Y(q.y))).join(' ') + '" fill="none" stroke="' + ink + '" stroke-width="1" stroke-dasharray="4 3"/>')
+  for (const q of pts) L.push('<circle cx="' + n1(X(q.x)) + '" cy="' + n1(Y(q.y)) + '" r="' + n1(Math.max(2.6, sw * 1.4)) + '" fill="' + ink + '"/>')
+  return L.join('')
+}
+/** 频率折线图 / 散点图共用的两个小工具 ✓（与直方图同算法 ✓） */
+function niceStepOf(raw: number): number {
+  if (!(raw > 0)) return 1
+  const e = Math.pow(10, Math.floor(Math.log10(raw)))
+  const m = raw / e
+  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * e
+}
+function numOf(v: number): string {
+  if (!Number.isFinite(v)) return '0'
+  const a = Math.abs(v)
+  if (a >= 100) return String(Math.round(v))
+  if (a >= 1) return String(Math.round(v * 1000) / 1000)
+  if (a === 0) return '0'
+  return String(Number(v.toFixed(4)))
+}
+function ymaxOf(p: Record<string, number>, mv: number): number {
+  const step = Number(p.ystep) > 0 ? Number(p.ystep) : niceStepOf(mv / 4)
+  const fix = Number(p.ymax) || 0
+  if (fix > 0) return fix
+  let y = Math.ceil(mv / step) * step
+  if (y - mv < step * 0.2) y += step
+  return y
 }
 export function withParams(kind: string, params?: Record<string, number>): Record<string, number> {
   const out: Record<string, number> = {}
@@ -1855,7 +1974,8 @@ export function viewAspect(kind: string): number | null {
   const v = FUNCTIONS[kind]?.view ?? CONICS[kind]?.view
   if (v) return (v.xmax - v.xmin) / (v.ymax - v.ymin)
   // 带控制点的平面图形（圆弧 / 指定半径圆）：给 6:5 的框 —— 圆与圆弧才不会被压成椭圆
-  if (kind === 'histogram') return 1.45                        // 【M2.11】频率分布直方图：略扁一点像书上 ✓
+  if (kind === 'histogram' || kind === 'freqLine') return 1.45 // 【M2.11/M2.12】统计图：略扁一点像书上 ✓
+  if (kind === 'scatter') return 1.15
   if (kind === 'arcAngle' || kind === 'arc3pt' || kind === 'circleR' || kind === 'ellipseArc' || kind === 'ellipseAB') return 1.2
   return null
 }
