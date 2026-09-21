@@ -554,9 +554,10 @@ export function vennFigure(w: number, h: number, stroke: string, sw: number, par
   const mode = Math.round(p.mode || 0)
   const shade = p.shade > 0.5
   const ink = stroke || '#111'
-  const fs = Math.max(11, Math.min(20, Math.round(w * 0.045)))
   const cy = h * 0.52
   const r = Math.min(h * 0.3, w * 0.2)
+  // 【M2.15】集合字母**按圆半径定字号**（原来按整幅宽算 ✗ 偏小 ✓）—— 老师要求：字母更大、位置接近圆心 ✓
+  const fs = Math.max(13, Math.min(34, Math.round(r * 0.72)))
   const gap = r * (0.55 + (Number.isFinite(p.gap) ? p.gap : 1) * 0.25)   // 圆心距系数 ✓（可调 ✓）
   const cx1 = w / 2 - gap / 2, cx2 = w / 2 + gap / 2
   const circle = (cx: number, fill: string) => '<circle cx="' + n1(cx) + '" cy="' + n1(cy) + '" r="' + n1(r) + '" fill="' + fill + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>'
@@ -566,36 +567,39 @@ export function vennFigure(w: number, h: number, stroke: string, sw: number, par
   if (mode === 0) {                   // A ∩ B
     if (shade) L.push('<path d="' + lensPath(cx1, cy, r, gap) + '" fill="' + S + '"/>')
     L.push(circle(cx1, 'none'), circle(cx2, 'none'))
-    L.push(lbl(cx1 - r * 0.55, cy - r * 0.72, 'A'), lbl(cx2 + r * 0.55, cy - r * 0.72, 'B'))
+    // 字母贴近各自圆心 ✓、只往外让开一点（别压到中间那块阴影 ✓）
+    L.push(lbl(cx1 - r * 0.42, cy + fs * 0.35, 'A'), lbl(cx2 + r * 0.42, cy + fs * 0.35, 'B'))
     if (shade) L.push(lbl(w / 2, cy + r * 1.45, 'A∩B'))
   } else if (mode === 1) {            // A ∪ B
     if (shade) L.push('<g fill="' + S + '">' + circle(cx1, S) + circle(cx2, S) + '</g>')
     L.push(circle(cx1, 'none'), circle(cx2, 'none'))
-    L.push(lbl(cx1 - r * 0.55, cy - r * 0.72, 'A'), lbl(cx2 + r * 0.55, cy - r * 0.72, 'B'))
+    L.push(lbl(cx1 - r * 0.42, cy + fs * 0.35, 'A'), lbl(cx2 + r * 0.42, cy + fs * 0.35, 'B'))
   } else if (mode === 2) {            // ∁ᵤA
     const rw = w * 0.86, rh = h * 0.8, rx = w * 0.07, ry = h * 0.1
     L.push('<rect x="' + n1(rx) + '" y="' + n1(ry) + '" width="' + n1(rw) + '" height="' + n1(rh) + '" fill="' + (shade ? S : 'none') + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
     L.push(circle(cx1, '#fff'))
-    L.push(lbl(rx + fs, ry + fs * 1.2, 'U'))
-    L.push(lbl(cx1, cy + fs * 0.35, 'A'))
+    L.push(lbl(rx + fs * 0.9, ry + fs * 1.1, 'U'))
+    L.push(lbl(cx1, cy + fs * 0.35, 'A'))          // 补集：A 就在圆心 ✓
   } else if (mode === 3) {            // A ⊆ B
     const big = r * 1.5, small = r * 0.75
     if (shade) L.push(circle(cx2, small <= 0 ? 'none' : S))
     L.push('<circle cx="' + n1(cx2) + '" cy="' + n1(cy) + '" r="' + n1(big) + '" fill="none" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
     L.push('<circle cx="' + n1(cx2 - big * 0.35) + '" cy="' + n1(cy) + '" r="' + n1(small) + '" fill="none" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
-    L.push(lbl(cx2 + big * 0.55, cy - big * 0.7, 'B'), lbl(cx2 - big * 0.35, cy + fs * 0.35, 'A'))
+    L.push(lbl(cx2 + big * 0.62, cy + fs * 0.35, 'B'), lbl(cx2 - big * 0.35, cy + fs * 0.35, 'A'))   // A 在小圆圆心附近 ✓
   } else if (mode === 4) {            // A ∩ B = ∅
     const d2 = r * 2.4
     L.push(circle(w / 2 - d2 / 2, 'none'), circle(w / 2 + d2 / 2, 'none'))
-    L.push(lbl(w / 2 - d2 / 2, cy + fs * 0.35, 'A'), lbl(w / 2 + d2 / 2, cy + fs * 0.35, 'B'))
+    L.push(lbl(w / 2 - d2 / 2, cy + fs * 0.35, 'A'), lbl(w / 2 + d2 / 2, cy + fs * 0.35, 'B'))   // 相离：各自圆心 ✓
     L.push(lbl(w / 2, cy + r * 1.6, 'A∩B = ∅'))
   } else {                            // 三集合
     const rr = Math.min(h * 0.26, w * 0.17)
+    const fs3 = Math.max(12, Math.min(28, Math.round(rr * 0.66)))    // 【M2.15】三集合字母也按圆半径 ✓
     const c1 = { x: w / 2 - rr * 0.7, y: cy - rr * 0.62 }
     const c2 = { x: w / 2 + rr * 0.7, y: cy - rr * 0.62 }
     const c3 = { x: w / 2, y: cy + rr * 0.66 }
     for (const c of [c1, c2, c3]) L.push('<circle cx="' + n1(c.x) + '" cy="' + n1(c.y) + '" r="' + n1(rr) + '" fill="' + (shade ? 'rgba(0,0,0,0.10)' : 'none') + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
-    L.push(lbl(c1.x - rr * 0.75, c1.y - rr * 0.35, 'A'), lbl(c2.x + rr * 0.75, c2.y - rr * 0.35, 'B'), lbl(c3.x, c3.y + rr * 0.95, 'C'))
+    const lbl3 = (x: number, y: number, t: string) => '<text x="' + n1(x) + '" y="' + n1(y) + '" font-size="' + fs3 + '" fill="' + ink + '" text-anchor="middle">' + t + '</text>'
+    L.push(lbl3(c1.x - rr * 0.72, c1.y - rr * 0.1, 'A'), lbl3(c2.x + rr * 0.72, c2.y - rr * 0.1, 'B'), lbl3(c3.x, c3.y + rr * 0.92, 'C'))
   }
   return L.join('')
 }
