@@ -363,7 +363,8 @@ export function freqTableFigure(w: number, h: number, stroke: string, sw: number
   const bw = p.bw > 0 ? p.bw : 10
   const start = Number.isFinite(p.start) ? p.start : 0
   const f: number[] = []
-  for (let i = 0; i < n; i++) f.push(Math.max(0, Math.round(p['f' + i + 1] || 0)))
+  // ⚠ 必须写 'f' + (i + 1) ✗ —— 写成 'f' + i + 1 会拼出 'f01' ✓，频数永远是 0 ✗（截图里就是全 0 ✓）
+  for (let i = 0; i < n; i++) f.push(Math.max(0, Math.round(p['f' + (i + 1)] || 0)))
   const total = f.reduce((a, b) => a + b, 0) || 1
   const density = p.showDensity > 0.5
   const cols = density ? 4 : 3
