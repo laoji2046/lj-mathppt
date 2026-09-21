@@ -44,7 +44,8 @@ function headKind(title: string): 'h1' | 'example' | 'exercise' | 'variant' | 's
   if (/(例题|典型例|精讲)/.test(t)) return 'example'
   if (/变式/.test(t)) return 'variant'
   if (/(练习|作业|检测|巩固)/.test(t)) return 'exercise'
-  if (/(小结|总结|归纳|复习)/.test(t)) return 'summary'
+  // ⚠ 「复习引入」是**普通小节** ✗ —— 只有"本章小结 / 小结 / 总结 / 归纳小结"才算小结 ✓（老师那批 md 实测 ✓）
+  if (/(小结|总结|归纳)/.test(t)) return 'summary'
   return 'h1'
 }
 
@@ -67,7 +68,7 @@ export function mdToHandout(fileName: string, text: string): { meta: HandoutMeta
     if (!t) { flush(); continue }
     if (/^-{3,}$/.test(t)) { flush(); continue }
     let m = /^#\s+(.*)$/.exec(t)
-    if (m) { flush(); h1Title = m[1].replace(/^§\s*/, '').trim(); continue }
+    if (m) { flush(); attach = null; h1Title = m[1].replace(/^§\s*/, '').trim(); continue }
     m = /^##\s+(.*)$/.exec(t)
     if (m) {
       flush()
@@ -77,7 +78,7 @@ export function mdToHandout(fileName: string, text: string): { meta: HandoutMeta
       continue
     }
     m = /^###\s+(.*)$/.exec(t)
-    if (m) { flush(); blocks.push(makeBlock('h2', m[1].trim())); continue }
+    if (m) { flush(); attach = null; blocks.push(makeBlock('h2', m[1].trim())); continue }
     if (/^>\s?/.test(t)) { flush(); buf.push(t.replace(/^>\s?/, '').replace(/\s+$/, '')); continue }
     buf.push(line)
   }

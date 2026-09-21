@@ -13,7 +13,7 @@ import AppIcon from './AppIcon.vue'
 import { typesetMixed } from '@/composables/useMathJax'
 import {
   HD_BOOKS, HD_LABEL, HD_NUMBERED, HD_PRESSES, handout, hdVersion, makeBlock, outlineOf, pageHtmlOf,
-  rendered, saveHandout, setHandout, handoutToText, handoutPathOf, syncAutoTitle, autoTitleOf,
+  rendered, saveHandout, handoutToText, handoutPathOf, syncAutoTitle, autoTitleOf,
   initHandoutLib, openHandout, newHandout, deleteHandout, handoutTree, lib, curId, markSaved, currentSaved,
 } from '@/composables/useHandout'
 import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
