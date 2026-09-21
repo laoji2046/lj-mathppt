@@ -234,6 +234,18 @@ export function figureParams(kind: string): ParamSpec[] {
   if (kind === 'freqLine') return freqLineParams()            // 【M2.12】
   if (kind === 'scatter') return scatterParams()
   if (kind === 'freqTable') return freqTableParams()
+  if (kind === 'vennFigure') return [
+    { key: 'mode', label: '类型（0交 1并 2补 3子集 4相离 5三集）', def: 0, min: 0, max: 5, step: 1 },
+    { key: 'shade', label: '打阴影', def: 1, min: 0, max: 1, step: 1, bool: true },
+    { key: 'gap', label: '两圆间距', def: 1, min: 0.2, max: 3, step: 0.1 },
+  ]
+  if (kind === 'setNumberline') return [
+    { key: 'a', label: '左端点 a', def: -1, min: -1000, max: 1000, step: 0.5 },
+    { key: 'b', label: '右端点 b', def: 2, min: -1000, max: 1000, step: 0.5 },
+    { key: 'leftOpen', label: '左端点空心（开）', def: 1, min: 0, max: 1, step: 1, bool: true },
+    { key: 'rightOpen', label: '右端点空心（开）', def: 1, min: 0, max: 1, step: 1, bool: true },
+    { key: 'shadeLine', label: '把区间加粗标出', def: 1, min: 0, max: 1, step: 1, bool: true },
+  ]
   return FUNCTIONS[kind]?.params ?? CONICS[kind]?.params ?? []
 }
 
@@ -522,6 +534,92 @@ function ymaxOf(p: Record<string, number>, mv: number): number {
   let y = Math.ceil(mv / step) * step
   if (y - mv < step * 0.2) y += step
   return y
+}
+
+/* ================= 【M2.14】集合图形（Venn 六种 + 数轴区间） ================= */
+/** 圆的交点（两圆交点的两个 x/y）—— 画"交集那块透镜"用 ✓ */
+function lensPath(cx1: number, cy: number, r: number, d: number): string {
+  const a = r * r, h = Math.sqrt(Math.max(0, a - (d / 2) * (d / 2)))
+  const x1 = cx1 + d / 2, y1 = cy - h, y2 = cy + h
+  return 'M ' + n1(x1) + ' ' + n1(y1) + ' A ' + n1(r) + ' ' + n1(r) + ' 0 0 1 ' + n1(x1) + ' ' + n1(y2)
+    + ' A ' + n1(r) + ' ' + n1(r) + ' 0 0 1 ' + n1(x1) + ' ' + n1(y1) + ' Z'
+}
+/**
+ * 韦恩图（交集 / 并集 / 补集 / 子集 / 相离 / 三集合）✓
+ *   mode: 0=交集 1=并集 2=补集 3=子集 4=相离 5=三集合 ✓（参数是数字 ✓ 面板能直接选 ✓）
+ *   阴影用"白底抠洞"的稳妥办法 ✓（讲义/幻灯片都是白底 ✓ 不依赖 clip ✓）
+ */
+export function vennFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>): string {
+  const p = withParams('vennFigure', params)
+  const mode = Math.round(p.mode || 0)
+  const shade = p.shade > 0.5
+  const ink = stroke || '#111'
+  const fs = Math.max(11, Math.min(20, Math.round(w * 0.045)))
+  const cy = h * 0.52
+  const r = Math.min(h * 0.3, w * 0.2)
+  const gap = r * (0.55 + (Number.isFinite(p.gap) ? p.gap : 1) * 0.25)   // 圆心距系数 ✓（可调 ✓）
+  const cx1 = w / 2 - gap / 2, cx2 = w / 2 + gap / 2
+  const circle = (cx: number, fill: string) => '<circle cx="' + n1(cx) + '" cy="' + n1(cy) + '" r="' + n1(r) + '" fill="' + fill + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>'
+  const lbl = (x: number, y: number, t: string) => '<text x="' + n1(x) + '" y="' + n1(y) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">' + t + '</text>'
+  const L: string[] = []
+  const S = 'rgba(0,0,0,0.22)'        // 阴影色 ✓（浅灰 ✓ 黑白打印也看得见 ✓）
+  if (mode === 0) {                   // A ∩ B
+    if (shade) L.push('<path d="' + lensPath(cx1, cy, r, gap) + '" fill="' + S + '"/>')
+    L.push(circle(cx1, 'none'), circle(cx2, 'none'))
+    L.push(lbl(cx1 - r * 0.55, cy - r * 0.72, 'A'), lbl(cx2 + r * 0.55, cy - r * 0.72, 'B'))
+    if (shade) L.push(lbl(w / 2, cy + r * 1.45, 'A∩B'))
+  } else if (mode === 1) {            // A ∪ B
+    if (shade) L.push('<g fill="' + S + '">' + circle(cx1, S) + circle(cx2, S) + '</g>')
+    L.push(circle(cx1, 'none'), circle(cx2, 'none'))
+    L.push(lbl(cx1 - r * 0.55, cy - r * 0.72, 'A'), lbl(cx2 + r * 0.55, cy - r * 0.72, 'B'))
+  } else if (mode === 2) {            // ∁ᵤA
+    const rw = w * 0.86, rh = h * 0.8, rx = w * 0.07, ry = h * 0.1
+    L.push('<rect x="' + n1(rx) + '" y="' + n1(ry) + '" width="' + n1(rw) + '" height="' + n1(rh) + '" fill="' + (shade ? S : 'none') + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+    L.push(circle(cx1, '#fff'))
+    L.push(lbl(rx + fs, ry + fs * 1.2, 'U'))
+    L.push(lbl(cx1, cy + fs * 0.35, 'A'))
+  } else if (mode === 3) {            // A ⊆ B
+    const big = r * 1.5, small = r * 0.75
+    if (shade) L.push(circle(cx2, small <= 0 ? 'none' : S))
+    L.push('<circle cx="' + n1(cx2) + '" cy="' + n1(cy) + '" r="' + n1(big) + '" fill="none" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+    L.push('<circle cx="' + n1(cx2 - big * 0.35) + '" cy="' + n1(cy) + '" r="' + n1(small) + '" fill="none" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+    L.push(lbl(cx2 + big * 0.55, cy - big * 0.7, 'B'), lbl(cx2 - big * 0.35, cy + fs * 0.35, 'A'))
+  } else if (mode === 4) {            // A ∩ B = ∅
+    const d2 = r * 2.4
+    L.push(circle(w / 2 - d2 / 2, 'none'), circle(w / 2 + d2 / 2, 'none'))
+    L.push(lbl(w / 2 - d2 / 2, cy + fs * 0.35, 'A'), lbl(w / 2 + d2 / 2, cy + fs * 0.35, 'B'))
+    L.push(lbl(w / 2, cy + r * 1.6, 'A∩B = ∅'))
+  } else {                            // 三集合
+    const rr = Math.min(h * 0.26, w * 0.17)
+    const c1 = { x: w / 2 - rr * 0.7, y: cy - rr * 0.62 }
+    const c2 = { x: w / 2 + rr * 0.7, y: cy - rr * 0.62 }
+    const c3 = { x: w / 2, y: cy + rr * 0.66 }
+    for (const c of [c1, c2, c3]) L.push('<circle cx="' + n1(c.x) + '" cy="' + n1(c.y) + '" r="' + n1(rr) + '" fill="' + (shade ? 'rgba(0,0,0,0.10)' : 'none') + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+    L.push(lbl(c1.x - rr * 0.75, c1.y - rr * 0.35, 'A'), lbl(c2.x + rr * 0.75, c2.y - rr * 0.35, 'B'), lbl(c3.x, c3.y + rr * 0.95, 'C'))
+  }
+  return L.join('')
+}
+/** 数轴上的集合（区间）：实心 / 空心端点 + 区间 ✓ */
+export function setNumberlineFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>): string {
+  const p = withParams('setNumberline', params)
+  const a = Number.isFinite(p.a) ? p.a : -1
+  const b = Number.isFinite(p.b) ? p.b : 2
+  const lo = Math.min(a, b) - 1.5, hi = Math.max(a, b) + 1.5
+  const X = (v: number) => 34 + ((v - lo) / (hi - lo)) * (w - 60)
+  const y = h * 0.55
+  const ink = stroke || '#111'
+  const fs = Math.max(11, Math.min(18, Math.round(w * 0.038)))
+  const L: string[] = []
+  L.push(axisArrow(24, y, w - 18, y, ink, sw))                       // 数轴（带箭头 ✓）
+  L.push('<text x="' + n1(w - 14) + '" y="' + n1(y - fs * 0.5) + '" font-size="' + fs + '" fill="' + ink + '">x</text>')
+  const openA = p.leftOpen > 0.5, openB = p.rightOpen > 0.5
+  const dot = (v: number, open: boolean) => '<circle cx="' + n1(X(v)) + '" cy="' + n1(y) + '" r="' + n1(fs * 0.34) + '" fill="' + (open ? '#fff' : ink) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>'
+  if (p.shadeLine > 0.5) L.push('<line x1="' + n1(X(a)) + '" y1="' + n1(y) + '" x2="' + n1(X(b)) + '" y2="' + n1(y) + '" stroke="' + ink + '" stroke-width="' + n1(Math.max(3, sw * 2.2)) + '"/>')
+  L.push(dot(a, openA), dot(b, openB))
+  L.push('<text x="' + n1(X(a)) + '" y="' + n1(y + fs * 1.8) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">' + numOf(a) + '</text>')
+  L.push('<text x="' + n1(X(b)) + '" y="' + n1(y + fs * 1.8) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">' + numOf(b) + '</text>')
+  L.push('<text x="' + n1((X(a) + X(b)) / 2) + '" y="' + n1(y - fs * 1.1) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">' + (openA ? '(' : '[') + numOf(a) + ', ' + numOf(b) + (openB ? ')' : ']') + '</text>')
+  return L.join('')
 }
 export function withParams(kind: string, params?: Record<string, number>): Record<string, number> {
   const out: Record<string, number> = {}
@@ -2055,6 +2153,8 @@ export function viewAspect(kind: string): number | null {
   if (kind === 'histogram' || kind === 'freqLine') return 1.45 // 【M2.11/M2.12】统计图：略扁一点像书上 ✓
   if (kind === 'scatter') return 1.15
   if (kind === 'freqTable') return 1.5                         // 【M2.13】频率分布表：按行数定高更合适，这里先用表宽 ✓
+  if (kind === 'vennFigure') return 1.5                        // 【M2.14】集合 ✓
+  if (kind === 'setNumberline') return 2.4
   if (kind === 'arcAngle' || kind === 'arc3pt' || kind === 'circleR' || kind === 'ellipseArc' || kind === 'ellipseAB') return 1.2
   return null
 }
