@@ -585,8 +585,11 @@ async function insertToSlide() {
     }
     if (!els.length) { flash('这几道题没有可插入的文字'); return }
     store.addElements(els)   // 一次快照、一次选中新元素 ✓
-    emit('close')
-    flash('✓ 已插入 ' + list.length + ' 道到幻灯片'
+    // 【v1471】插完**不再把题库关掉** ✗ —— 老师的用法是「挑一道 → 插 → 再挑下一道」✓，
+    //   以前这里 emit('close') ✗ → 每插一道都要重新点菜单进题库 ✗（用户实测反馈 ✓）。
+    //   同时把**勾选清空** ✓：不清的话，下一次点「插入」还是插上一批（targets 优先取勾选 ✓）→ 会重复插 ✗
+    picked.value = []
+    flash('✓ 已插入 ' + list.length + ' 道到幻灯片（勾选已清空，继续挑下一道即可 ✓）'
       + (placed ? '，配图 ' + placed + ' 张' : '')
       + (missing ? '（有 ' + missing + ' 处图片标记未落地，需手动补图）' : ''))
   } finally {
