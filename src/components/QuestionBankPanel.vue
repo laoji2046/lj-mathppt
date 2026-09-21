@@ -386,6 +386,14 @@ function onPanelKey(e: KeyboardEvent) {
   emit('close')
 }
 onMounted(() => {
+  // 【v1472】恢复上次摆的位置与收起状态 ✓
+  try {
+    const w = JSON.parse(localStorage.getItem(WIN_KEY) || 'null')
+    if (w && typeof w.x === 'number' && typeof w.y === 'number') {
+      dragOff.value = { x: w.x, y: w.y }
+      collapsed.value = !!w.mini
+    }
+  } catch { /* 坏数据就当没存过 ✓ */ }
   document.addEventListener('keydown', onPanelKey)
   // 【v1466】面板开着时 Ctrl+V 直接贴图（只认剪贴板里的图片 ✓）
   document.addEventListener('paste', onPanelPaste)
@@ -393,7 +401,39 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onPanelKey)
   document.removeEventListener('paste', onPanelPaste)
+  // 【v1472】拖动的两个监听挂在 window 上 → 关面板时一定要摘掉 ✓
+  window.removeEventListener('mousemove', onHeadMove)
+  window.removeEventListener('mouseup', onHeadUp)
 })
+
+/* ---------------- 【v1472】浮窗：拖动 / 收起 / 记住位置 ---------------- */
+const WIN_KEY = 'lj-mathslides:qbwin'
+const collapsed = ref(false)
+const dragOff = ref({ x: 0, y: 0 })
+let dragFrom: { mx: number; my: number; ox: number; oy: number } | null = null
+function saveWin() {
+  try { localStorage.setItem(WIN_KEY, JSON.stringify({ x: dragOff.value.x, y: dragOff.value.y, mini: collapsed.value })) } catch { /* 存不上不影响用 */ }
+}
+function onHeadDown(e: MouseEvent) {
+  const t = e.target as HTMLElement | null
+  if (t && t.closest('button, input, select, textarea, a')) return   // 别抢按钮/输入框的点击 ✓
+  dragFrom = { mx: e.clientX, my: e.clientY, ox: dragOff.value.x, oy: dragOff.value.y }
+  window.addEventListener('mousemove', onHeadMove)
+  window.addEventListener('mouseup', onHeadUp)
+}
+function onHeadMove(e: MouseEvent) {
+  if (!dragFrom) return
+  dragOff.value = { x: dragFrom.ox + (e.clientX - dragFrom.mx), y: dragFrom.oy + (e.clientY - dragFrom.my) }
+}
+function onHeadUp() {
+  if (!dragFrom) return
+  dragFrom = null
+  saveWin()
+  window.removeEventListener('mousemove', onHeadMove)
+  window.removeEventListener('mouseup', onHeadUp)
+}
+function toggleMini() { collapsed.value = !collapsed.value; saveWin() }
+function resetWin() { dragOff.value = { x: 0, y: 0 }; collapsed.value = false; saveWin(); flash('已复位（居中、展开）') }
 
 function pickSection(s: string) {
   f.value.section = f.value.section === s ? undefined : s
@@ -614,7 +654,11 @@ async function addToPaper() {
     }
     if (!parts.length) { flash('这几道题没有可插入的文字'); return }
     sendToPaper({ text: parts.join('\n\n'), id: list.length === 1 ? list[0].id : 0, label: '试题 ' + list.length + ' 道', imgs })
-    flash('✓ 已加入试卷' + (imgs.length ? '（配图 ' + imgs.length + ' 张）' : '') + '，可继续选下一道')
+    // 【v1472】交给试卷后**自动收起** ✓ —— 不然题库盖着试卷，看不到插进去的效果 ✗
+    //   （要展开点标题栏那颗「▣ 展开」✓；位置与收起状态会记住 ✓）
+    collapsed.value = true
+    saveWin()
+    flash('✓ 已加入试卷' + (imgs.length ? '（配图 ' + imgs.length + ' 张）' : '') + ' —— 题库已收起，看完点标题栏「▣ 展开」继续挑 ✓')
   } finally {
     busy.value = false
   }
@@ -677,8 +721,13 @@ async function batchDelete() {
        而面板是 96vw×88vh，外面那圈很窄，鼠标移出去后只要有一次点击（含从别的窗口点回来重新聚焦）就丢了 ✗
        现在只认 ✕ 和 Esc（Esc 以前只在 title 里写着，其实没实现 ✓） -->
   <div class="qb">
-    <div class="qb__box">
-      <header class="qb__head">
+    <div
+      class="qb__box" :class="{ 'qb__box--mini': collapsed }"
+      :style="{ transform: 'translate(' + dragOff.x + 'px, ' + dragOff.y + 'px)' }"
+    >
+      <header class="qb__head" title="按住标题栏可以拖动这个窗口（位置会记住 ✓）" @mousedown="onHeadDown">
+        <button class="qb__btn qb__btn--mini" :title="collapsed ? '展开（看题、挑题）' : '收起成一条标题栏 —— 收起后能看清幻灯片 / 试卷，点这里再展开 ✓'" @click="toggleMini">{{ collapsed ? '▣ 展开' : '— 收起' }}</button>
+        <button class="qb__btn qb__btn--mini" title="位置复位到屏幕中央并展开" @click="resetWin">⟳</button>
         <span class="qb__title">试题库</span>
         <span class="qb__sub">共 {{ facets.total }} 道 · 当前筛出 {{ total }} 道</span>
         <span v-if="msg" class="qb__msg">{{ msg }}</span>
@@ -1011,9 +1060,18 @@ async function batchDelete() {
 </template>
 
 <style scoped>
-.qb { position: fixed; inset: 0; z-index: 400; background: rgba(20, 24, 34, 0.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; }
-.qb__box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: 96vw; max-width: 1280px; height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
-.qb__head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+/* 【v1472】题库从「全屏模态」改成**浮窗** ✓ —— 老师要的是「题库 / 试卷 / 幻灯片 自由切换」：
+   ① 遮罩去掉 + 外层 pointer-events:none → **点得到后面的画布/试卷** ✓（以前整屏都点不动 ✗）；
+   ② z-index 2050：**浮在试卷(2000)之上** ✓、仍在图形面板(2200)/三维(3200)之下 ✓（那些是从这里打开的 ✓）；
+   ③ 可拖动 + 可收起（标题栏右侧「收起」✓）—— 收起后只剩一条标题栏，看幻灯片/试卷不挡 ✓。
+   位置与收起状态记在 localStorage ✓，下次打开还是你摆的样子 ✓。 */
+.qb { position: fixed; inset: 0; z-index: 2050; background: transparent; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.qb__box { pointer-events: auto; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: 96vw; max-width: 1280px; height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
+.qb__box--mini { width: auto; max-width: 96vw; height: auto; }
+.qb__box--mini .qb__filters, .qb__box--mini .qb__body, .qb__box--mini .qb__foot, .qb__box--mini .qb__rpt { display: none; }
+.qb__head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: move; user-select: none; }
+.qb__box--mini .qb__head { border-bottom: 0; }
+.qb__btn--mini { height: 24px; padding: 0 8px; font-size: 12px; }
 .qb__title { font-size: 15px; font-weight: 700; color: var(--text); }
 .qb__sub { font-size: 12px; color: var(--muted); }
 .qb__msg { font-size: 12px; color: var(--brand-600, #534AB7); }
