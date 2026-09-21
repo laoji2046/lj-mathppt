@@ -625,7 +625,9 @@ watch(ver, () => { void refreshNow() })
           <!-- 【M2】抽屉：插题 / 抽题 / 知识底座 ✓（在 .hd__body 里当第 4 列 ✓ 不覆盖 A4 ✓） -->
         <div v-if="drawer" class="hd__drawer">
           <div class="hd__dhead">
-            <b>{{ drawer === 'pick' ? '从题库插题' : drawer === 'draw' ? '按规则抽题' : '知识底座' }}</b>
+            <!-- ⚠ 这里原来漏了 'lib' 分支 ✗ → 打开「讲义库」时标题还写着「知识底座」✓
+                 （老师一眼看过去就是"俩东西混在一起"✗ 已修 ✓） -->
+            <b>{{ drawer === 'lib' ? '讲义库（按册/章/节/课时）' : drawer === 'pick' ? '从题库插题' : drawer === 'draw' ? '按规则抽题' : '知识底座' }}</b>
             <button class="hd__mini" title="关闭" @click="drawer = ''">✕</button>
           </div>
 
