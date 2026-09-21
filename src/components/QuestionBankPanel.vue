@@ -397,7 +397,7 @@ onMounted(() => {
     // 【v1502】⚠ 老师实测：点「全屏」/改窗口大小之后 **面板显示不完整** ✗
     //   真因：位置是按**像素**记住的 ✓ —— 窗口变大变小后那对坐标就把面板顶到屏幕外了 ✗（右边/下边被切 ✓）
     //   修：每次打开面板（以及窗口尺寸变化时）把偏移**夹回可见范围** ✓ + CSS 再兜一层 max-width/height ✓
-    clampWin()
+    requestAnimationFrame(() => clampWin())
     window.addEventListener('resize', clampWin)
   } catch { /* 坏数据就当没存过 ✓ */ }
   document.addEventListener('keydown', onPanelKey)
@@ -420,13 +420,20 @@ const collapsed = ref(false)
 const dockRight = ref(false)
 const dragOff = ref({ x: 0, y: 0 })
 let dragFrom: { mx: number; my: number; ox: number; oy: number } | null = null
-/** 【v1502】把浮窗偏移夹回可见范围 ✓（面板默认是"居中 + 偏移"✓ 所以偏移不能超出半个窗口 ✓） */
+/** 【v1502】把浮窗偏移夹回可见范围 ✓
+ *  ⚠ 第一版按"固定余量"算 ✗ → 探针实测仍然出屏（面板本身宽 1280 ✓，允许 ±590 就把右边顶到 1950 > 1440 ✗）。
+ *  正解：按**面板实际尺寸**算 ✓ —— 居中布局下，偏移的极限就是 (窗口 − 面板)/2 ✓。*/
 function clampWin() {
-  const mx = Math.max(0, (window.innerWidth - 260) / 2)   // 至少留 260px 在屏幕里 ✓
-  const my = Math.max(0, (window.innerHeight - 160) / 2)
-  dragOff.value = {
-    x: Math.max(-mx, Math.min(mx, dragOff.value.x)),
-    y: Math.max(-my, Math.min(my, dragOff.value.y)),
+  const box = document.querySelector('.qb__box') as HTMLElement | null
+  const bw = box ? box.getBoundingClientRect().width : 320
+  const bh = box ? box.getBoundingClientRect().height : 200
+  const mx = Math.max(0, (window.innerWidth - bw) / 2)
+  const my = Math.max(0, (window.innerHeight - bh) / 2)
+  const nx = Math.max(-mx, Math.min(mx, dragOff.value.x))
+  const ny = Math.max(-my, Math.min(my, dragOff.value.y))
+  if (nx !== dragOff.value.x || ny !== dragOff.value.y) {
+    dragOff.value = { x: nx, y: ny }
+    saveWin()
   }
 }
 function saveWin() {
