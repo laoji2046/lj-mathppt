@@ -394,6 +394,11 @@ onMounted(() => {
       collapsed.value = !!w.mini
       dockRight.value = !!w.dock
     }
+    // 【v1502】⚠ 老师实测：点「全屏」/改窗口大小之后 **面板显示不完整** ✗
+    //   真因：位置是按**像素**记住的 ✓ —— 窗口变大变小后那对坐标就把面板顶到屏幕外了 ✗（右边/下边被切 ✓）
+    //   修：每次打开面板（以及窗口尺寸变化时）把偏移**夹回可见范围** ✓ + CSS 再兜一层 max-width/height ✓
+    clampWin()
+    window.addEventListener('resize', clampWin)
   } catch { /* 坏数据就当没存过 ✓ */ }
   document.addEventListener('keydown', onPanelKey)
   // 【v1466】面板开着时 Ctrl+V 直接贴图（只认剪贴板里的图片 ✓）
@@ -405,6 +410,7 @@ onBeforeUnmount(() => {
   // 【v1472】拖动的两个监听挂在 window 上 → 关面板时一定要摘掉 ✓
   window.removeEventListener('mousemove', onHeadMove)
   window.removeEventListener('mouseup', onHeadUp)
+  window.removeEventListener('resize', clampWin)
 })
 
 /* ---------------- 【v1472】浮窗：拖动 / 收起 / 记住位置 ---------------- */
@@ -414,6 +420,15 @@ const collapsed = ref(false)
 const dockRight = ref(false)
 const dragOff = ref({ x: 0, y: 0 })
 let dragFrom: { mx: number; my: number; ox: number; oy: number } | null = null
+/** 【v1502】把浮窗偏移夹回可见范围 ✓（面板默认是"居中 + 偏移"✓ 所以偏移不能超出半个窗口 ✓） */
+function clampWin() {
+  const mx = Math.max(0, (window.innerWidth - 260) / 2)   // 至少留 260px 在屏幕里 ✓
+  const my = Math.max(0, (window.innerHeight - 160) / 2)
+  dragOff.value = {
+    x: Math.max(-mx, Math.min(mx, dragOff.value.x)),
+    y: Math.max(-my, Math.min(my, dragOff.value.y)),
+  }
+}
 function saveWin() {
   try { localStorage.setItem(WIN_KEY, JSON.stringify({ x: dragOff.value.x, y: dragOff.value.y, mini: collapsed.value, dock: dockRight.value })) } catch { /* 存不上不影响用 */ }
 }
@@ -1076,7 +1091,7 @@ async function batchDelete() {
    ③ 可拖动 + 可收起（标题栏右侧「收起」✓）—— 收起后只剩一条标题栏，看幻灯片/试卷不挡 ✓。
    位置与收起状态记在 localStorage ✓，下次打开还是你摆的样子 ✓。 */
 .qb { position: fixed; inset: 0; z-index: 2050; background: transparent; display: flex; align-items: center; justify-content: center; pointer-events: none; }
-.qb__box { pointer-events: auto; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: 96vw; max-width: 1280px; height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
+.qb__box { pointer-events: auto; max-width: calc(100vw - 12px); max-height: calc(100vh - 12px); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: 96vw; max-width: 1280px; height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
 .qb__box--mini { width: auto; max-width: 96vw; height: auto; }
 .qb__box--mini .qb__filters, .qb__box--mini .qb__body, .qb__box--mini .qb__foot, .qb__box--mini .qb__rpt { display: none; }
 .qb__head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: move; user-select: none; }
