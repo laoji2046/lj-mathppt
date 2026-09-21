@@ -57,6 +57,10 @@ export interface HandoutMeta {
   chapter: string
   /** 第几节 ✓ */
   section: string
+  /** 【v1476】第几课时（第 1 课时 / 第 2 课时 … ✓） */
+  period: string
+  /** 【v1476】标题是否按教材自动生成（默认 true ✓；手改过标题就自动关掉 ✓） */
+  autoTitle?: boolean
 }
 
 export interface Handout {
@@ -117,7 +121,7 @@ export function sampleHandout(): Handout {
     meta: {
       school: '示例中学', subject: '数学', title: '椭圆外点切线的轨迹',
       subtitle: '一轮复习 · 圆锥曲线专题（一）', grade: '高三', teacher: '', date: new Date().toISOString().slice(0, 10),
-      press: '人教版', book: '选择性必修一', chapter: '3', section: '1',
+      press: '人教版', book: '选择性必修一', chapter: '3', section: '1', period: '1', autoTitle: false,
     },
     blocks: [
       mk('h1', '一、知识梳理'),
@@ -144,7 +148,8 @@ function normalize(h: unknown): Handout {
   const meta: HandoutMeta = {
     school: '', subject: '数学', title: '未命名讲义', subtitle: '', grade: '', teacher: '',
     date: new Date().toISOString().slice(0, 10),
-    press: '人教版', book: '必修一', chapter: '', section: '',
+    press: '人教版', book: '必修一', chapter: '', section: '', period: '',
+    autoTitle: true,
     ...(o.meta || {}),
   }
   const blocks: HdBlock[] = Array.isArray(o.blocks)
@@ -271,6 +276,34 @@ export function outlineOf(h: Handout): HdOutlineNode[] {
   return roots
 }
 
+/**
+ * 【v1476】按教材**自动生成讲义标题** ✓
+ *   例：人教版·选择性必修一 第 3 章 第 1 节（第 2 课时）✓
+ *   —— 章/节/课时缺哪个就省哪个 ✓；全空就回退到「未命名讲义」✓
+ */
+export function autoTitleOf(h: Handout): string {
+  const m = h.meta
+  const head = [m.press, m.book].filter(Boolean).join('·')
+  const num = (v: string, unit: string) => {
+    const s = String(v || '').trim()
+    if (!s) return ''
+    if (s.charAt(0) === '第') return s
+    return '第 ' + s + ' ' + unit
+  }
+  const parts = [num(m.chapter, '章'), num(m.section, '节')].filter(Boolean).join(' ')
+  const per = String(m.period || '').trim() ? '（第 ' + String(m.period).replace(/^第\s*/, '') + ' 课时）' : ''
+  const body = [head, parts].filter(Boolean).join(' ')
+  if (!body) return ''
+  return body + per
+}
+
+/** 自动标题开着时，把标题同步成生成值 ✓（改教材定位 → 标题跟着变 ✓） */
+export function syncAutoTitle(h: Handout): void {
+  if (h.meta.autoTitle === false) return
+  const t = autoTitleOf(h)
+  if (t) h.meta.title = t
+}
+
 /** 抬头那一行：教材版本 · 册 · 第几章 · 第几节 ✓（有才显示 ✓） */
 export function handoutPathOf(h: Handout): string {
   const m = h.meta
@@ -295,7 +328,7 @@ export function pageHtmlOf(h: Handout, v: HdVersion): string {
   const L: string[] = []
   L.push('<div class="hd-ptitle">' + hdEsc(m.title || '未命名讲义') + '</div>')
   if (m.subtitle) L.push('<div class="hd-psub">' + hdEsc(m.subtitle) + '</div>')
-  const metaBits = [m.school, m.subject, m.grade, m.teacher ? '教师：' + m.teacher : '', m.date, handoutPathOf(h), v === 'student' ? '学生版' : '教师版']
+  const metaBits = [m.school, m.subject, m.grade, m.teacher ? '教师：' + m.teacher : '', m.date, handoutPathOf(h), m.period ? '第 ' + String(m.period).replace(/^第\s*/, '') + ' 课时' : '', v === 'student' ? '学生版' : '教师版']
     .filter(Boolean).map((x) => '<span>' + hdEsc(x) + '</span>').join('')
   L.push('<div class="hd-pmeta">' + metaBits + '</div>')
 

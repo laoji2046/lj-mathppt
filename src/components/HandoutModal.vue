@@ -13,7 +13,7 @@ import AppIcon from './AppIcon.vue'
 import { typesetMixed } from '@/composables/useMathJax'
 import {
   HD_BOOKS, HD_LABEL, HD_NUMBERED, HD_PRESSES, handout, hdVersion, makeBlock, outlineOf, pageHtmlOf,
-  rendered, saveHandout, setHandout, handoutToText, handoutPathOf,
+  rendered, saveHandout, setHandout, handoutToText, handoutPathOf, syncAutoTitle, autoTitleOf,
 } from '@/composables/useHandout'
 import type { HdBlock, HdBlockType, HdRender } from '@/composables/useHandout'
 
@@ -124,6 +124,14 @@ function importJson(e: Event) {
 function onKey(e: KeyboardEvent) { if (e.key === 'Escape') emit('close') }
 onMounted(() => { document.addEventListener('keydown', onKey); void refreshNow() })
 onBeforeUnmount(() => { document.removeEventListener('keydown', onKey); if (timer) window.clearTimeout(timer) })
+/** 【v1476】教材定位一变，标题跟着自动生成 ✓（自动标题关掉后就不再覆盖老师手写的 ✓） */
+watch(() => [h.value.meta.press, h.value.meta.book, h.value.meta.chapter, h.value.meta.section, h.value.meta.period], () => {
+  syncAutoTitle(h.value)
+  void nextTick(() => refreshNow())
+})
+function regenTitle() { h.value.meta.autoTitle = true; syncAutoTitle(h.value); void refreshNow(); flash('标题已按教材重新生成 ✓') }
+function onTitleInput() { h.value.meta.autoTitle = false; void refresh() }   // 手改标题 → 自动模式关掉 ✓
+
 /** 内容一变就重排（深度监听 ✓）—— 加的块、改的公式都会立刻渲染 ✓ */
 watch(() => h.value, () => refresh(), { deep: true })
 watch(ver, () => { void refreshNow() })
@@ -199,10 +207,20 @@ watch(ver, () => { void refreshNow() })
               <label>第几章<input v-model="h.meta.chapter" placeholder="3" /></label>
               <label>第几节<input v-model="h.meta.section" placeholder="1" /></label>
             </div>
+            <div class="hd__row2">
+              <label>第几课时<input v-model="h.meta.period" placeholder="2" /></label>
+              <label class="hd__chk hd__chk--t"><input v-model="h.meta.autoTitle" type="checkbox" @change="h.meta.autoTitle && regenTitle()" /> 标题自动生成</label>
+            </div>
             <div class="hd__hint2">抬头显示：{{ path || '（未填）' }} ✓ 目录树按章 / 节块自动长 ✓</div>
 
             <div class="hd__t1">讲义信息</div>
-            <label>标题<input v-model="h.meta.title" /></label>
+            <label>标题
+              <span class="hd__titleline">
+                <input v-model="h.meta.title" :readonly="h.meta.autoTitle !== false" :title="h.meta.autoTitle !== false ? '按教材自动生成中（改这里会切成手动 ✓）' : '手动标题 ✓'" @input="onTitleInput" />
+                <button class="hd__mini" title="按教材重新生成标题" @click="regenTitle">↻</button>
+              </span>
+            </label>
+            <div v-if="h.meta.autoTitle !== false" class="hd__hint2">自动生成中：{{ autoTitleOf(h) || '（把教材定位填上就会生成 ✓）' }}</div>
             <label>副标题<input v-model="h.meta.subtitle" /></label>
             <div class="hd__row2">
               <label>学校<input v-model="h.meta.school" /></label>
@@ -280,6 +298,11 @@ watch(ver, () => { void refreshNow() })
 .hd__right input, .hd__right select, .hd__right textarea { padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; font-family: inherit; color: var(--text); background: #fff; }
 .hd__row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .hd__chk { flex-direction: row; align-items: center; gap: 6px; }
+.hd__chk--t { justify-content: flex-start; padding-top: 14px; }
+.hd__titleline { display: flex; gap: 4px; align-items: center; }
+.hd__titleline input { flex: 1; }
+.hd__titleline input[readonly] { background: #f6f5f1; color: #555; }
+.hd__mini { width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 6px; background: #fff; cursor: pointer; }
 .hd__rnd { border-top: 1px dashed var(--border); padding-top: 8px; margin-top: 4px; }
 .hd__rndrow { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }
 .hd__rndrow select { flex: 1; }
