@@ -339,11 +339,15 @@ export function histogramFigure(w: number, h: number, stroke: string, sw: number
 
 
 /** 【M2.13】带箭头的坐标轴（统计图共用 ✓）—— 箭头 + 轴末端标注 ✓ */
-export function axisArrow(x1: number, y1: number, x2: number, y2: number, ink: string, sw: number, a = 7): string {
+export function axisArrow(x1: number, y1: number, x2: number, y2: number, ink: string, sw: number, a = 16): string {
   const ang = Math.atan2(y2 - y1, x2 - x1)
   const p = (d: number, off: number) => n1(x2 - d * Math.cos(ang - off)) + ' ' + n1(y2 - d * Math.sin(ang - off))
-  return '<line x1="' + n1(x1) + '" y1="' + n1(y1) + '" x2="' + n1(x2) + '" y2="' + n1(y2) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>'
-    + '<path d="M ' + n1(x2) + ' ' + n1(y2) + ' L ' + p(a, 0.4) + ' L ' + p(a, -0.4) + ' Z" fill="' + ink + '"/>'
+  // ⚠ 箭头原来 a=7 / 半角 0.4 ✗ —— 又短又宽 ✓，缩到讲义里几乎看不见 ✗（老师截图 ✓）
+  //   改成"细长实心三角" ✓：长约 16 单位（≈ 线宽的 8~10 倍 ✓）、半角 0.2 ✓ —— 就是教材上那种箭头 ✓
+  const half = 0.2
+  const shaftEnd = 0.9                                    // 线画到箭头根部稍前一点 ✓ 免得从三角里透出来 ✓
+  return '<line x1="' + n1(x1) + '" y1="' + n1(y1) + '" x2="' + n1(x2 - (a * shaftEnd) * Math.cos(ang)) + '" y2="' + n1(y2 - (a * shaftEnd) * Math.sin(ang)) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>'
+    + '<path d="M ' + n1(x2) + ' ' + n1(y2) + ' L ' + p(a, half) + ' L ' + p(a, -half) + ' Z" fill="' + ink + '"/>'
 }
 /** 【M2.13】频率分布表：分组区间 / 频数 / 频率 / 频率·组距 ✓（画成一张表 ✓ 可直接插讲义 ✓） */
 export function freqTableParams(): ParamSpec[] {
