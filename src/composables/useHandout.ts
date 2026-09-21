@@ -42,6 +42,8 @@ export interface HdBlock {
   ref?: number
   /** 【M2】知识底座条目的标题（插进来时带的 ✓） */
   kbTitle?: string
+  /** 【M2.5】插图（type = 'figure' 时用 ✓）—— 大图走内容库 assetId ✓（与题库同一套，省 localStorage ✓） */
+  img?: { src?: string; assetId?: number; caption?: string }
 }
 
 export interface HandoutMeta {
@@ -168,6 +170,7 @@ function normalize(h: unknown): Handout {
           render: { ...HD_DEFAULT_RENDER[t], ...(b.render || {}) },
           ref: Number(b.ref) || undefined,
           kbTitle: b.kbTitle ? String(b.kbTitle) : undefined,
+          img: b.img && (b.img.src || b.img.assetId) ? { src: b.img.src ? String(b.img.src) : undefined, assetId: Number(b.img.assetId) || undefined, caption: b.img.caption ? String(b.img.caption) : undefined } : undefined,
         } as HdBlock
       })
     : []
@@ -184,6 +187,8 @@ export function loadHandout(): Handout {
 
 export function saveHandout(h: Handout) {
   try { localStorage.setItem(KEY, JSON.stringify(h)) } catch { /* 存不上也不影响用 ✓ */ }
+  // 【M2.5】顺手写回讲义库（多份讲义 ✓）—— 库还没初始化时是空操作 ✓
+  try { saveHandoutLibrary() } catch { /* 忽略 */ }
 }
 
 /** 一份全局讲义（编辑器与导出共用 ✓） */
@@ -304,6 +309,145 @@ export function autoTitleOf(h: Handout): string {
 }
 
 /** 自动标题开着时，把标题同步成生成值 ✓（改教材定位 → 标题跟着变 ✓） */
+
+/* ---------------- 【M2.5】讲义库（多份）+ 图片块 ---------------- */
+
+/** 一份讲义 = 内容 + id + 时间 ✓ */
+export interface HdDoc extends Handout { id: string; updatedAt: string }
+
+const LIB_KEY = 'lj-mathslides-vue:handout-lib'
+const CUR_KEY = 'lj-mathslides-vue:handout-cur'
+
+/** 讲义库（全部讲义 ✓） */
+export const lib = ref<HdDoc[]>([])
+/** 当前打开的是哪一份 ✓ */
+export const curId = ref('')
+
+function readLib(): HdDoc[] | null {
+  try {
+    const raw = localStorage.getItem(LIB_KEY)
+    if (!raw) return null
+    const arr = JSON.parse(raw) as HdDoc[]
+    if (!Array.isArray(arr) || !arr.length) return null
+    return arr.map((d) => ({ ...normalize(d), id: String(d.id || hdId()), updatedAt: String(d.updatedAt || nowStamp()) }))
+  } catch { return null }
+}
+function writeLib() {
+  try { localStorage.setItem(LIB_KEY, JSON.stringify(lib.value)) } catch { /* 存不上不影响用 ✓ */ }
+}
+function nowStamp(): string { return new Date().toISOString().slice(0, 16).replace('T', ' ') }
+
+/** 库里的当前那份（没有就建一份 ✓） */
+function ensureCurrent(): HdDoc {
+  if (curId.value) {
+    const d = lib.value.find((x) => x.id === curId.value)
+    if (d) return d
+  }
+  // ① 老版本只存了一份（lj-mathslides-vue:handout ✓）→ 迁进来 ✓
+  const legacy = (() => { try { return localStorage.getItem(KEY) } catch { return null } })()
+  const first: HdDoc = legacy
+    ? { ...normalize(JSON.parse(legacy)), id: hdId(), updatedAt: nowStamp() }
+    : { ...sampleHandout(), id: hdId(), updatedAt: nowStamp() }
+  lib.value = [first, ...lib.value]
+  curId.value = first.id
+  writeLib()
+  return first
+}
+
+/** 载入讲义库（应用启动/首次打开讲义时调一次 ✓） */
+export function initHandoutLib() {
+  if (!lib.value.length) lib.value = readLib() || []
+  try { curId.value = localStorage.getItem(CUR_KEY) || '' } catch { curId.value = '' }
+  const d = ensureCurrent()
+  handout.value = { meta: d.meta, blocks: d.blocks }
+  saveHandout(handout.value)
+}
+
+/** 把当前内容写回库里（每次改动都会调 ✓） */
+export function saveHandoutLibrary() {
+  const d = lib.value.find((x) => x.id === curId.value)
+  if (!d) return
+  d.meta = handout.value.meta
+  d.blocks = handout.value.blocks
+  d.updatedAt = nowStamp()
+  writeLib()
+  try { localStorage.setItem(CUR_KEY, curId.value) } catch { /* 忽略 */ }
+}
+
+/** 打开另一份 ✓（会先把当前这份存好 ✓） */
+export function openHandout(id: string) {
+  if (id === curId.value) return
+  saveHandoutLibrary()
+  const d = lib.value.find((x) => x.id === id)
+  if (!d) return
+  curId.value = id
+  handout.value = { meta: d.meta, blocks: d.blocks }
+  try { localStorage.setItem(CUR_KEY, id) } catch { /* 忽略 */ }
+}
+
+/** 新建一份 ✓（沿用上一次的教材定位/学校信息，省得每次重填 ✓） */
+export function newHandout(): void {
+  saveHandoutLibrary()
+  const prev = handout.value.meta
+  const doc: HdDoc = {
+    id: hdId(), updatedAt: nowStamp(),
+    meta: {
+      ...prev, title: '未命名讲义', subtitle: '', period: '', chapter: '', section: '',
+      autoTitle: true,
+      date: new Date().toISOString().slice(0, 10),
+    },
+    blocks: [makeBlock('h1', '一、知识梳理')],
+  }
+  syncAutoTitle(doc)
+  lib.value = [doc, ...lib.value]
+  curId.value = doc.id
+  handout.value = { meta: doc.meta, blocks: doc.blocks }
+  writeLib()
+  try { localStorage.setItem(CUR_KEY, doc.id) } catch { /* 忽略 */ }
+}
+
+/** 删除一份（库里至少留一份 ✓） */
+export function deleteHandout(id: string) {
+  if (lib.value.length <= 1) return
+  lib.value = lib.value.filter((x) => x.id !== id)
+  writeLib()
+  if (curId.value === id) {
+    const first = lib.value[0]
+    curId.value = first.id
+    handout.value = { meta: first.meta, blocks: first.blocks }
+  }
+}
+
+/** 讲义库目录树：册 → 章 → 节 → 课时（讲义）✓ —— 左侧「讲义库」用它 ✓ */
+export interface HdLibNode { key: string; label: string; docs: HdDoc[]; kids: HdLibNode[] }
+export function handoutTree(): HdLibNode[] {
+  const books = new Map<string, Map<string, Map<string, HdDoc[]>>>()
+  for (const d of lib.value) {
+    const bk = String(d.meta.book || '未分册')
+    const cp = String(d.meta.chapter || '').trim() || '未分章'
+    const sc = String(d.meta.section || '').trim() || '未分节'
+    if (!books.has(bk)) books.set(bk, new Map())
+    const ch = books.get(bk) as Map<string, Map<string, HdDoc[]>>
+    if (!ch.has(cp)) ch.set(cp, new Map())
+    const se = ch.get(cp) as Map<string, HdDoc[]>
+    if (!se.has(sc)) se.set(sc, [])
+    ;(se.get(sc) as HdDoc[]).push(d)
+  }
+  const out: HdLibNode[] = []
+  for (const [bk, chs] of books) {
+    const kids: HdLibNode[] = []
+    for (const [cp, secs] of chs) {
+      const skids: HdLibNode[] = []
+      for (const [sc, docs] of secs) {
+        skids.push({ key: bk + '/' + cp + '/' + sc, label: sc === '未分节' ? sc : '第 ' + sc + ' 节', docs: docs.slice().sort((a, b) => (a.meta.period || '').localeCompare(b.meta.period || '')), kids: [] })
+      }
+      kids.push({ key: bk + '/' + cp, label: cp === '未分章' ? cp : '第 ' + cp + ' 章', docs: [], kids: skids })
+    }
+    out.push({ key: bk, label: bk, docs: [], kids })
+  }
+  return out
+}
+
 export function syncAutoTitle(h: Handout): void {
   if (h.meta.autoTitle === false) return
   const t = autoTitleOf(h)
@@ -328,7 +472,7 @@ export function handoutPathOf(h: Handout): string {
  *   改成「Vue 只给一个空容器 + 内容变了整块重写 + typesetMixed 排版」✓ ——
  *   与题库预览 / 试卷同一条路 ✓（那两处一直没这毛病 ✓）。
  */
-export function pageHtmlOf(h: Handout, v: HdVersion): string {
+export function pageHtmlOf(h: Handout, v: HdVersion, imgMap: Record<string, string> = {}): string {
   const { main, notes } = renderFor(h, v)
   const m = h.meta
   const L: string[] = []
@@ -349,6 +493,16 @@ export function pageHtmlOf(h: Handout, v: HdVersion): string {
     if (t === 'h1') { L.push('<h1 class="hd-h1"' + id + '>' + body + '</h1>'); continue }
     if (t === 'h2') { L.push('<h2 class="hd-h2"' + id + '>' + body + '</h2>'); continue }
     if (t === 'formula') { L.push('<div class="hd-formula"' + id + '>' + body + '</div>'); continue }
+    if (t === 'figure') {
+      const src = imgMap[it.b.id] || it.b.img?.src || ''
+      if (src) {
+        L.push('<figure class="hd-fig"' + id + '><img src="' + hdEsc(src) + '" alt="' + hdEsc(it.b.img?.caption || '插图') + '" />'
+          + (it.b.img?.caption ? '<figcaption>' + hdEsc(it.b.img.caption) + '</figcaption>' : '') + '</figure>')
+      } else {
+        L.push('<div class="hd-fig hd-fig--empty"' + id + '>（插图：还没选图片）</div>')
+      }
+      continue
+    }
     if (t === 'goal') { L.push('<div class="hd-bx hd-bx--goal"' + id + '><b>' + lab('学习目标') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
     if (t === 'knowledge') { L.push('<div class="hd-bx hd-bx--know"' + id + '><b>' + lab('知识梳理') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
     if (t === 'note') { L.push('<div class="hd-bx hd-bx--note"' + id + '><b>' + lab('提示') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }

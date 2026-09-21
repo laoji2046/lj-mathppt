@@ -14,7 +14,9 @@ import { typesetMixed } from '@/composables/useMathJax'
 import {
   HD_BOOKS, HD_LABEL, HD_NUMBERED, HD_PRESSES, handout, hdVersion, makeBlock, outlineOf, pageHtmlOf,
   rendered, saveHandout, setHandout, handoutToText, handoutPathOf, syncAutoTitle, autoTitleOf,
+  initHandoutLib, openHandout, newHandout, deleteHandout, handoutTree, lib, curId,
 } from '@/composables/useHandout'
+import { loadAssets, assetSrc, saveAsset } from '@/composables/useAssets'
 import type { HdBlock, HdBlockType, HdRender } from '@/composables/useHandout'
 import { qFacets } from '@/composables/useQuestionBank'
 import type { QItem } from '@/composables/useQuestionBank'
@@ -36,7 +38,7 @@ const ADD: { t: HdBlockType; label: string }[] = [
   { t: 'goal', label: '目标' }, { t: 'knowledge', label: '知识' }, { t: 'example', label: '例题' }, { t: 'variant', label: '变式' },
   { t: 'exercise', label: '练习' }, { t: 'answer', label: '答案' }, { t: 'solution', label: '解析' },
   { t: 'summary', label: '小结' }, { t: 'note', label: '提示' }, { t: 'warn', label: '警示' },
-  { t: 'blank', label: '留白' }, { t: 'pagebreak', label: '分页' },
+  { t: 'figure', label: '插图' }, { t: 'blank', label: '留白' }, { t: 'pagebreak', label: '分页' },
 ]
 const RENDER_LABEL: Record<HdRender, string> = { inline: '正常显示', hide: '不显示', blank: '留白', endnote: '排到文末' }
 
@@ -45,7 +47,87 @@ const sel = computed<HdBlock | null>(() => h.value.blocks[selIdx.value] || null)
 function flash(t: string) { msg.value = t; window.setTimeout(() => { if (msg.value === t) msg.value = '' }, 2600) }
 
 /* ---------------- 【M2】题库打通 + 知识底座 ---------------- */
-const drawer = ref<'' | 'pick' | 'draw' | 'kb'>('')
+const drawer = ref<'' | 'pick' | 'draw' | 'kb' | 'lib'>('')
+/* ---------------- 【M2.5】讲义库（目录树）+ 插图 ---------------- */
+const tree = computed(() => handoutTree())
+/** 页面里的图：块 id → data URL ✓（大图走内容库 assetId，渲染前 hydrate 回来 ✓） */
+const imgMap = ref<Record<string, string>>({})
+async function buildImgMap() {
+  const ids: number[] = []
+  for (const b of h.value.blocks) if (b.img?.assetId) ids.push(Number(b.img.assetId))
+  if (ids.length) { try { await loadAssets(ids) } catch { /* 取不到就空着 ✓ */ } }
+  const map: Record<string, string> = {}
+  for (const b of h.value.blocks) {
+    const src = b.img?.src || (b.img?.assetId ? assetSrc(Number(b.img.assetId)) : '')
+    if (src) map[b.id] = src
+  }
+  imgMap.value = map
+}
+/** 插图：文件 → data URL → 大图进内容库 ✓（与题库同一套，省 localStorage ✓） */
+const MAX_INLINE = 150 * 1024
+async function pickFigure(e: Event) {
+  const input = e.target as HTMLInputElement
+  const f = input.files && input.files[0]
+  input.value = ''
+  if (!f || !h.value.blocks[selIdx.value]) return
+  if (f.type.indexOf('image/') !== 0) { flash('只收图片（png / jpg / webp / gif / svg）'); return }
+  if (f.size > 8 * 1024 * 1024) { flash('这张太大（' + Math.round(f.size / 1024) + 'KB > 8MB），先压一下再传'); return }
+  const src = await new Promise<string>((res, rej) => {
+    const r = new FileReader()
+    r.onload = () => res(String(r.result || ''))
+    r.onerror = () => rej(new Error('读文件失败'))
+    r.readAsDataURL(f)
+  })
+  const b = h.value.blocks[selIdx.value]
+  b.type = 'figure'
+  const cap = String(b.img?.caption || '')
+  if (src.length > MAX_INLINE) {
+    const id = await saveAsset(src)
+    b.img = id ? { assetId: id, caption: cap } : { src, caption: cap }
+  } else {
+    b.img = { src, caption: cap }
+  }
+  await buildImgMap()
+  void nextTick(() => refreshNow())
+  flash('已插图' + (b.img.assetId ? '（大图存进内容库 ✓）' : '') + ' —— 图注可在这里改 ✓')
+}
+function setFigCaption(v: string) {
+  const b = sel.value
+  if (!b) return
+  b.img = { ...(b.img || {}), caption: v }
+  void nextTick(() => refreshNow())
+}
+function clearFigure() {
+  const b = sel.value
+  if (!b) return
+  delete b.img
+  void nextTick(() => refreshNow())
+  flash('已清掉这张插图 ✓')
+}
+/** 打开库里的另一份 ✓ */
+function doOpen(id: string) {
+  if (id === curId.value) return
+  openHandout(id)
+  selIdx.value = 0
+  void buildImgMap().then(() => refreshNow())
+  flash('已打开：' + (h.value.meta.title || '未命名讲义'))
+}
+function doNew() {
+  newHandout()
+  selIdx.value = 0
+  imgMap.value = {}
+  void refreshNow()
+  flash('已新建一份讲义（沿用上次的教材定位 ✓）')
+}
+function doDelete(id: string) {
+  const d = lib.value.find((x) => x.id === id)
+  if (!d) return
+  if (!window.confirm('删除讲义「' + (d.meta.title || '未命名讲义') + '」？（不可撤销 ✓）')) return
+  deleteHandout(id)
+  selIdx.value = 0
+  void buildImgMap().then(() => refreshNow())
+  flash('已删除 ✓')
+}
 const q = ref('')
 const qList = ref<QItem[]>([])
 const qTotal = ref(0)
@@ -126,7 +208,7 @@ async function syncRefs() {
   void refreshNow()
   flash(n ? '已按题库刷新 ' + n + ' 块 ✓' : '引用的题没有变化 ✓')
 }
-async function openDrawer(which: 'pick' | 'draw' | 'kb') {
+async function openDrawer(which: 'pick' | 'draw' | 'kb' | 'lib') {
   drawer.value = drawer.value === which ? '' : which
   if (which === 'pick' && !qList.value.length) void loadQ()
   if (which === 'pick' && !Object.keys(facets.value.bySection).length) {
@@ -143,7 +225,7 @@ async function refreshNow() {
   await nextTick()
   const host = pageHost.value
   if (!host) return
-  try { await typesetMixed(host, pageHtmlOf(h.value, ver.value)) } catch { /* 排版失败不影响用 ✓ */ }
+  try { await typesetMixed(host, pageHtmlOf(h.value, ver.value, imgMap.value)) } catch { /* 排版失败不影响用 ✓ */ }
 }
 function refresh() {
   if (timer) window.clearTimeout(timer)
@@ -218,7 +300,11 @@ function importJson(e: Event) {
   r.readAsText(f)
 }
 function onKey(e: KeyboardEvent) { if (e.key === 'Escape') emit('close') }
-onMounted(() => { document.addEventListener('keydown', onKey); void refreshNow() })
+onMounted(() => {
+  document.addEventListener('keydown', onKey)
+  initHandoutLib()                       // 【M2.5】载入讲义库（首次会把单份讲义迁进来 ✓）
+  void buildImgMap().then(() => refreshNow())
+})
 onBeforeUnmount(() => { document.removeEventListener('keydown', onKey); if (timer) window.clearTimeout(timer) })
 /** 【v1476】教材定位一变，标题跟着自动生成 ✓（自动标题关掉后就不再覆盖老师手写的 ✓） */
 watch(() => [h.value.meta.press, h.value.meta.book, h.value.meta.chapter, h.value.meta.section, h.value.meta.period], () => {
@@ -244,6 +330,9 @@ watch(ver, () => { void refreshNow() })
           <span class="hd__rt">
             <button class="hd__btn" :class="{ 'hd__btn--on': ver === 'student' }" title="学生版：答案按各块设置隐藏 / 留白 / 排到文末" @click="setVer('student')">学生版</button>
             <button class="hd__btn" :class="{ 'hd__btn--on': ver === 'teacher' }" title="教师版：答案与解析内联显示" @click="setVer('teacher')">教师版</button>
+            <!-- 【M2.5】讲义库（目录树）+ 新建 ✓ -->
+            <button class="hd__btn" :class="{ 'hd__btn--on': drawer === 'lib' }" title="讲义库：按 册 → 章 → 节 → 课时 的目录树找以前保存过的讲义 ✓" @click="openDrawer('lib')">讲义库</button>
+            <button class="hd__btn" title="新建一份讲义（沿用上次的教材定位 ✓）" @click="doNew">新建</button>
             <!-- 【M2】题库打通 + 知识底座 ✓ -->
             <button class="hd__btn" :class="{ 'hd__btn--on': drawer === 'pick' }" title="从题库插题：挑一道 → 例题/练习 + 解析 + 答案三块 ✓" @click="openDrawer('pick')">插题</button>
             <button class="hd__btn" :class="{ 'hd__btn--on': drawer === 'draw' }" title="按 册/章节/难度 抽 N 道，插成例题池或练习池 ✓" @click="openDrawer('draw')">抽题</button>
@@ -334,7 +423,21 @@ watch(ver, () => { void refreshNow() })
 
             <div class="hd__t1">本块（{{ sel ? HD_LABEL[sel.type] : '未选中' }}）</div>
             <template v-if="sel">
-              <label v-if="sel.type !== 'pagebreak' && sel.type !== 'blank'">内容<textarea v-model="sel.text" rows="7" placeholder="支持 $…$ 公式；换行直接回车 ✓"></textarea></label>
+              <!-- 【M2.5】插图块 ✓ -->
+              <template v-if="sel.type === 'figure'">
+                <div class="hd__figbox">
+                  <img v-if="sel.img && (sel.img.src || (sel.img.assetId && imgMap[sel.id]))" :src="sel.img.src || imgMap[sel.id]" alt="插图" />
+                  <div v-else class="hd__figempty">还没有图片</div>
+                </div>
+                <label class="hd__btn hd__btn--file" title="上传图片（png / jpg / webp / gif / svg；大图自动存进内容库 ✓）">
+                  {{ sel.img ? '换一张图' : '上传图片' }}
+                  <input type="file" accept="image/*" style="display:none" @change="pickFigure" />
+                </label>
+                <label>图注<input :value="sel.img?.caption || ''" placeholder="例如：图 1 椭圆与两条切线" @input="setFigCaption(($event.target as HTMLInputElement).value)" /></label>
+                <button v-if="sel.img" class="hd__btn hd__btn--wide" @click="clearFigure">清掉这张插图</button>
+                <div class="hd__hint2">插图会跟着两个版本一起显示 ✓；大图存进内容库（与题库同一套 ✓），讲义 JSON 不会变胖 ✓</div>
+              </template>
+              <label v-else-if="sel.type !== 'pagebreak' && sel.type !== 'blank'">内容<textarea v-model="sel.text" rows="7" placeholder="支持 $…$ 公式；换行直接回车 ✓"></textarea></label>
               <label v-if="sel.type === 'blank'">留白高度（cm）<input v-model.number="sel.blankCm" type="number" min="1" max="20" step="0.5" /></label>
               <label v-if="HD_NUMBERED.includes(sel.type)" class="hd__chk"><input v-model="sel.number" type="checkbox" /> 自动编号</label>
               <div class="hd__rnd">
@@ -356,7 +459,30 @@ watch(ver, () => { void refreshNow() })
             <button class="hd__mini" title="关闭" @click="drawer = ''">✕</button>
           </div>
 
-          <template v-if="drawer === 'pick'">
+          <template v-if="drawer === 'lib'">
+            <div class="hd__dhint">当前：<b>{{ h.meta.title || '未命名讲义' }}</b>（{{ curId ? curId.slice(0, 6) : '—' }}）· 共 {{ lib.length }} 份</div>
+            <div class="hd__dlist">
+              <template v-for="bk in tree" :key="bk.key">
+                <div class="hd__lb1">{{ bk.label }}</div>
+                <template v-for="ch in bk.kids" :key="ch.key">
+                  <div class="hd__lb2">{{ ch.label }}</div>
+                  <template v-for="se in ch.kids" :key="se.key">
+                    <div class="hd__lb3">{{ se.label }}</div>
+                    <div
+                      v-for="d in se.docs" :key="d.id" class="hd__ldoc"
+                      :class="{ 'hd__ldoc--on': d.id === curId }" @click="doOpen(d.id)"
+                    >
+                      <span class="hd__ldocname">{{ d.meta.period ? '第 ' + d.meta.period + ' 课时' : '（未填课时）' }} · {{ d.meta.title || '未命名讲义' }}</span>
+                      <span class="hd__ldocdel" title="删除这份讲义" @click.stop="doDelete(d.id)">✕</span>
+                    </div>
+                  </template>
+                </template>
+              </template>
+            </div>
+            <div class="hd__dhint">点一条即打开 ✓（会自动把当前这份存好 ✓）；课时、章、节在右边「教材定位」里填 ✓</div>
+          </template>
+
+          <template v-else-if="drawer === 'pick'">
             <div class="hd__drow">
               <input v-model="q" class="hd__dinput" placeholder="搜题干 / 标题…（回车）" @keydown.enter="loadQ" />
               <button class="hd__mini hd__mini--w" :disabled="qBusy" @click="loadQ">搜</button>
@@ -492,6 +618,22 @@ watch(ver, () => { void refreshNow() })
 .hd__dbtns button { flex: 1; height: 24px; border: 1px solid var(--border); border-radius: 6px; background: #fff; font-size: 11.5px; cursor: pointer; }
 .hd__dbtns button:hover { background: var(--brand-soft, #f2f0fb); }
 .hd__foot { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-top: 1px solid var(--border); }
+/* 讲义库目录树 */
+.hd__lb1 { font-size: 12.5px; font-weight: 700; padding: 4px 4px 2px; color: var(--text); }
+.hd__lb2 { font-size: 12px; padding: 3px 4px 2px 14px; color: var(--text); }
+.hd__lb3 { font-size: 11.5px; padding: 2px 4px 2px 26px; color: var(--muted); }
+.hd__ldoc { display: flex; align-items: baseline; gap: 6px; margin: 2px 0 2px 36px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; cursor: pointer; }
+.hd__ldoc:hover { background: var(--brand-soft, #f2f0fb); }
+.hd__ldoc--on { background: #f2f0fb; border-color: var(--brand-400, #b9b2ec); font-weight: 700; }
+.hd__ldocname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hd__ldocdel { flex: none; color: var(--muted); font-size: 11px; }
+.hd__ldocdel:hover { color: #b42318; }
+/* 插图 */
+.hd__figbox { border: 1px solid var(--border); border-radius: 8px; padding: 6px; margin-bottom: 6px; text-align: center; background: #fff; }
+.hd__figbox img { max-width: 100%; max-height: 180px; object-fit: contain; }
+.hd__figempty { color: var(--muted); font-size: 11.5px; padding: 16px 0; }
+.hd__btn--file { display: block; text-align: center; line-height: 28px; margin-bottom: 6px; cursor: pointer; }
+.hd__btn--wide { display: block; width: 100%; margin-top: 4px; }
 /* 抽屉要压在右栏之上 ✓ */
 .hd__box { position: relative; }
 
@@ -528,6 +670,10 @@ watch(ver, () => { void refreshNow() })
 .hd-ans b, .hd-sol b { font-size: 10.5pt; color: #9a6212; margin-right: 6px; }
 .hd-endnote { display: flex; gap: 8px; margin: 6px 0; }
 .hd-blank { border: 1px dashed #c9c6bd; border-radius: 4px; margin: 8px 0; color: #bdbab2; font-size: 9.5pt; padding: 4px 6px; box-sizing: border-box; }
+.hd-fig { margin: 10px 0; text-align: center; }
+.hd-fig img { max-width: 100%; max-height: 90mm; }
+.hd-fig figcaption { font-size: 9.5pt; color: #666; margin-top: 3px; }
+.hd-fig--empty { border: 1px dashed #c9c6bd; border-radius: 4px; color: #bdbab2; font-size: 9.5pt; padding: 6px; }
 .hd-pagebreak { border-top: 1px dashed #bbb; text-align: center; color: #999; font-size: 9.5pt; margin: 12px 0; }
 /* 【v1479】打印：只留讲义 A4 纸 ✓（与试卷同一套做法：藏 .app + 纸张静态化 + 自己定页边距 ✓） */
 @media print {
