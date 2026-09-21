@@ -38,6 +38,10 @@ export interface HdBlock {
   number?: boolean
   /** 两个版本各自的呈现方式 ✓ */
   render: { student: HdRender; teacher: HdRender }
+  /** 【M2】引用的题库题 id（0/无 = 手写的 ✓）—— 块列表里显示「题 #123」✓ */
+  ref?: number
+  /** 【M2】知识底座条目的标题（插进来时带的 ✓） */
+  kbTitle?: string
 }
 
 export interface HandoutMeta {
@@ -162,6 +166,8 @@ function normalize(h: unknown): Handout {
           blankCm: Number(b.blankCm) || undefined,
           number: b.number !== undefined ? !!b.number : HD_NUMBERED.includes(t),
           render: { ...HD_DEFAULT_RENDER[t], ...(b.render || {}) },
+          ref: Number(b.ref) || undefined,
+          kbTitle: b.kbTitle ? String(b.kbTitle) : undefined,
         } as HdBlock
       })
     : []
@@ -336,16 +342,18 @@ export function pageHtmlOf(h: Handout, v: HdVersion): string {
     const t = it.b.type
     const body = hdEsc(it.show)
     const id = ' id="hd-b-' + it.b.id + '"'
+    /** 知识底座插进来的条目**带上标题** ✓（「知识梳理 · 基本不等式」✓ 不然只剩公式，学生不知道这是哪一条 ✓） */
+    const lab = (base: string) => hdEsc(base + (it.b.kbTitle ? ' · ' + it.b.kbTitle : ''))
     if (t === 'pagebreak') { L.push('<div class="hd-pagebreak"' + id + '>— 分页 —</div>'); continue }
     if (t === 'blank') { L.push('<div class="hd-blank"' + id + ' style="height:' + (it.b.blankCm || 4) + 'cm">（留白）</div>'); continue }
     if (t === 'h1') { L.push('<h1 class="hd-h1"' + id + '>' + body + '</h1>'); continue }
     if (t === 'h2') { L.push('<h2 class="hd-h2"' + id + '>' + body + '</h2>'); continue }
     if (t === 'formula') { L.push('<div class="hd-formula"' + id + '>' + body + '</div>'); continue }
-    if (t === 'goal') { L.push('<div class="hd-bx hd-bx--goal"' + id + '><b>学习目标</b><div class="hd-txt">' + body + '</div></div>'); continue }
-    if (t === 'knowledge') { L.push('<div class="hd-bx hd-bx--know"' + id + '><b>知识梳理</b><div class="hd-txt">' + body + '</div></div>'); continue }
-    if (t === 'note') { L.push('<div class="hd-bx hd-bx--note"' + id + '><b>提示</b><div class="hd-txt">' + body + '</div></div>'); continue }
-    if (t === 'warn') { L.push('<div class="hd-bx hd-bx--warn"' + id + '><b>易错警示</b><div class="hd-txt">' + body + '</div></div>'); continue }
-    if (t === 'summary') { L.push('<div class="hd-bx hd-bx--sum"' + id + '><b>归纳小结</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'goal') { L.push('<div class="hd-bx hd-bx--goal"' + id + '><b>' + lab('学习目标') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'knowledge') { L.push('<div class="hd-bx hd-bx--know"' + id + '><b>' + lab('知识梳理') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'note') { L.push('<div class="hd-bx hd-bx--note"' + id + '><b>' + lab('提示') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'warn') { L.push('<div class="hd-bx hd-bx--warn"' + id + '><b>' + lab('易错警示') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'summary') { L.push('<div class="hd-bx hd-bx--sum"' + id + '><b>' + lab('归纳小结') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
     if (t === 'example' || t === 'variant' || t === 'exercise') {
       L.push('<div class="hd-q"' + id + '><span class="hd-qnum">' + hdEsc(it.num) + '</span><span class="hd-qtext">' + body + '</span></div>'); continue
     }

@@ -16,6 +16,10 @@ import {
   rendered, saveHandout, setHandout, handoutToText, handoutPathOf, syncAutoTitle, autoTitleOf,
 } from '@/composables/useHandout'
 import type { HdBlock, HdBlockType, HdRender } from '@/composables/useHandout'
+import { qFacets } from '@/composables/useQuestionBank'
+import type { QItem } from '@/composables/useQuestionBank'
+import { blocksFromQuestion, drawQuestions, kbBlockOf, loadKb, refreshRefBlocks, saveKbCustom, stemTextOf } from '@/composables/useHandoutLibrary'
+import type { KbItem } from '@/composables/useHandoutLibrary'
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 
@@ -39,6 +43,98 @@ const RENDER_LABEL: Record<HdRender, string> = { inline: '正常显示', hide: '
 const sel = computed<HdBlock | null>(() => h.value.blocks[selIdx.value] || null)
 
 function flash(t: string) { msg.value = t; window.setTimeout(() => { if (msg.value === t) msg.value = '' }, 2600) }
+
+/* ---------------- 【M2】题库打通 + 知识底座 ---------------- */
+const drawer = ref<'' | 'pick' | 'draw' | 'kb'>('')
+const q = ref('')
+const qList = ref<QItem[]>([])
+const qTotal = ref(0)
+const qBusy = ref(false)
+const facets = ref<{ bySection: Record<string, number>; byKp: Record<string, number>; byLevel: Record<string, number> }>({ bySection: {}, byKp: {}, byLevel: {} })
+/** 抽题条件 ✓ */
+const draw = ref({ pool: 'example' as 'example' | 'exercise' | 'variant', section: '', level: '', n: 3 })
+/** 知识底座 ✓ */
+const kb = ref<KbItem[]>(loadKb())
+const kbQ = ref('')
+const customKb = ref<KbItem[]>([])
+
+const kbFiltered = computed(() => {
+  const k = kbQ.value.trim()
+  const list = kb.value.filter((x) => !k || (x.title + x.text + x.book + x.chapter).indexOf(k) >= 0)
+  // 按「册 + 章」聚一下 ✓（便于按教材找 ✓）
+  return list.slice(0, 60)
+})
+
+/** 把几块插到「当前选中块」后面 ✓（与 +按钮同一套插入规则 ✓） */
+function insertBlocks(list: HdBlock[], tip: string) {
+  if (!list.length) return
+  const at = Math.min(selIdx.value + 1, h.value.blocks.length)
+  h.value.blocks.splice(at, 0, ...list)
+  selIdx.value = at
+  void nextTick(() => refreshNow())
+  flash(tip)
+}
+
+async function loadQ() {
+  qBusy.value = true
+  try {
+    const { qSearch } = await import('@/composables/useQuestionBank')
+    const r = await qSearch({ q: q.value.trim(), limit: 30 })
+    qList.value = r.items || []
+    qTotal.value = r.total || 0
+  } finally { qBusy.value = false }
+}
+/** 插一道（题干 → 解析 → 答案 ✓） */
+function pickQuestion(it: QItem, kind: 'example' | 'exercise' | 'variant') {
+  insertBlocks(blocksFromQuestion(it, kind, true, true), '已插入「' + (kind === 'example' ? '例题' : kind === 'exercise' ? '练习' : '变式') + '」（题干+解析+答案，答案默认排到学生版文末 ✓）')
+}
+/** 按规则抽 N 道 ✓ */
+async function doDraw() {
+  qBusy.value = true
+  try {
+    const f: Record<string, unknown> = {}
+    if (draw.value.section) f.section = draw.value.section
+    if (draw.value.level) f.level = draw.value.level
+    const { items, total } = await drawQuestions(f, Number(draw.value.n) || 3)
+    if (!items.length) { flash('这个条件下库里没有题 ✗（先去题库录几道 ✓）'); return }
+    const out: HdBlock[] = []
+    for (const it of items) out.push(...blocksFromQuestion(it, draw.value.pool, true, true))
+    insertBlocks(out, '已抽题并插入 ' + items.length + ' 道（候选 ' + total + ' 道 ✓）')
+  } finally { qBusy.value = false }
+}
+/** 插一条知识底座 ✓ */
+function pickKb(item: KbItem) {
+  insertBlocks([kbBlockOf(item)], '已插入「' + item.title + '」→ ' + (item.kind === 'knowledge' ? '知识梳理' : item.kind === 'note' ? '提示' : '易错警示') + '块 ✓')
+}
+/** 把当前块存进知识底座（自定义 ✓） */
+function saveKbFromBlock() {
+  const b = sel.value
+  if (!b || !String(b.text || '').trim()) { flash('先选一块有内容的块 ✓'); return }
+  const item: KbItem = {
+    id: 'c' + Date.now().toString(36), book: h.value.meta.book, chapter: h.value.meta.chapter,
+    kind: b.type === 'note' ? 'note' : b.type === 'warn' ? 'warn' : 'knowledge',
+    title: (b.kbTitle || String(b.text).replace(/[s$]/g, '').slice(0, 10) || '自定义条目'), text: b.text, custom: true,
+  }
+  customKb.value = [...customKb.value, item]
+  saveKbCustom(customKb.value)
+  kb.value = loadKb()
+  flash('已存进知识底座（自定义 ✓ 下次还能用 ✓）')
+}
+/** 【M2】按题库最新内容刷新引用的块 ✓ */
+async function syncRefs() {
+  const n = await refreshRefBlocks(h.value.blocks)
+  void refreshNow()
+  flash(n ? '已按题库刷新 ' + n + ' 块 ✓' : '引用的题没有变化 ✓')
+}
+async function openDrawer(which: 'pick' | 'draw' | 'kb') {
+  drawer.value = drawer.value === which ? '' : which
+  if (which === 'pick' && !qList.value.length) void loadQ()
+  if (which === 'pick' && !Object.keys(facets.value.bySection).length) {
+    const fc = await qFacets()
+    facets.value = { bySection: fc.bySection || {}, byKp: fc.byKp || {}, byLevel: fc.byLevel || {} }
+  }
+}
+onMounted(() => { try { customKb.value = loadKb().filter((x) => x.custom) } catch { /* 忽略 */ } })
 
 /** 整块重写 A4 页 + 交给 MathJax 排版 ✓（内容一变就重排 → 「加完块公式就渲染」✓） */
 let timer: number | undefined
@@ -148,6 +244,10 @@ watch(ver, () => { void refreshNow() })
           <span class="hd__rt">
             <button class="hd__btn" :class="{ 'hd__btn--on': ver === 'student' }" title="学生版：答案按各块设置隐藏 / 留白 / 排到文末" @click="setVer('student')">学生版</button>
             <button class="hd__btn" :class="{ 'hd__btn--on': ver === 'teacher' }" title="教师版：答案与解析内联显示" @click="setVer('teacher')">教师版</button>
+            <!-- 【M2】题库打通 + 知识底座 ✓ -->
+            <button class="hd__btn" :class="{ 'hd__btn--on': drawer === 'pick' }" title="从题库插题：挑一道 → 例题/练习 + 解析 + 答案三块 ✓" @click="openDrawer('pick')">插题</button>
+            <button class="hd__btn" :class="{ 'hd__btn--on': drawer === 'draw' }" title="按 册/章节/难度 抽 N 道，插成例题池或练习池 ✓" @click="openDrawer('draw')">抽题</button>
+            <button class="hd__btn" :class="{ 'hd__btn--on': drawer === 'kb' }" title="知识底座：常用公式 / 模型 / 易错点，按教材存着，一键插成知识梳理块 ✓" @click="openDrawer('kb')">知识底座</button>
             <button class="hd__btn hd__btn--main" title="打印 / 另存为 PDF（矢量文字 ✓）" @click="printPdf">打印 / PDF</button>
             <button class="hd__btn" title="导出纯文本（当前版本）" @click="exportText">导出文本</button>
             <button class="hd__btn" title="导出讲义 JSON（可再导入 ✓）" @click="exportJson">导出 JSON</button>
@@ -250,6 +350,70 @@ watch(ver, () => { void refreshNow() })
             <div v-else class="hd__hint">在左边点一块，这里就能改它 ✓</div>
           </aside>
         </div>
+
+        <!-- 【M2】抽屉：插题 / 抽题 / 知识底座 ✓ -->
+        <div v-if="drawer" class="hd__drawer">
+          <div class="hd__dhead">
+            <b>{{ drawer === 'pick' ? '从题库插题' : drawer === 'draw' ? '按规则抽题' : '知识底座' }}</b>
+            <button class="hd__mini" title="关闭" @click="drawer = ''">✕</button>
+          </div>
+
+          <template v-if="drawer === 'pick'">
+            <div class="hd__drow">
+              <input v-model="q" class="hd__dinput" placeholder="搜题干 / 标题…（回车）" @keydown.enter="loadQ" />
+              <button class="hd__mini hd__mini--w" :disabled="qBusy" @click="loadQ">搜</button>
+            </div>
+            <div class="hd__dhint">库里有 {{ qTotal }} 道匹配<template v-if="qList.length"> · 显示前 {{ qList.length }} 道</template></div>
+            <div class="hd__dlist">
+              <div v-for="it in qList" :key="it.id" class="hd__ditem">
+                <div class="hd__dtitle">{{ it.code || ('#' + it.id) }} · {{ it.section || '未归类' }} · {{ it.level || '未填' }}<span v-if="it.kp && it.kp.length"> · {{ it.kp.join('/') }}</span></div>
+                <div class="hd__dstem">{{ stemTextOf(it).slice(0, 70) }}</div>
+                <div class="hd__dbtns">
+                  <button @click="pickQuestion(it, 'example')">插为例题</button>
+                  <button @click="pickQuestion(it, 'exercise')">插为练习</button>
+                  <button @click="pickQuestion(it, 'variant')">插为变式</button>
+                </div>
+              </div>
+              <div v-if="!qList.length" class="hd__dhint">{{ qBusy ? '查询中…' : '点「搜」或直接回车看看题库里有什么 ✓' }}</div>
+            </div>
+          </template>
+
+          <template v-else-if="drawer === 'draw'">
+            <div class="hd__drow"><span class="hd__dlab">池子</span>
+              <select v-model="draw.pool"><option value="example">例题</option><option value="exercise">练习</option><option value="variant">变式</option></select>
+            </div>
+            <div class="hd__drow"><span class="hd__dlab">章节</span>
+              <select v-model="draw.section"><option value="">全部</option><option v-for="(c, s) in facets.bySection" :key="s" :value="s">{{ s }}（{{ c }}）</option></select>
+            </div>
+            <div class="hd__drow"><span class="hd__dlab">难度</span>
+              <select v-model="draw.level"><option value="">全部</option><option v-for="(c, s) in facets.byLevel" :key="s" :value="s">{{ s }}（{{ c }}）</option></select>
+            </div>
+            <div class="hd__drow"><span class="hd__dlab">数量</span>
+              <input v-model.number="draw.n" type="number" min="1" max="20" class="hd__dnum" />
+            </div>
+            <button class="hd__dgo" :disabled="qBusy" @click="doDraw">{{ qBusy ? '抽题中…' : '抽题并插入 ✓' }}</button>
+            <div class="hd__dhint">抽题是**洗牌后随机**取 ✓ 每次不一样；插进来的是「题干 + 解析 + 答案」三块一组 ✓</div>
+          </template>
+
+          <template v-else>
+            <div class="hd__drow">
+              <input v-model="kbQ" class="hd__dinput" placeholder="搜公式 / 模型 / 易错点…" />
+              <button class="hd__mini hd__mini--w" title="把当前选中的块存进知识底座（自定义 ✓）" @click="saveKbFromBlock">+存</button>
+            </div>
+            <div class="hd__dlist">
+              <div v-for="item in kbFiltered" :key="item.id" class="hd__ditem hd__ditem--kb" @click="pickKb(item)">
+                <div class="hd__dtitle">{{ item.book }}<template v-if="item.chapter"> 第 {{ item.chapter }} 章</template> · {{ item.kind === 'knowledge' ? '知识' : item.kind === 'note' ? '提示' : '易错' }}<span v-if="item.custom"> · 自定义</span></div>
+                <div class="hd__dstem"><b>{{ item.title }}</b> —— {{ item.text.replace(/\$/g, '').slice(0, 46) }}</div>
+              </div>
+              <div v-if="!kbFiltered.length" class="hd__dhint">没搜到 ✓ 换个词，或把讲义里的块「+存」进去 ✓</div>
+            </div>
+          </template>
+        </div>
+
+        <footer class="hd__foot">
+          <button class="hd__btn" title="把引用了题库的块按库里最新内容刷新（题改过之后点一下 ✓）" @click="syncRefs">↻ 同步题库</button>
+          <span class="hd__dhint">题目是**引用**（块上显示 题 #id ✓），改题不必重插 ✓</span>
+        </footer>
       </div>
     </div>
   </Teleport>
@@ -307,6 +471,28 @@ watch(ver, () => { void refreshNow() })
 .hd__rndrow { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }
 .hd__rndrow select { flex: 1; }
 .hd__page { width: 210mm; min-height: 297mm; margin: 0 auto; background: #fff; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12); padding: 16mm 15mm; box-sizing: border-box; }
+/* 【M2】抽屉 */
+.hd__drawer { position: absolute; right: 14px; top: 54px; bottom: 14px; width: 330px; background: var(--panel, #fff); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; overflow: hidden; z-index: 5; }
+.hd__dhead { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.hd__drow { display: flex; align-items: center; gap: 6px; padding: 6px 10px; }
+.hd__dlab { flex: none; width: 34px; font-size: 11.5px; color: var(--muted); }
+.hd__drow select, .hd__dinput, .hd__dnum { flex: 1; min-width: 0; padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; font-family: inherit; }
+.hd__dnum { flex: none; width: 64px; }
+.hd__mini--w { width: auto; padding: 0 8px; }
+.hd__dgo { margin: 4px 10px 8px; height: 30px; border: 0; border-radius: 6px; background: var(--brand-600, #534AB7); color: #fff; font-size: 13px; cursor: pointer; }
+.hd__dhint { padding: 4px 10px; font-size: 11px; color: var(--muted); line-height: 1.5; }
+.hd__dlist { flex: 1; overflow-y: auto; padding: 4px 6px 8px; }
+.hd__ditem { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; font-size: 12px; }
+.hd__ditem--kb { cursor: pointer; }
+.hd__ditem--kb:hover { background: var(--brand-soft, #f2f0fb); border-color: var(--brand-400, #b9b2ec); }
+.hd__dtitle { font-size: 11px; color: var(--brand-600, #534AB7); margin-bottom: 3px; }
+.hd__dstem { color: var(--text); line-height: 1.5; margin-bottom: 5px; }
+.hd__dbtns { display: flex; gap: 4px; }
+.hd__dbtns button { flex: 1; height: 24px; border: 1px solid var(--border); border-radius: 6px; background: #fff; font-size: 11.5px; cursor: pointer; }
+.hd__dbtns button:hover { background: var(--brand-soft, #f2f0fb); }
+.hd__foot { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-top: 1px solid var(--border); }
+/* 抽屉要压在右栏之上 ✓ */
+.hd__box { position: relative; }
 
 @media print {
   body > *:not(.hd) { display: none !important; }
