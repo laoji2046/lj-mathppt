@@ -70,6 +70,8 @@ export interface QFilter {
   sourceKind?: string
   limit?: number
   offset?: number
+  /** 【v1470】排序：不给 = 最新在前；'paper' = 按试卷 + 题内序号（meta.no）✓ */
+  sort?: string
 }
 
 /** 11 个必修板块（沿用旧题库的口径）+ 未分类兜底 ✓ */

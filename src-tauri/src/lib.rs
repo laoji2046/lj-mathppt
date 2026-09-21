@@ -1375,10 +1375,21 @@ fn lib_q_search(filter: serde_json::Value) -> serde_json::Value {
         )
         .unwrap_or(0);
 
+    // 【v1470】排序：默认还是「最新在前」（老行为不动 ✓）；sort = "paper" → **按试卷 + 题内序号** ✓
+    //   老师实测：批量导入六套真题后，每一套在列表里**正好是倒的** ✗ —— 因为默认 id DESC ✓，
+    //   而批量导入是**正序插入**的 ✓。序号优先用 meta.no（导入时从卷面记下的题号 ✓）；
+    //   老数据没有 no（v1470 之前导的）→ 取 0 兜底、再按 id 升序 ✓ —— 同一批导入的 id 是顺序的，
+    //   所以那批仍然按卷面顺序排 ✓（**不重导也能看对顺序** ✓）。
+    let order_sql = if sget("sort") == "paper" {
+        "ORDER BY (COALESCE(paper,'')=''), COALESCE(paper,''), \
+         CASE WHEN json_valid(meta) THEN COALESCE(CAST(json_extract(meta,'$.no') AS INTEGER),0) ELSE 0 END, id"
+    } else {
+        "ORDER BY id DESC"
+    };
     let sql = format!(
         // COALESCE：老行这四个真列可能是 NULL，用 String 取 NULL 会整行失败（P0b 新加的四个列）
-        "SELECT id, title, body, meta, section, qtype, level, difficulty, year, paper, COALESCE(code,''), COALESCE(status,''), COALESCE(source_kind,''), COALESCE(warn,''), updated_at          FROM library_item{} ORDER BY id DESC LIMIT ? OFFSET ?",
-        where_sql
+        "SELECT id, title, body, meta, section, qtype, level, difficulty, year, paper, COALESCE(code,''), COALESCE(status,''), COALESCE(source_kind,''), COALESCE(warn,''), updated_at          FROM library_item{} {} LIMIT ? OFFSET ?",
+        where_sql, order_sql
     );
     args.push(rusqlite::types::Value::Integer(limit));
     args.push(rusqlite::types::Value::Integer(offset));
@@ -2071,6 +2082,13 @@ fn lib_import_commit(ids: Vec<String>) -> serde_json::Value {
                 if let Some(imgs) = ex.get("images").and_then(|x| x.as_array()) {
                     if !imgs.is_empty() {
                         m["images"] = serde_json::json!(imgs);
+                    }
+                }
+                // 【v1470】题内序号（卷面上的「第 N 题」）也走 extra 存进 meta.no ✓
+                //   为什么要存：老师在库里要能看出**这道题在原卷里是第几题** ✓（列表排序也靠它 ✓）
+                if let Some(n) = ex.get("no").and_then(|x| x.as_i64()) {
+                    if n > 0 {
+                        m["no"] = serde_json::json!(n);
                     }
                 }
             }

@@ -149,6 +149,8 @@ export interface QMeta {
   paperName: string
   region: string
   score: number
+  /** 【v1470】题内序号 = 卷面上的「第 N 题」（导入时从原文记下来 ✓；老数据没有 → 0 ✓） */
+  no?: number
   answerFrom: '' | 'manual' | 'auto' | 'ai'
   images?: QuestionImage[]
   /** 识别时的告警（AI JSON 的 warnings，如「本题含 2 个空，分值未按空拆分」）✓ */
@@ -158,7 +160,7 @@ export interface QMeta {
 const EMPTY_META: QMeta = {
   stem: '', options: [], answer: '', solution: '', knowledge: [], difficulty: 3, level: '',
   qtype: 'answer', section: '', chapter: '', date: '', year: 0, paperName: '', region: '',
-  score: 0, answerFrom: '', images: [], warn: '',
+  score: 0, no: 0, answerFrom: '', images: [], warn: '',
 }
 
 function today(): string {
@@ -241,6 +243,7 @@ export function metaOfParsed(p: ParsedQuestion): QMeta {
     paperName: p.paperName || '',
     region: p.region || '',
     score: Number(p.scoreExplicit) || 0,
+    no: Number(p.no) || 0,
     answerFrom,
     images: p.images || [],
     warn: p.warn || '',
@@ -277,7 +280,10 @@ export function draftFromMeta(q: QMeta, sourceLabel = '', sourceItemId = '') {
     images: q.images || [],
     // 【修 v1465】图必须进 extra 才存得下来：Rust 的 import_draft 表只有 extra 这一列能装图
     //   （顶层 images 只被闸门用来**数**张数，不落库 ✗ —— 结果草稿路线把图丢了）
-    extra: q.images && q.images.length ? JSON.stringify({ images: q.images, from: 'MinerU' }) : '',
+    // 【v1470】题内序号（meta.no）也放 extra —— 同一个原因：draft 表没有 no 这一列 ✓
+    extra: q.images && q.images.length
+      ? JSON.stringify({ images: q.images, no: q.no || 0, from: 'MinerU' })
+      : (q.no ? JSON.stringify({ no: q.no, from: 'MinerU' }) : ''),
   }
 }
 

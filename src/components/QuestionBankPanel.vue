@@ -190,7 +190,8 @@ async function jumpTo(id: number) {
   if (it) select(it)
 }
 
-const f = ref<QFilter>({})
+/** 【v1470】默认「最新在前」= 老行为 ✓；换成 'paper' 就按「试卷 + 题内序号」排 ✓ */
+const f = ref<QFilter>({ sort: 'id' })
 const sel = computed(() => items.value.find((x) => x.id === selId.value) || null)
 const kpKeys = computed(() => Object.keys(facets.value.byKp || {}))
 const yearKeys = computed(() => Object.keys(facets.value.byYear || {}).filter((k) => k !== '(空)'))
@@ -460,6 +461,34 @@ function kpListOf(text: string): string[] {
   return Array.from(new Set(String(text || '').split(/[，,、;；]/).map((s) => s.trim()).filter(Boolean)))
 }
 
+/**
+ * 【v1470】这道题在原卷里是第几题 ✓
+ *   优先用 `meta.no`（导入时从卷面记下来的题号 ✓）；老数据没有 → **按同一套里 id 升序数位置** ✓
+ *   （同一批导入的 id 是顺序的 → 数出来的就是卷面顺序 ✓，**不用重导一遍** ✓）
+ *   ⚠ 列表被分页/筛选时兜底序号可能对不上（只按当前加载到的题数 ✓）—— 有 meta.no 的题不受影响 ✓
+ */
+const paperPos = computed(() => {
+  const byPaper = new Map<string, QItem[]>()
+  for (const it of items.value) {
+    const p = String(metaOf(it).paperName || it.paper || '').trim()
+    if (!p) continue
+    const arr = byPaper.get(p) || []
+    arr.push(it)
+    byPaper.set(p, arr)
+  }
+  const out = new Map<number, number>()
+  for (const arr of byPaper.values()) {
+    arr.sort((a, b) => Number(a.id) - Number(b.id))
+    arr.forEach((it, i) => out.set(Number(it.id), i + 1))
+  }
+  return out
+})
+function noOf(it: QItem | null): number {
+  if (!it) return 0
+  const n = Number(metaOf(it).no || 0)
+  return n > 0 ? n : (paperPos.value.get(Number(it.id)) || 0)
+}
+
 /** 【v1467】选项编辑框：一行一个（空行自动去掉 ✓；全空 = 这道题没有选项 ✓） */
 function optionsOf(text: string): string[] {
   return String(text || '')
@@ -674,6 +703,11 @@ async function batchDelete() {
           <option :value="0">年份：全部</option>
           <option v-for="y in yearKeys" :key="y" :value="Number(y)">{{ y }}（{{ facets.byYear[y] }}）</option>
         </select>
+        <!-- 【v1470】排序：批量导入后每套在默认排序里是**倒的** ✗ → 这里可以切「按试卷 + 题号」✓ -->
+        <select v-model="f.sort" title="列表排序：默认最新在前；「按试卷 + 题号」会把同一套排在一起、按卷面题号升序" @change="reload">
+          <option value="id">排序：最新在前</option>
+          <option value="paper">排序：按试卷 + 题号</option>
+        </select>
         <select v-model="f.status" @change="reload">
           <option value="">状态：全部</option>
           <option v-for="s in STATUS_ORDER" :key="s" :value="s">{{ statusLabel(s) }}（{{ facets.byStatus[s] || 0 }}）</option>
@@ -718,6 +752,8 @@ async function batchDelete() {
             </label>
             <div class="qb__chips">
               <span class="qb__chip qb__chip--code" :class="{ 'qb__chip--warn': !it.code }" :title="it.code || '没有编号（写库漏了 lib_prepare_qmeta）'">{{ it.code || '无编号' }}</span>
+              <!-- 【v1470】这道题在原卷里是第几题 ✓（老师要的：一眼看出顺序 ✓） -->
+              <span v-if="noOf(it)" class="qb__chip qb__chip--no" :title="'这道题在原卷里是第 ' + noOf(it) + ' 题'">第{{ noOf(it) }}题</span>
               <span class="qb__chip" :class="{ 'qb__chip--warn': !it.section }">{{ it.section || '未归类' }}</span>
               <span class="qb__chip">{{ QTYPE_LABEL[it.qtype] || '未判题型' }}</span>
               <span v-if="it.level" class="qb__chip">{{ it.level }}</span>
@@ -737,6 +773,7 @@ async function batchDelete() {
           <template v-else>
             <div class="qb__chips qb__chips--top">
               <span class="qb__chip">#{{ sel.id }}</span>
+              <span v-if="noOf(sel)" class="qb__chip qb__chip--no" :title="'这道题在原卷（' + (sel.paper || '未填试卷名') + '）里是第 ' + noOf(sel) + ' 题'">第{{ noOf(sel) }}题</span>
               <span class="qb__chip qb__chip--code" :class="{ 'qb__chip--warn': !sel.code }">{{ sel.code || '无编号' }}</span>
               <span class="qb__chip qb__chip--st" :class="'qb__chip--st-' + (sel.status || 'none')">{{ statusLabel(sel.status) }}</span>
               <span class="qb__chip" :class="{ 'qb__chip--warn': !sel.paper }">{{ sel.paper || '来源未填' }}</span>
@@ -1052,6 +1089,7 @@ async function batchDelete() {
 /* ---- 【P0b】编号 / 状态 / 来源类别 / 告警 ---- */
 .qb__chip--code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #eef1f6; color: #3a4252; }
 .qb__chip--src { background: #eaf3ec; color: #2f6b45; }
+.qb__chip--no { background: #eef4ff; color: #1d4e89; font-variant-numeric: tabular-nums; }
 .qb__chip--st { background: #eef1f6; color: #3a4252; }
 .qb__chip--st-published { background: #e6f4ea; color: #1f6b3a; }
 .qb__chip--st-ready, .qb__chip--st-approved { background: #e8effa; color: #2a4f8f; }
