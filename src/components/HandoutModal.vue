@@ -140,12 +140,26 @@ function setFigLayout(v: string) {
   if (v.indexOf('float') === 0 && !Number(b.img.width)) b.img = { ...b.img, width: 45 }
   void nextTick(() => refreshNow())
 }
-function setFigWidth(v: string) {
+/** 【M2.8】宽度：打字时**只记草稿、不夹值** ✗ —— 以前 @input 里立刻 Math.max(10,…) ✓，
+ *  打「4」就被夹成 10 ✓，于是"只能输入 10 和 100，其他得靠上下箭头"✗（老师实测 ✓）。改：@input 记草稿、@change 才落库 ✓ */
+const wDraft = ref('')
+watch(() => sel.value?.id, () => { wDraft.value = sel.value?.img?.width ? String(sel.value.img.width) : '' }, { immediate: true })
+function onWidthInput(v: string) { wDraft.value = String(v).replace(/[^0-9]/g, '').slice(0, 3) }
+function commitWidth() {
   const b = sel.value
   if (!b) return
-  const n = Math.max(10, Math.min(100, Number(v) || 0))
-  b.img = { ...(b.img || {}), width: n || undefined }
+  const raw = wDraft.value.trim()
+  if (!raw) { b.img = { ...(b.img || {}), width: undefined }; wDraft.value = ''; void nextTick(() => refreshNow()); return }
+  const n = Math.max(10, Math.min(100, Number(raw) || 0))
+  b.img = { ...(b.img || {}), width: n }
+  wDraft.value = String(n)
   void nextTick(() => refreshNow())
+}
+/** 【M2.8】「完成编辑」：把这一份**立刻落盘**并给个明确反馈 ✓（其实改动一直是即时自动保存的 ✓ 只是没有反馈 ✗） */
+function finishFigure() {
+  saveHandout(h.value)
+  void refreshNow()
+  flash('✓ 已保存（插图改动一直是即时生效、自动保存的 ✓）')
 }
 function clearFigure() {
   const b = sel.value
@@ -501,8 +515,17 @@ watch(ver, () => { void refreshNow() })
                     </select>
                   </label>
                   <label>宽度 %
-                    <input :value="sel.img?.width || ''" type="number" min="10" max="100" step="5" :placeholder="(sel.img?.layout || '').indexOf('float') === 0 ? '45' : '100'" @input="setFigWidth(($event.target as HTMLInputElement).value)" />
+                    <input
+                      :value="wDraft" type="text" inputmode="numeric" maxlength="3"
+                      :placeholder="(sel.img?.layout || '').indexOf('float') === 0 ? '45（浮动默认）' : '留空 = 撑满版心'"
+                      @input="onWidthInput(($event.target as HTMLInputElement).value)"
+                      @change="commitWidth()" @keydown.enter="commitWidth()" @blur="commitWidth()"
+                    />
                   </label>
+                </div>
+                <div class="hd__savebar">
+                  <button class="hd__btn hd__btn--main" title="插图改动一直是即时生效、自动保存的 ✓ 点这里再确认一次" @click="finishFigure">✓ 完成编辑</button>
+                  <span class="hd__hint2">边改边生效、自动保存 ✓（宽度打完按回车或点别处生效 ✓）</span>
                 </div>
                 <button v-if="sel.img" class="hd__btn hd__btn--wide" @click="clearFigure">清掉这张插图</button>
                 <div class="hd__hint2">插图会跟着两个版本一起显示 ✓；大图存进内容库（与题库同一套 ✓），讲义 JSON 不会变胖 ✓</div>
@@ -746,8 +769,10 @@ watch(ver, () => { void refreshNow() })
 .hd-blank { border: 1px dashed #c9c6bd; border-radius: 4px; margin: 8px 0; color: #bdbab2; font-size: 9.5pt; padding: 4px 6px; box-sizing: border-box; }
 .hd-fig { margin: 10px 0; text-align: center; }
 .hd-fig img { max-width: 100%; max-height: 90mm; }
+/* 非浮动时：盒子已用 margin auto 摆好 ✓，图在盒内居中 ✓、图注跟着盒子对齐 ✓ */
 .hd-fig--left { text-align: left; }
 .hd-fig--right { text-align: right; }
+.hd-fig--center img { display: block; margin: 0 auto; }
 .hd-fig--float-left { float: left; margin: 4px 10px 6px 0; }
 .hd-fig--float-right { float: right; margin: 4px 0 6px 10px; }
 /* 带底色的块自成一体 ✓（否则浮动图会被块底色压住 ✗）；正文段落仍可绕排 ✓ */

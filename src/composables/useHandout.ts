@@ -512,8 +512,13 @@ export function pageHtmlOf(h: Handout, v: HdVersion, imgMap: Record<string, stri
       if (src) {
         const lay = it.b.img?.layout || 'center'
         const w = Number(it.b.img?.width) || 0
-        const style = (lay.indexOf('float') === 0 ? 'float:' + (lay === 'float-left' ? 'left' : 'right') + ';' : '')
-          + (w > 0 ? 'width:' + Math.max(10, Math.min(100, w)) + '%;' : (lay.indexOf('float') === 0 ? 'width:45%;' : ''))
+        const wpct = w > 0 ? Math.max(10, Math.min(100, w)) : (lay.indexOf('float') === 0 ? 45 : 0)
+        // ⚠ 非浮动布局要**对齐盒子本身**（margin auto）✗ —— 只写 text-align 的话，
+        //   动的是图注（短）而图（占满盒宽）看着没动 ✗（老师实测：「改的是图注的左中右」✓）
+        const align = lay === 'left' ? 'margin:10px auto 10px 0;' : lay === 'right' ? 'margin:10px 0 10px auto;' : 'margin:10px auto;'
+        const style = (lay.indexOf('float') === 0
+          ? 'float:' + (lay === 'float-left' ? 'left' : 'right') + ';' + (wpct ? 'width:' + wpct + '%;' : '')
+          : align + (wpct ? 'width:' + wpct + '%;' : ''))
         L.push('<figure class="hd-fig hd-fig--' + lay + '"' + id + (style ? ' style="' + style + '"' : '') + '><img src="' + hdEsc(src) + '" alt="' + hdEsc(it.b.img?.caption || '插图') + '" />'
           + (it.b.img?.caption ? '<figcaption>' + hdEsc(it.b.img.caption) + '</figcaption>' : '') + '</figure>')
       } else {
