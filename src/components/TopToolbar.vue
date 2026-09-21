@@ -36,7 +36,7 @@ const DeckLibraryDialog = defineAsyncComponent(() => import('./DeckLibraryDialog
 const QuestionBankPanel = defineAsyncComponent(() => import('./QuestionBankPanel.vue'))
 
 const store = useDeckStore()
-const emit = defineEmits<{ (e: 'present'): void; (e: 'open-templates'): void; (e: 'open-paper'): void; (e: 'open-ggb-suite'): void }>()
+const emit = defineEmits<{ (e: 'present'): void; (e: 'open-templates'): void; (e: 'open-paper'): void; (e: 'open-handout'): void; (e: 'open-ggb-suite'): void }>()
 
 // symbolOpen 已提到 @/ui/menus（?shot= 可直接打开）
 // 图形面板的开关搬到 ui/figPalette 了 —— PDF 文档也要能打开它并接管"点卡片"的行为
@@ -877,7 +877,7 @@ onBeforeUnmount(() => {
       <button class="btn" title="文稿 / 主题 / 过渡设置" @click="openSettings">
         <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.settings"></svg></span>设置
       </button>
-      <button class="btn" title="模板库：高中数学讲义模板 / 专业模板" @click="openTemplates">
+      <button class="btn" title="模板库：幻灯片·数学风 / 高中数学例题 / 专业模板" @click="openTemplates">
         <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.templates"></svg></span>模板库
       </button>
     <div class="group">
@@ -891,6 +891,10 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+      <!-- 【M1】数学讲义：知识梳理 + 例题精讲 + 练习；一份内容出**学生版 / 教师版** ✓ -->
+      <button class="btn" title="数学讲义：写讲义（知识梳理 / 例题精讲 / 变式 / 练习），一键切学生版与教师版，打印导出 PDF" @click="emit('open-handout')">
+        <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.paper"></svg></span>讲义
+      </button>
       <button v-if="addonOn('pdf-gen')" class="btn" title="PDF 生成：把 Markdown / 试卷写成 A4 文档并导出 PDF" @click="openPaper">
         <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.paper"></svg></span>PDF生成
       </button>

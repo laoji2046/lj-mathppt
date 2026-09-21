@@ -18,6 +18,8 @@ import PresentationOverlay from '@/components/PresentationOverlay.vue'
 //   启动包不再包含它们 ✓（实测本次改前：0 处懒加载 ✗、单文件 1299 KB ✓）。
 //   ⚠ 不要给"常驻挂载（没有 v-if）"的组件加这个 ✗ —— 它一渲染就会立刻拉 chunk ✓，等于白改 ✓。
 const PaperModal = defineAsyncComponent(() => import('@/components/PaperModal.vue'))
+/** 【M1】数学讲义编辑器：与试卷并列的第三个产物（考 / 讲 / 演 ✓）—— 独立窗口，不塞进试卷 ✗ */
+const HandoutModal = defineAsyncComponent(() => import('@/components/HandoutModal.vue'))
 const HelpDialog = defineAsyncComponent(() => import('@/components/HelpDialog.vue'))
 const GgbSuite = defineAsyncComponent(() => import('@/components/GgbSuite.vue'))
 const TemplatePicker = defineAsyncComponent(() => import('@/components/TemplatePicker.vue'))
@@ -47,6 +49,8 @@ import StatusBar from '@/components/StatusBar.vue'
 const store = useDeckStore()
 const presenting = ref(false)
 const paperOpen = ref(false)
+/** 【M1】讲义窗口开没开 ✓ */
+const handoutOpen = ref(false)
 
 /** 试题库「加入试卷」：没接住就挂成待办 → 这里把试卷打开（PaperModal 挂载时消费掉）✓ */
 watch(paperPending, (p) => { if (p) paperOpen.value = true })
@@ -205,7 +209,7 @@ function onPresent() {
 
 <template>
   <div class="app">
-    <TopToolbar @present="onPresent" @open-templates="openTemplateLibrary('replace')" @open-paper="paperOpen = true" @open-ggb-suite="openGgbSuite()" />
+    <TopToolbar @present="onPresent" @open-templates="openTemplateLibrary('replace')" @open-paper="paperOpen = true" @open-handout="handoutOpen = true" @open-ggb-suite="openGgbSuite()" />
     <EditToolbar />
     <div class="app__body">
       <SlideList />
@@ -229,6 +233,7 @@ function onPresent() {
       @pptx="openPptImportMenu()"
     />
     <PaperModal v-if="paperOpen" @close="paperOpen = false" />
+    <HandoutModal v-if="handoutOpen" @close="handoutOpen = false" />
   <HelpDialog v-if="helpOpen" @close="closeHelp()" />
     <GgbSuite v-if="ggbEdit.open" :edit-id="ggbEdit.editId" @close="closeGgbSuite()" />
     <ImageEditorModal v-if="imageEditOpen && imageEditId" :id="imageEditId" @close="closeImageEditor()" />

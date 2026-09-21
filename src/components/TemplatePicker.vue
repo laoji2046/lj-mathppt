@@ -165,7 +165,7 @@ function applyBundle(id: string) {
 
       <div class="panel__tabs">
         <button class="panel__tab" :class="{ 'panel__tab--active': library === 'common' }" @click="library = 'common'">常用模板</button>
-        <button class="panel__tab" :class="{ 'panel__tab--active': library === 'math' }" @click="library = 'math'">数学讲义模板</button>
+        <button class="panel__tab" :class="{ 'panel__tab--active': library === 'math' }" @click="library = 'math'">幻灯片 · 数学风</button>
         <button class="panel__tab" :class="{ 'panel__tab--active': library === 'mathApplet' }" @click="library = 'mathApplet'">高中数学例题</button>
         <button class="panel__tab" :class="{ 'panel__tab--active': library === 'pro' }" @click="library = 'pro'">专业模板</button>
       </div>
