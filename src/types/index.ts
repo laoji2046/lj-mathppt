@@ -365,6 +365,9 @@ export interface PenElement extends ElementBase {
 export type SvgItemKind =
   | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'ngon' | 'star'
   | 'line' | 'arrow' | 'poly' | 'polygon' | 'pen' | 'text'
+  /** 【v1508】数学图形里的**平面图形**（坐标系 / 数轴 / Venn / 直角三角形 / 平行四边形…）
+   *  在 SVG 编辑器里也是"一笔"：拖出来放好，落盘成**原生 mathfig 元素** ✓（插完照样能改参数/顶点 ✓） */
+  | 'figure'
 
 export interface SvgPt { x: number; y: number }
 
@@ -396,6 +399,10 @@ export interface SvgItemData {
   dash?: string
   /** 箭头样式（见 ARROW_HEADS：triangle/open/stealth/double ✓） */
   arrowHead?: string
+  /** 【v1508】kind === 'figure' 时：是哪一种数学图形（'triangle' / 'parallelogram' / 'venn' …✓） */
+  figKind?: MathFigureKind
+  /** mathfig 自己的那套参数（polygon/bezier 的顶点、坐标轴刻度…）—— 原样带着走 ✓ */
+  figExtra?: Record<string, unknown>
 }
 
 /** 挂在"这张手绘图"的**每一个**元素上：同一 key = 同一张图 ✓ */

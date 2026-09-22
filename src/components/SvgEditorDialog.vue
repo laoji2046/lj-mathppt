@@ -21,8 +21,9 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { ICONS as I } from '@/ui/icons'
 import { useDeckStore } from '@/stores/deck'
-import { LINE_STYLES, ARROW_HEADS, lineDashCss } from '@/types'
-import type { SlideElement, SvgItemData, SvgItemKind, SvgDrawing } from '@/types'
+import { LINE_STYLES, ARROW_HEADS, MATH_FIGURE_OPTIONS, lineDashCss } from '@/types'
+import type { SlideElement, SvgItemData, SvgItemKind, SvgDrawing, MathFigureKind } from '@/types'
+import { mathFigureElOfKind, renderFigureSvg } from '@/composables/figureRender'
 import { svgEditorEditKey } from '@/ui/svgEditor'
 
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -56,8 +57,11 @@ const SWATCHES = ['#1a1a1a', '#534AB7', '#d92d20', '#2563eb', '#16a34a', '#d9770
 const FILL_SWATCHES = ['none', '#534AB7', '#dbe4ff', '#ffe8cc', '#d3f9d8', '#ffe3e3', '#f1f3f5', '#ffffff']
 const KIND_LABEL: Record<string, string> = {
   rect: '矩形', roundrect: '圆角矩形', ellipse: '圆', triangle: '三角形', ngon: '正多边形', star: '星形',
-  line: '直线', arrow: '箭头', poly: '折线', polygon: '多边形', pen: '手绘', text: '文字',
+  line: '直线', arrow: '箭头', poly: '折线', polygon: '多边形', pen: '手绘', text: '文字', figure: '平面图形',
 }
+/** 【v1508】数学图形里的**平面图形**全搬进来（与图形库同一份清单 ✓ 不另起一套 ✗） */
+const PLANE_FIGS = MATH_FIGURE_OPTIONS.filter((o) => o.cat === '平面图形')
+const figLabel = (k?: string) => PLANE_FIGS.find((o) => o.v === k)?.label || String(k || '')
 
 const editKey = ref(svgEditorEditKey.value)
 const isEdit = computed(() => !!editKey.value)
@@ -75,6 +79,8 @@ const arrowHead = ref('triangle')
 const sides = ref(5)
 const cornerRadius = ref(18)
 const textValue = ref('文字')
+/** 【v1508】当前要放的平面图形（工具 'figure' 用它 ✓；选中一个平面图形时也可以用它"换图形" ✓） */
+const figKind = ref<MathFigureKind>('triangle')
 const msg = ref('')
 
 /* ---------------- 拖拽（**window 级** ✓ 拖出窗口也不掉） ---------------- */
@@ -174,6 +180,132 @@ function lineEnds(it: Item): { p0: Pt; p1: Pt } {
 }
 const dashOf = (it: Item) => lineDashCss(it.dash) || undefined
 
+/* ---------------- 【v1508】平面图形：用 **app 自己的渲染**（与画布 / 导出逐像素一致 ✓） ---------------- */
+/** 按 (kind + 尺寸 + 颜色) 缓存 —— renderFigureSvg 每次都要挂一遍真组件，别在渲染里反复调 ✗ */
+const figCache = new Map<string, string>()
+function figureHtml(it: Item): string {
+  const kind = it.figKind
+  if (!kind) return ''
+  const key = [kind, Math.round(it.w), Math.round(it.h), it.stroke, it.strokeWidth, it.fill, it.dash || ''].join('|')
+  const hit = figCache.get(key)
+  if (hit !== undefined) return hit
+  let out = ''
+  try {
+    const el = mathFigureElOfKind(kind)
+    Object.assign(el, {
+      x: 0, y: 0, w: Math.max(8, Math.round(it.w)), h: Math.max(8, Math.round(it.h)),
+      stroke: it.stroke, strokeWidth: it.strokeWidth,
+      fill: it.fill && it.fill !== 'none' ? it.fill : 'transparent',
+      ...(it.figExtra || {}),
+    })
+    out = renderFigureSvg(el as SlideElement).replace('<svg ', '<svg preserveAspectRatio="none" ')
+  } catch { out = '' }
+  figCache.set(key, out)
+  if (figCache.size > 160) figCache.clear()
+  return out
+}
+
+/* ---------------- 【v1508】编辑器内**再编辑**：顶点模式 + 数值微调 ✓ ---------------- */
+/** 这一笔的"顶点"（绝对坐标 ✓）—— line/arrow 用两端点、poly/pen/polygon/三角形/正多边形/星形用点序列 */
+function verticesOf(it: Item): Pt[] {
+  if (it.kind === 'line' || it.kind === 'arrow') { const e = lineEnds(it); return [e.p0, e.p1] }
+  return pointsOf(it)
+}
+/** 能拖顶点的那几类（平面图形 / 矩形 / 圆 / 文字都不走顶点模式 ✓ 它们直接改框 ✓） */
+function canEditVertices(it: Item | null): boolean {
+  if (!it) return false
+  if (it.kind === 'line' || it.kind === 'arrow') return true
+  if (it.points && it.points.length) return true
+  return isPolyKind(it.kind)
+}
+let vDrag: { idx: number; snapped?: boolean } | null = null
+/** 拖顶点：先把"算出来的点"固化进 points（三角形/正多边形/星形一拖就变成自由多边形 ✓），再改那一个点 ✓ */
+function bakePoints(it: Item) {
+  if (!it.points || !it.points.length) it.points = pointsOf(it).map((p) => ({ ...p }))
+}
+function onVertexDown(e: PointerEvent, it: Item, idx: number) {
+  if (tool.value !== 'select') return
+  e.stopPropagation()
+  selId.value = it.id
+  vDrag = { idx }
+  bindDrag()
+}
+function moveVertex(it: Item, idx: number, p: Pt) {
+  if (it.kind === 'line' || it.kind === 'arrow') {
+    if (idx === 0) it.a = p
+    else it.b = p
+  } else {
+    bakePoints(it)
+    it.points = (it.points || []).map((q, i) => (i === idx ? p : q))
+  }
+  const b = boxOf(it)
+  it.x = b.x; it.y = b.y; it.w = b.w; it.h = b.h
+}
+/** 双击顶点 = 删掉它（闭合的最少留 3 个、折线/手绘最少留 2 个 ✓） */
+function deleteVertex(it: Item, idx: number) {
+  if (it.kind === 'line' || it.kind === 'arrow') return
+  bakePoints(it)
+  const n = (it.points || []).length
+  const min = it.closed ? 3 : 2
+  if (n <= min) { msg.value = '再删就不成形了（最少 ' + min + ' 个顶点 ✓）'; return }
+  snapshot()
+  it.points = (it.points || []).filter((_, i) => i !== idx)
+  const b = boxOf(it)
+  it.x = b.x; it.y = b.y; it.w = b.w; it.h = b.h
+  msg.value = '删掉一个顶点（可撤销 ✓）'
+}
+/** 双击一条边 = 在**那一点**插一个顶点 ✓（与画布上的顶点编辑同一套手感 ✓） */
+function insertVertexAt(it: Item, p: Pt) {
+  if (it.kind === 'line' || it.kind === 'arrow') return
+  bakePoints(it)
+  const ps = it.points || []
+  if (ps.length < 2) return
+  let best = 0
+  let bestD = Infinity
+  const segs = it.closed ? ps.length : ps.length - 1
+  for (let i = 0; i < segs; i++) {
+    const a = ps[i]
+    const b = ps[(i + 1) % ps.length]
+    const vx = b.x - a.x
+    const vy = b.y - a.y
+    const L2 = vx * vx + vy * vy || 1
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy) / L2))
+    const q = { x: a.x + vx * t, y: a.y + vy * t }
+    const d = Math.hypot(p.x - q.x, p.y - q.y)
+    if (d < bestD) { bestD = d; best = i }
+  }
+  snapshot()
+  it.points = [...ps.slice(0, best + 1), { x: Math.round(p.x), y: Math.round(p.y) }, ...ps.slice(best + 1)]
+  const b2 = boxOf(it)
+  it.x = b2.x; it.y = b2.y; it.w = b2.w; it.h = b2.h
+  msg.value = '加了一个顶点（拖它可以微调 ✓）'
+}
+/** 选中项改一个数值（X / Y / 宽 / 高 ✓） */
+function setNum(key: 'x' | 'y' | 'w' | 'h', v: string) {
+  const it = sel.value
+  if (!it) return
+  const n = Number(v)
+  if (!isFinite(n)) return
+  snapshot()
+  if (key === 'x' || key === 'y') translate(it, key === 'x' ? n - it.x : 0, key === 'y' ? n - it.y : 0)
+  else if (key === 'w') scaleTo(it, boxOf(it), Math.max(0.05, n / Math.max(1, it.w)), 1)
+  else scaleTo(it, boxOf(it), 1, Math.max(0.05, n / Math.max(1, it.h)))
+  msg.value = '已调整 ✓'
+}
+/** 换平面图形（选中的那一笔是平面图形时 ✓） */
+function changeFigKind(k: MathFigureKind) {
+  figKind.value = k
+  const it = sel.value
+  if (!it || it.kind !== 'figure') return
+  const def = mathFigureElOfKind(k)
+  snapshot()
+  it.figKind = k
+  it.figExtra = undefined
+  // 尺寸按新图形的默认比例走（不然换完会拉变形 ✗）
+  if (def.w && def.h) { it.w = Math.max(80, Math.round(it.w)); it.h = Math.round(it.w * (def.h / def.w)) }
+  msg.value = '换成「' + figLabel(k) + '」✓'
+}
+
 /* ---------------- 交互（window 级 ✓） ---------------- */
 function onWinMove(e: PointerEvent) { handleMove(e) }
 function onWinUp() { handleUp() }
@@ -217,6 +349,17 @@ function onCanvasDown(e: PointerEvent) {
     dash: dash.value, arrowHead: arrowHead.value, sides: sides.value, cornerRadius: cornerRadius.value,
   }
   if (tool.value === 'line' || tool.value === 'arrow') { base.a = p; base.b = p } else if (tool.value === 'pen') { base.points = [p] }
+  // 【v1508】平面图形：把 app 那套默认参数（顶点/刻度/标签…）一起带上 ✓ —— 落盘就是同一个 mathfig ✓
+  if (tool.value === 'figure') {
+    base.figKind = figKind.value
+    const def = mathFigureElOfKind(figKind.value) as unknown as Record<string, unknown>
+    const skip = new Set(['id', 'type', 'x', 'y', 'w', 'h', 'rot', 'kind', 'stroke', 'strokeWidth', 'fill', 'strokeDash'])
+    const extra: Record<string, unknown> = {}
+    for (const k of Object.keys(def)) if (!skip.has(k) && def[k] !== undefined) extra[k] = def[k]
+    base.figExtra = extra
+    base.h = 0
+    base.w = 0
+  }
   draft.value = base
   drag = { mode: 'draw', start: p }
   bindDrag()
@@ -224,6 +367,12 @@ function onCanvasDown(e: PointerEvent) {
 
 function handleMove(e: PointerEvent) {
   const p = pt(e)
+  // 【v1508】拽顶点（编辑器内再编辑 ✓）
+  if (vDrag) {
+    const it = items.value.find((x) => x.id === selId.value)
+    if (it) moveVertex(it, vDrag.idx, p)
+    return
+  }
   if ((tool.value === 'poly' || tool.value === 'polygon') && polyPts.value.length) { polyCur.value = p; return }
   const d = draft.value
   if (d && drag && drag.mode === 'draw') {
@@ -268,6 +417,7 @@ function handleMove(e: PointerEvent) {
 function handleUp() {
   if (draft.value) commitDraft()
   drag = null
+  vDrag = null
   unbindDrag()
 }
 
@@ -275,6 +425,16 @@ function commitDraft() {
   const d = draft.value
   draft.value = null
   if (!d) return
+  if (d.kind === 'figure' && (d.w < 12 || d.h < 12)) {
+    // 在画布上"点一下"放图 → 用这个图形的默认尺寸（居中在点击处 ✓）
+    const def = mathFigureElOfKind(d.figKind || 'triangle')
+    const w = Math.max(120, Math.round(def.w || 320))
+    const h = Math.max(90, Math.round(def.h || 220))
+    d.x = Math.max(0, Math.min(W - w, Math.round(d.x - w / 2)))
+    d.y = Math.max(0, Math.min(H - h, Math.round(d.y - h / 2)))
+    d.w = w
+    d.h = h
+  }
   if (d.kind === 'line' || d.kind === 'arrow') {
     const { p0, p1 } = lineEnds(d)
     if (Math.hypot(p1.x - p0.x, p1.y - p0.y) < 8) return
@@ -352,6 +512,20 @@ function onHandleDown(e: PointerEvent, it: Item) {
   drag = { mode: 'scale', id: it.id, box: boxOf(it), orig: JSON.parse(JSON.stringify(it)) as Item }
   bindDrag()
 }
+/** 事件坐标 → 画布坐标（顶点插点用 ✓） */
+function ptOfEvent(e: MouseEvent | PointerEvent): Pt { return pt(e) }
+/**
+ * 下拉里挑了一个平面图形 —— **一律是"准备放一个"** ✓
+ * ⚠ 原来写成"选中项是平面图形就换图形" ✗ —— 刚放下的那个还是选中态，于是连着放第二个就变成改第一个了 ✗
+ *   （真机探针当场抓到 ✓）现在"换图形"走旁边那颗明确的按钮 ✓
+ */
+function onFigPick(k: string) {
+  const kind = k as MathFigureKind
+  figKind.value = kind
+  tool.value = 'figure'
+  polyPts.value = []
+  msg.value = '在画布上拖一个「' + figLabel(kind) + '」出来（点一下 = 默认大小 ✓）'
+}
 function onItemDbl(e: MouseEvent, it: Item) {
   if (it.kind !== 'text') return
   e.stopPropagation()
@@ -386,7 +560,22 @@ function clearAll() {
 }
 
 /* ---------------- 落盘：一笔 → 一个原生矢量元素 ✓ ---------------- */
-function toElement(it: Item): { type: 'shape' | 'line' | 'arrow' | 'pen' | 'text'; overrides: Partial<SlideElement> } {
+function toElement(it: Item): { type: 'shape' | 'line' | 'arrow' | 'pen' | 'text' | 'mathfig'; overrides: Partial<SlideElement> } {
+  // 【v1508】平面图形 → **原生 mathfig 元素** ✓（插完照样能在属性面板改参数 / 双击编辑顶点 ✓）
+  if (it.kind === 'figure' && it.figKind) {
+    const b0 = boxOf(it)
+    return {
+      type: 'mathfig',
+      overrides: {
+        kind: it.figKind,
+        x: r2(b0.x), y: r2(b0.y), w: Math.max(20, r2(b0.w)), h: Math.max(20, r2(b0.h)),
+        stroke: it.stroke, strokeWidth: it.strokeWidth,
+        fill: it.fill && it.fill !== 'none' ? it.fill : 'transparent',
+        strokeDash: it.dash && it.dash !== 'solid' ? it.dash : undefined,
+        ...(it.figExtra || {}),
+      } as Partial<SlideElement>,
+    }
+  }
   const b = boxOf(it)
   const common = { stroke: it.stroke, strokeWidth: it.strokeWidth, strokeDash: it.dash && it.dash !== 'solid' ? it.dash : undefined }
   if (it.kind === 'rect' || it.kind === 'roundrect' || it.kind === 'ellipse') {
@@ -552,6 +741,16 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
           <label v-if="tool === 'text' || (sel && sel.kind === 'text')" class="svgx__lab">文字
             <input v-model="textValue" class="svgx__txt" placeholder="图上的字" @input="onTextInput" />
           </label>
+          <!-- 【v1508】数学图形里的**平面图形**：选中即切到"放图形"工具；已选中平面图形时 = 换图形 ✓ -->
+          <label class="svgx__lab">平面图形
+            <select class="svgx__sel" :value="sel && sel.kind === 'figure' ? sel.figKind : figKind" @change="onFigPick(($event.target as HTMLSelectElement).value)">
+              <option v-for="o in PLANE_FIGS" :key="o.v" :value="o.v">{{ o.label }}</option>
+            </select>
+          </label>
+          <button
+            v-if="sel && sel.kind === 'figure'" class="svgx__mini" title="把选中的这张平面图形换成下拉里选的那种（尺寸按新图形的比例走 ✓）"
+            @click="changeFigKind(figKind)"
+          >⇄ 换成这个</button>
           <span class="svgx__sep"></span>
           <button class="svgx__mini" title="撤销（Ctrl+Z ✓）" @click="undo">撤销</button>
           <button class="svgx__mini" title="删掉选中的那一笔（Delete ✓）" @click="delSel">删除</button>
@@ -580,12 +779,25 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
               <rect v-if="it.kind === 'rect' || it.kind === 'roundrect'" :x="it.x" :y="it.y" :width="it.w" :height="it.h" :rx="it.kind === 'roundrect' ? (it.cornerRadius ?? 18) : 0" :fill="it.fill === 'none' ? 'transparent' : it.fill" :stroke="it.stroke" :stroke-width="it.strokeWidth" :stroke-dasharray="dashOf(it)" @pointerdown="onItemDown($event, it)" @dblclick="onItemDbl($event, it)" />
               <ellipse v-else-if="it.kind === 'ellipse'" :cx="it.x + it.w / 2" :cy="it.y + it.h / 2" :rx="it.w / 2" :ry="it.h / 2" :fill="it.fill === 'none' ? 'transparent' : it.fill" :stroke="it.stroke" :stroke-width="it.strokeWidth" :stroke-dasharray="dashOf(it)" @pointerdown="onItemDown($event, it)" />
               <line v-else-if="it.kind === 'line' || it.kind === 'arrow'" :x1="lineEnds(it).p0.x" :y1="lineEnds(it).p0.y" :x2="lineEnds(it).p1.x" :y2="lineEnds(it).p1.y" :stroke="it.stroke" :stroke-width="it.strokeWidth" :stroke-dasharray="dashOf(it)" stroke-linecap="round" :marker-end="it.kind === 'arrow' ? 'url(#svgx-arrow)' : undefined" :marker-start="it.kind === 'arrow' && it.arrowHead === 'double' ? 'url(#svgx-arrow)' : undefined" @pointerdown="onItemDown($event, it)" />
+              <!-- 【v1508】平面图形：用 app 自己的渲染（与画布 / 导出同一份 ✓） -->
+              <svg
+                v-else-if="it.kind === 'figure'" :x="it.x" :y="it.y" :width="it.w" :height="it.h"
+                class="svgx__fig" v-html="figureHtml(it)" @pointerdown="onItemDown($event, it)"
+              ></svg>
               <text v-else-if="it.kind === 'text'" :x="it.x + it.w / 2" :y="it.y + it.h / 2" :fill="it.stroke" :font-size="Math.max(14, Math.round(Math.min(it.h, it.w) * 0.7))" text-anchor="middle" dominant-baseline="middle" @pointerdown="onItemDown($event, it)" @dblclick="onItemDbl($event, it)">{{ it.text }}</text>
               <polygon v-else-if="it.closed || (it.kind === 'polygon' || it.kind === 'triangle' || it.kind === 'ngon' || it.kind === 'star')" :points="pointsStr(it)" :fill="it.fill === 'none' ? 'transparent' : it.fill" :stroke="it.stroke" :stroke-width="it.strokeWidth" :stroke-dasharray="dashOf(it)" stroke-linejoin="round" @pointerdown="onItemDown($event, it)" />
               <polyline v-else :points="pointsStr(it)" :fill="it.fill === 'none' ? 'none' : it.fill" :stroke="it.stroke" :stroke-width="it.strokeWidth" :stroke-dasharray="dashOf(it)" stroke-linecap="round" stroke-linejoin="round" @pointerdown="onItemDown($event, it)" />
               <template v-if="it.id === selId">
                 <rect :x="boxOf(it).x - 6" :y="boxOf(it).y - 6" :width="boxOf(it).w + 12" :height="boxOf(it).h + 12" fill="none" stroke="#534AB7" stroke-width="2" stroke-dasharray="8 6" pointer-events="none" />
                 <rect :x="boxOf(it).x + boxOf(it).w - 3" :y="boxOf(it).y + boxOf(it).h - 3" width="20" height="20" fill="#fff" stroke="#534AB7" stroke-width="3" class="svgx__handle" @pointerdown="onHandleDown($event, it)" />
+                <!-- 【v1508】顶点模式：拖顶点改形状 / 双击顶点删 / 双击边加点 ✓（与画布上的顶点编辑同一套手感 ✓） -->
+                <template v-if="canEditVertices(it)">
+                  <polyline :points="verticesOf(it).map((q) => q.x + ',' + q.y).join(' ')" fill="none" stroke="transparent" stroke-width="18" class="svgx__edgehit" @dblclick.stop="insertVertexAt(it, ptOfEvent($event))" />
+                  <circle
+                    v-for="(q, vi) in verticesOf(it)" :key="'v' + vi" :cx="q.x" :cy="q.y" r="9"
+                    class="svgx__vtx" @pointerdown="onVertexDown($event, it, vi)" @dblclick.stop="deleteVertex(it, vi)"
+                  />
+                </template>
               </template>
             </g>
 
@@ -607,8 +819,15 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
         </div>
 
         <footer class="svgx__foot">
-          <span class="svgx__hint">{{ (TOOLS.find((t) => t.v === tool) || TOOLS[0]).hint }}</span>
-          <span v-if="sel" class="svgx__n">已选：{{ KIND_LABEL[sel.kind] || sel.kind }} {{ Math.round(boxOf(sel).w) }}×{{ Math.round(boxOf(sel).h) }}</span>
+          <span class="svgx__hint">{{ sel ? '选中了：拖它挪位置、拉右下角缩放；拖小圆点改形状、双击顶点删、双击边上加点 ✓' : (TOOLS.find((t) => t.v === tool) || TOOLS[0]).hint }}</span>
+          <span v-if="sel" class="svgx__n">已选：{{ sel.kind === 'figure' ? figLabel(sel.figKind) : (KIND_LABEL[sel.kind] || sel.kind) }}</span>
+          <!-- 【v1508】数值微调（选中后可直接改 ✓） -->
+          <span v-if="sel" class="svgx__nums">
+            <label>X<input type="number" :value="Math.round(boxOf(sel).x)" @change="setNum('x', ($event.target as HTMLInputElement).value)" /></label>
+            <label>Y<input type="number" :value="Math.round(boxOf(sel).y)" @change="setNum('y', ($event.target as HTMLInputElement).value)" /></label>
+            <label>宽<input type="number" :value="Math.round(boxOf(sel).w)" @change="setNum('w', ($event.target as HTMLInputElement).value)" /></label>
+            <label>高<input type="number" :value="Math.round(boxOf(sel).h)" @change="setNum('h', ($event.target as HTMLInputElement).value)" /></label>
+          </span>
           <span class="svgx__n">已画 {{ items.length }} 笔</span>
           <button class="svgx__btn" @click="emit('close')">取消</button>
           <button class="svgx__btn svgx__btn--main" :disabled="!canApply" :title="isEdit ? '把改动应用回那一张（整张替换，只留一步撤销 ✓）' : '把画好的插到当前页（多笔自动打成一个组合 ✓）'" @click="apply">
@@ -648,6 +867,14 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
 .svgx__stage--draw { cursor: crosshair; }
 .svgx__canvas { display: block; width: 100%; aspect-ratio: 16 / 9; background: #fff; border: 1px solid var(--border); border-radius: 8px; touch-action: none; }
 .svgx__handle { cursor: nwse-resize; }
+/* 【v1508】顶点模式 + 平面图形 + 数值微调 */
+.svgx__vtx { fill: #fff; stroke: #534AB7; stroke-width: 3; cursor: move; }
+.svgx__vtx:hover { fill: #ede9fb; r: 11; }
+.svgx__edgehit { cursor: copy; }
+.svgx__fig { overflow: visible; }
+.svgx__nums { display: inline-flex; align-items: center; gap: 6px; }
+.svgx__nums label { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 11.5px; }
+.svgx__nums input { width: 58px; height: 24px; padding: 0 4px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
 .svgx__foot { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--border); }
 .svgx__hint { font-size: 12px; color: var(--muted); }
 .svgx__n { margin-left: auto; font-size: 12px; color: var(--muted); }
