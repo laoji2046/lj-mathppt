@@ -70,7 +70,12 @@ const editKey = ref(svgEditorEditKey.value)
 const isEdit = computed(() => !!editKey.value)
 const tool = ref<Tool>('select')
 const items = ref<Item[]>([])
-const selId = ref('')
+/** 【v1511】选中集（Shift 点选可多选 ✓）—— 复制/剪切/粘贴/删除都按它来 ✓ */
+const selIds = ref<string[]>([])
+/** 只选了一个时才是"那一笔"（样式回填 / 顶点编辑 / 数值微调都只对单个生效 ✓） */
+const sel = computed(() => (selIds.value.length === 1 ? items.value.find((x) => x.id === selIds.value[0]) || null : null))
+const isSel = (id: string) => selIds.value.indexOf(id) >= 0
+function setSel(ids: string[]) { selIds.value = ids }
 const draft = ref<Item | null>(null)
 const polyPts = ref<Pt[]>([])
 const polyCur = ref<Pt | null>(null)
@@ -101,11 +106,10 @@ function undo() {
   if (!last) { msg.value = '没有可撤销的了 ✓'; return }
   items.value = JSON.parse(last) as Item[]
   undoStack.value = undoStack.value.slice(0, -1)
-  selId.value = ''
+  setSel([])
   msg.value = '已撤销一步 ✓'
 }
 
-const sel = computed(() => items.value.find((x) => x.id === selId.value) || null)
 const canvas = ref<SVGSVGElement | null>(null)
 
 /** 画布坐标（**夹在画布里** ✓ —— 拖到窗口外面时，图形长到边就停，不会跑到 1920 之外 ✗） */
@@ -234,29 +238,77 @@ function canEditVertices(it: Item | null): boolean {
   return isPolyKind(it.kind)
 }
 let vDrag: { idx: number; snapped?: boolean } | null = null
-/** 拖顶点：先把"算出来的点"固化进 points（三角形/正多边形/星形一拖就变成自由多边形 ✓），再改那一个点 ✓ */
+/** 拖顶点前把"算出来的点"固化进 points ✓（自由多边形/折线/手绘本来就有 ✓） */
 function bakePoints(it: Item) {
   if (!it.points || !it.points.length) it.points = pointsOf(it).map((p) => ({ ...p }))
 }
-function onVertexDown(e: PointerEvent, it: Item, idx: number) {
-  if (tool.value !== 'select') return
-  e.stopPropagation()
-  selId.value = it.id
-  syncStyleFrom(it)
-  vDrag = { idx }
-  bindDrag()
+/** 把 it 的点重新按 box 收一遍（改完点都要做 ✓） */
+function rebox(it: Item) {
+  const b = boxOf(it)
+  it.x = b.x; it.y = b.y; it.w = b.w; it.h = b.h
 }
+const centerOf = (it: Item) => ({ x: it.x + it.w / 2, y: it.y + it.h / 2 })
+
+/**
+ * 【v1511】拖顶点时**守住形状约束** ✓ —— 老师要的：
+ *   · 平行四边形：拖一个顶点 → **对角那个跟着走**，四条边依旧两两平行 ✓
+ *   · 梯形：拖上底一个角 → 另一个上底角**对称跟**（保持等腰梯形 ✓）
+ *   · 正多边形 / 星形：拖哪个顶点都**保持正**（半径与转角一起变，边长始终相等 ✓）
+ *   · 三角形 / 自由多边形 / 折线 / 手绘：不约束（本来就随便拖 ✓）
+ */
 function moveVertex(it: Item, idx: number, p: Pt) {
   if (it.kind === 'line' || it.kind === 'arrow') {
     if (idx === 0) it.a = p
     else it.b = p
-  } else {
-    bakePoints(it)
-    it.points = (it.points || []).map((q, i) => (i === idx ? p : q))
+    rebox(it)
+    return
   }
-  const b = boxOf(it)
-  it.x = b.x; it.y = b.y; it.w = b.w; it.h = b.h
+  bakePoints(it)
+  const ps = (it.points || []).map((q) => ({ ...q }))
+  if (it.kind === 'parallelogram' && ps.length === 4) {
+    // 对角点 = 两个邻点之和 − 自己（平行四边形 A+C = B+D ✓）
+    ps[idx] = p
+    const a = ps[(idx + 1) % 4]
+    const b = ps[(idx + 3) % 4]
+    ps[(idx + 2) % 4] = { x: a.x + b.x - p.x, y: a.y + b.y - p.y }
+  } else if (it.kind === 'trapezoid' && ps.length === 4) {
+    // 上底（0,1）与下底（3,2）：拖一个角 → 同底另一个角左右对称跟 ✓
+    ps[idx] = p
+    const pair = idx === 0 ? 1 : idx === 1 ? 0 : idx === 2 ? 3 : 2
+    const other = ps[pair]
+    const cx = (p.x + other.x) / 2
+    const half = Math.abs(p.x - other.x) / 2
+    const side = p.x <= other.x ? -1 : 1
+    ps[idx] = { x: cx + side * half, y: p.y }
+    ps[pair] = { x: cx - side * half, y: other.y }
+  } else if ((it.kind === 'ngon' || it.kind === 'star') && ps.length >= 3) {
+    // 保持"正"：以中心为心，半径 = 拖到哪儿的距离，转角让被拖的顶点正落在指针上 ✓
+    const c = centerOf(it)
+    const N = ps.length
+    const r = Math.max(8, Math.hypot(p.x - c.x, p.y - c.y))
+    const step = (Math.PI * 2) / N
+    const ang = Math.atan2(p.y - c.y, p.x - c.x)
+    const a0 = ang - idx * step
+    for (let k = 0; k < N; k++) {
+      // 星形：奇数号顶点在内圈（与 shapePoints 同口径 ✓）
+      const rr = it.kind === 'star' && k % 2 === 1 ? r * 0.42 : r
+      ps[k] = { x: c.x + rr * Math.cos(a0 + k * step), y: c.y + rr * Math.sin(a0 + k * step) }
+    }
+  } else {
+    ps[idx] = p
+  }
+  it.points = ps
+  rebox(it)
 }
+function onVertexDown(e: PointerEvent, it: Item, idx: number) {
+  if (tool.value !== 'select') return
+  e.stopPropagation()
+  setSel([it.id])
+  syncStyleFrom(it)
+  vDrag = { idx }
+  bindDrag()
+}
+
 /** 双击顶点 = 删掉它（闭合的最少留 3 个、折线/手绘最少留 2 个 ✓） */
 function deleteVertex(it: Item, idx: number) {
   if (it.kind === 'line' || it.kind === 'arrow') return
@@ -309,32 +361,82 @@ function syncStyleFrom(it: Item) {
   if (it.kind === 'text') textValue.value = it.text || ''
   if (it.kind === 'figure' && it.figKind) figKind.value = it.figKind
 }
-function applyStroke(v: string) { stroke.value = v; const it = sel.value; if (it) { snapshot(); it.stroke = v } }
-function applyFill(v: string) { fill.value = v; const it = sel.value; if (it) { snapshot(); it.fill = v } }
+/** 【v1511】样式改的是**所有选中项** ✓（没选中就只改"下一笔的默认" ✓） */
+function selItems(): Item[] { return items.value.filter((x) => selIds.value.indexOf(x.id) >= 0) }
+function applyStroke(v: string) { stroke.value = v; const l = selItems(); if (l.length) { snapshot(); l.forEach((it) => { it.stroke = v }) } }
+function applyFill(v: string) { fill.value = v; const l = selItems(); if (l.length) { snapshot(); l.forEach((it) => { it.fill = v }) } }
 function applyWidth(v: number) {
   const n = Math.max(1, Math.min(20, Number(v) || 3))
   strokeWidth.value = n
-  const it = sel.value
-  if (it) { snapshot(); it.strokeWidth = n }
+  const l = selItems()
+  if (l.length) { snapshot(); l.forEach((it) => { it.strokeWidth = n }) }
 }
-function applyDash(v: string) { dash.value = v; const it = sel.value; if (it) { snapshot(); it.dash = v } }
+function applyDash(v: string) { dash.value = v; const l = selItems(); if (l.length) { snapshot(); l.forEach((it) => { it.dash = v }) } }
 function applySides(v: number) {
   const n = Math.max(3, Math.min(12, Math.round(Number(v) || 5)))
   sides.value = n
-  const it = sel.value
-  if (it && (it.kind === 'ngon' || it.kind === 'star')) {
+  const l = selItems().filter((it) => it.kind === 'ngon' || it.kind === 'star')
+  if (l.length) {
     snapshot()
-    it.sides = n
-    it.points = undefined      // 拖过顶点的话按新边数重新生成（不然改了没反应 ✗）
-    const b = boxOf(it)
-    it.x = b.x; it.y = b.y; it.w = b.w; it.h = b.h
+    l.forEach((it) => {
+      it.sides = n
+      it.points = undefined      // 拖过顶点的话按新边数重新生成（不然改了没反应 ✗）
+      rebox(it)
+    })
   }
 }
 function applyCorner(v: number) {
   const n = Math.max(0, Math.min(160, Math.round(Number(v) || 0)))
   cornerRadius.value = n
-  const it = sel.value
-  if (it && it.kind === 'roundrect') { snapshot(); it.cornerRadius = n }
+  const l = selItems().filter((it) => it.kind === 'roundrect')
+  if (l.length) { snapshot(); l.forEach((it) => { it.cornerRadius = n }) }
+}
+
+/* ---------------- 【v1511】编辑器内的剪贴板：复制 / 剪切 / 粘贴 / 原地复制 ✓ ---------------- */
+const clip = ref<Item[]>([])
+/** 选中的这几笔复制一份（点往后错开一点 ✓ 免得叠在一起看不出来 ✓） */
+function cloneItems(list: Item[], dx = 0, dy = 0): Item[] {
+  return list.map((it) => {
+    const c = JSON.parse(JSON.stringify(it)) as Item
+    c.id = newId()
+    translate(c, dx, dy)
+    return c
+  })
+}
+function copySel() {
+  const l = selItems()
+  if (!l.length) { msg.value = '先点一下要复制的那些笔 ✓'; return }
+  clip.value = JSON.parse(JSON.stringify(l)) as Item[]
+  msg.value = '已复制 ' + l.length + ' 笔（Ctrl+V 粘贴 ✓）'
+}
+function cutSel() {
+  const l = selItems()
+  if (!l.length) { msg.value = '先点一下要剪切的那些笔 ✓'; return }
+  clip.value = JSON.parse(JSON.stringify(l)) as Item[]
+  delSel()
+  msg.value = '已剪切 ' + clip.value.length + ' 笔（Ctrl+V 粘贴 ✓）'
+}
+function pasteClip() {
+  if (!clip.value.length) { msg.value = '剪贴板是空的（先 Ctrl+C 复制 ✓）'; return }
+  snapshot()
+  const add = cloneItems(clip.value, 40, 40)
+  items.value = [...items.value, ...add]
+  setSel(add.map((x) => x.id))
+  msg.value = '已粘贴 ' + add.length + ' 笔 ✓'
+}
+/** 原地复制（Ctrl+D ✓） */
+function duplicateSel() {
+  const l = selItems()
+  if (!l.length) { msg.value = '先点一下要复制的那些笔 ✓'; return }
+  snapshot()
+  const add = cloneItems(l, 40, 40)
+  items.value = [...items.value, ...add]
+  setSel(add.map((x) => x.id))
+  msg.value = '已原地复制 ' + add.length + ' 笔 ✓'
+}
+function selectAll() {
+  setSel(items.value.map((x) => x.id))
+  msg.value = '已全选 ' + items.value.length + ' 笔 ✓'
 }
 /** 控件上显示的值：选中了就显示选中项的 ✓ */
 const shownFill = computed(() => (sel.value ? (sel.value.fill ?? 'none') : fill.value))
@@ -392,7 +494,7 @@ function onCanvasDown(e: PointerEvent) {
     bindDrag()             // 鼠标移到窗口外也要跟着预览 ✓
     return
   }
-  if (tool.value === 'select') { selId.value = ''; return }
+  if (tool.value === 'select') { setSel([]); return }
   if (tool.value === 'text') {
     snapshot()
     const it: Item = {
@@ -400,7 +502,7 @@ function onCanvasDown(e: PointerEvent) {
       text: textValue.value || '文字', stroke: stroke.value, strokeWidth: strokeWidth.value, fill: 'none',
     }
     items.value = [...items.value, it]
-    selId.value = it.id
+    setSel([it.id])
     tool.value = 'select'
     return
   }
@@ -431,7 +533,7 @@ function handleMove(e: PointerEvent) {
   const p = pt(e)
   // 【v1508】拽顶点（编辑器内再编辑 ✓）
   if (vDrag) {
-    const it = items.value.find((x) => x.id === selId.value)
+    const it = sel.value
     if (it) moveVertex(it, vDrag.idx, p)
     return
   }
@@ -455,12 +557,14 @@ function handleMove(e: PointerEvent) {
   }
   if (drag && drag.mode === 'move') {
     const g = drag
-    const target = items.value.find((x) => x.id === g.id)
-    if (!target) return
     const dx = p.x - g.last.x
     const dy = p.y - g.last.y
     if (!g.snapped && (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5)) { snapshot(); g.snapped = true }
-    translate(target, dx, dy)
+    // 【v1511】选中的**一起挪** ✓
+    for (const id of selIds.value) {
+      const t = items.value.find((x) => x.id === id)
+      if (t) translate(t, dx, dy)
+    }
     g.last = p
     return
   }
@@ -507,7 +611,7 @@ function commitDraft() {
   } else if (d.w < 6 && d.h < 6) return
   snapshot()
   items.value = [...items.value, d]
-  selId.value = d.id
+  setSel([d.id])
   tool.value = 'select'
 }
 
@@ -531,7 +635,7 @@ function commitPoly(closed = false) {
     stroke: stroke.value, strokeWidth: strokeWidth.value, fill: fill.value, dash: dash.value,
   }
   items.value = [...items.value, it]
-  selId.value = it.id
+  setSel([it.id])
   tool.value = 'select'
 }
 
@@ -561,7 +665,12 @@ function scaleTo(it: Item, box: { x: number; y: number; w: number; h: number }, 
 function onItemDown(e: PointerEvent, it: Item) {
   if (tool.value !== 'select') return
   e.stopPropagation()
-  selId.value = it.id
+  // 【v1511】Shift 点 = 加选/减选 ✓（多选后能一起挪、一起改色、一起复制删除 ✓）
+  if (e.shiftKey) {
+    setSel(isSel(it.id) ? selIds.value.filter((x) => x !== it.id) : [...selIds.value, it.id])
+  } else if (!isSel(it.id)) {
+    setSel([it.id])
+  }
   syncStyleFrom(it)
   drag = { mode: 'move', id: it.id, last: pt(e) }
   bindDrag()
@@ -569,7 +678,7 @@ function onItemDown(e: PointerEvent, it: Item) {
 function onHandleDown(e: PointerEvent, it: Item) {
   if (tool.value !== 'select') return
   e.stopPropagation()
-  selId.value = it.id
+  setSel([it.id])
   snapshot()
   drag = { mode: 'scale', id: it.id, box: boxOf(it), orig: JSON.parse(JSON.stringify(it)) as Item }
   bindDrag()
@@ -588,7 +697,7 @@ function pickTool(t: Tool) {
   polyCur.value = null
   // ⚠ 只有**绘制工具**才取消选中 ✓：「选择」保留（不然"选中一笔 → 点选择 → 改色"就断了 ✗）；
   //   平面图形下拉也保留（"换成这个"那颗按钮要靠选中态才出来 ✓）
-  if (t !== 'select') selId.value = ''
+  if (t !== 'select') setSel([])
 }
 
 /**
@@ -622,16 +731,18 @@ function onTextInput() {
 }
 
 function delSel() {
-  if (!selId.value) { msg.value = '先点一下要删的那一笔 ✓'; return }
+  if (!selIds.value.length) { msg.value = '先点一下要删的那一笔 ✓'; return }
   snapshot()
-  items.value = items.value.filter((x) => x.id !== selId.value)
-  selId.value = ''
+  const gone = new Set(selIds.value)
+  items.value = items.value.filter((x) => !gone.has(x.id))
+  msg.value = gone.size > 1 ? '删掉 ' + gone.size + ' 笔（可撤销 ✓）' : ''
+  setSel([])
 }
 function clearAll() {
   if (!items.value.length) return
   snapshot()
   items.value = []
-  selId.value = ''
+  setSel([])
   polyPts.value = []
   msg.value = '画布已清空（可撤销 ✓）'
 }
@@ -735,12 +846,19 @@ function onKey(e: KeyboardEvent) {
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
   if (e.key === 'Escape') {
     if (polyPts.value.length) { polyPts.value = []; polyCur.value = null; msg.value = '这一笔不要了 ✓'; return }
-    if (selId.value) { selId.value = ''; return }
+    if (selIds.value.length) { setSel([]); return }
     emit('close'); return
   }
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); delSel(); return }
   if (e.key === 'Enter' && polyPts.value.length >= 2) { e.preventDefault(); commitPoly(tool.value === 'polygon'); return }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo() }
+  const mod = e.ctrlKey || e.metaKey
+  const k = e.key.toLowerCase()
+  if (mod && k === 'z') { e.preventDefault(); undo(); return }
+  if (mod && k === 'c') { e.preventDefault(); copySel(); return }
+  if (mod && k === 'x') { e.preventDefault(); cutSel(); return }
+  if (mod && k === 'v') { e.preventDefault(); pasteClip(); return }
+  if (mod && k === 'd') { e.preventDefault(); duplicateSel(); return }
+  if (mod && k === 'a') { e.preventDefault(); selectAll(); return }
 }
 
 onMounted(() => {
@@ -832,7 +950,11 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
           >⇄ 换成这个</button>
           <span class="svgx__sep"></span>
           <button class="svgx__mini" title="撤销（Ctrl+Z ✓）" @click="undo">撤销</button>
-          <button class="svgx__mini" title="删掉选中的那一笔（Delete ✓）" @click="delSel">删除</button>
+          <button class="svgx__mini" :disabled="!selIds.length" title="复制选中的（Ctrl+C ✓）—— 粘贴时往后错开一点 ✓" @click="copySel">复制</button>
+          <button class="svgx__mini" :disabled="!selIds.length" title="剪切选中的（Ctrl+X ✓）" @click="cutSel">剪切</button>
+          <button class="svgx__mini" :disabled="!clip.length" title="粘贴（Ctrl+V ✓）" @click="pasteClip">粘贴</button>
+          <button class="svgx__mini" :disabled="!selIds.length" title="原地复制一份（Ctrl+D ✓）" @click="duplicateSel">复制一份</button>
+          <button class="svgx__mini" :disabled="!selIds.length" title="删掉选中的（Delete ✓）" @click="delSel">删除</button>
           <button class="svgx__mini" title="清空画布（可撤销 ✓）" @click="clearAll">清空</button>
           <span class="svgx__msg">{{ msg }}</span>
         </div>
@@ -866,11 +988,12 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
               <text v-else-if="it.kind === 'text'" :x="it.x + it.w / 2" :y="it.y + it.h / 2" :fill="it.stroke" :font-size="Math.max(14, Math.round(Math.min(it.h, it.w) * 0.7))" text-anchor="middle" dominant-baseline="middle" @pointerdown="onItemDown($event, it)" @dblclick="onItemDbl($event, it)">{{ it.text }}</text>
               <polygon v-else-if="it.closed || isPolyKind(it.kind)" :points="pointsStr(it)" :fill="it.fill === 'none' ? 'transparent' : it.fill" :stroke="it.stroke" :stroke-width="it.strokeWidth" :stroke-dasharray="dashOf(it)" stroke-linejoin="round" @pointerdown="onItemDown($event, it)" />
               <polyline v-else :points="pointsStr(it)" :fill="it.fill === 'none' ? 'none' : it.fill" :stroke="it.stroke" :stroke-width="it.strokeWidth" :stroke-dasharray="dashOf(it)" stroke-linecap="round" stroke-linejoin="round" @pointerdown="onItemDown($event, it)" />
-              <template v-if="it.id === selId">
+              <template v-if="isSel(it.id)">
                 <rect :x="boxOf(it).x - 6" :y="boxOf(it).y - 6" :width="boxOf(it).w + 12" :height="boxOf(it).h + 12" fill="none" stroke="#534AB7" stroke-width="2" stroke-dasharray="8 6" pointer-events="none" />
-                <rect :x="boxOf(it).x + boxOf(it).w - 3" :y="boxOf(it).y + boxOf(it).h - 3" width="20" height="20" fill="#fff" stroke="#534AB7" stroke-width="3" class="svgx__handle" @pointerdown="onHandleDown($event, it)" />
+                <!-- 缩放手柄只在**单选**时给（多选时各自挪动 / 改样式 ✓） -->
+                <rect v-if="sel && sel.id === it.id" :x="boxOf(it).x + boxOf(it).w - 3" :y="boxOf(it).y + boxOf(it).h - 3" width="20" height="20" fill="#fff" stroke="#534AB7" stroke-width="3" class="svgx__handle" @pointerdown="onHandleDown($event, it)" />
                 <!-- 【v1508】顶点模式：拖顶点改形状 / 双击顶点删 / 双击边加点 ✓（与画布上的顶点编辑同一套手感 ✓） -->
-                <template v-if="canEditVertices(it)">
+                <template v-if="sel && sel.id === it.id && canEditVertices(it)">
                   <polyline :points="verticesOf(it).map((q) => q.x + ',' + q.y).join(' ')" fill="none" stroke="transparent" stroke-width="18" class="svgx__edgehit" @dblclick.stop="insertVertexAt(it, ptOfEvent($event))" />
                   <circle
                     v-for="(q, vi) in verticesOf(it)" :key="'v' + vi" :cx="q.x" :cy="q.y" r="9"
@@ -898,8 +1021,11 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
         </div>
 
         <footer class="svgx__foot">
-          <span class="svgx__hint">{{ sel ? '选中了：拖它挪位置、拉右下角缩放；拖小圆点改形状、双击顶点删、双击边上加点；上面那些颜色/线宽/填充改的就是**它** ✓' : (TOOLS.find((t) => t.v === tool) || TOOLS[0]).hint }}</span>
-          <span v-if="sel" class="svgx__n">已选：{{ sel.kind === 'figure' ? figLabel(sel.figKind) : (KIND_LABEL[sel.kind] || sel.kind) }}</span>
+          <span class="svgx__hint">{{ selIds.length
+            ? '选中了：拖动挪位置、拉右下角缩放；拖小圆点改形状（平行四边形/正多边形会**保持形状** ✓）、双击顶点删、双击边上加点；样式控件改的就是选中的这些 ✓；Ctrl+C/X/V/D、Delete ✓'
+            : (TOOLS.find((t) => t.v === tool) || TOOLS[0]).hint }}</span>
+          <span v-if="selIds.length > 1" class="svgx__n">已选 {{ selIds.length }} 笔（Shift 点选加减 ✓ 可一起挪 / 改样式 / 复制）</span>
+          <span v-else-if="sel" class="svgx__n">已选：{{ sel.kind === 'figure' ? figLabel(sel.figKind) : (KIND_LABEL[sel.kind] || sel.kind) }}</span>
           <!-- 【v1508】数值微调（选中后可直接改 ✓） -->
           <span v-if="sel" class="svgx__nums">
             <label>X<input type="number" :value="Math.round(boxOf(sel).x)" @change="setNum('x', ($event.target as HTMLInputElement).value)" /></label>
