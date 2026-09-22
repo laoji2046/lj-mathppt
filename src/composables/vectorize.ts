@@ -1472,7 +1472,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
         const ux = verts[v].x - verts[a].x, uy = verts[v].y - verts[a].y
         const wx = verts[b].x - verts[v].x, wy = verts[b].y - verts[v].y
         const lu = Math.hypot(ux, uy) || 1, lw = Math.hypot(wx, wy) || 1
-        if ((ux / lu) * (wx / lw) + (uy / lu) * (wy / lw) < (opt.collinearCos ?? 0.995)) continue   // 真有转折，保留
+        if ((ux / lu) * (wx / lw) + (uy / lu) * (wy / lw) < (opt.collinearCos ?? 0.98)) continue   // 真有转折，保留
         const dash = (e1[2] && e2[2]) ? 1 : 0
         const kept = outEdges.filter((_, i) => i !== inc[v][0] && i !== inc[v][1]).map((e) => e.slice() as [number, number, number])
         kept.push([a, b, dash])
