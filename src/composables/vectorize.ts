@@ -13,6 +13,7 @@
  */
 
 import { recognizeLabels } from './glyphOcr'
+import { matchFigure } from './figMatch'
 import type { FigureArc } from '@/types'
 
 export interface VectorizeOpt {
@@ -103,6 +104,11 @@ export interface VectorizeOpt {
   /** 【v1519 · D2】形状判据：小块"占自身主轴斜外接框"的比例低于此值就当字母抹掉 ✓
    *  （尺度无关 ✓：短划是细长实心的 → 实测 0.53~1.54 ✓；字母紧凑 → 0.20~0.44 ✓） */
   dashFill?: number
+  /* ---------- 【v1519 · C】模板匹配：认得出来就吸成标准立体图 ---------- */
+  /** 1 = 开（默认）；0 = 关 */
+  figMatch?: number
+  /** 配准残差上限（占对角线比例，默认 0.08）—— 超过就不吸 */
+  figTol?: number
   /** 迭代轮数（默认 16） */
   snapIter?: number
   /** 数据项强度：每轮把顶点往原位置拉回这么多（默认 0.25，越大越保守） */
@@ -571,71 +577,6 @@ function axisOf(c: Comp, W: number) {
  * 注意不能用"实心度（墨迹占 bbox 比例）"来分：对角短划的 bbox 接近正方形，实心度很低，
  * 会被当成字母一起抹掉，整条虚线就没了。
  */
-/**
- * 【v1519 · D2】虚线成链：**整条直线选内点**（替代原来的"相邻两块逐对判" ✓）
- *
- * 老做法：相邻两块判"方向对齐 + 到 A 的垂距 + 沿轴间距" —— 短划只有十几像素、主轴方向估计有噪声，
- * **一块判错就断链** → 同一条虚线碎成好几堆、甚至凑不满 2 块被当字母抹掉（文档点名的 A–E、D–E 就是这么丢的）。
- * 而且阈值一松就会把隔壁线的短划吞进来。
- *
- * 现在：任取两块（自身方向 + 连线方向都对齐）定一条直线 → 把所有「中心到这条线 ≤ dashPerp、自身方向对齐、
- * 且**沿轴贴着已收进来的某一块**」的块一次收进来 → 取墨迹最长的 → 重复到收不出为止。
- * ⚠ 「沿轴贴着」这条必须有：只看垂距会把远处同线的字母也吞进来（真机实测：顶点 10→14、边 18→22、凭空多 3 条弧）。
- * ⚠ 字母更早一步已经被 stripText 的 **fill 形状判据**挡掉了 —— 两道闸一起才稳 ✓。
- */
-function ransacPieceGroups(bars: Comp[], opt: VectorizeOpt): { groups: Comp[][]; leftover: Comp[] } {
-  const cosMin = opt.dashCos ?? 0.94
-  const perpMax = opt.dashPerp ?? 16
-  const gapMax = opt.dashGap ?? 20
-  const minTotal = opt.dashMinTotal ?? 16
-  const used = new Array(bars.length).fill(false)
-  const groups: Comp[][] = []
-  const leftover: Comp[] = []
-  for (let guard = 0; guard < bars.length + 1; guard++) {
-    let best: { idx: number[]; mass: number } | null = null
-    for (let a = 0; a < bars.length; a++) {
-      if (used[a]) continue
-      const A = bars[a]
-      for (let b = a + 1; b < bars.length; b++) {
-        if (used[b]) continue
-        const B = bars[b]
-        const vx = B.cx - A.cx, vy = B.cy - A.cy
-        const d = Math.hypot(vx, vy)
-        if (d < 1e-6) continue
-        const ux = vx / d, uy = vy / d
-        if (Math.abs(A.ux * ux + A.uy * uy) < cosMin) continue
-        if (Math.abs(B.ux * ux + B.uy * uy) < cosMin) continue
-        const idx = [a, b]
-        let mass = A.len + B.len
-        for (let k = 0; k < bars.length; k++) {
-          if (used[k] || k === a || k === b) continue
-          const C = bars[k]
-          const dx = C.cx - A.cx, dy = C.cy - A.cy
-          if (Math.abs(dx * -uy + dy * ux) > perpMax) continue      // 到整条直线的垂距（不是到相邻那块 ✓）
-          if (Math.abs(C.ux * ux + C.uy * uy) < cosMin) continue
-          const t = dx * ux + dy * uy
-          if (t < -A.len / 2 - gapMax || t > d + B.len / 2 + gapMax) continue
-          let near = false
-          for (const q of idx) {
-            const Q = bars[q]
-            const tq = (Q.cx - A.cx) * ux + (Q.cy - A.cy) * uy
-            if (Math.abs(t - tq) <= gapMax + 0.5 * (C.len + Q.len)) { near = true; break }
-          }
-          if (!near) continue
-          idx.push(k); mass += C.len
-        }
-        if (!best || mass > best.mass) best = { idx, mass }
-      }
-    }
-    if (!best) break
-    for (const k of best.idx) used[k] = true
-    if (best.idx.length >= 2 && best.mass >= minTotal) groups.push(best.idx.map((k) => bars[k]))
-    else for (const k of best.idx) leftover.push(bars[k])
-  }
-  for (let k = 0; k < bars.length; k++) if (!used[k]) leftover.push(bars[k])
-  return { groups, leftover }
-}
-
 export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array, opt: VectorizeOpt) {
   const smallMax = opt.textMax ?? 0.16
   const minPiece = opt.dashMinPiece ?? 4
@@ -650,16 +591,50 @@ export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array
     //   方向估计随机 ✗，会被当成"虚线的一截"收进链里 ✗ → 该抹掉的字母留在墨迹里 ✗ →
     //   骨架多出弯曲短路径 → tryFitArc 冒出 3~7 条假弧 ✗✗（1-原图 弧 0→3、3-人工修正 1→7 ✓）。
     //   实测 fill：短划 0.75~1.54 ✓、字母 0.20~0.44 ✓ → 门槛 0.5 干净利落 ✓。
-    if (ax.fill < (opt.dashFill ?? 0.5)) { texts.push(c); continue }
+    //   ⚠ 默认值是**扫出来的 0.35** ✗→✓：0.45/0.5 会把真短划一起丢掉（1-原图 掉 2 顶点 2 边 ✗），
+    //     0.35 在两张实图上与基线逐项一致（10/18/6/0 与 19/19/9/1 ✓），合成 scorecard 也逐项一致 ✓。
+    if (ax.fill < (opt.dashFill ?? 0.35)) { texts.push(c); continue }
     // 杂点：扫描噪声形成的小墨团，主轴长度往往只有 1~3px（真实短划十几像素）。
     // 若让它参与"虚线成链"，两个杂点就会凑成一条"两截的短虚线" → 凭空多出一条悬空线段。
     if (c.len < minPiece) { texts.push(c); continue }
     bars.push(c)
   }
-  // 【v1519 · D2】RANSAC 成链：整条直线选内点（字母已被前面的 fill 判据挡在候选池之外 ✓）
-  const rp = ransacPieceGroups(bars, opt)
-  const groups = rp.groups
-  for (const cc of rp.leftover) texts.push(cc)
+  const used = new Array(bars.length).fill(false)
+  const groups: Comp[][] = []
+  for (let a = 0; a < bars.length; a++) {
+    if (used[a]) continue
+    const grp = [bars[a]]
+    used[a] = true
+    let grow = true
+    while (grow) {
+      grow = false
+      for (let k = 0; k < bars.length; k++) {
+        if (used[k]) continue
+        const B = bars[k]
+        for (const A of grp) {
+          // 短划（十几像素）的**主轴方向估计有噪声**，10° 的对齐门槛会把同一条虚线上的短划拆开；
+          // 拆散之后每堆不足 2 个就会被当字母抹掉 —— 整条虚线随之消失
+          if (Math.abs(A.ux * B.ux + A.uy * B.uy) < (opt.dashCos ?? 0.94)) continue   // 方向对齐（见 dashCos 注释）
+          const vx = B.cx - A.cx, vy = B.cy - A.cy
+          const d = Math.hypot(vx, vy)
+          if (d > 8 + 6 * Math.max(A.len, B.len)) continue
+          if (Math.abs(vx * -A.uy + vy * A.ux) > (opt.dashPerp ?? 16)) continue   // 到 A 所在直线的垂距（见 dashPerp 注释）
+          // 4px 太严：虚线本身画得略有抖动，实测 A–E 那条线上各短块相对理想线偏了 2~12px，
+          // 一超限就被拆成孤立小块、凑不满 3 个 → 当字母抹掉 → 整条边消失
+          const tB = vx * A.ux + vy * A.uy
+          if (Math.abs(tB) > 0.5 * (A.len + B.len) + (opt.dashGap ?? 20)) continue  // 沿轴方向的间距
+          grp.push(B); used[k] = true; grow = true; break
+        }
+        if (grow) break
+      }
+    }
+    // ≥2 就算虚线：**只有两截的短虚线**（例如 D–E、C–F 那种）天生凑不满 3，
+    // 按 ≥3 判的话它们会被当字母碎片抹掉，用户看到的就是"这条边没识别出来"
+    // 整堆总长度不够 = 几个杂点凑出来的假虚线 → 整堆抹掉（真短虚线两截加起来也远超这个值）
+    const mass = grp.reduce((s, c) => s + c.len, 0)
+    if (grp.length >= 2 && mass >= (opt.dashMinTotal ?? 16)) groups.push(grp)
+    else for (const c of grp) texts.push(c)
+  }
   const out = ink.slice()
   for (const c of texts) for (const p of c.pix) out[p] = 0
   const anchors = texts.map((c) => ({ x: c.cx, y: c.cy, pix: c.pix, x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1 }))
@@ -1640,6 +1615,16 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
 
   // 【v1518】几何规整（约束吸附）—— 放在所有形态改动之后、导出之前 ✓
   snapGeometry(verts, outEdges, diag, opt, fittedArcs)
+  // 【v1519 · C】模板匹配：这张图如果就是「复刻图形」里那 8 套之一，就直接换成人工核对过的几何
+  //   （只在拓扑完全一致时才吸 —— 顶点/边/虚实线一条不增不减；有弧不匹配）
+  if ((opt.figMatch ?? 1) !== 0 && !fittedArcs.length) {
+    const flat: number[] = []
+    for (const v of verts) flat.push(v.x, v.y)
+    const m = matchFigure(flat, outEdges, { tol: opt.figTol ?? 0.08 })
+    if (m) {
+      for (let i = 0; i < verts.length; i++) { verts[i].x = m.points[2 * i]; verts[i].y = m.points[2 * i + 1] }
+    }
+  }
   // 规整会挪顶点 → 再走一遍收尾清理（共线假点 / 假交点 / 重合点 ✓）
   collinearSimplify()
   dissolveCrossings()
