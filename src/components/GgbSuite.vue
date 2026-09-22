@@ -373,7 +373,18 @@ function defSnapshot(): Record<string, string> {
  * 为什么放到**跑完**再清 ✗→✓：这样能先知道"这次到底画没画东西" ——
  * 只读脚本（读回信息）什么都没画 → **一个都不清** ✓（老师想看看板上有啥，结果图被清了才是最气人的 ✗）。
  */
+let finishTimer: number | undefined
+let runSeq = 0
 function finishRun(beforeDefs: Record<string, string>, prev: string[]) {
+  // ⚠ 等**一拍**再对账（250ms）：刚 evalCommand 完，绘图板可能还没把新对象都摆好 ✗
+  // （踩过：立刻对账会漏记几个 → 它们下一轮就"没人管"地留在板上 ✗）
+  // 只做**一次**对账 ✗：曾经加过"1.2 秒后再补一次账"，结果老师在这 1.2 秒里手画的东西
+  // 被误记成"脚本画的"✗，下一轮就被清掉了 ✗（真机探针 ④ 抓的 ✓）→ 删掉。
+  const seq = ++runSeq
+  clearTimeout(finishTimer)
+  finishTimer = window.setTimeout(() => { if (seq === runSeq) settleRun(beforeDefs, prev) }, 250)
+}
+function settleRun(beforeDefs: Record<string, string>, prev: string[]) {
   const a = liveApplet()
   const afterDefs = defSnapshot()
   const touched: Record<string, true> = {}
@@ -388,7 +399,10 @@ function finishRun(beforeDefs: Record<string, string>, prev: string[]) {
   const victims = prev.filter((n) => !touched[n] && n in afterDefs)
   if (!victims.length) return
   victims.forEach((n) => { try { a.deleteObject(n) } catch { /* 忽略 */ } })
-  pushLog(true, '已清掉上一次画的 ' + victims.length + ' 个对象 —— 想留着就把上面的「运行前清掉上一次的图」勾掉 ✓')
+  // 报数按"真的消失了几个上一次画的"算 ✓（删一个多边形会连带删掉它的边 ✗ → 按 victims.length 会少报 ✓）
+  const nowDefs = defSnapshot()
+  const gone = Object.keys(afterDefs).filter((n) => !(n in nowDefs) && prev.indexOf(n) >= 0)
+  if (gone.length) pushLog(true, '已清掉上一次画的 ' + gone.length + ' 个对象 —— 想留着就把上面的「运行前清掉上一次的图」勾掉 ✓')
 }
 
 /** Esc 关帮助（帮助开着的时候先关帮助，别一下关到别处去 ✓） */
@@ -451,7 +465,7 @@ onMounted(() => {
   render()
   watchReady()
 })
-onBeforeUnmount(() => { window.removeEventListener('keydown', onSuiteKey); if (host.value) host.value.innerHTML = ''; clearTimeout(noticeTimer); clearInterval(readyTimer) })
+onBeforeUnmount(() => { window.removeEventListener('keydown', onSuiteKey); clearTimeout(finishTimer); if (host.value) host.value.innerHTML = ''; clearTimeout(noticeTimer); clearInterval(readyTimer) })
 </script>
 
 <template>
