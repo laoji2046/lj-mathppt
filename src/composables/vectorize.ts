@@ -100,6 +100,9 @@ export interface VectorizeOpt {
   snapRt?: number
   /** 判等长：同一平行组里长度比 ≤ 1+这个值就取加权平均长度（默认 0.1 = 10%） */
   snapEq?: number
+  /** 【v1519 · D2】形状判据：小块"占自身主轴斜外接框"的比例低于此值就当字母抹掉 ✓
+   *  （尺度无关 ✓：短划是细长实心的 → 实测 0.53~1.54 ✓；字母紧凑 → 0.20~0.44 ✓） */
+  dashFill?: number
   /** 迭代轮数（默认 16） */
   snapIter?: number
   /** 数据项强度：每轮把顶点往原位置拉回这么多（默认 0.25，越大越保守） */
@@ -541,14 +544,25 @@ function axisOf(c: Comp, W: number) {
   mxx /= c.n; mxy /= c.n; myy /= c.n
   const th = 0.5 * Math.atan2(2 * mxy, mxx - myy)
   const ux = Math.cos(th), uy = Math.sin(th)
-  let minT = 1e9, maxT = -1e9
+  let minT = 1e9, maxT = -1e9, minW = 1e9, maxW = -1e9
   for (let k = 0; k < c.pix.length; k++) {
     const x = c.pix[k] % W, y = (c.pix[k] / W) | 0
-    const t = (x - c.cx) * ux + (y - c.cy) * uy
+    const dx = x - c.cx, dy = y - c.cy
+    const t = dx * ux + dy * uy
+    const w = dx * -uy + dy * ux
     if (t < minT) minT = t
     if (t > maxT) maxT = t
+    if (w < minW) minW = w
+    if (w > maxW) maxW = w
   }
-  return { ux, uy, len: maxT - minT }
+  const len = maxT - minT, wid = maxW - minW
+  // 【v1519 · D2】"占自身斜外接框"的比例 —— 这是**尺度无关**的形状判据 ✓：
+  //   短划是细长实心的（墨迹把细长框填满 ✓ 实测 fill 0.75~1.5 ✓）；
+  //   字母是紧凑笔画（框里大量空白 ✓ 实测 fill 0.20~0.44 ✓）。
+  //   ⚠ 不能用轴对齐 bbox 的实心度 ✗（对角短划的 bbox 接近正方形、实心度很低 ✗ 老注释说过 ✓）——
+  //   必须用**主轴对齐**的框 ✓，这才分得开 ✓。
+  const fill = c.n / Math.max(1e-6, len * Math.max(1, wid))
+  return { ux, uy, len, wid, fill }
 }
 
 /**
@@ -566,6 +580,12 @@ export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array
     if (c.diag >= smallMax * diag) continue      // 大块 = 线网本体，留下
     const ax = axisOf(c, W)
     c.ux = ax.ux; c.uy = ax.uy; c.len = ax.len
+    // 【v1519 · D2】★ 形状判据：**紧凑块直接当字母**，不许进"虚线成链"的候选池 ✓
+    //   起因（真机实测 ✓）：只按"到整条直线的垂距 + 方向"成链时，字母（B、C、D…）又小又方、
+    //   方向估计随机 ✗，会被当成"虚线的一截"收进链里 ✗ → 该抹掉的字母留在墨迹里 ✗ →
+    //   骨架多出弯曲短路径 → tryFitArc 冒出 3~7 条假弧 ✗✗（1-原图 弧 0→3、3-人工修正 1→7 ✓）。
+    //   实测 fill：短划 0.75~1.54 ✓、字母 0.20~0.44 ✓ → 门槛 0.5 干净利落 ✓。
+    if (ax.fill < (opt.dashFill ?? 0.5)) { texts.push(c); continue }
     // 杂点：扫描噪声形成的小墨团，主轴长度往往只有 1~3px（真实短划十几像素）。
     // 若让它参与"虚线成链"，两个杂点就会凑成一条"两截的短虚线" → 凭空多出一条悬空线段。
     if (c.len < minPiece) { texts.push(c); continue }
