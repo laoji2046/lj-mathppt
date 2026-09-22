@@ -20,6 +20,8 @@ export interface FigMatchResult {
   rms: number
   /** 模板顶点映射回**输入坐标系**的位置（扁平 x,y，下标与输入顶点一一对应） */
   points: number[]
+  /** 对应关系：模板第 j 个顶点 ↔ 输入第 map[j] 个顶点（验证 / 单测要用） */
+  map: number[]
 }
 
 interface Cand { id: string; name: string; pts: [number, number][]; edges: [number, number, number][]; deg: number[] }
@@ -128,8 +130,9 @@ export function matchFigure(
         if (rms > tol) continue
         if (!best || rms < best.rms) {
           const out = new Array(V * 2).fill(0)
-          for (let j = 0; j < V; j++) { out[2 * t2i[j]] = +mapped[j][0].toFixed(2); out[2 * t2i[j] + 1] = +mapped[j][1].toFixed(2) }
-          best = { id: c.id, name: c.name, rms, points: out }
+          // ⚠ 不能 toFixed(2) ✗：归一化坐标下 0.005 的量化误差在短边上就是 1~3.4° 的角度误差 ✓（单测量出来的 ✓）
+          for (let j = 0; j < V; j++) { out[2 * t2i[j]] = mapped[j][0]; out[2 * t2i[j] + 1] = mapped[j][1] }
+          best = { id: c.id, name: c.name, rms, points: out, map: t2i.slice() }
         }
       }
     }
