@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import type { SlideElement } from '@/types'
 import { useDeckStore } from '@/stores/deck'
 import { hasLocalEngine, loadGeoGebra } from '@/composables/useGeoGebra'
 import { describeToCommands } from '@/composables/ggbAI'
+import { HELP_GROUPS, SAMPLES, SAMPLE_GROUPS, sampleIndexOf, type GgbHelpItem } from '@/composables/ggbPresets'
 
 const store = useDeckStore()
 const emit = defineEmits<{ close: [] }>()
@@ -153,7 +154,8 @@ function apply() {
 }
 
 /** AI 作图：把中文描述解析成 GeoGebra 命令并逐个执行 */
-function runAI() {
+function runAI() { quietErrors(runAIInner) }
+function runAIInner() {
   const a = liveApplet()
   if (!a || typeof a.evalCommand !== 'function') { toaster('作图器尚未就绪'); return }
   const cmds = describeToCommands(aiDesc.value)
@@ -197,7 +199,8 @@ function watchReady() {
   }, 400)
 }
 
-function runScript() {
+function runScript() { quietErrors(runScriptInner) }
+function runScriptInner() {
   const a = liveApplet()
   if (!a || typeof a.evalCommand !== 'function') { toaster('作图器还在加载，稍等一下再运行 ✓'); return }
   const src = script.value.trim()
@@ -242,49 +245,109 @@ function redoGgb() {
   } catch (e) { pushLog(false, errText(e)) }
 }
 
-/** 例子：点一下填进编辑框（不自动跑 ✓ 老师可以先看一眼再运行） */
-const SAMPLES: { label: string; mode: 'js' | 'cmd'; code: string }[] = [
-  { label: '例：画圆并上色（JS）', mode: 'js', code: [
-    "// ggb 就是绘图板，GeoGebra 的 JS API 全都能用",
-    "ggb.evalCommand('c: Circle((0,0),2)')",
-    "ggb.setColor('c', 200, 60, 60)",
-    "ggb.setLineThickness('c', 5)",
-    "return ggb.getAllObjectNames().join(', ')",
-  ].join('\n') },
-  { label: '例：滑动条 + 抛物线动画（JS）', mode: 'js', code: [
-    "ggb.evalCommand('a=Slider(-3,3,0.1)')",
-    "ggb.evalCommand('f(x)=a x^2')",
-    "ggb.setColor('f', 40, 90, 200)",
-    "ggb.startAnimation('a')      // 让 a 自己动起来 ✓",
-    "return 'a 已在动：' + ggb.getValue('a')",
-  ].join('\n') },
-  { label: '例：读回作图信息（JS）', mode: 'js', code: [
-    "const names = ggb.getAllObjectNames()",
-    "const rows = names.map((n) => n + '=' + ggb.getValueString(n))",
-    "return names.length + ' 个对象：' + rows.join(' | ')",
-  ].join('\n') },
-  { label: '例：导出 XML 片段（JS）', mode: 'js', code: [
-    "// getXML() 拿到整份作图（可存起来 / 发给别人 ✓）",
-    "return ggb.getXML().slice(0, 240) + '…'",
-  ].join('\n') },
-  { label: '例：三角形 + 中线（指令模式）', mode: 'cmd', code: [
-    "A=(0,0)",
-    "B=(4,0)",
-    "C=(2,3)",
-    "poly1=Polygon(A,B,C)",
-    "M=Midpoint(A,B)",
-    "s=Segment(C,M)",
-  ].join('\n') },
-]
+/** 例子：点一下填进编辑框（不自动跑 ✓ 老师可以先看一眼再运行）—— 例子库在 ggbPresets.ts（40 条，按分组 ✓） */
 function loadSample(i: number) {
   const s = SAMPLES[i]
   if (!s) return
   jsMode.value = s.mode
   script.value = s.code
   jsOpen.value = true
-  toaster('已填入例子，点「运行」试试 ✓')
+  toaster(s.note ? '已填入例子 —— ' + s.note : '已填入例子，点「运行」试试 ✓')
 }
 
+/* ---------------- 【v1514】指令帮助面板（老师要的："添加指令帮助按钮" ✓） ----------------
+ * 帮助内容是**纯数据**（ggbPresets.ts），这里只管：搜索 / 切分类 / 一键填入 ✓
+ * 「填入」的去向按内容自动定：
+ *   · GeoGebra 指令 → 指令模式原样插入；JS 模式自动包一层 ggb.evalCommand("…") ✓（免得模式不对跑挂 ✗）
+ *   · JavaScript 片段 → 切到 JS 模式插入 ✓
+ *   · AI 句型 → 填进上面的「AI 作图」框 ✓
+ */
+const helpOpen = ref(false)
+const helpTab = ref('syntax')
+const helpQuery = ref('')
+const scriptRef = ref<HTMLTextAreaElement | null>(null)
+
+/** 搜索时忽略当前分类，直接全局过滤 ✓（找不到就给个明确的空状态 ✗） */
+const helpShown = computed(() => {
+  const q = helpQuery.value.trim().toLowerCase()
+  if (!q) {
+    const g = HELP_GROUPS.find((x) => x.id === helpTab.value) || HELP_GROUPS[0]
+    return [{ id: g.id, title: g.title, tip: g.tip, items: g.items }]
+  }
+  return HELP_GROUPS
+    .map((g) => ({
+      id: g.id,
+      title: g.title,
+      tip: g.tip,
+      items: g.items.filter((it) => (it.code + ' ' + it.desc).toLowerCase().includes(q)),
+    }))
+    .filter((g) => g.items.length)
+})
+const helpHits = computed(() => helpShown.value.reduce((n, g) => n + g.items.length, 0))
+
+function openHelp(tab?: string) {
+  helpTab.value = tab || 'syntax'
+  helpQuery.value = ''
+  helpOpen.value = true
+}
+function closeHelp() { helpOpen.value = false }
+
+/** 插到光标处（没光标就追加末尾 ✓）；插完光标落在新内容后面，能接着往下写 ✓ */
+function insertAtCursor(text: string) {
+  jsOpen.value = true
+  nextTick(() => {
+    const ta = scriptRef.value
+    if (!ta) { script.value = script.value ? script.value + '\n' + text : text; return }
+    const start = ta.selectionStart ?? script.value.length
+    const end = ta.selectionEnd ?? start
+    const before = script.value.slice(0, start)
+    const after = script.value.slice(end)
+    const pre = before && !before.endsWith('\n') ? '\n' : ''
+    const post = after && !after.startsWith('\n') ? '\n' : ''
+    script.value = before + pre + text + post + after
+    const pos = (before + pre + text).length
+    ta.focus()
+    ta.setSelectionRange(pos, pos)
+  })
+}
+
+function useHelpItem(it: GgbHelpItem) {
+  if (it.kind === 'say') {
+    aiDesc.value = aiDesc.value ? aiDesc.value + '\n' + it.code : it.code
+    toaster('已填进「AI 作图」框，点「生成」试试 ✓')
+    closeHelp()
+    return
+  }
+  if (it.kind === 'js') {
+    jsMode.value = 'js'
+    insertAtCursor(it.code)
+    toaster('已填进脚本（JavaScript 模式 ✓）')
+    return
+  }
+  // GeoGebra 指令：当前是 JS 模式就包一层（引号用 JSON.stringify 生成，省得手工转义出错 ✗）
+  if (jsMode.value === 'js') insertAtCursor('ggb.evalCommand(' + JSON.stringify(it.code) + ')')
+  else insertAtCursor(it.code)
+  toaster('已填进脚本（' + (jsMode.value === 'js' ? 'JavaScript 模式' : 'GeoGebra 指令模式') + ' ✓）')
+}
+
+/** Esc 关帮助（帮助开着的时候先关帮助，别一下关到别处去 ✓） */
+function onSuiteKey(e: KeyboardEvent) {
+  if (e.key === 'Escape' && helpOpen.value) { e.stopPropagation(); closeHelp() }
+}
+
+/** 脚本批量跑的时候，先把绘图板自己的报错弹窗关掉 ✓ ——
+ *  错误照样进我们日志（✗ 一行），但不会弹 GeoGebra 那个 Modal 把面板挡住 ✗；
+ *  老师自己手打指令时的原生报错**照旧**（跑完 1.2 秒恢复 ✓）。 */
+function quietErrors<T>(fn: () => T): T {
+  const a = liveApplet()
+  let restore = false
+  try {
+    if (a && typeof a.setErrorDialogsActive === 'function') { a.setErrorDialogsActive(false); restore = true }
+  } catch { /* 忽略 */ }
+  try { return fn() } finally {
+    if (restore) window.setTimeout(() => { try { a.setErrorDialogsActive(true) } catch { /* 忽略 */ } }, 1200)
+  }
+}
 /** 应用时把脚本一起存到元素上（回来还能接着改 ✓） */
 function scriptPatch(): Record<string, unknown> {
   const s = script.value.trim()
@@ -298,6 +361,7 @@ function scriptPatch(): Record<string, unknown> {
 }
 
 onMounted(() => {
+  window.addEventListener('keydown', onSuiteKey)
   watchReady()
   if (props.editId) {
     const el = findGgbEl(props.editId)
@@ -320,7 +384,7 @@ onMounted(() => {
   render()
   watchReady()
 })
-onBeforeUnmount(() => { if (host.value) host.value.innerHTML = ''; clearTimeout(noticeTimer); clearInterval(readyTimer) })
+onBeforeUnmount(() => { window.removeEventListener('keydown', onSuiteKey); if (host.value) host.value.innerHTML = ''; clearTimeout(noticeTimer); clearInterval(readyTimer) })
 </script>
 
 <template>
@@ -341,7 +405,7 @@ onBeforeUnmount(() => { if (host.value) host.value.innerHTML = ''; clearTimeout(
               <option value="scientific">科学计算器</option>
               <option value="3d">🧊 3D 计算器</option>
             </select>
-
+            <button class="ggbs__btn ggbs__btn--help" title="指令帮助：GeoGebra 指令速查 / JavaScript API / AI 句型；点「填入」直接进编辑框 ✓" @click="openHelp('syntax')">📖 指令帮助</button>
           </div>
           <div class="ggbs__ai">
             <span class="ggbs__aiicon">🤖</span>
@@ -367,17 +431,20 @@ M 是 AB 的中点
                   <option value="js">JavaScript</option>
                   <option value="cmd">GeoGebra 指令（逐行）</option>
                 </select>
-                <select class="ggbs__sel ggbs__sel--sm" title="例子：点一下填进编辑框（不自动跑 ✓）" @change="loadSample(Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
-                  <option value="">插入例子…</option>
-                  <option v-for="(s, i) in SAMPLES" :key="i" :value="i">{{ s.label }}</option>
+                <select class="ggbs__sel ggbs__sel--sm" title="例子：点一下填进编辑框（不自动跑 ✓）；按分组挑，共 {{ SAMPLES.length }} 条" @change="loadSample(Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
+                  <option value="">插入例子…（{{ SAMPLES.length }} 条）</option>
+                  <optgroup v-for="g in SAMPLE_GROUPS" :key="g" :label="g">
+                    <option v-for="i in sampleIndexOf(g)" :key="i" :value="i">{{ SAMPLES[i].label }}</option>
+                  </optgroup>
                 </select>
                 <button class="ggbs__btn ggbs__btn--primary" :disabled="!ready" title="运行（Ctrl+Enter ✓）" @click="runScript">▶ 运行</button>
                 <button class="ggbs__btn" title="撤销一步（ggb.undo()）" @click="undoGgb">撤销</button>
                 <button class="ggbs__btn" title="重做一步（ggb.redo()）" @click="redoGgb">重做</button>
                 <button class="ggbs__btn" title="清空下面的日志" @click="clearLog">清日志</button>
+                <button class="ggbs__btn ggbs__btn--help" title="JavaScript API 一览：点「填入」直接进脚本 ✓" @click="openHelp('js')">📖 帮助</button>
               </div>
               <textarea
-                v-model="script" class="ggbs__jsinput" rows="6" spellcheck="false" wrap="off"
+                ref="scriptRef" v-model="script" class="ggbs__jsinput" rows="6" spellcheck="false" wrap="off"
                 :placeholder="jsMode === 'js'
                   ? 'ggb 就是绘图板，例如：\nggb.evalCommand(\'Circle((0,0),2)\')  // 画个圆\nggb.setColor(\'c\', 200, 60, 60)        // 改成红色\nreturn ggb.getAllObjectNames().join(\', \')'
                   : '一行一条 GeoGebra 指令，例如：\nA=(0,0)\nB=(4,0)\nPolygon(A,B,C)'"
@@ -391,6 +458,35 @@ M 是 AB 的中点
           </div>
           <div class="ggbs__canvas"><div ref="host" class="ggbs__host"></div></div>
           <p v-if="error" class="ggbs__err">{{ error }}</p>
+        </div>
+        <!-- 【v1514】指令帮助面板：搜索 / 分类 / 一键填入 ✓（覆盖在弹窗内容上，不遮标题栏和底部按钮） -->
+        <div v-if="helpOpen" class="ggbs__help">
+          <div class="ggbs__helphead">
+            <span class="ggbs__helptitle">📖 指令帮助</span>
+            <input v-model="helpQuery" class="ggbs__helpsearch" type="text" placeholder="搜指令或关键词：切线、中点、动画、颜色、统计、Slider…（留空 = 按分类看）" />
+            <span class="ggbs__helphits">{{ helpHits }} 条</span>
+            <button class="ggbs__x" title="关闭帮助（Esc ✓）" @click="closeHelp"><AppIcon name="close" :size="13" /></button>
+          </div>
+          <div class="ggbs__helptabs">
+            <button
+              v-for="g in HELP_GROUPS" :key="g.id" class="ggbs__helptab"
+              :class="{ 'ggbs__helptab--on': !helpQuery.trim() && helpTab === g.id }"
+              @click="helpTab = g.id; helpQuery = ''"
+            >{{ g.title }}</button>
+          </div>
+          <div class="ggbs__helpbody">
+            <div v-for="g in helpShown" :key="g.id" class="ggbs__helpgroup">
+              <div class="ggbs__helpgtitle">{{ g.title }}</div>
+              <p v-if="g.tip" class="ggbs__helptip">{{ g.tip }}</p>
+              <div v-for="(it, i) in g.items" :key="i" class="ggbs__helprow">
+                <code class="ggbs__helpcode">{{ it.code }}</code>
+                <span class="ggbs__helpdesc">{{ it.desc }}</span>
+                <button class="ggbs__btn ggbs__btn--tiny" @click="useHelpItem(it)">{{ it.kind === 'say' ? '填入 AI 框' : '填入' }}</button>
+              </div>
+            </div>
+            <p v-if="!helpHits" class="ggbs__helpempty">没找到「{{ helpQuery }}」—— 换个词试试：切线、中点、动画、颜色、统计、Slider ✗</p>
+            <p class="ggbs__helphint">提示：点「填入」会插到脚本框的光标处 —— 指令模式下是原样一条 GeoGebra 指令，JavaScript 模式下自动包成 <code>ggb.evalCommand("…")</code> ✓</p>
+          </div>
         </div>
         <footer class="ggbs__foot">
           <span v-if="notice" class="ggbs__notice">{{ notice }}</span>
@@ -448,4 +544,30 @@ M 是 AB 的中点
 .ggbs__btn:hover { background: var(--gray-50); }
 .ggbs__btn--primary { background: var(--brand); border-color: var(--brand); color: #fff; }
 .ggbs__btn--primary:hover { background: var(--brand-strong); }
+/* 【v1514】指令帮助面板 + 例子分组 */
+.ggbs__btn--help { background: var(--brand-50); border-color: var(--brand-100); color: var(--brand-700); font-weight: 600; }
+.ggbs__btn--help:hover { background: var(--brand-100); }
+.ggbs__btn--tiny { padding: 2px 8px; font-size: 11.5px; border-radius: 5px; flex: 0 0 auto; }
+/* 右侧抽屉：左边留着脚本框/画布 —— 点「填入」能当场看见东西进到脚本里 ✓（铺满整屏就看不见了 ✗） */
+.ggbs__help { position: absolute; top: 46px; right: 0; bottom: 52px; width: min(580px, 64%); display: flex; flex-direction: column; background: #fff; border-left: 1px solid var(--border-strong); box-shadow: -10px 0 26px rgba(15, 23, 42, 0.14); z-index: 5; }
+.ggbs__helphead { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+.ggbs__helptitle { font-weight: 700; font-size: 13px; color: var(--text); white-space: nowrap; }
+.ggbs__helpsearch { flex: 1; border: 1px solid var(--border-strong); border-radius: 7px; padding: 5px 9px; font-size: 12.5px; }
+.ggbs__helpsearch:focus { outline: none; border-color: var(--brand-600); }
+.ggbs__helphits { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.ggbs__helptabs { display: flex; flex-wrap: wrap; gap: 5px; padding: 7px 14px; border-bottom: 1px dashed var(--border-strong); }
+.ggbs__helptab { border: 1px solid var(--border-strong); background: #fff; color: var(--text); border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+.ggbs__helptab:hover { background: var(--gray-50); }
+.ggbs__helptab--on { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+.ggbs__helpbody { flex: 1; overflow: auto; padding: 8px 14px 14px; }
+.ggbs__helpgtitle { font-size: 12.5px; font-weight: 700; color: var(--brand-700); margin: 8px 0 4px; }
+.ggbs__helptip { font-size: 12px; color: var(--muted); margin: 0 0 6px; line-height: 1.6; }
+.ggbs__helprow { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; }
+.ggbs__helprow:hover { background: var(--brand-50); }
+.ggbs__helpcode { flex: 0 0 auto; max-width: 46%; overflow-x: auto; white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #0b4a8f; background: var(--panel-2); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; }
+.ggbs__helpdesc { flex: 1; font-size: 12px; color: var(--text); line-height: 1.5; }
+.ggbs__helpempty { color: var(--danger); font-size: 12.5px; }
+.ggbs__helphint { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border-strong); font-size: 11.5px; color: var(--muted); line-height: 1.7; }
+.ggbs__helphint code { font-family: ui-monospace, Menlo, Consolas, monospace; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; }
+
 </style>
