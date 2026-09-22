@@ -161,7 +161,7 @@ function matchGlyph(m: Uint8Array, srcN: number, kind: Kind) {
 }
 
 /** 细长条：墨迹量 ÷ 主轴长度 ≈ 笔画宽度，很小就说明是一根线（虚线的短划），不是字 */
-function isBarLike(p: GlyphBox, W: number) {
+export function isBarLike(p: GlyphBox, W: number) {
   const n = p.pix.length
   if (!n) return false
   const cx = (p.x0 + p.x1) / 2, cy = (p.y0 + p.y1) / 2

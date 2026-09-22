@@ -5,14 +5,14 @@
  * 试卷 / 讲义里的立体几何插图都是干净的黑白线稿，直接把它拆成
  * 「归一化顶点 + 边拓扑 + 哪条线是虚线」，出来就是普通的数学图形元素，可以拖点、改线型。
  *
- * 流程：二值化 → 挑字母（抹掉）→ Zhang-Suen 细化 → 骨架建图 → 追路径
+ * 流程：二值化 → 挑孤立小块当字母（抹掉）→ **字母分离**（贴着线的字母，认出来）→ Zhang-Suen 细化 → 骨架建图 → 追路径
  *      → Douglas-Peucker 简化 → 共线短划合并成虚线 → 顶点归并 → 解消十字交叉 → 交点精修
  *
  * 实测（拿 solidFigures.ts 里人工核对过的 8 套当真值）：顶点召回 89%、平均误差 1.3%、
  * 虚实线判定 100% 对；会多出几个落在直线上的冗余顶点，由调用方（VectorizeDialog）让用户删。
  */
 
-import { recognizeLabels } from './glyphOcr'
+import { recognizeLabels, isBarLike } from './glyphOcr'
 import { matchFigure } from './figMatch'
 import type { FigureArc } from '@/types'
 
@@ -115,6 +115,38 @@ export interface VectorizeOpt {
   snapPull?: number
   /** 单个顶点最大位移（图对角线的比例，默认 0.03） */
   snapMax?: number
+  /* ---------- 【v1523】字母分离：把"贴着线的字母"从图形线里切出来 ---------- */
+  /**
+   * 总开关：1 = 开（默认）；0 = 关（要看 v1522 的老行为时用）。
+   * 真实扫描图上，顶点字母**都贴着/压着图形线**，和线粘成同一个大连通域 ——
+   * stripText 只处理"孤立小块"，于是这些字母既没被抹掉、也没进字形识别，
+   * 每个字母的笔画都变成顶点（user2 五棱锥：真值 11 个顶点、识别出 22 个 ✗）。
+   */
+  labelPeel?: number
+  /**
+   * 是否**把分离出来的字母从墨迹里删掉**（默认 0 = 不删 ✗）。
+   * 实测（.probe/vecbench.cjs 8 套合成真值 + 6 张真图）：删掉之后
+   *   · 好的一面：user2 的顶点从 (216,93) 挪到真正的顶点 (216,77) ✓、顶点数 22→20 ✓、字母数正好 11（= 真值 ✓）；
+   *   · 坏的一面：合成基准台顶点召回 93.3%→91.9% ✗、1-原图 10→8 ✗、3-人工修正 19→18 ✗。
+   * 原因是"删字母"会连带改变虚线成链的走向（字母位置原来是链的端点），下游一抖就是一两个顶点 ✗。
+   * 所以默认**只分离、不删**（零几何回归 ✓），要试这条路的用 labelCut=1。
+   */
+  labelCut?: number
+  /** 找"字母芽"的半径（图对角线的比例，默认 0.055 ≈ 大半个字高）。取小了切不下整个字，取大了会把短线段当成字。 */
+  labelBudR?: number
+  /** 芽的最小高度（相对"字高参考"，默认 0.6）—— 比这更矮的块一律不是字（虚线短划、墨点碎屑）*/
+  labelMinH?: number
+  /** 芽的实心度下限（切出来的墨迹 ÷ 它的外框面积，默认 0.30）——
+   *  尺度无关 ✓：字母是紧凑笔画（实测 0.30~0.50 ✓），一条线在同样大的框里只有 0.05~0.15 ✓。 */
+  labelBudFill?: number
+  /** 最多切几轮（默认 2）。一轮切不干净的字（被图形线穿过的 H、A）留下的残笔画，靠第二轮收尾 ✓ */
+  labelPass?: number
+  /** 切完是否再跑一遍"挑小孤立块"（默认 0 = 不跑 ✗ —— 实测会把散开的虚线短划当字母抹掉） */
+  labelRescan?: number
+  /** "被抹掉的字母能把线补起来"（v1522 的补接）用哪些字母块：
+   *  0 = 只有**字形识别成功**的那些（默认 ✓ = v1522 的老行为）；1 = 所有被抹掉的小块。
+   *  ⚠ 实测 1 会误合并真顶点（1-原图 10→8 ✗、3-人工修正 19→18 ✗），所以默认不动 ✓。 */
+  healByBlob?: number
 }
 
 export interface VectorizeStats {
@@ -124,6 +156,8 @@ export interface VectorizeStats {
   text: number
   bars: number
   dashGroups: number
+  /** 【v1523】从图形线里**分离出来的字母**个数（贴着线、原来根本没被挑出来的那些） */
+  buds?: number
   /** 识别框四条边上各有多少墨迹像素 —— 非 0 就说明这个框把图形切掉了一块。
    *  实测：image16 的框底边正压在字母 x 的腰上，x 只剩半个字形（像个 V），于是被认成了 v。
    *  只在显式传了 crop 时统计（整图识别时图片边缘本来就可能有内容，报这个没意义）。 */
@@ -641,6 +675,258 @@ export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array
   return { ink: out, anchors, dashGroups: groups.length, barCount: bars.length, textCount: texts.length }
 }
 
+/* ---------- 【v1523】字母分离：把"贴着线的字母"从图形线里切出来 ---------- */
+
+/** 切出来的字母块（与 stripText 的 anchors 同构，直接并进字形识别队列 ✓） */
+export interface LetterBlob { x: number; y: number; pix: number[]; x0: number; y0: number; x1: number; y1: number }
+
+/**
+ * 把"贴着线的字母"从图形线里切出来。
+ *
+ * 起因（用户 6 张真题图实测 ✓）：教材图**每个顶点都有字母**，而这些字母都贴着/压着图形线 ✗，
+ * 和线粘成同一个大连通域 → stripText 只认**孤立**小块 ✓ → 这些字母既没被抹掉、也没进字形识别 ✗
+ * → 每个字母的笔画都变成顶点 ✗（user2 五棱锥：真值 11 个顶点，识别出 **22** 个 ✗）。
+ *
+ * 判据（全部尺度无关，且都能在图上直接看出来 ✓）：
+ *   ① **字母挂在线上 = 骨架里必然多出一个度 ≥3 的节点**（接触点）—— 只从这种点出发找 ✓；
+ *   ② 从该点沿骨架走：**整条都落在半径 R 内**的路径 = 芽（字母），走到 R 外面的 = 图形线 ✓
+ *      （字形内部的交叉点继续往里走，所以 B、A 这种带内部分叉的整字也是一块 ✓）；
+ *   ③ 芽要**像字**：外框 ≤ R、外框里墨迹实心度 ≥ 0.30、不是细长条、有笔画端头（或内部分叉）✓；
+ *   ④ 真要删墨迹时（`labelCut=1`）按"**离骨架最近**"分配 —— 图形线自己的墨迹离线的骨架更近，不会被误删 ✓
+ *      （所以下刀只在字母与线的接触处，线的走向、顶点位置都不动 ✓）。
+ *
+ * 分离出来的字变成**新的字母块**（与 stripText 的 anchors 同构）→ 并进字形识别队列 ✓ →
+ * `VectorizeDialog.adopt()` 就能把它们配回顶点、显示成顶点字母 ✓。
+ * ⚠ 默认**只分离、不删墨迹**（`labelCut=0`）：删掉字母会连带改变虚线成链的走向，
+ *   基准台顶点召回 93.3%→91.9%、1-原图 10→8 ✗ —— 实测数据见 docs/矢量描摹-诊断.md · v1523。
+ */
+export function peelLabels(
+  ink: Uint8Array, W: number, H: number, diag: number, opt: VectorizeOpt,
+  known: { y0: number; y1: number }[] = [],
+  pre?: { sk: Uint8Array; G: SkGraph },
+): { ink: Uint8Array; anchors: LetterBlob[]; buds: number; sk?: Uint8Array; G?: SkGraph } {
+  const R = Math.max(6, (opt.labelBudR ?? 0.055) * diag)
+  const fillMin = opt.labelBudFill ?? 0.3
+  // 不删墨迹时只跑一轮：墨迹没变，第二轮会把同一批字母再"发现"一遍 ✗
+  const cut = (opt.labelCut ?? 0) !== 0
+  const passes = cut ? Math.max(1, Math.round(opt.labelPass ?? 2)) : 1
+  // 字高参考：stripText 抹掉的孤立小块几乎全是字母 ✓（虚线的短划会被"成链"留下、不会被抹掉 ✓）。
+  // 教材图里**所有标注的字号是同一个**（实测 user2 全是 24px、1-原图 全是 19px、3-人工修正 全是 41px ✓）——
+  // 这是个很强的先验：比它矮太多的块（虚线短划 2×7、墨点碎屑）一律不是字 ✓。
+  // ⚠ 少了这一条，虚线的每一个短划都会被当成"小字"切掉 ✗（实测 user2 切出 44 块 ✗）。
+  const hs = known
+    .map((a) => a.y1 - a.y0 + 1)
+    .filter((h) => h >= 0.02 * diag && h <= 0.12 * diag)
+    .sort((a, b) => a - b)
+  const hintH = hs.length ? hs[hs.length >> 1] : 0.035 * diag
+  const minH = (opt.labelMinH ?? 0.6) * hintH
+  const out = ink.slice()
+  const anchors: LetterBlob[] = []
+  let lastSk: Uint8Array | undefined
+  let lastG: SkGraph | undefined
+  for (let pass = 0; pass < passes; pass++) {
+    // 第一轮的骨架图表可以直接用调用方刚算好的那份 ✓（不删墨迹时整条流水线只用算一次 thin+buildGraph）
+    const sk = pass === 0 && pre ? pre.sk : thin(out, W, H)
+    const G = pass === 0 && pre ? pre.G : buildGraph(sk, W, H)
+    const deg: number[] = G.nodes.map(() => 0)
+    const inc: number[][] = G.nodes.map(() => [])
+    G.paths.forEach((p, i) => {
+      if (p.aId >= 0) { deg[p.aId]++; inc[p.aId].push(i) }
+      if (p.bId >= 0) { deg[p.bId]++; inc[p.bId].push(i) }
+    })
+    let found = 0
+    /**
+     * 试切一块：把"离这块骨架比离别的骨架更近"的墨迹划出来，**像字**才删。
+     * 下刀只在字母与线的接触处（线自己的墨迹离线的骨架更近 ✓），所以图形线的走向、顶点位置都不动。
+     */
+    const tryPeel = (budPix: number[]): boolean => {
+      const budSet = new Set(budPix)
+      let bx0 = W, by0 = H, bx1 = -1, by1 = -1
+      for (const p of budPix) {
+        const px = p % W, py = (p / W) | 0
+        if (px < bx0) bx0 = px
+        if (py < by0) by0 = py
+        if (px > bx1) bx1 = px
+        if (py > by1) by1 = py
+      }
+      // ⚠ 便宜预筛放在最贵的"最近骨架"分配之前：大图里自由路径有上百条（虚线的每一截都是一条 ✗），
+      //   每条都跑一遍分配就是几百万次距离计算（实测 3-人工修正 29ms → 245ms ✗）。
+      //   骨架框本身就太大 / 太矮的，不可能是字（墨迹框最多比骨架框大一个笔画宽）✓。
+      if (Math.hypot(bx1 - bx0 + 1, by1 - by0 + 1) > R * 1.15 + 4) return false
+      if (by1 - by0 + 1 < minH * 0.8) return false
+      const pad = 2
+      const gx0 = Math.max(0, bx0 - pad), gy0 = Math.max(0, by0 - pad)
+      const gx1 = Math.min(W - 1, bx1 + pad), gy1 = Math.min(H - 1, by1 + pad)
+      const inBud: number[] = [], inOther: number[] = []
+      for (let y = gy0; y <= gy1; y++) {
+        for (let x = gx0; x <= gx1; x++) {
+          const i = y * W + x
+          if (!sk[i]) continue
+          if (budSet.has(i)) inBud.push(i)
+          else inOther.push(i)
+        }
+      }
+      const del: number[] = []
+      for (let y = gy0; y <= gy1; y++) {
+        for (let x = gx0; x <= gx1; x++) {
+          const i = y * W + x
+          if (!out[i]) continue
+          let db = Infinity, dv = Infinity
+          for (const q of inBud) {
+            const qx = q % W, qy = (q / W) | 0
+            const d = (qx - x) * (qx - x) + (qy - y) * (qy - y)
+            if (d < db) db = d
+          }
+          for (const q of inOther) {
+            const qx = q % W, qy = (q / W) | 0
+            const d = (qx - x) * (qx - x) + (qy - y) * (qy - y)
+            if (d < dv) dv = d
+          }
+          if (db < dv) del.push(i)
+        }
+      }
+      if (del.length < 12) return false
+      // ③ 像不像一个字
+      let dx0 = W, dy0 = H, dx1 = -1, dy1 = -1
+      for (const i of del) {
+        const px = i % W, py = (i / W) | 0
+        if (px < dx0) dx0 = px
+        if (py < dy0) dy0 = py
+        if (px > dx1) dx1 = px
+        if (py > dy1) dy1 = py
+      }
+      const bw = dx1 - dx0 + 1, bh = dy1 - dy0 + 1
+      if (Math.hypot(bw, bh) > R * 1.15) return false                              // 太大 = 不是字
+      if (bh < minH) return false                                                  // 太矮 = 虚线短划/碎屑，不是字
+      if (del.length / (bw * bh) < fillMin) return false                           // 太空 = 线网
+      if (isBarLike({ x0: dx0, y0: dy0, x1: dx1, y1: dy1, pix: del }, W)) return false  // 细长条 = 线
+      let tips = 0, fork = false
+      for (const p of budPix) {
+        const px = p % W, py = (p / W) | 0
+        let k = 0
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue
+            const nx = px + dx, ny = py + dy
+            if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue
+            const j = ny * W + nx
+            if (sk[j] && budSet.has(j)) k++
+          }
+        }
+        if (k <= 1) tips++
+        if (k >= 3) fork = true
+      }
+      if (tips < 1 && !fork) return false                                         // 没端头也不分叉 = 一段线
+      // ④ 落地：记成字母块（+ 按开关决定要不要真的把墨迹删掉）
+      let sx = 0, sy = 0
+      for (const i of del) { if (cut) out[i] = 0; sx += i % W; sy += (i / W) | 0 }
+      anchors.push({ x: sx / del.length, y: sy / del.length, pix: del, x0: dx0, y0: dy0, x1: dx1, y1: dy1 })
+      return true
+    }
+
+    // ① 交叉点上的芽：字母**压在**线上（骨架接上了）→ 接触点必是度 ≥3 的节点 ✓
+    for (let v = 0; v < G.nodes.length; v++) {
+      if (deg[v] < 3) continue
+      const Jx = G.nodes[v].cx, Jy = G.nodes[v].cy
+      const seenP = new Set<number>()
+      const stack: [number, number][] = []
+      for (const pi of inc[v]) stack.push([pi, v])
+      const budPix: number[] = []
+      let escape = 0
+      while (stack.length) {
+        const [pi, from] = stack.pop() as [number, number]
+        if (seenP.has(pi)) continue
+        seenP.add(pi)
+        const P = G.paths[pi]
+        let dmax = 0
+        for (const q of P.pts) { const d = Math.hypot(q[0] - Jx, q[1] - Jy); if (d > dmax) dmax = d }
+        if (dmax > R) { escape++; continue }           // 出圈 = 图形线，到此为止
+        for (const q of P.pts) budPix.push(q[1] * W + q[0])
+        const far = P.aId === from ? P.bId : P.aId
+        if (far >= 0 && far !== v) for (const qi of inc[far]) if (qi !== pi) stack.push([qi, far])
+      }
+      // 一条引出线都没有 = 本来就孤立（stripText 已经管过）→ 不在这儿重复下刀
+      if (!escape || !budPix.length) continue
+      if (tryPeel(budPix)) found++
+    }
+
+    // ② 没有交叉点的骨架块：字母只是**挨着**线（骨架其实没接上）—— 实测真题图里的 S、h 都是这种 ✗
+    //    （二值图上它们和线是同一个连通域 ✓，细化的过程中连接断掉了 ✓，于是骨架里是一块"孤岛"。）
+    //    这类孤岛里既有字母，也有虚线的短划、被切掉的线段 —— 用同一套"像不像字"的判据筛 ✓。
+    //    ⚠ 要按**连通块**整体判：h = 竖 + 拱 + 腿，在图上就是三条自由路径，单独一条会被当成"细长条"漏掉 ✗。
+    const uf = new Int32Array(G.nodes.length)
+    for (let i = 0; i < uf.length; i++) uf[i] = i
+    const ufFind = (x: number): number => { while (uf[x] !== x) { uf[x] = uf[uf[x]]; x = uf[x] } return x }
+    for (const P of G.paths) {
+      if (P.aId < 0 || P.bId < 0) continue
+      const ra = ufFind(P.aId), rb = ufFind(P.bId)
+      if (ra !== rb) uf[rb] = ra
+    }
+    const groups = new Map<number, number[]>()
+    G.paths.forEach((P, i) => {
+      const key = P.aId >= 0 ? ufFind(P.aId) : P.bId >= 0 ? ufFind(P.bId) : -1 - i
+      const g = groups.get(key)
+      if (g) g.push(i)
+      else groups.set(key, [i])
+    })
+    const cand: { pix: number[]; x0: number; y0: number; x1: number; y1: number }[] = []
+    for (const plist of groups.values()) {
+      // 块里有交叉点 = 线网的一部分（该走 ① 或根本不该动）
+      let forkNode = false
+      for (const pi of plist) {
+        const P = G.paths[pi]
+        if (P.aId >= 0 && deg[P.aId] >= 3) forkNode = true
+        if (P.bId >= 0 && deg[P.bId] >= 3) forkNode = true
+      }
+      if (forkNode) continue
+      const pix: number[] = []
+      let cx0 = W, cy0 = H, cx1 = -1, cy1 = -1
+      for (const pi of plist) {
+        for (const q of G.paths[pi].pts) {
+          const i = q[1] * W + q[0]
+          pix.push(i)
+          if (q[0] < cx0) cx0 = q[0]
+          if (q[1] < cy0) cy0 = q[1]
+          if (q[0] > cx1) cx1 = q[0]
+          if (q[1] > cy1) cy1 = q[1]
+        }
+      }
+      if (pix.length) cand.push({ pix, x0: cx0, y0: cy0, x1: cx1, y1: cy1 })
+    }
+    // ⚠ 再把**挨在一起的**块并成一个候选：h 这种字在骨架上就是"竖 + 拱 + 腿"几条**互不相连**的自由路径 ✓，
+    //   单独一条会被当成"细长条（笔画）"漏掉 ✗。并起来之后才是一个字的大小与形状 ✓。
+    //   块间距 ≤ 3px 才算挨着 —— 虚线的短划彼此隔 4px 以上，不会被并进来 ✓。
+    const guf = new Int32Array(cand.length)
+    for (let i = 0; i < guf.length; i++) guf[i] = i
+    const gFind = (x: number): number => { while (guf[x] !== x) { guf[x] = guf[guf[x]]; x = guf[x] } return x }
+    const gap = (a: typeof cand[number], b: typeof cand[number]) => {
+      const dx = Math.max(0, Math.max(a.x0 - b.x1, b.x0 - a.x1))
+      const dy = Math.max(0, Math.max(a.y0 - b.y1, b.y0 - a.y1))
+      return Math.max(dx, dy)
+    }
+    for (let i = 0; i < cand.length; i++) {
+      for (let j = i + 1; j < cand.length; j++) {
+        if (gap(cand[i], cand[j]) > 3) continue
+        const ra = gFind(i), rb = gFind(j)
+        if (ra !== rb) guf[rb] = ra
+      }
+    }
+    const merged = new Map<number, number[]>()
+    cand.forEach((c, i) => {
+      const k = gFind(i)
+      const g = merged.get(k)
+      if (g) g.push(...c.pix)
+      else merged.set(k, c.pix.slice())
+    })
+    for (const seed of merged.values()) if (tryPeel(seed)) found++
+    // 这一轮如果真删了墨迹，骨架/图就作废了（下一轮本来也会重算 ✓）；没删就能直接交给调用方复用 ✓
+    lastSk = found && cut ? undefined : sk
+    lastG = found && cut ? undefined : G
+    if (!found) break
+  }
+  return { ink: out, anchors, buds: anchors.length, sk: lastSk, G: lastG }
+}
+
 // ---------- Zhang-Suen 细化 ----------
 export function thin(src: Uint8Array, W: number, H: number) {
   const w = W + 2, h = H + 2
@@ -1106,12 +1392,35 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   const diag = Math.hypot(box[2] - box[0], box[3] - box[1])
   const comp = components(m.ink, W, H, box)
   const st = stripText(comp, W, diag, m.ink, opt)
-  // st.ink = 抹掉字母之后的墨迹（自动拟合弧时需要它判虚实；现在拟合关掉了，先不取别名）
-  const clipped = opt.crop ? clippedEdges(st.ink, W, box) : undefined
+  // 【v1523】第二刀：把**贴着线的字母**从图形线里切出来（stripText 只认孤立小块 ✗，见 peelLabels）
+  const sk0 = thin(st.ink, W, H)
+  const G0 = buildGraph(sk0, W, H)
+  const peel = (opt.labelPeel ?? 1) !== 0
+    ? peelLabels(st.ink, W, H, diag, opt, st.anchors, { sk: sk0, G: G0 })
+    : { ink: st.ink, anchors: [] as LetterBlob[], buds: 0, sk: sk0, G: G0 }
+  // 切完再扫一遍：分离出来的字母常留下碎片（笔画残端、衬线），不扫掉它们又会变成顶点 ✗
+  let letters = st.anchors.concat(peel.anchors)
+  let ink = peel.ink
+  let textN = st.textCount
+  // ⚠ 切完**不要**再跑一遍 stripText：切掉字母会让原来"成链"的短划散开，
+  //   第二遍就会把散开的短划当字母抹掉 ✗（实测 1-原图 一条虚线被吃掉 → 顶点 10→8 ✗✗）。
+  //   残留的碎片交给后面的 spur 剪枝与顶点归并处理 ✓。
+  if (peel.buds && (opt.labelRescan ?? 0) !== 0) {
+    const st2 = stripText(components(peel.ink, W, H, box), W, diag, peel.ink, opt)
+    ink = st2.ink
+    letters = letters.concat(st2.anchors)
+    textN += st2.textCount
+  }
+  const clipped = opt.crop ? clippedEdges(ink, W, box) : undefined
   // 被抹掉的那些小块其实是字母 —— 顺手认一下（模板匹配，见 glyphOcr.ts）
-  const labels = recognizeLabels(W, st.anchors)
-  const sk = thin(st.ink, W, H)
-  const G = buildGraph(sk, W, H)
+  const labels = recognizeLabels(W, letters)
+  // "字母把线截断了"的补接要用**所有被抹掉的字母块**判位置，不能只认"字形识别成功"的那几个 ✗
+  // （识别不出来时那一步等于没做，实测真图上正是它把线留在半路 → 多出一堆悬空顶点 ✗）
+  const letterPts = (opt.healByBlob ?? 0) !== 0
+    ? letters.map((a) => ({ cx: a.x, cy: a.y }))
+    : labels.map((L) => ({ cx: L.cx, cy: L.cy }))
+  const sk = peel.sk ?? thin(ink, W, H)
+  const G = peel.G ?? buildGraph(sk, W, H)
 
   const freeA = (p: SkGraph['paths'][number]) => p.aId < 0 && p.bId < 0
   const spur = opt.spur ?? 6
@@ -1392,6 +1701,11 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
         const dx = verts[j].x - verts[i].x, dy = verts[j].y - verts[i].y
         const d = Math.hypot(dx, dy)
         if (d < 2 || d > 48) continue
+        // 【v1523】①' **至少有一头是"断头"（度 1）** —— 补接要修的正是"线被字母切断、留下两个半截端点"。
+        //   两头都是有连线的正常顶点时合并，就是在把两个真顶点粘成一个 ✗（实测 3-人工修正 19→16 ✗、
+        //   user1 10→8 ✗）。断头判据把这一整类误合并挡在门外 ✓。
+        const degOf = (v: number) => outEdges.reduce((s, E) => s + (E[0] === v || E[1] === v ? 1 : 0), 0)
+        if (degOf(i) > 1 && degOf(j) > 1) continue
         const ux = dx / d, uy = dy / d
         // ② 中间要有被抹掉的字母：扫描两点连线上的采样点，任一点靠近某个字母中心即可
         //   （不能只看中点 —— 标签是挂在有字母那一端的，实测中点离字母 35px 以上）
@@ -1402,7 +1716,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
           // 用"字母中心的距离"判，阈值 34px —— 实测这一版在真值集上三项各 +1（76% / 68 / 63），
           // 放到 50px 或用外框判都反而退步（真值 配上边掉到 65、虚实掉到 60）。
           // 代价：棱柱图那对（字母中心离连线 41px）接不上，还得另想办法。
-          if (labels.some((L) => Math.hypot(L.cx - px2, L.cy - py2) < 34)) hasLabel = true
+          if (letterPts.some((L) => Math.hypot(L.cx - px2, L.cy - py2) < 34)) hasLabel = true
         }
         if (!hasLabel) continue
         // ③ 两点各自都有一条边指着对方
@@ -1659,7 +1973,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       text: L.text,
       conf: +L.conf.toFixed(3),
     })),
-    stats: { verts: verts.length, edges: outEdges.length, dash: dashN, text: st.textCount, bars: st.barCount, dashGroups: st.dashGroups, clipped },
+    stats: { verts: verts.length, edges: outEdges.length, dash: dashN, text: textN, bars: st.barCount, dashGroups: st.dashGroups, buds: peel.buds, clipped },
   }
 }
 
