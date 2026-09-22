@@ -364,6 +364,8 @@ export interface PenElement extends ElementBase {
 /** 一笔的形状种类（绘制/形状 → SVG 编辑器） */
 export type SvgItemKind =
   | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'ngon' | 'star'
+  /** 【v1510】预置四边形：拖一个框就出来（顶点照样能拖 ✓） */
+  | 'parallelogram' | 'trapezoid'
   | 'line' | 'arrow' | 'poly' | 'polygon' | 'pen' | 'text'
   /** 【v1508】数学图形里的**平面图形**（坐标系 / 数轴 / Venn / 直角三角形 / 平行四边形…）
    *  在 SVG 编辑器里也是"一笔"：拖出来放好，落盘成**原生 mathfig 元素** ✓（插完照样能改参数/顶点 ✓） */

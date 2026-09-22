@@ -46,6 +46,8 @@ const TOOLS: { v: Tool; label: string; icon: string; hint: string }[] = [
   { v: 'roundrect', label: '圆角矩形', icon: 'shape', hint: '按住拖一个圆角矩形 ✓（圆角大小在右边调 ✓）' },
   { v: 'ellipse', label: '圆 / 椭圆', icon: 'ellipse', hint: '按住拖一个椭圆（按住 Shift 是正圆 ✓）' },
   { v: 'triangle', label: '三角形', icon: 'symbol', hint: '按住拖一个三角形（底边在下、顶点在上 ✓）' },
+  { v: 'parallelogram', label: '平行四边形', icon: 'shape', hint: '按住拖一个平行四边形（斜边自动 ✓ 顶点还能拖 ✓）' },
+  { v: 'trapezoid', label: '梯形', icon: 'group', hint: '按住拖一个梯形（上底短、下底长、居中 ✓ 顶点还能拖 ✓）' },
   { v: 'ngon', label: '正多边形', icon: 'icon', hint: '按住拖一个正多边形（边数在右边调 3~12 ✓）' },
   { v: 'star', label: '星形', icon: 'plus', hint: '按住拖一个五角星 ✓' },
   { v: 'poly', label: '折线', icon: 'fig', hint: '一下一下点角点，回到起点（或双击）收尾 —— **不闭合** ✓' },
@@ -57,6 +59,7 @@ const SWATCHES = ['#1a1a1a', '#534AB7', '#d92d20', '#2563eb', '#16a34a', '#d9770
 const FILL_SWATCHES = ['none', '#534AB7', '#dbe4ff', '#ffe8cc', '#d3f9d8', '#ffe3e3', '#f1f3f5', '#ffffff']
 const KIND_LABEL: Record<string, string> = {
   rect: '矩形', roundrect: '圆角矩形', ellipse: '圆', triangle: '三角形', ngon: '正多边形', star: '星形',
+  parallelogram: '平行四边形', trapezoid: '梯形',
   line: '直线', arrow: '箭头', poly: '折线', polygon: '多边形', pen: '手绘', text: '文字', figure: '平面图形',
 }
 /** 【v1508】数学图形里的**平面图形**全搬进来（与图形库同一份清单 ✓ 不另起一套 ✗） */
@@ -142,11 +145,21 @@ function shapePoints(kind: SvgItemKind, x: number, y: number, w: number, h: numb
   const ry = h / 2
   const out: Pt[] = []
   if (kind === 'triangle') return [{ x: cx, y }, { x: x + w, y: y + h }, { x, y: y + h }]
+  // 【v1510】预置四边形：平行四边形（斜边 = 1/5 宽）与梯形（上底 = 3/5 宽，居中 ✓）
+  if (kind === 'parallelogram') {
+    const k = w * 0.22
+    return [{ x: x + k, y }, { x: x + w, y }, { x: x + w - k, y: y + h }, { x, y: y + h }]
+  }
+  if (kind === 'trapezoid') {
+    const k = w * 0.2
+    return [{ x: x + k, y }, { x: x + w - k, y }, { x: x + w, y: y + h }, { x, y: y + h }]
+  }
   if (kind === 'ngon' || kind === 'star') {
     const N = Math.max(3, Math.min(12, Math.round(n)))
     if (kind === 'ngon') {
+      // 【v1510】朝向：整体转半格（π/N）—— 正六边形就有一条**水平的边** ✓，正方形也变成正的（不再是对角立着 ✗）
       for (let i = 0; i < N; i++) {
-        const a = -Math.PI / 2 + (i * 2 * Math.PI) / N
+        const a = -Math.PI / 2 + Math.PI / N + (i * 2 * Math.PI) / N
         out.push({ x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a) })
       }
     } else {
@@ -162,7 +175,9 @@ function shapePoints(kind: SvgItemKind, x: number, y: number, w: number, h: numb
   return []
 }
 /** 这一笔要是"闭合多边形"（多边形 / 三角形 / 正多边形 / 星形 ✓）—— 点由 shapePoints 生成 ✓ */
-function isPolyKind(k: SvgItemKind) { return k === 'polygon' || k === 'triangle' || k === 'ngon' || k === 'star' }
+function isPolyKind(k: SvgItemKind) {
+  return k === 'polygon' || k === 'triangle' || k === 'ngon' || k === 'star' || k === 'parallelogram' || k === 'trapezoid'
+}
 /** 渲染 / 落盘共用的点串 ✓ */
 function pointsOf(it: Item): Pt[] {
   if (it.points && it.points.length) return it.points
@@ -562,6 +577,21 @@ function onHandleDown(e: PointerEvent, it: Item) {
 /** 事件坐标 → 画布坐标（顶点插点用 ✓） */
 function ptOfEvent(e: MouseEvent | PointerEvent): Pt { return pt(e) }
 /**
+ * 【v1510】挑工具 = **开始画** → 顺手取消选中 ✓
+ * ⚠ 不取消会出这种坑：上一笔还选着，改「边数」就把**它**改了 ✗
+ *   （真机探针里"正六边形"被后一步的边数=4 悄悄改成了正方形 ✓ 抓到）
+ *   要改已有的某一笔，用「选择」工具点它 —— 那时控件改的才是它 ✓
+ */
+function pickTool(t: Tool) {
+  tool.value = t
+  polyPts.value = []
+  polyCur.value = null
+  // ⚠ 只有**绘制工具**才取消选中 ✓：「选择」保留（不然"选中一笔 → 点选择 → 改色"就断了 ✗）；
+  //   平面图形下拉也保留（"换成这个"那颗按钮要靠选中态才出来 ✓）
+  if (t !== 'select') selId.value = ''
+}
+
+/**
  * 下拉里挑了一个平面图形 —— **一律是"准备放一个"** ✓
  * ⚠ 原来写成"选中项是平面图形就换图形" ✗ —— 刚放下的那个还是选中态，于是连着放第二个就变成改第一个了 ✗
  *   （真机探针当场抓到 ✓）现在"换图形"走旁边那颗明确的按钮 ✓
@@ -746,7 +776,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
         <div class="svgx__bar">
           <button
             v-for="t in TOOLS" :key="t.v" class="svgx__tool" :class="{ 'svgx__tool--on': tool === t.v }"
-            :title="t.hint" @click="tool = t.v; polyPts = []"
+            :title="t.hint" @click="pickTool(t.v)"
           >
             <span class="svgx__ticon"><svg viewBox="0 0 24 24" class="svgx__svg" v-html="(I as Record<string, string>)[t.icon]"></svg></span>{{ t.label }}
           </button>
@@ -834,7 +864,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
                 class="svgx__fig" v-html="figureHtml(it)" @pointerdown="onItemDown($event, it)"
               ></svg>
               <text v-else-if="it.kind === 'text'" :x="it.x + it.w / 2" :y="it.y + it.h / 2" :fill="it.stroke" :font-size="Math.max(14, Math.round(Math.min(it.h, it.w) * 0.7))" text-anchor="middle" dominant-baseline="middle" @pointerdown="onItemDown($event, it)" @dblclick="onItemDbl($event, it)">{{ it.text }}</text>
-              <polygon v-else-if="it.closed || (it.kind === 'polygon' || it.kind === 'triangle' || it.kind === 'ngon' || it.kind === 'star')" :points="pointsStr(it)" :fill="it.fill === 'none' ? 'transparent' : it.fill" :stroke="it.stroke" :stroke-width="it.strokeWidth" :stroke-dasharray="dashOf(it)" stroke-linejoin="round" @pointerdown="onItemDown($event, it)" />
+              <polygon v-else-if="it.closed || isPolyKind(it.kind)" :points="pointsStr(it)" :fill="it.fill === 'none' ? 'transparent' : it.fill" :stroke="it.stroke" :stroke-width="it.strokeWidth" :stroke-dasharray="dashOf(it)" stroke-linejoin="round" @pointerdown="onItemDown($event, it)" />
               <polyline v-else :points="pointsStr(it)" :fill="it.fill === 'none' ? 'none' : it.fill" :stroke="it.stroke" :stroke-width="it.strokeWidth" :stroke-dasharray="dashOf(it)" stroke-linecap="round" stroke-linejoin="round" @pointerdown="onItemDown($event, it)" />
               <template v-if="it.id === selId">
                 <rect :x="boxOf(it).x - 6" :y="boxOf(it).y - 6" :width="boxOf(it).w + 12" :height="boxOf(it).h + 12" fill="none" stroke="#534AB7" stroke-width="2" stroke-dasharray="8 6" pointer-events="none" />
