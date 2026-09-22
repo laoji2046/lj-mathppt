@@ -27,10 +27,13 @@ const LayoutGallery = defineAsyncComponent(() => import('@/components/LayoutGall
 import { ggbEdit, openGgbSuite, closeGgbSuite } from '@/ui/ggbEditor'
 const ImageEditorModal = defineAsyncComponent(() => import('@/components/ImageEditorModal.vue'))
 const VectorizeDialog = defineAsyncComponent(() => import('@/components/VectorizeDialog.vue'))
+/** 【绘制/形状 → SVG 编辑器】：小弹窗，按需加载 ✓ */
+const SvgEditorDialog = defineAsyncComponent(() => import('@/components/SvgEditorDialog.vue'))
 const Geom3DDialog = defineAsyncComponent(() => import('@/components/Geom3DDialog.vue'))
 const AsyExportDialog = defineAsyncComponent(() => import('@/components/AsyExportDialog.vue'))
 import { asyExportEl, closeAsyExport, openAsyExport } from '@/ui/asyExport'
 import { vectorizeOpen, vectorizeSrc, vectorizeReplaceId, vectorizeEditId, closeVectorize, openVectorize } from '@/ui/vectorize'
+import { svgEditorOpen, closeSvgEditor } from '@/ui/svgEditor'
 import { geom3dOpen, geom3dEditId } from '@/ui/geom3d'
 import { imageEditOpen, imageEditId, closeImageEditor, openImageEditor } from '@/ui/imageEditor'
 import MarkdownSourcePanel from '@/components/MarkdownSourcePanel.vue'
@@ -237,6 +240,8 @@ function onPresent() {
   <HelpDialog v-if="helpOpen" @close="closeHelp()" />
     <GgbSuite v-if="ggbEdit.open" :edit-id="ggbEdit.editId" @close="closeGgbSuite()" />
     <ImageEditorModal v-if="imageEditOpen && imageEditId" :id="imageEditId" @close="closeImageEditor()" />
+    <!-- 【绘制/形状 → SVG 编辑器】画简单矢量图 → 插当前页 ✓ -->
+    <SvgEditorDialog v-if="svgEditorOpen" @close="closeSvgEditor()" />
     <VectorizeDialog v-if="vectorizeOpen && vectorizeSrc" :src="vectorizeSrc" :replace-id="vectorizeReplaceId" :edit-id="vectorizeEditId" @close="closeVectorize()" />
     <AsyExportDialog v-if="asyExportEl" :el="asyExportEl" @close="closeAsyExport()" />
     <!-- ⚠ 必须 Teleport 到 body ✗ —— 试卷(PaperModal)是 teleport 到 body 的 ✓，

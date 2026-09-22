@@ -20,6 +20,7 @@ import SaveAsDialog from './SaveAsDialog.vue'
 import { isTauri } from '@/composables/useTauri'
 import SettingsPanel from './SettingsPanel.vue'
 import { ICONS as I } from '@/ui/icons'
+import { openSvgEditor } from '@/ui/svgEditor'
 import { pdfImportOpen, pdfImportFile, openPdfImport, closePdfImport } from '@/ui/pdfImport'
 import { addonState, requireAddon } from '@/addons/registry'
 import { openHelp as openHelpDialog } from '@/ui/help'
@@ -739,6 +740,9 @@ onBeforeUnmount(() => {
           </button>
           <button v-for="d in drawButtons" :key="d.type" class="dropdown__item" :class="{ 'dropdown__item--on': store.drawTool === d.type }" :title="d.title || ('在画布空白处拖拽绘制 ' + d.label)" @click="toggleDraw(d.type); shapeMenuOpen = false">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="d.svg"></svg></span>{{ d.label }}
+          </button>
+          <button class="dropdown__item" title="SVG 编辑器：画简单的矢量图（直线 / 箭头 / 矩形 / 圆 / 折线 / 手绘）→ 插进当前页，插进去的还是矢量元素、还能接着改" @click="openSvgEditor(); shapeMenuOpen = false">
+            <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pen"></svg></span>SVG 编辑器
           </button>
           <button class="dropdown__item" @click="openSymbol(); shapeMenuOpen = false"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.symbol"></svg></span>数学符号</button>
           <button class="dropdown__item" @click="openIcon(); shapeMenuOpen = false"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.icon"></svg></span>图标库</button>
