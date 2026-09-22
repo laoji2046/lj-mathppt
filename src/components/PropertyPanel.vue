@@ -24,6 +24,7 @@ import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type E
 import { solidSel } from '@/composables/solidSel'
 import { openImageEditor } from '@/ui/imageEditor'
 import { openVectorize } from '@/ui/vectorize'
+import { openSvgEditor } from '@/ui/svgEditor'
 import { openGeom3D } from '@/ui/geom3d'
 import { openAsyExport } from '@/ui/asyExport'
 import ColorSwatches from './ColorSwatches.vue'
@@ -1021,6 +1022,11 @@ function layerTypeLabel(type: string) {
           位置与尺寸
           <button class="panel__del" @click="store.removeSelected()">删除</button>
         </h3>
+        <!-- 【v1507】这一笔属于某张**手绘图**（SVG 编辑器画的 ✓）→ 一键回弹窗接着改（也可双击元素 ✓） -->
+        <button
+          v-if="el.svgDraw" class="quick__btn" style="width:100%;margin-bottom:6px;background:#ede9fb;border-color:#c9b8f0;color:#5b43ad"
+          title="回到 SVG 编辑器改这张图（整张替换，只留一步撤销 ✓）" @click="openSvgEditor(el.svgDraw.key)"
+        >✎ 编辑这张手绘图（也可双击）</button>
         <div class="grid2">
           <label class="field"><span>X</span>
             <input type="number" :value="Math.round(el.x)" @input="patch({ x: num(($event.target as HTMLInputElement).value) })" />
@@ -1319,7 +1325,16 @@ function layerTypeLabel(type: string) {
             @input="patch({ strokeWidth: num(($event.target as HTMLInputElement).value, 3) } as Partial<SlideElement>)"
           />
         </label>
-        <p v-if="isPen" class="panel__hint">重新绘制：先在顶部点「笔」，再在画布空白处拖拽画出新笔迹。</p>
+        <!-- 【v1507】多边形（SVG 编辑器画的那类）可以填色、可以切闭合 ✓ -->
+        <template v-if="isPen">
+          <label class="field"><span>填充（透明=无）</span>
+            <ColorSwatches :model-value="pen?.fill === 'none' ? '' : pen?.fill" allow-transparent @update:model-value="(v) => patch({ fill: v } as Partial<SlideElement>)" />
+          </label>
+          <label class="field"><span>闭合（多边形）</span>
+            <input type="checkbox" :checked="!!pen?.closed" @change="patch({ closed: ($event.target as HTMLInputElement).checked } as Partial<SlideElement>)" />
+          </label>
+          <p class="panel__hint">顶点编辑：双击这个元素回到「SVG 编辑器」改整张图 ✓（或顶部「绘制/形状 → SVG 编辑器」重画）</p>
+        </template>
       </div>
 
       <div v-if="isMathFig" class="panel__section">

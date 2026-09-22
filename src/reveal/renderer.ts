@@ -527,8 +527,12 @@ function elementToHtmlInner(el: SlideElement): string {
   }
 
   if (el.type === 'pen') {
+    // 【v1507】闭合 = 多边形（首尾相连 ✓）+ 可填充 + 线型 —— 与画布 PenElement.vue 同一套口径 ✓
     const pts = (el.points ?? []).map((p) => `${p.x},${p.y}`).join(' ')
-    return `<div style="${box}${rot}"${cls}${fragIdx}><svg width="100%" height="100%" viewBox="0 0 ${el.w} ${el.h}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${esc(el.stroke)}" stroke-width="${el.strokeWidth}" vector-effect="non-scaling-stroke"/></svg></div>`
+    const tag = el.closed ? 'polygon' : 'polyline'
+    const fill = el.fill && el.fill !== 'none' ? esc(el.fill) : 'none'
+    const dash = lineDashCss(el.strokeDash)
+    return `<div style="${box}${rot}"${cls}${fragIdx}><svg width="100%" height="100%" viewBox="0 0 ${el.w} ${el.h}" preserveAspectRatio="none"><${tag} points="${pts}" fill="${fill}" stroke="${esc(el.stroke)}" stroke-width="${el.strokeWidth}"${dash ? ` stroke-dasharray="${dash}"` : ''} stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg></div>`
   }
 
   if (el.type === 'mathfig') {

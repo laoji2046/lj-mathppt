@@ -662,6 +662,35 @@ export const useDeckStore = defineStore('deck', () => {
     selectedIds.value = ids
     return ids
   }
+  /**
+   * 【v1507】SVG 编辑器：把**整张手绘图**一次替换掉 ✓（旧的删、新的插，**只留一步撤销** ✗ 不能一步一个快照）
+   *  · 按 svgDraw.key 找旧的那几张 ✓
+   *  · 新元素沿用旧的 groupId（原来成组的，改完还成组 ✓）
+   *  · overrides 里带了 svgDraw（新模型）就写进去 ✓
+   */
+  function replaceDrawing(
+    key: string,
+    items: { type: ElementType; overrides?: Partial<SlideElement> }[],
+    groupId?: string,
+  ): string[] {
+    const slide = currentSlide.value
+    if (!slide || !items.length) return []
+    pushHistory()
+    const oldIds = slide.elements.filter((e) => e.svgDraw && e.svgDraw.key === key).map((e) => e.id)
+    const oldGroup = groupId || slide.elements.find((e) => e.svgDraw && e.svgDraw.key === key)?.groupId || ''
+    if (oldIds.length) slide.elements = slide.elements.filter((e) => !oldIds.includes(e.id))
+    const ids: string[] = []
+    items.forEach((it) => {
+      const el = createElement(it.type, { x: 0, y: 0 })
+      Object.assign(el, it.overrides || {})
+      if (oldGroup) el.groupId = oldGroup
+      slide.elements.push(el)
+      ids.push(el.id)
+    })
+    selectedIds.value = ids
+    return ids
+  }
+
   function updateElement(id: string, patch: Partial<SlideElement>) {
     const el = currentSlide.value?.elements.find((e) => e.id === id)
     if (el) Object.assign(el, patch)
@@ -1019,7 +1048,7 @@ export const useDeckStore = defineStore('deck', () => {
     slideClip, copySlideToClip, cutSlideToClip, pasteSlideAt, toggleSlideHidden, resetSlide, applyLayoutToSlide,
     addSlide, addSubpageAfterCurrent, addPageWithTemplate, addBundlePages, applyBlank, addBlankPage, removeSlide, setSlideSubpage, gotoSlide, insertSlides, replaceDeck, importDeck, copySlide, moveSlide, reorderSlide,
     versions, saveVersion, restoreVersion, deleteVersion,
-    addElement, addElements, updateElement, switchGraphic, commitElements, setAllFragments, removeSelected, removeElement, copyElements, cutElements, pasteElements, canPaste, setSlideBg, setSlideBgGradient, setSlideBgImage, setSlideTransition, setSlideNotes, applyTemplate, applyBundle,
+    addElement, addElements, updateElement, replaceDrawing, switchGraphic, commitElements, setAllFragments, removeSelected, removeElement, copyElements, cutElements, pasteElements, canPaste, setSlideBg, setSlideBgGradient, setSlideBgImage, setSlideTransition, setSlideNotes, applyTemplate, applyBundle,
     groupSelection, ungroup,
     alignSelection, distributeSelection, reorderZ, setElementIndex,
     resetDeck, undo, redo, pushHistory, saveNow,

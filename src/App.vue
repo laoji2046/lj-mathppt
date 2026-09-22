@@ -82,6 +82,11 @@ function onKeydown(e: KeyboardEvent) {
   const mod = e.ctrlKey || e.metaKey
   const k = e.key.toLowerCase()
 
+  // 【v1507】SVG 编辑器开着时，撤销 / Delete / Esc **一律让给弹窗** ✗
+  //   弹窗里 Delete 是"删一笔"、Ctrl+Z 是"撤销一笔" ✓ —— 不能让画布顺手把选中元素也删了/也撤了 ✗
+  //   （这套全局快捷键挂在 window 冒泡阶段，弹窗拦不住它，只能在这里让路 ✓）
+  if (svgEditorOpen.value && (k === 'z' || k === 'y' || e.key === 'Delete' || e.key === 'Backspace' || e.key === 'Escape')) return
+
   if (mod && k === 'z') {
     e.preventDefault()
     if (e.shiftKey) store.redo()

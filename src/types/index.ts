@@ -58,6 +58,9 @@ interface ElementBase extends Rect {
   shadowBlur?: number
   /** 描边线型（见 LINE_STYLES）：solid/dashed/dotted/长虚线/点划线 */
   strokeDash?: string
+  /** 【v1507】这张元素属于哪张**手绘图** + 整张图的模型（存每个元素上 ✓）
+   *  双击任一元素 → 回到 SVG 编辑器接着改；应用时整张一次替换（只留一步撤销 ✓） */
+  svgDraw?: SvgDrawing
   /**
    * 公式 / 混排元素的缩放方式：
    * - 'fill'（默认）：等比缩放填满元素框 —— 拖动外框放大，内容跟着无级放大；
@@ -342,12 +345,63 @@ export interface ArrowElement extends ElementBase {
   arrowHead?: string
 }
 
-/** 手绘笔迹：points 为相对元素原点 (0,0) 的坐标序列 */
+/** 手绘笔迹 / 多边形：points 为相对元素原点 (0,0) 的坐标序列
+ *  【v1507】closed=true 时按**多边形**渲染（首尾自动相连 ✓），并可带 fill ✓
+ *  —— SVG 编辑器的「多边形 / 三角形 / 正多边形 / 星形」都落成它 ✓ */
 export interface PenElement extends ElementBase {
   type: 'pen'
   stroke: string
   strokeWidth: number
   points: { x: number; y: number }[]
+  /** 闭合（多边形 ✓）；不写 = 折线/笔迹 ✓ */
+  closed?: boolean
+  /** 填充色（css 色；'none' / 空 = 只描边 ✓） */
+  fill?: string
+}
+
+/* ---------------- 【v1507】SVG 编辑器：手绘图的"模型" ---------------- */
+
+/** 一笔的形状种类（绘制/形状 → SVG 编辑器） */
+export type SvgItemKind =
+  | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'ngon' | 'star'
+  | 'line' | 'arrow' | 'poly' | 'polygon' | 'pen' | 'text'
+
+export interface SvgPt { x: number; y: number }
+
+/** 一笔的完整定义 —— **存到元素上**（svgDraw.items ✓），双击就能整张再编辑 ✓ */
+export interface SvgItemData {
+  id: string
+  kind: SvgItemKind
+  x: number
+  y: number
+  w: number
+  h: number
+  /** line / arrow：两端点（**绝对画布坐标** ✓） */
+  a?: SvgPt
+  b?: SvgPt
+  /** poly / polygon / pen：点序列（**绝对画布坐标** ✓，落盘时才转相对 ✓） */
+  points?: SvgPt[]
+  /** polygon 是否闭合（poly 永远不闭合 ✓） */
+  closed?: boolean
+  /** text 的文字内容 ✓ */
+  text?: string
+  /** ngon 边数（3~12 ✓） */
+  sides?: number
+  /** roundrect 圆角半径 ✓ */
+  cornerRadius?: number
+  stroke: string
+  strokeWidth: number
+  fill: string
+  /** 线型（见 LINE_STYLES：solid/dashed/dotted…✓） */
+  dash?: string
+  /** 箭头样式（见 ARROW_HEADS：triangle/open/stealth/double ✓） */
+  arrowHead?: string
+}
+
+/** 挂在"这张手绘图"的**每一个**元素上：同一 key = 同一张图 ✓ */
+export interface SvgDrawing {
+  key: string
+  items: SvgItemData[]
 }
 
 /** 数学图形种类 */

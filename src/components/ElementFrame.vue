@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { SlideElement } from '@/types'
 import { HANDLES, type Handle } from '@/composables/useDragResize'
 import { openShapeEdit } from '@/ui/shapeEditor'
+import { openSvgEditor } from '@/ui/svgEditor'
 import { requestInlineEdit } from '@/ui/inlineEdit'
 import { useDeckStore } from '@/stores/deck'
 import { useContextMenu } from '@/composables/useContextMenu'
@@ -93,6 +94,9 @@ function onHandleDown(e: PointerEvent, handle: Handle) {
 }
 function onDblClick() {
   const t = props.el
+  // 【v1507】SVG 编辑器画的那张图：双击**直接回弹窗**改整张 ✓
+  //   ⚠ 放在「进组」之前：那张图本身就是一个组合，再点一次才进组太绕 ✗（老师要的是"双击就能接着画" ✓）
+  if (t.svgDraw && t.svgDraw.key) { openSvgEditor(t.svgDraw.key); return }
   // 组合内的元素：第一次双击进入组内单独编辑（不再整组选中），
   // 再双击才走原有的顶点 / 形状编辑；文字元素由 contenteditable 自己接管。
   if (t.groupId && store.editingGroupId !== t.groupId) {
