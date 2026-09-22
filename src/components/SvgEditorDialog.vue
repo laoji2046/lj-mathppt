@@ -25,6 +25,8 @@ import { LINE_STYLES, ARROW_HEADS, MATH_FIGURE_OPTIONS, lineDashCss } from '@/ty
 import type { SlideElement, SvgItemData, SvgItemKind, SvgDrawing, MathFigureKind } from '@/types'
 import { mathFigureElOfKind, renderFigureSvg } from '@/composables/figureRender'
 import { svgEditorEditKey } from '@/ui/svgEditor'
+import { useContextMenu } from '@/composables/useContextMenu'
+import type { MenuItem } from '@/composables/useContextMenu'
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 const store = useDeckStore()
@@ -437,6 +439,74 @@ function duplicateSel() {
 function selectAll() {
   setSel(items.value.map((x) => x.id))
   msg.value = '已全选 ' + items.value.length + ' 笔 ✓'
+}
+
+/* ---------------- 【v1512】层级（数组顺序 = 绘制顺序，后面的盖前面的 ✓） ---------------- */
+function zMove(dir: 'up' | 'down' | 'top' | 'bottom') {
+  const ids = new Set(selIds.value)
+  if (!ids.size) return
+  snapshot()
+  const list = items.value.slice()
+  const sel = list.filter((x) => ids.has(x.id))
+  const rest = list.filter((x) => !ids.has(x.id))
+  if (dir === 'top') { items.value = [...rest, ...sel]; msg.value = '已置顶 ✓'; return }
+  if (dir === 'bottom') { items.value = [...sel, ...rest]; msg.value = '已置底 ✓'; return }
+  const step = dir === 'up' ? 1 : -1
+  const idxs = dir === 'up' ? [...list.keys()].reverse() : [...list.keys()]
+  for (const i of idxs) {
+    const j = i + step
+    if (j < 0 || j >= list.length) continue
+    if (ids.has(list[i].id) && !ids.has(list[j].id)) { const t = list[i]; list[i] = list[j]; list[j] = t }
+  }
+  items.value = list
+  msg.value = dir === 'up' ? '已上移一层 ✓' : '已下移一层 ✓'
+}
+
+/* ---------------- 【v1512】右键菜单（复用 app 那一套 ✓ 与画布右键同一个菜单 ✓） ---------------- */
+const { openMenu, closeMenu } = useContextMenu()
+/** 右键某一笔：先选中它（没选中的话 ✓），再给菜单 ✓ */
+function onItemCtx(e: MouseEvent, it: Item) {
+  e.preventDefault()
+  e.stopPropagation()
+  if (!isSel(it.id)) setSel([it.id])
+  syncStyleFrom(it)
+  const menu: MenuItem[] = [
+    { label: '复制', hint: 'Ctrl+C', disabled: !selIds.value.length, onClick: copySel },
+    { label: '剪切', hint: 'Ctrl+X', disabled: !selIds.value.length, onClick: cutSel },
+    { label: '复制一份', hint: 'Ctrl+D', disabled: !selIds.value.length, onClick: duplicateSel },
+    { label: '粘贴', hint: 'Ctrl+V', disabled: !clip.value.length, onClick: pasteClip },
+    { sep: true, label: '', onClick: () => {} },
+    { label: '上移一层', disabled: !selIds.value.length, onClick: () => zMove('up') },
+    { label: '下移一层', disabled: !selIds.value.length, onClick: () => zMove('down') },
+    { label: '置顶', disabled: !selIds.value.length, onClick: () => zMove('top') },
+    { label: '置底', disabled: !selIds.value.length, onClick: () => zMove('bottom') },
+  ]
+  if (sel.value && sel.value.kind === 'text') {
+    menu.push({ sep: true, label: '', onClick: () => {} })
+    menu.push({ label: '改文字…', onClick: () => { const t = sel.value; if (t) { const n = window.prompt('改文字：', t.text || ''); if (n != null) { snapshot(); t.text = n; t.w = Math.max(60, n.length * 42) } } } })
+  }
+  if (sel.value && sel.value.kind === 'figure') {
+    menu.push({ sep: true, label: '', onClick: () => {} })
+    menu.push({
+      label: '换成平面图形',
+      onClick: () => {},                       // 父项只负责展开子菜单 ✓（Menu 组件要求有这个字段 ✓）
+      children: PLANE_FIGS.map((o) => ({ label: o.label, onClick: () => changeFigKind(o.v) })),
+    })
+  }
+  menu.push({ sep: true, label: '', onClick: () => {} })
+  menu.push({ label: '全选', hint: 'Ctrl+A', onClick: selectAll })
+  menu.push({ label: '删除', hint: 'Delete', danger: true, disabled: !selIds.value.length, onClick: delSel })
+  openMenu(e.clientX, e.clientY, menu)
+}
+/** 右键空白：粘贴 / 全选 / 清空 ✓ */
+function onCanvasCtx(e: MouseEvent) {
+  e.preventDefault()
+  openMenu(e.clientX, e.clientY, [
+    { label: '粘贴', hint: 'Ctrl+V', disabled: !clip.value.length, onClick: pasteClip },
+    { label: '全选', hint: 'Ctrl+A', disabled: !items.value.length, onClick: selectAll },
+    { sep: true, label: '', onClick: () => {} },
+    { label: '清空画布', danger: true, disabled: !items.value.length, onClick: clearAll },
+  ])
 }
 /** 控件上显示的值：选中了就显示选中项的 ✓ */
 const shownFill = computed(() => (sel.value ? (sel.value.fill ?? 'none') : fill.value))
@@ -876,7 +946,7 @@ onMounted(() => {
     msg.value = '挑一个工具，在画布上画 ✓（画布就是幻灯片，画在哪就落在哪 ✓；拖出窗口也不会掉 ✓）'
   }
 })
-onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag() })
+onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag(); closeMenu() })
 </script>
 
 <template>
@@ -962,7 +1032,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
         <div class="svgx__stage" :class="{ 'svgx__stage--draw': tool !== 'select' }">
           <svg
             ref="canvas" :viewBox="'0 0 ' + W + ' ' + H" class="svgx__canvas"
-            @pointerdown="onCanvasDown"
+            @pointerdown="onCanvasDown" @contextmenu="onCanvasCtx"
             @dblclick="(polyPts.length >= 2) && commitPoly(tool === 'polygon')"
           >
             <defs>
@@ -976,7 +1046,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
             <rect :width="W" :height="H" fill="#fff" />
             <rect :width="W" :height="H" fill="url(#svgx-grid)" />
 
-            <g v-for="it in items" :key="it.id">
+            <g v-for="it in items" :key="it.id" @contextmenu="onItemCtx($event, it)">
               <rect v-if="it.kind === 'rect' || it.kind === 'roundrect'" :x="it.x" :y="it.y" :width="it.w" :height="it.h" :rx="it.kind === 'roundrect' ? (it.cornerRadius ?? 18) : 0" :fill="it.fill === 'none' ? 'transparent' : it.fill" :stroke="it.stroke" :stroke-width="it.strokeWidth" :stroke-dasharray="dashOf(it)" @pointerdown="onItemDown($event, it)" @dblclick="onItemDbl($event, it)" />
               <ellipse v-else-if="it.kind === 'ellipse'" :cx="it.x + it.w / 2" :cy="it.y + it.h / 2" :rx="it.w / 2" :ry="it.h / 2" :fill="it.fill === 'none' ? 'transparent' : it.fill" :stroke="it.stroke" :stroke-width="it.strokeWidth" :stroke-dasharray="dashOf(it)" @pointerdown="onItemDown($event, it)" />
               <line v-else-if="it.kind === 'line' || it.kind === 'arrow'" :x1="lineEnds(it).p0.x" :y1="lineEnds(it).p0.y" :x2="lineEnds(it).p1.x" :y2="lineEnds(it).p1.y" :stroke="it.stroke" :stroke-width="it.strokeWidth" :stroke-dasharray="dashOf(it)" stroke-linecap="round" :marker-end="it.kind === 'arrow' ? 'url(#svgx-arrow)' : undefined" :marker-start="it.kind === 'arrow' && it.arrowHead === 'double' ? 'url(#svgx-arrow)' : undefined" @pointerdown="onItemDown($event, it)" />
@@ -1023,7 +1093,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
         <footer class="svgx__foot">
           <span class="svgx__hint">{{ selIds.length
             ? '选中了：拖动挪位置、拉右下角缩放；拖小圆点改形状（平行四边形/正多边形会**保持形状** ✓）、双击顶点删、双击边上加点；样式控件改的就是选中的这些 ✓；Ctrl+C/X/V/D、Delete ✓'
-            : (TOOLS.find((t) => t.v === tool) || TOOLS[0]).hint }}</span>
+            : (TOOLS.find((t) => t.v === tool) || TOOLS[0]).hint + '（右键有菜单 ✓）' }}</span>
           <span v-if="selIds.length > 1" class="svgx__n">已选 {{ selIds.length }} 笔（Shift 点选加减 ✓ 可一起挪 / 改样式 / 复制）</span>
           <span v-else-if="sel" class="svgx__n">已选：{{ sel.kind === 'figure' ? figLabel(sel.figKind) : (KIND_LABEL[sel.kind] || sel.kind) }}</span>
           <!-- 【v1508】数值微调（选中后可直接改 ✓） -->

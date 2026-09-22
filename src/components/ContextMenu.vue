@@ -83,7 +83,9 @@ onBeforeUnmount(() => {
 <style scoped>
 .ctx-menu {
   position: fixed;
-  z-index: 2000;
+  /* 【v1512】2500：要**盖在 SVG 编辑器（2400）之上** —— 原来 2000 在弹窗里点右键根本看不见 ✗
+     （菜单本来就该在最上面；画布右键时没有更高的浮层，抬高不影响 ✓） */
+  z-index: 2500;
   min-width: 168px;
   background: var(--panel);
   border: 1px solid var(--border);
