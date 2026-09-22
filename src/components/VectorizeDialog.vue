@@ -659,6 +659,16 @@ function rerun(crop?: [number, number, number, number] | null) {
  *  只把**被改过**的项传给算法（见 advOpt），没改的继续吃算法默认值。 */
 const ADV_GROUPS = [
   {
+    title: '几何规整（平行 / 直角 / 等长）',
+    items: [
+      { k: 'snapGeo', label: '几何规整', min: 0, max: 1, step: 1, def: 1, hint: '总开关：0 = 完全不吸（要最原始的墨迹结果时用）。1 = 把"该平行 / 该直角 / 该等长 / 该是水平或 45°"的关系吸成精确的 ✓' },
+      { k: 'snapDir', label: '方向吸附', min: 0, max: 15, step: 0.5, def: 4, hint: '边与水平 / 45° / 竖直的偏差 ≤ 这个度数就吸正（立体几何基本都是斜二测 ✓）' },
+      { k: 'snapPar', label: '判平行', min: 0, max: 15, step: 0.5, def: 4.5, hint: '两条边夹角 ≤ 这个度数就归为一组、取边长加权平均方向（默认 4.5 是基准台扫出来的 ✓）' },
+      { k: 'snapRt', label: '判直角', min: 0, max: 15, step: 0.5, def: 5, hint: '共享顶点的两条边与 90° 差 ≤ 这个度数就摆正（绕共享顶点转，接头不动 ✓）' },
+      { k: 'snapEq', label: '判等长', min: 0, max: 0.3, step: 0.01, def: 0.1, hint: '同一平行组里长度比 ≤ 1+此值就取加权平均长度（0.1 = 10%）' },
+    ],
+  },
+  {
     title: '杂点 / 多余的点与线段',
     items: [
       { k: 'dashMinPiece', label: '最小短划', min: 0, max: 20, step: 1, def: 4, hint: '主轴短于此长度的小墨团直接当噪点抹掉（px）' },

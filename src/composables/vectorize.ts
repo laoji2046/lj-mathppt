@@ -88,6 +88,24 @@ export interface VectorizeOpt {
    * 调大 = 更容易把这种点并掉（0.99 ≈ 8°、0.98 ≈ 11°）。
    */
   collinearCos?: number
+  /* ---------- 【v1518】几何规整（把该平行 / 直角 / 等长 / 45° 倍数的关系变成精确的 ✓） ---------- */
+  /** 总开关：0 = 完全关掉几何规整（要看原始墨迹结果时用 ✓） */
+  snapGeo?: number
+  /** 方向吸附：边与 45° 倍数的偏差 ≤ 这个度数就吸正（度，默认 6） */
+  snapDir?: number
+  /** 判平行：两条边夹角 ≤ 这个度数就归为一组、取加权平均方向（度，默认 3） */
+  snapPar?: number
+  /** 判直角：共享顶点的两条边与 90° 差 ≤ 这个度数就摆正（度，默认 5）
+   *  ⚠ 不能叫 snapPerp —— 那个名字已经被「虚线链吸附垂距」占了 ✗（实测编译报 Duplicate identifier ✓） */
+  snapRt?: number
+  /** 判等长：同一平行组里长度比 ≤ 1+这个值就取加权平均长度（默认 0.1 = 10%） */
+  snapEq?: number
+  /** 迭代轮数（默认 16） */
+  snapIter?: number
+  /** 数据项强度：每轮把顶点往原位置拉回这么多（默认 0.25，越大越保守） */
+  snapPull?: number
+  /** 单个顶点最大位移（图对角线的比例，默认 0.03） */
+  snapMax?: number
 }
 
 export interface VectorizeStats {
@@ -866,6 +884,195 @@ function clippedEdges(ink: Uint8Array, W: number, box: [number, number, number, 
   return { top, bottom, left, right }
 }
 
+/**
+ * 【v1518】几何规整：把"该平行 / 该直角 / 该等长 / 该是 45° 倍数"的关系变成**精确**的 ✓
+ *
+ * 起因（老师问"怎么进一步提高准确度"）：顶点落在墨迹上、拓扑也对得住，但**几何关系是歪的** ✗ ——
+ * 手画 / 扫描 / 压缩都会让"该平行的差 1°、该直角的 89°、该等长的差 6%"。
+ * 立体几何插图 99% 是理想图（斜二测：水平 / 45° / 竖直 + 平行 + 等长 ✓），这些关系本来就能量出来 ✓。
+ *
+ * 做法：从**测量到的**几何关系里挑出明显成立的那些当约束，再用阻尼投影（PBD 风格）：
+ *   每轮 = 满足约束（转角度 / 调长度）→ 再往原位置拉一把（数据项）→ 限位。
+ * 三条安全线（免得把"本来就不规则"的示意图硬掰直 ✗）：
+ *   · 只在偏差 ≤ 容差时才吸（容差可调、可整组关闭 ✓）；
+ *   · 每个顶点离原位置不超过 snapMax（默认 3% 对角线 ✓）；
+ *   · 贴在拟合弧上的顶点**冻住**（弧的圆心/半径是拟合出来的，动了会脱开 ✗）；
+ *   · 等长只在**同一平行组内部**做（三角形两条边碰巧等长不会被硬掰 ✓）。
+ */
+function snapGeometry(
+  verts: { x: number; y: number }[],
+  outEdges: [number, number, number][],
+  diag: number,
+  opt: VectorizeOpt,
+  arcs: { cx: number; cy: number; rx: number; ry: number; a0: number; a1: number }[],
+) {
+  if ((opt.snapGeo ?? 1) === 0) return
+  const D2R = Math.PI / 180
+  const dirTol = (opt.snapDir ?? 4) * D2R        // 方向吸附（45° 倍数）—— 默认值由基准台扫出来 ✓
+  const parTol = (opt.snapPar ?? 4.5) * D2R      // 判平行 —— 4.5° 是基准台上「几何误差最小、位置误差不涨」的那个点 ✓
+  const perpTol = (opt.snapRt ?? 5) * D2R        // 判直角
+  const eqTol = opt.snapEq ?? 0.1                // 判等长（比值）
+  const iter = Math.max(1, Math.round(opt.snapIter ?? 16))
+  const pull = opt.snapPull ?? 0.25
+  const maxMove = (opt.snapMax ?? 0.03) * diag
+  const minLen = 0.02 * diag                     // 太短的边方向估计没意义 → 不参与约束
+
+  const angDiff = (a: number, b: number) => {
+    let d = Math.abs(a - b) % (2 * Math.PI)
+    if (d > Math.PI) d = 2 * Math.PI - d
+    return d
+  }
+
+  // ① 冻住"贴在弧上"的顶点 ✓
+  const frozen: boolean[] = verts.map(() => false)
+  for (const a of arcs) {
+    const rx = Math.max(1e-6, a.rx), ry = Math.max(1e-6, a.ry)
+    const norm = (t: number) => { let r = t % (2 * Math.PI); if (r < 0) r += 2 * Math.PI; return r }
+    const span = norm(a.a1 - a.a0)
+    for (let i = 0; i < verts.length; i++) {
+      const u = (verts[i].x - a.cx) / rx, v = (verts[i].y - a.cy) / ry
+      const q = Math.hypot(u, v)
+      if (Math.abs(q - 1) * Math.min(rx, ry) > 2.5) continue
+      if (span > Math.PI * 1.99 || norm(Math.atan2(v, u) - a.a0) <= span + 0.2) frozen[i] = true
+    }
+  }
+
+  // ② 边表
+  const es: { i: number; j: number; th: number; len: number; target?: number; group?: number }[] = []
+  for (const e of outEdges) {
+    if (e[0] === e[1]) continue
+    if (frozen[e[0]] || frozen[e[1]]) continue
+    const dx = verts[e[1]].x - verts[e[0]].x, dy = verts[e[1]].y - verts[e[0]].y
+    const len = Math.hypot(dx, dy)
+    if (len < minLen) continue
+    es.push({ i: e[0], j: e[1], th: Math.atan2(dy, dx), len })
+  }
+  if (es.length < 3) return
+
+  // ③ 平行分组（按角度排序后**线性聚类**：簇内最大角差 ≤ parTol ✓
+  //     —— 不能用"传递闭包"式并查集：A≈B、B≈C 会把整张图并成一组 ✗）
+  const order = es.map((e, k) => ({ k, th: e.th })).sort((a, b) => a.th - b.th)
+  const clusters: number[][] = []
+  for (const o of order) {
+    const last = clusters[clusters.length - 1]
+    if (last && angDiff(es[o.k].th, es[last[0]].th) <= parTol) last.push(o.k)
+    else clusters.push([o.k])
+  }
+  if (clusters.length > 1) {   // 首尾两簇其实是同一方向（±π 接缝）✓
+    const f = clusters[0], l = clusters[clusters.length - 1]
+    if (angDiff(es[f[0]].th, es[l[0]].th) <= parTol) { clusters[0] = l.concat(f); clusters.pop() }
+  }
+  clusters.forEach((cl, gi) => {
+    let sx = 0, sy = 0, sw = 0
+    for (const k of cl) { const w = es[k].len; sx += w * Math.cos(2 * es[k].th); sy += w * Math.sin(2 * es[k].th); sw += w }
+    void sw
+    let t = 0.5 * Math.atan2(sy, sx)
+    if (cl.length === 1) {
+      // 孤立边：只做"45° 倍数"吸附（斜二测先验 ✓），不在倍数附近就完全不碰 ✓
+      const step = Math.PI / 4
+      const near = Math.round(t / step) * step
+      if (angDiff(t, near) <= dirTol) { es[cl[0]].target = near; es[cl[0]].group = gi }
+      return
+    }
+    const step = Math.PI / 4
+    const near = Math.round(t / step) * step
+    if (angDiff(t, near) <= dirTol) t = near      // 整簇贴近 45° 倍数 → 直接用那个倍数 ✓
+    for (const k of cl) { es[k].target = t; es[k].group = gi }
+  })
+
+  // ④ 等长分组（只在同一平行组内 ✓）
+  const lenGroups: { members: number[]; target: number }[] = []
+  for (const cl of clusters) {
+    if (cl.length < 2) continue
+    const sorted = cl.slice().sort((a, b) => es[a].len - es[b].len)
+    let cur: number[] = []
+    const flush = () => { if (cur.length > 1) lenGroups.push({ members: cur, target: 0 }) }
+    for (const k of sorted) {
+      if (!cur.length || es[k].len / es[cur[0]].len - 1 <= eqTol) cur.push(k)
+      else { flush(); cur = [k] }
+    }
+    flush()
+  }
+  for (const g of lenGroups) {
+    let sw = 0, sl = 0
+    for (const k of g.members) { const w = es[k].len; sw += w; sl += w * es[k].len }
+    g.target = sl / sw       // 按边长加权（长边更可信 ✓）
+  }
+
+  // ⑤ 直角约束：共享顶点的两条边夹角接近 90° → 让**短的那条**垂直于长的那条 ✓（绕共享顶点转，接头不动 ✓）
+  const inc: number[][] = verts.map(() => [])
+  es.forEach((e, k) => { inc[e.i].push(k); inc[e.j].push(k) })
+  const perps: { k: number; ref: number; shared: number }[] = []
+  for (const list of inc) {
+    for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) {
+      const k1 = list[a], k2 = list[b]
+      if (es[k1].group !== undefined && es[k1].group === es[k2].group) continue   // 平行的两条不可能垂直 ✓
+      const d = angDiff(es[k1].th, es[k2].th)
+      if (Math.abs(d - Math.PI / 2) > perpTol) continue
+      const ref = es[k1].len >= es[k2].len ? k1 : k2
+      const mov = ref === k1 ? k2 : k1
+      const shared = es[k1].i === es[k2].i || es[k1].i === es[k2].j ? es[k1].i : es[k1].j
+      perps.push({ k: mov, ref, shared })
+    }
+  }
+
+  // ⑥ 阻尼投影迭代
+  const p0 = verts.map((v) => ({ x: v.x, y: v.y }))
+  const clampMove = () => {
+    for (let i = 0; i < verts.length; i++) {
+      if (frozen[i]) continue
+      const dx = verts[i].x - p0[i].x, dy = verts[i].y - p0[i].y
+      const d = Math.hypot(dx, dy)
+      if (d > maxMove) { verts[i].x = p0[i].x + (dx * maxMove) / d; verts[i].y = p0[i].y + (dy * maxMove) / d }
+    }
+  }
+  const rotEdge = (k: number, target: number, about: number | 'mid', factor: number) => {
+    const e = es[k]
+    const ax = verts[e.i].x, ay = verts[e.i].y, bx = verts[e.j].x, by = verts[e.j].y
+    const cur = Math.atan2(by - ay, bx - ax)
+    let d = target - cur
+    while (d > Math.PI / 2) d -= Math.PI
+    while (d < -Math.PI / 2) d += Math.PI
+    d *= factor
+    if (Math.abs(d) < 1e-4) return
+    const cx = about === 'mid' ? (ax + bx) / 2 : verts[about].x
+    const cy = about === 'mid' ? (ay + by) / 2 : verts[about].y
+    const c = Math.cos(d), s2 = Math.sin(d)
+    const rot = (x: number, y: number): [number, number] => {
+      const dx = x - cx, dy = y - cy
+      return [cx + dx * c - dy * s2, cy + dx * s2 + dy * c]
+    }
+    const [nax, nay] = rot(ax, ay), [nbx, nby] = rot(bx, by)
+    if (Math.hypot(nbx - nax, nby - nay) < minLen * 0.5) return   // 别把边转没了 ✓
+    if (!frozen[e.i]) { verts[e.i].x = nax; verts[e.i].y = nay }
+    if (!frozen[e.j]) { verts[e.j].x = nbx; verts[e.j].y = nby }
+    e.th = target
+  }
+  const setLen = (k: number, target: number, factor: number) => {
+    const e = es[k]
+    const ax = verts[e.i].x, ay = verts[e.i].y, bx = verts[e.j].x, by = verts[e.j].y
+    const len = Math.hypot(bx - ax, by - ay)
+    if (len < 1e-6) return
+    if (len < minLen * 0.5 && target < len) return
+    const s = 1 + (target / len - 1) * factor
+    const mx = (ax + bx) / 2, my = (ay + by) / 2
+    if (!frozen[e.i]) { verts[e.i].x = mx + (ax - mx) * s; verts[e.i].y = my + (ay - my) * s }
+    if (!frozen[e.j]) { verts[e.j].x = mx + (bx - mx) * s; verts[e.j].y = my + (by - my) * s }
+    e.len = Math.hypot(verts[e.j].x - verts[e.i].x, verts[e.j].y - verts[e.i].y)
+  }
+  for (let it = 0; it < iter; it++) {
+    for (let i = 0; i < verts.length; i++) {
+      if (frozen[i]) continue
+      verts[i].x += pull * (p0[i].x - verts[i].x)
+      verts[i].y += pull * (p0[i].y - verts[i].y)
+    }
+    for (let k = 0; k < es.length; k++) if (es[k].target !== undefined) rotEdge(k, es[k].target as number, 'mid', 0.6)
+    for (const g of lenGroups) for (const k of g.members) setLen(k, g.target, 0.5)
+    for (const p of perps) rotEdge(p.k, es[p.ref].th + Math.PI / 2, p.shared, 0.5)
+    clampMove()
+  }
+}
+
 function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [number, number, number, number] }, opt: VectorizeOpt = {}): VectorizeResult {
   const W = m.W, H = m.H, box = m.box
   const diag = Math.hypot(box[2] - box[0], box[3] - box[1])
@@ -1374,6 +1581,15 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   dissolveCrossings()
   // 精修会把顶点挪位置，**挪完必须再合并一次** —— 否则可能留下两个几乎重合的顶点，
   // 它们的手柄叠在一起，用户会有一个点点不到也拖不动
+  mergeVerts(opt.mergeR ?? 8)
+  dropIsolated()
+  dedupe()
+
+  // 【v1518】几何规整（约束吸附）—— 放在所有形态改动之后、导出之前 ✓
+  snapGeometry(verts, outEdges, diag, opt, fittedArcs)
+  // 规整会挪顶点 → 再走一遍收尾清理（共线假点 / 假交点 / 重合点 ✓）
+  collinearSimplify()
+  dissolveCrossings()
   mergeVerts(opt.mergeR ?? 8)
   dropIsolated()
   dedupe()
