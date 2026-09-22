@@ -179,7 +179,63 @@ function runAIInner() {
  *   · GeoGebra 指令：逐行 evalCommand（不会 JS 也能用 ✓，而且这段能存成 commands 随元素自动执行 ✓）。
  * 安全性：脚本在**本机自己的页面**里跑（桌面应用、老师自己写 ✓），但存在元素上的脚本**不自动执行** ✗。
  */
-const jsOpen = ref(false)
+const jsOpen = ref(true)   // 【v1517】右栏默认就把脚本框摊开 ✓（面板挪到绘图板右边之后，收起反而多余）
+
+/**
+ * 【v1517】AutoClose 虚拟键盘。
+ * 这台机器（以及很多老师笔记本）是**触摸屏**，WebView2 如实上报 navigator.maxTouchPoints > 0 ✗ →
+ * GeoGebra 自作主张把**虚拟键盘**摊在板子下面 ✗，一做就是 221px（板面的三分之一 ✗）；
+ * 而且它内部按"键盘在"扣掉那块高度 ✗ —— 光用 CSS 藏只会留一条空白 ✗（实测 ✗）。
+ * 正确做法：**点它自己的关闭按钮**（.closeTabbedKeyboardButton ✓）→ GeoGebra 真收起 + 重排 ✓；
+ * 老师想用键盘时，点输入框那个 ⌨ 图标它还会回来 ✓（GeoGebra 原生行为，我们不抢 ✓）。
+ */
+const kbdReserve = ref(0)          // 键盘那一条的高度（GWT 会一直留着它 ✗ → 得自己补回来 ✓）
+let kbdObs: MutationObserver | undefined
+
+/** 把键盘收起来（display:none ✓ —— 点它自己的 ✕ 那一招**在真机上没用** ✗，实测 ✓） */
+function hideVirtualKeyboard(tries = 0) {
+  const h = host.value
+  if (!h) return
+  const kbd = h.querySelector('.KeyBoard') as HTMLElement | null
+  if (!kbd) { if (tries < 20) window.setTimeout(() => hideVirtualKeyboard(tries + 1), 300); return }
+  if (getComputedStyle(kbd).display !== 'none') {
+    const kh = Math.round(kbd.getBoundingClientRect().height)
+    if (kh > 40) kbdReserve.value = kh
+    kbd.style.display = 'none'
+    window.setTimeout(resizeApplet, 150)
+  }
+  // 老师要是自己把键盘点出来（样式变了），立刻重排一次 —— 让键盘待在板子里面 ✓ 而不是被裁掉 ✗
+  if (!kbdObs) {
+    kbdObs = new MutationObserver(() => resizeApplet())
+    kbdObs.observe(kbd, { attributes: true, attributeFilter: ['style', 'class'] })
+  }
+}
+
+/**
+ * 藏掉键盘之后要**逼 GeoGebra 重排一次** ✗→✓：
+ * 它内部是 GWT 的 SplitLayoutPanel（绝对定位），把键盘 display:none 只是让它不画 ✓，
+ * 但**那块地方不会被让出来** ✗（截图里板子下面空了一大条 ✗）→ setSize() 一下，视图就重新铺满了 ✓。
+ */
+function resizeApplet() {
+  const a = liveApplet()
+  const h = host.value
+  if (!a || !h) return
+  const w = Math.max(320, h.clientWidth || 640)
+  const ht = Math.max(240, h.clientHeight || 480)
+  const kbd = h.querySelector('.KeyBoard') as HTMLElement | null
+  const kbdVisible = !!kbd && getComputedStyle(kbd).display !== 'none'
+  if (kbdVisible) { const kh = Math.round(kbd!.getBoundingClientRect().height); if (kh > 40) kbdReserve.value = kh }
+  // 键盘收着时，GWT 仍然把它那一条留着 ✗（板子下面空一大条 ✗）→ 把 applet 高度**多加**那一条，
+  // 多出来的部分正好被我们的 .ggbs__canvas{overflow:hidden} 裁掉 ✓，视图就拿满整个容器 ✓
+  const extra = kbdVisible ? 0 : kbdReserve.value
+  try {
+    if (typeof a.setSize === 'function') a.setSize(w, ht + extra)
+    else {
+      if (typeof a.setWidth === 'function') a.setWidth(w)
+      if (typeof a.setHeight === 'function') a.setHeight(ht + extra)
+    }
+  } catch { /* 忽略 */ }
+}
 const jsMode = ref<'js' | 'cmd'>('js')
 const script = ref('')
 const log = ref<{ ok: boolean; text: string }[]>([])
@@ -198,7 +254,12 @@ function watchReady() {
   ready.value = false
   readyTimer = window.setInterval(() => {
     const a = liveApplet()
-    if (a && typeof a.evalCommand === 'function') { ready.value = true; clearInterval(readyTimer) }
+    if (a && typeof a.evalCommand === 'function') {
+      ready.value = true
+      clearInterval(readyTimer)
+      window.setTimeout(hideVirtualKeyboard, 300)   // 【v1517】收起触摸屏虚拟键盘（它占 221px ✗）
+      window.setTimeout(resizeApplet, 700)
+    }
   }, 400)
 }
 
@@ -465,7 +526,7 @@ onMounted(() => {
   render()
   watchReady()
 })
-onBeforeUnmount(() => { window.removeEventListener('keydown', onSuiteKey); clearTimeout(finishTimer); if (host.value) host.value.innerHTML = ''; clearTimeout(noticeTimer); clearInterval(readyTimer) })
+onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } window.removeEventListener('keydown', onSuiteKey); clearTimeout(finishTimer); if (host.value) host.value.innerHTML = ''; clearTimeout(noticeTimer); clearInterval(readyTimer) })
 </script>
 
 <template>
@@ -491,56 +552,61 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onSuiteKey); clear
               <input v-model="clearBefore" type="checkbox" @change="persistClear" /> 运行前清掉上一次的图
             </label>
           </div>
-          <div class="ggbs__ai">
-            <span class="ggbs__aiicon">🤖</span>
-            <textarea v-model="aiDesc" class="ggbs__aiinput" rows="2" wrap="soft" placeholder="AI 作图（每行一句，回车执行）：
-作等边三角形 ABC
-M 是 AB 的中点
-过 M 作 BC 的垂线
-椭圆 F1 F2 3
-函数 f(x)=x^2-2x" @keydown.enter.exact.prevent="runAI"></textarea>
-            <button class="ggbs__btn ggbs__btn--ai" @click="runAI">生成</button>
-          </div>
-          <!-- 【v1513】JS 指令：用 JavaScript 控制作图 ✓ -->
-          <div class="ggbs__js" :class="{ 'ggbs__js--open': jsOpen }">
-            <button class="ggbs__jshead" @click="jsOpen = !jsOpen">
-              <span class="ggbs__jscaret">{{ jsOpen ? '▾' : '▸' }}</span>
-              <span>JS 指令（用 JavaScript 控制作图）</span>
-              <span class="ggbs__jsstate" :class="{ 'ggbs__jsstate--off': !ready }">{{ ready ? '● 绘图板已就绪' : '○ 正在加载…' }}</span>
-              <span class="ggbs__jshint">脚本里 <b>ggb</b> 就是绘图板，GeoGebra 的 JS API 直接可用</span>
-            </button>
-            <div v-if="jsOpen" class="ggbs__jsbody">
-              <div class="ggbs__jsbar">
-                <select v-model="jsMode" class="ggbs__sel ggbs__sel--sm" title="JavaScript：整段当函数体跑（能写变量/循环）；GeoGebra 指令：逐行执行（不会 JS 也能用）">
-                  <option value="js">JavaScript</option>
-                  <option value="cmd">GeoGebra 指令（逐行）</option>
-                </select>
-                <select class="ggbs__sel ggbs__sel--sm" title="例子：点一下填进编辑框（不自动跑 ✓）；按分组挑，共 {{ SAMPLES.length }} 条" @change="loadSample(Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
-                  <option value="">插入例子…（{{ SAMPLES.length }} 条）</option>
-                  <optgroup v-for="g in SAMPLE_GROUPS" :key="g" :label="g">
-                    <option v-for="i in sampleIndexOf(g)" :key="i" :value="i">{{ SAMPLES[i].label }}</option>
-                  </optgroup>
-                </select>
-                <button class="ggbs__btn ggbs__btn--primary" :disabled="!ready" title="运行（Ctrl+Enter ✓）" @click="runScript">▶ 运行</button>
-                <button class="ggbs__btn" title="撤销一步（ggb.undo()）" @click="undoGgb">撤销</button>
-                <button class="ggbs__btn" title="重做一步（ggb.redo()）" @click="redoGgb">重做</button>
-                <button class="ggbs__btn" title="清空下面的日志" @click="clearLog">清日志</button>
-                <button class="ggbs__btn ggbs__btn--help" title="JavaScript API 一览：点「填入」直接进脚本 ✓" @click="openHelp('js')">📖 帮助</button>
-              </div>
-              <textarea
-                ref="scriptRef" v-model="script" class="ggbs__jsinput" rows="6" spellcheck="false" wrap="off"
-                :placeholder="jsMode === 'js'
-                  ? 'ggb 就是绘图板，例如：\nggb.evalCommand(\'Circle((0,0),2)\')  // 画个圆\nggb.setColor(\'c\', 200, 60, 60)        // 改成红色\nreturn ggb.getAllObjectNames().join(\', \')'
-                  : '一行一条 GeoGebra 指令，例如：\nA=(0,0)\nB=(4,0)\nPolygon(A,B,C)'"
-                @keydown.ctrl.enter.prevent="runScript"
-              ></textarea>
-              <div class="ggbs__log">
-                <div v-for="(l, i) in log" :key="i" class="ggbs__logline" :class="{ 'ggbs__logline--err': !l.ok }">{{ l.ok ? '✓' : '✗' }} {{ l.text }}</div>
-                <div v-if="!log.length" class="ggbs__loghint">运行结果在这儿一行一条 ✓（接口一览：evalCommand / setColor / setCoords / setValue / startAnimation / getValue / getAllObjectNames / getXML / setXML / deleteObject / undo / redo …）</div>
+          <div class="ggbs__main">
+            <div class="ggbs__left">
+              <div class="ggbs__canvas"><div ref="host" class="ggbs__host"></div></div>
+            </div>
+            <div class="ggbs__side">
+            <div class="ggbs__ai">
+              <span class="ggbs__aiicon">🤖</span>
+              <textarea v-model="aiDesc" class="ggbs__aiinput" rows="2" wrap="soft" placeholder="AI 作图（每行一句，回车执行）：
+  作等边三角形 ABC
+  M 是 AB 的中点
+  过 M 作 BC 的垂线
+  椭圆 F1 F2 3
+  函数 f(x)=x^2-2x" @keydown.enter.exact.prevent="runAI"></textarea>
+              <button class="ggbs__btn ggbs__btn--ai" @click="runAI">生成</button>
+            </div>
+            <!-- 【v1513】JS 指令：用 JavaScript 控制作图 ✓ -->
+            <div class="ggbs__js" :class="{ 'ggbs__js--open': jsOpen }">
+              <button class="ggbs__jshead" @click="jsOpen = !jsOpen">
+                <span class="ggbs__jscaret">{{ jsOpen ? '▾' : '▸' }}</span>
+                <span>JS 指令（用 JavaScript 控制作图）</span>
+                <span class="ggbs__jsstate" :class="{ 'ggbs__jsstate--off': !ready }">{{ ready ? '● 绘图板已就绪' : '○ 正在加载…' }}</span>
+              </button>
+              <div v-if="jsOpen" class="ggbs__jsbody">
+                <div class="ggbs__jsbar">
+                  <select v-model="jsMode" class="ggbs__sel ggbs__sel--sm" title="JavaScript：整段当函数体跑（能写变量/循环）；GeoGebra 指令：逐行执行（不会 JS 也能用）">
+                    <option value="js">JavaScript</option>
+                    <option value="cmd">GeoGebra 指令（逐行）</option>
+                  </select>
+                  <select class="ggbs__sel ggbs__sel--sm" title="例子：点一下填进编辑框（不自动跑 ✓）；按分组挑，共 {{ SAMPLES.length }} 条" @change="loadSample(Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
+                    <option value="">插入例子…（{{ SAMPLES.length }} 条）</option>
+                    <optgroup v-for="g in SAMPLE_GROUPS" :key="g" :label="g">
+                      <option v-for="i in sampleIndexOf(g)" :key="i" :value="i">{{ SAMPLES[i].label }}</option>
+                    </optgroup>
+                  </select>
+                  <button class="ggbs__btn ggbs__btn--primary" :disabled="!ready" title="运行（Ctrl+Enter ✓）" @click="runScript">▶ 运行</button>
+                  <button class="ggbs__btn" title="撤销一步（ggb.undo()）" @click="undoGgb">撤销</button>
+                  <button class="ggbs__btn" title="重做一步（ggb.redo()）" @click="redoGgb">重做</button>
+                  <button class="ggbs__btn" title="清空下面的日志" @click="clearLog">清日志</button>
+                  <button class="ggbs__btn ggbs__btn--help" title="JavaScript API 一览：点「填入」直接进脚本 ✓" @click="openHelp('js')">📖 帮助</button>
+                </div>
+                <textarea
+                  ref="scriptRef" v-model="script" class="ggbs__jsinput" rows="6" spellcheck="false" wrap="off"
+                  :placeholder="jsMode === 'js'
+                    ? 'ggb 就是绘图板，例如：\nggb.evalCommand(\'Circle((0,0),2)\')  // 画个圆\nggb.setColor(\'c\', 200, 60, 60)        // 改成红色\nreturn ggb.getAllObjectNames().join(\', \')'
+                    : '一行一条 GeoGebra 指令，例如：\nA=(0,0)\nB=(4,0)\nPolygon(A,B,C)'"
+                  @keydown.ctrl.enter.prevent="runScript"
+                ></textarea>
+                <div class="ggbs__log">
+                  <div v-for="(l, i) in log" :key="i" class="ggbs__logline" :class="{ 'ggbs__logline--err': !l.ok }">{{ l.ok ? '✓' : '✗' }} {{ l.text }}</div>
+                  <div v-if="!log.length" class="ggbs__loghint">运行结果在这儿一行一条 ✓（接口一览：evalCommand / setColor / setCoords / setValue / startAnimation / getValue / getAllObjectNames / getXML / setXML / deleteObject / undo / redo …）</div>
+                </div>
               </div>
             </div>
+            </div>
           </div>
-          <div class="ggbs__canvas"><div ref="host" class="ggbs__host"></div></div>
           <p v-if="error" class="ggbs__err">{{ error }}</p>
         </div>
         <!-- 【v1514】指令帮助面板：搜索 / 分类 / 一键填入 ✓（覆盖在弹窗内容上，不遮标题栏和底部按钮） -->
@@ -588,35 +654,41 @@ M 是 AB 的中点
 .ggbs__backdrop { position: fixed; inset: 0; background: rgba(20, 24, 34, 0.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
 .ggbs__box {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  width: min(900px, 92vw); max-height: 92vh; display: flex; flex-direction: column;
+  width: min(1240px, 96vw); max-height: 94vh; display: flex; flex-direction: column;
   background: #fff; border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); overflow: hidden;
 }
 .ggbs__head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 700; color: var(--text); font-size: 15px; }
 .ggbs__x { border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--muted); }
 .ggbs__x:hover { color: var(--text); }
-.ggbs__body { padding: 12px 14px; overflow: auto; }
-.ggbs__bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; font-size: 13px; color: var(--muted); }
+/* 【v1517】布局：上面一行工具条，下面**左边绘图板 + 右边操作栏**（AI 作图 / JS 指令）✓ */
+.ggbs__body { padding: 10px 14px 12px; overflow: hidden; display: flex; flex-direction: column; gap: 8px; }
+.ggbs__main { display: flex; align-items: stretch; gap: 10px; height: min(72vh, 660px); min-height: 360px; }
+.ggbs__left { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.ggbs__side { flex: 0 0 400px; max-width: 44%; min-width: 300px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding-right: 2px; }
+.ggbs__bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
 .ggbs__sel { border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 8px; font-size: 13px; }
 .ggbs__check { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 /* 【v1513】JS 指令面板 */
 .ggbs__js { border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel-2); overflow: hidden; }
 .ggbs__jshead { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border: 0; background: none; cursor: pointer; text-align: left; font-size: 12.5px; color: var(--text); }
 .ggbs__jscaret { color: var(--muted); font-size: 11px; width: 10px; }
-.ggbs__jsstate { font-size: 11px; color: var(--ok, #16a34a); }
+/* 【v1517】右栏只有 400px：状态靠右就够 ✓，那行长提示去掉（脚本框占位符里已经说了 ✓） */
+.ggbs__jsstate { margin-left: auto; font-size: 11px; color: var(--ok, #16a34a); white-space: nowrap; }
 .ggbs__jsstate--off { color: var(--muted); }
-.ggbs__jshint { margin-left: auto; font-size: 11px; color: var(--muted); }
 .ggbs__jsbody { padding: 0 10px 10px; display: flex; flex-direction: column; gap: 6px; }
 .ggbs__jsbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .ggbs__jsinput { width: 100%; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.55; padding: 8px; border: 1px solid var(--border-strong); border-radius: 7px; background: #fff; color: var(--text); resize: vertical; white-space: pre; }
 .ggbs__jsinput:focus { outline: none; border-color: var(--brand-600); }
-.ggbs__log { max-height: 132px; overflow-y: auto; border: 1px dashed var(--border-strong); border-radius: 7px; background: #fff; padding: 6px 8px; font-size: 11.5px; line-height: 1.6; }
+.ggbs__log { max-height: 170px; overflow-y: auto; border: 1px dashed var(--border-strong); border-radius: 7px; background: #fff; padding: 6px 8px; font-size: 11.5px; line-height: 1.6; }
 .ggbs__logline { color: #2f6b45; white-space: pre-wrap; word-break: break-all; }
 .ggbs__logline--err { color: #b42318; }
 .ggbs__loghint { color: var(--muted); }
-.ggbs__canvas { border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; background: #fff; }
-.ggbs__host { width: 100%; height: 62vh; min-height: 320px; }
+.ggbs__canvas { flex: 1 1 auto; min-height: 0; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; background: #fff; }
+.ggbs__host { width: 100%; height: 100%; min-height: 300px; }
+/* 【v1517】虚拟键盘不在这里用 CSS 藏 ✗（GWT 仍按"键盘在"扣高度 → 板子下面留一大条空白 ✗，实测 ✗）；
+   改成启动后点它自己的 ✕（见 closeVirtualKeyboard() ✓），GeoGebra 会真收起并重排 ✓。 */
 .ggbs__err { color: var(--danger); font-size: 13px; margin: 8px 0 0; }
-.ggbs__ai { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 12px; padding: 8px 10px; background: var(--brand-50); border: 1px solid var(--brand-100); border-radius: 8px; }
+.ggbs__ai { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; background: var(--brand-50); border: 1px solid var(--brand-100); border-radius: 8px; }
 .ggbs__aiicon { font-size: 18px; line-height: 24px; }
 .ggbs__aiinput { flex: 1; min-height: 48px; height: auto; border: 1px solid var(--border-strong); border-radius: 7px; padding: 6px 10px; font-size: 13px; background: #fff; font-family: inherit; line-height: 1.5; resize: vertical; }
 .ggbs__aiinput:focus { outline: none; border-color: var(--brand-600); }
@@ -633,7 +705,7 @@ M 是 AB 的中点
 .ggbs__btn--help:hover { background: var(--brand-100); }
 .ggbs__btn--tiny { padding: 2px 8px; font-size: 11.5px; border-radius: 5px; flex: 0 0 auto; }
 /* 右侧抽屉：左边留着脚本框/画布 —— 点「填入」能当场看见东西进到脚本里 ✓（铺满整屏就看不见了 ✗） */
-.ggbs__help { position: absolute; top: 46px; right: 0; bottom: 52px; width: min(580px, 64%); display: flex; flex-direction: column; background: #fff; border-left: 1px solid var(--border-strong); box-shadow: -10px 0 26px rgba(15, 23, 42, 0.14); z-index: 5; }
+.ggbs__help { position: absolute; top: 46px; right: 0; bottom: 52px; width: min(560px, 58%); display: flex; flex-direction: column; background: #fff; border-left: 1px solid var(--border-strong); box-shadow: -10px 0 26px rgba(15, 23, 42, 0.14); z-index: 5; }
 .ggbs__helphead { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
 .ggbs__helptitle { font-weight: 700; font-size: 13px; color: var(--text); white-space: nowrap; }
 .ggbs__helpsearch { flex: 1; border: 1px solid var(--border-strong); border-radius: 7px; padding: 5px 9px; font-size: 12.5px; }
@@ -650,6 +722,12 @@ M 是 AB 的中点
 .ggbs__helprow:hover { background: var(--brand-50); }
 .ggbs__helpcode { flex: 0 0 auto; max-width: 46%; overflow-x: auto; white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #0b4a8f; background: var(--panel-2); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; }
 .ggbs__helpdesc { flex: 1; font-size: 12px; color: var(--text); line-height: 1.5; }
+/* 窄屏（小笔记本）退回上下排 ✓ */
+@media (max-width: 1040px) {
+  .ggbs__main { flex-direction: column; height: auto; }
+  .ggbs__side { flex: 1 1 auto; max-width: none; min-width: 0; overflow: visible; }
+  .ggbs__host { height: 52vh; }
+}
 .ggbs__helpempty { color: var(--danger); font-size: 12.5px; }
 .ggbs__helphint { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border-strong); font-size: 11.5px; color: var(--muted); line-height: 1.7; }
 .ggbs__helphint code { font-family: ui-monospace, Menlo, Consolas, monospace; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; }

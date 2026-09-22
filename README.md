@@ -236,7 +236,8 @@ node ../node_modules/@tauri-apps/cli/tauri.js build   # 生成 NSIS 安装包
   画布与幻灯片**同尺寸**（画在哪就落在哪），拖出窗口也不会掉；
   插入后是**原生矢量元素**（还能接着改、导出仍是矢量），多笔自动打成一个组合（要拆开点「解组」）；
   **双击图里任意一个元素即可回到弹窗再编辑**（整张替换、只留一步撤销）
-- **GeoGebra 作图套件**（GeoGebra ▾ → 作图套件）：离线作图 + **JS 指令面板** —— 脚本里 `ggb` 就是绘图板，
+- **GeoGebra 作图套件**（GeoGebra ▾ → 作图套件）：**左绘图板 + 右操作栏**（AI 作图 / JS 指令都在板子右边；
+  触屏电脑上 GeoGebra 的虚拟键盘会自动收起，把板面让出来 ✓）；离线作图 + **JS 指令面板** —— 脚本里 `ggb` 就是绘图板，
   官方 JS API 直接可用（evalCommand / setColor / setValue / startAnimation / getValue / getXML / setXML / undo …）；
   支持 JavaScript 与「GeoGebra 指令逐行」两种模式、Ctrl+Enter 运行、逐条 ✓/✗ 日志；
   **📖 指令帮助**（10 类速查 + 搜索 + 一键填入，指令 / JS / AI 句型都能填）+ **36 条预制例子（7 组）**；
