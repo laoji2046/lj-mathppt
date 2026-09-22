@@ -140,6 +140,8 @@ function apply() {
         showAlgebraInput: true,
         showMenuBar: true,
         enableShiftDragZoom: true,
+        // 【v1513】那段 JS 指令也存进元素 ✓（回来接着改；"指令模式"的还会存成 commands 自动执行 ✓）
+        ...scriptPatch(),
       } as Partial<SlideElement>
       if (props.editId) store.updateElement(props.editId, patch)
       else store.addElement('geogebra', { ...patch, w: 720, h: 480 } as Partial<SlideElement>)
@@ -161,7 +163,142 @@ function runAI() {
   toaster('🤖 AI 已执行 ' + ok + '/' + cmds.length + ' 条命令')
 }
 
+/* ---------------- 【v1513】JS 指令：用 JavaScript 控制 GeoGebra 作图 ✓ ----------------
+ *
+ * 老师要的："添加 javascript 指令 控制 geogebra 作图功能" ✓
+ * 做法：把 GeoGebra 的**原生 JS API** 直接交给脚本 —— 脚本里的 `ggb` 就是绘图板 ✓，于是
+ *   ggb.evalCommand('Circle((0,0),2)')、ggb.setColor、ggb.startAnimation、ggb.getXML …
+ *   官方文档里那些方法**全都能用** ✓（不另造一套小语言 ✗）。
+ * 两种模式：
+ *   · JavaScript（默认）：整段当函数体跑，能写变量 / 循环 / 读回调；
+ *   · GeoGebra 指令：逐行 evalCommand（不会 JS 也能用 ✓，而且这段能存成 commands 随元素自动执行 ✓）。
+ * 安全性：脚本在**本机自己的页面**里跑（桌面应用、老师自己写 ✓），但存在元素上的脚本**不自动执行** ✗。
+ */
+const jsOpen = ref(false)
+const jsMode = ref<'js' | 'cmd'>('js')
+const script = ref('')
+const log = ref<{ ok: boolean; text: string }[]>([])
+const ready = ref(false)
+let readyTimer: number | undefined
+
+function pushLog(ok: boolean, text: string) {
+  log.value = [...log.value.slice(-199), { ok, text: String(text).slice(0, 500) }]
+}
+function clearLog() { log.value = [] }
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+/** 等绘图板就绪（GGB 是异步注入的 ✓）—— 面板上给个明确状态，免得点了"运行"没反应 ✗ */
+function watchReady() {
+  clearInterval(readyTimer)
+  ready.value = false
+  readyTimer = window.setInterval(() => {
+    const a = liveApplet()
+    if (a && typeof a.evalCommand === 'function') { ready.value = true; clearInterval(readyTimer) }
+  }, 400)
+}
+
+function runScript() {
+  const a = liveApplet()
+  if (!a || typeof a.evalCommand !== 'function') { toaster('作图器还在加载，稍等一下再运行 ✓'); return }
+  const src = script.value.trim()
+  if (!src) { toaster('先写点指令 ✓'); return }
+  if (jsMode.value === 'cmd') {
+    let ok = 0
+    for (const raw of src.split(/\r?\n/)) {
+      const line = raw.trim()
+      if (!line || line.startsWith('//') || line.startsWith('#')) continue
+      try {
+        const r = a.evalCommand(line)
+        pushLog(r !== false, line)
+        if (r !== false) ok++
+      } catch (e) { pushLog(false, line + ' → ' + errText(e)) }
+    }
+    toaster('已执行 ' + ok + ' 条 GeoGebra 指令 ✓')
+    return
+  }
+  try {
+    // eslint-disable-next-line no-new-func
+    const fn = new Function('ggb', '"use strict";\n' + src)
+    const ret = fn(a)
+    pushLog(true, 'JS 跑完了' + (ret === undefined ? '' : '，返回：' + String(ret)))
+    toaster('JS 已执行 ✓（结果见日志）')
+  } catch (e) {
+    pushLog(false, 'JS 报错：' + errText(e))
+    toaster('JS 报错 ✗（看日志）')
+  }
+}
+function undoGgb() {
+  const a = liveApplet()
+  try {
+    if (a && typeof a.undo === 'function') { a.undo(); pushLog(true, '已撤销一步（ggb.undo()）') }
+    else pushLog(false, '这个绘图板没有 undo()')
+  } catch (e) { pushLog(false, errText(e)) }
+}
+function redoGgb() {
+  const a = liveApplet()
+  try {
+    if (a && typeof a.redo === 'function') { a.redo(); pushLog(true, '已重做一步（ggb.redo()）') }
+    else pushLog(false, '这个绘图板没有 redo()')
+  } catch (e) { pushLog(false, errText(e)) }
+}
+
+/** 例子：点一下填进编辑框（不自动跑 ✓ 老师可以先看一眼再运行） */
+const SAMPLES: { label: string; mode: 'js' | 'cmd'; code: string }[] = [
+  { label: '例：画圆并上色（JS）', mode: 'js', code: [
+    "// ggb 就是绘图板，GeoGebra 的 JS API 全都能用",
+    "ggb.evalCommand('c: Circle((0,0),2)')",
+    "ggb.setColor('c', 200, 60, 60)",
+    "ggb.setLineThickness('c', 5)",
+    "return ggb.getAllObjectNames().join(', ')",
+  ].join('\n') },
+  { label: '例：滑动条 + 抛物线动画（JS）', mode: 'js', code: [
+    "ggb.evalCommand('a=Slider(-3,3,0.1)')",
+    "ggb.evalCommand('f(x)=a x^2')",
+    "ggb.setColor('f', 40, 90, 200)",
+    "ggb.startAnimation('a')      // 让 a 自己动起来 ✓",
+    "return 'a 已在动：' + ggb.getValue('a')",
+  ].join('\n') },
+  { label: '例：读回作图信息（JS）', mode: 'js', code: [
+    "const names = ggb.getAllObjectNames()",
+    "const rows = names.map((n) => n + '=' + ggb.getValueString(n))",
+    "return names.length + ' 个对象：' + rows.join(' | ')",
+  ].join('\n') },
+  { label: '例：导出 XML 片段（JS）', mode: 'js', code: [
+    "// getXML() 拿到整份作图（可存起来 / 发给别人 ✓）",
+    "return ggb.getXML().slice(0, 240) + '…'",
+  ].join('\n') },
+  { label: '例：三角形 + 中线（指令模式）', mode: 'cmd', code: [
+    "A=(0,0)",
+    "B=(4,0)",
+    "C=(2,3)",
+    "poly1=Polygon(A,B,C)",
+    "M=Midpoint(A,B)",
+    "s=Segment(C,M)",
+  ].join('\n') },
+]
+function loadSample(i: number) {
+  const s = SAMPLES[i]
+  if (!s) return
+  jsMode.value = s.mode
+  script.value = s.code
+  jsOpen.value = true
+  toaster('已填入例子，点「运行」试试 ✓')
+}
+
+/** 应用时把脚本一起存到元素上（回来还能接着改 ✓） */
+function scriptPatch(): Record<string, unknown> {
+  const s = script.value.trim()
+  if (!s) return { ggbScript: '', ggbScriptMode: '' }
+  const p: Record<string, unknown> = { ggbScript: s, ggbScriptMode: jsMode.value }
+  // 「指令模式」的脚本顺手存成 commands ✓ —— 元素打开时自动执行一遍，图形不丢 ✓
+  if (jsMode.value === 'cmd') {
+    p.commands = s.split(/\r?\n/).map((x) => x.trim()).filter((x) => x && !x.startsWith('//') && !x.startsWith('#'))
+  }
+  return p
+}
+
 onMounted(() => {
+  watchReady()
   if (props.editId) {
     const el = findGgbEl(props.editId)
     if (el && el.type === 'geogebra') {
@@ -171,11 +308,19 @@ onMounted(() => {
       showMenuBar.value = true
       showAlgebraInput.value = true
       enableShiftDragZoom.value = true
+      // 之前写过的脚本，回来接着改 ✓
+      const g = el as unknown as { ggbScript?: string; ggbScriptMode?: string }
+      if (g.ggbScript) {
+        script.value = g.ggbScript
+        jsMode.value = g.ggbScriptMode === 'cmd' ? 'cmd' : 'js'
+        jsOpen.value = true
+      }
     }
   }
   render()
+  watchReady()
 })
-onBeforeUnmount(() => { if (host.value) host.value.innerHTML = ''; clearTimeout(noticeTimer) })
+onBeforeUnmount(() => { if (host.value) host.value.innerHTML = ''; clearTimeout(noticeTimer); clearInterval(readyTimer) })
 </script>
 
 <template>
@@ -208,6 +353,42 @@ M 是 AB 的中点
 函数 f(x)=x^2-2x" @keydown.enter.exact.prevent="runAI"></textarea>
             <button class="ggbs__btn ggbs__btn--ai" @click="runAI">生成</button>
           </div>
+          <!-- 【v1513】JS 指令：用 JavaScript 控制作图 ✓ -->
+          <div class="ggbs__js" :class="{ 'ggbs__js--open': jsOpen }">
+            <button class="ggbs__jshead" @click="jsOpen = !jsOpen">
+              <span class="ggbs__jscaret">{{ jsOpen ? '▾' : '▸' }}</span>
+              <span>JS 指令（用 JavaScript 控制作图）</span>
+              <span class="ggbs__jsstate" :class="{ 'ggbs__jsstate--off': !ready }">{{ ready ? '● 绘图板已就绪' : '○ 正在加载…' }}</span>
+              <span class="ggbs__jshint">脚本里 <b>ggb</b> 就是绘图板，GeoGebra 的 JS API 直接可用</span>
+            </button>
+            <div v-if="jsOpen" class="ggbs__jsbody">
+              <div class="ggbs__jsbar">
+                <select v-model="jsMode" class="ggbs__sel ggbs__sel--sm" title="JavaScript：整段当函数体跑（能写变量/循环）；GeoGebra 指令：逐行执行（不会 JS 也能用）">
+                  <option value="js">JavaScript</option>
+                  <option value="cmd">GeoGebra 指令（逐行）</option>
+                </select>
+                <select class="ggbs__sel ggbs__sel--sm" title="例子：点一下填进编辑框（不自动跑 ✓）" @change="loadSample(Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
+                  <option value="">插入例子…</option>
+                  <option v-for="(s, i) in SAMPLES" :key="i" :value="i">{{ s.label }}</option>
+                </select>
+                <button class="ggbs__btn ggbs__btn--primary" :disabled="!ready" title="运行（Ctrl+Enter ✓）" @click="runScript">▶ 运行</button>
+                <button class="ggbs__btn" title="撤销一步（ggb.undo()）" @click="undoGgb">撤销</button>
+                <button class="ggbs__btn" title="重做一步（ggb.redo()）" @click="redoGgb">重做</button>
+                <button class="ggbs__btn" title="清空下面的日志" @click="clearLog">清日志</button>
+              </div>
+              <textarea
+                v-model="script" class="ggbs__jsinput" rows="6" spellcheck="false" wrap="off"
+                :placeholder="jsMode === 'js'
+                  ? 'ggb 就是绘图板，例如：\nggb.evalCommand(\'Circle((0,0),2)\')  // 画个圆\nggb.setColor(\'c\', 200, 60, 60)        // 改成红色\nreturn ggb.getAllObjectNames().join(\', \')'
+                  : '一行一条 GeoGebra 指令，例如：\nA=(0,0)\nB=(4,0)\nPolygon(A,B,C)'"
+                @keydown.ctrl.enter.prevent="runScript"
+              ></textarea>
+              <div class="ggbs__log">
+                <div v-for="(l, i) in log" :key="i" class="ggbs__logline" :class="{ 'ggbs__logline--err': !l.ok }">{{ l.ok ? '✓' : '✗' }} {{ l.text }}</div>
+                <div v-if="!log.length" class="ggbs__loghint">运行结果在这儿一行一条 ✓（接口一览：evalCommand / setColor / setCoords / setValue / startAnimation / getValue / getAllObjectNames / getXML / setXML / deleteObject / undo / redo …）</div>
+              </div>
+            </div>
+          </div>
           <div class="ggbs__canvas"><div ref="host" class="ggbs__host"></div></div>
           <p v-if="error" class="ggbs__err">{{ error }}</p>
         </div>
@@ -237,6 +418,21 @@ M 是 AB 的中点
 .ggbs__bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; font-size: 13px; color: var(--muted); }
 .ggbs__sel { border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 8px; font-size: 13px; }
 .ggbs__check { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+/* 【v1513】JS 指令面板 */
+.ggbs__js { border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel-2); overflow: hidden; }
+.ggbs__jshead { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border: 0; background: none; cursor: pointer; text-align: left; font-size: 12.5px; color: var(--text); }
+.ggbs__jscaret { color: var(--muted); font-size: 11px; width: 10px; }
+.ggbs__jsstate { font-size: 11px; color: var(--ok, #16a34a); }
+.ggbs__jsstate--off { color: var(--muted); }
+.ggbs__jshint { margin-left: auto; font-size: 11px; color: var(--muted); }
+.ggbs__jsbody { padding: 0 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+.ggbs__jsbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ggbs__jsinput { width: 100%; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.55; padding: 8px; border: 1px solid var(--border-strong); border-radius: 7px; background: #fff; color: var(--text); resize: vertical; white-space: pre; }
+.ggbs__jsinput:focus { outline: none; border-color: var(--brand-600); }
+.ggbs__log { max-height: 132px; overflow-y: auto; border: 1px dashed var(--border-strong); border-radius: 7px; background: #fff; padding: 6px 8px; font-size: 11.5px; line-height: 1.6; }
+.ggbs__logline { color: #2f6b45; white-space: pre-wrap; word-break: break-all; }
+.ggbs__logline--err { color: #b42318; }
+.ggbs__loghint { color: var(--muted); }
 .ggbs__canvas { border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; background: #fff; }
 .ggbs__host { width: 100%; height: 62vh; min-height: 320px; }
 .ggbs__err { color: var(--danger); font-size: 13px; margin: 8px 0 0; }

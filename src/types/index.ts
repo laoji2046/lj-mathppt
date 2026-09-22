@@ -1102,6 +1102,11 @@ export interface GeoGebraElement extends ElementBase {
   showGrid: boolean
   /** 打开后自动执行的 GeoGebra 命令（预设动态图，如 "f(x)=x^2"、"A=(1,1)"） */
   commands?: string[]
+  /** 【v1513】作图套件里写的那段 **JS 指令**（用 JavaScript 控制 ggb 作图 ✓）
+   *  只是**存着方便回来接着改** ✓，不会在打开时自动跑（任意 JS 自动执行太危险 ✗） */
+  ggbScript?: string
+  /** 那段脚本是 JS 还是"GeoGebra 指令逐行"（'js' / 'cmd'，缺省 js ✓） */
+  ggbScriptMode?: string
 }
 
 export interface DesmosElement extends ElementBase {
