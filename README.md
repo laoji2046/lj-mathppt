@@ -240,6 +240,7 @@ node ../node_modules/@tauri-apps/cli/tauri.js build   # 生成 NSIS 安装包
   官方 JS API 直接可用（evalCommand / setColor / setValue / startAnimation / getValue / getXML / setXML / undo …）；
   支持 JavaScript 与「GeoGebra 指令逐行」两种模式、Ctrl+Enter 运行、逐条 ✓/✗ 日志；
   **📖 指令帮助**（10 类速查 + 搜索 + 一键填入，指令 / JS / AI 句型都能填）+ **36 条预制例子（7 组）**；
+  **运行前清掉上一次的图**（默认勾上：只清上次脚本画的对象，手画的不动 ✓、只读脚本不清 ✓）；
   **脚本随元素保存**（回来接着改再跑），指令模式的还会作为元素的自执行指令重放 ✓
 - 数学符号面板（60 个 ∈ ∅ ∪ ∩ √ ∞ ∑ ① ½ 等，点击插为文本元素）
 - 数学图形（抛物线、正弦、余弦、指数、对数、坐标系、数轴、Venn 图、直角三角形、角、半圆）

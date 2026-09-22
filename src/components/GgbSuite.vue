@@ -160,8 +160,11 @@ function runAIInner() {
   if (!a || typeof a.evalCommand !== 'function') { toaster('作图器尚未就绪'); return }
   const cmds = describeToCommands(aiDesc.value)
   if (!cmds.length) { toaster('未识别到作图指令，可试试：作等边三角形 ABC / AB 中点 M / 过 M 作 BC 的垂线'); return }
+  const beforeDefs = defSnapshot()   // 【v1515】AI 作图也一样：跑完清掉上一次留下的 ✓
+  const prev = lastCreated.value.slice()
   let ok = 0
   for (const c of cmds) { try { a.evalCommand(c); ok++ } catch (e) { console.error(c, e) } }
+  finishRun(beforeDefs, prev)
   toaster('🤖 AI 已执行 ' + ok + '/' + cmds.length + ' 条命令')
 }
 
@@ -205,6 +208,9 @@ function runScriptInner() {
   if (!a || typeof a.evalCommand !== 'function') { toaster('作图器还在加载，稍等一下再运行 ✓'); return }
   const src = script.value.trim()
   if (!src) { toaster('先写点指令 ✓'); return }
+  // 【v1515】跑完再收拾：清掉上一次留下的旧图（这次没碰过的），老师手画的不动 ✓
+  const beforeDefs = defSnapshot()
+  const prev = lastCreated.value.slice()
   if (jsMode.value === 'cmd') {
     let ok = 0
     for (const raw of src.split(/\r?\n/)) {
@@ -216,6 +222,7 @@ function runScriptInner() {
         if (r !== false) ok++
       } catch (e) { pushLog(false, line + ' → ' + errText(e)) }
     }
+    finishRun(beforeDefs, prev)
     toaster('已执行 ' + ok + ' 条 GeoGebra 指令 ✓')
     return
   }
@@ -223,9 +230,11 @@ function runScriptInner() {
     // eslint-disable-next-line no-new-func
     const fn = new Function('ggb', '"use strict";\n' + src)
     const ret = fn(a)
+    finishRun(beforeDefs, prev)
     pushLog(true, 'JS 跑完了' + (ret === undefined ? '' : '，返回：' + String(ret)))
     toaster('JS 已执行 ✓（结果见日志）')
   } catch (e) {
+    finishRun(beforeDefs, prev)
     pushLog(false, 'JS 报错：' + errText(e))
     toaster('JS 报错 ✗（看日志）')
   }
@@ -330,6 +339,58 @@ function useHelpItem(it: GgbHelpItem) {
   toaster('已填进脚本（' + (jsMode.value === 'js' ? 'JavaScript 模式' : 'GeoGebra 指令模式') + ' ✓）')
 }
 
+/* ---------------- 【v1515】运行前清掉上一次画的图（老师反馈 ✓） ----------------
+ * 老师原话：「点击执行时，如果指令栏有指令，就会出现图形重叠，所以点执行时要清空指令栏」✓
+ * —— 上一次画的图还在板上，新指令又往上画 → 两张图叠在一起 ✗。
+ * 做法：跑完之后，把**上一次运行画出来的、这次没碰过的**对象删掉 ✓（默认开，可关，选择会记住 ✓）。
+ * 一路踩了两次才定下来（都是真机探针抓的 ✗）：
+ *   · 第一版 newConstruction() 清空整块板 ✗ —— 老师手画的图被连累删掉 ✗；
+ *   · 第二版"跑之前删上次 diff 出来的对象" ✗ —— 「读回作图信息」这种**只读脚本**也会把上一张图清光 ✗
+ *     （老师想看看板上有啥，结果图没了 ✗）；
+ *   · 现在：先跑、再收拾 —— 跑完才知道"这次到底画没画东西" ✓：只读脚本啥也没画 → 一个都不清 ✓；
+ *     老师手画的对象从没进过名单 → 不动 ✓；被这次重定义过的名字（两次作图共用的 A、B、C）也不算旧图 ✓。
+ */
+const clearBefore = ref(true)
+const CLEAR_PREF = 'lj-mathslides-vue:ggb-clear-before'
+/** 上一次运行**画出来的**对象名 —— 只清这些 ✓（老师手画的、绘图板里别的东西都不动 ✓） */
+const lastCreated = ref<string[]>([])
+function persistClear() {
+  try { localStorage.setItem(CLEAR_PREF, clearBefore.value ? '1' : '0') } catch { /* 忽略 */ }
+}
+/** 板上每个对象的"定义"快照 —— 用来分辨「这次运行新画/改动的」和「上次留下的」✓ */
+function defSnapshot(): Record<string, string> {
+  const a = liveApplet()
+  const map: Record<string, string> = {}
+  if (!a || typeof a.getAllObjectNames !== 'function') return map
+  let names: string[] = []
+  try { names = (a.getAllObjectNames() as string[]) || [] } catch { return map }
+  names.forEach((n) => { try { map[n] = String(a.getDefinitionString(n) ?? '') } catch { map[n] = '' } })
+  return map
+}
+/**
+ * 跑完收尾：记下这次"新画出来 / 改过定义"的对象 ✓；
+ * 再清掉**上一次**留下的那些（这次没碰过的）—— 这就是"新图不和旧图叠在一起" ✓。
+ * 为什么放到**跑完**再清 ✗→✓：这样能先知道"这次到底画没画东西" ——
+ * 只读脚本（读回信息）什么都没画 → **一个都不清** ✓（老师想看看板上有啥，结果图被清了才是最气人的 ✗）。
+ */
+function finishRun(beforeDefs: Record<string, string>, prev: string[]) {
+  const a = liveApplet()
+  const afterDefs = defSnapshot()
+  const touched: Record<string, true> = {}
+  const mine: string[] = []
+  Object.keys(afterDefs).forEach((n) => {
+    const isNew = !(n in beforeDefs)
+    const changed = !isNew && afterDefs[n] !== beforeDefs[n]
+    if (isNew || changed) { touched[n] = true; mine.push(n) }
+  })
+  lastCreated.value = mine
+  if (!clearBefore.value || !mine.length) return   // 没画东西 → 不动板子 ✓
+  const victims = prev.filter((n) => !touched[n] && n in afterDefs)
+  if (!victims.length) return
+  victims.forEach((n) => { try { a.deleteObject(n) } catch { /* 忽略 */ } })
+  pushLog(true, '已清掉上一次画的 ' + victims.length + ' 个对象 —— 想留着就把上面的「运行前清掉上一次的图」勾掉 ✓')
+}
+
 /** Esc 关帮助（帮助开着的时候先关帮助，别一下关到别处去 ✓） */
 function onSuiteKey(e: KeyboardEvent) {
   if (e.key === 'Escape' && helpOpen.value) { e.stopPropagation(); closeHelp() }
@@ -361,6 +422,12 @@ function scriptPatch(): Record<string, unknown> {
 }
 
 onMounted(() => {
+  // 【v1515】老师上次把「运行前清空绘图板」关掉过，就记住（别每次都要再关一遍 ✗）
+  try {
+    const v = localStorage.getItem(CLEAR_PREF)
+    if (v === '0') clearBefore.value = false
+    else if (v === '1') clearBefore.value = true
+  } catch { /* 忽略 */ }
   window.addEventListener('keydown', onSuiteKey)
   watchReady()
   if (props.editId) {
@@ -406,6 +473,9 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onSuiteKey); if (h
               <option value="3d">🧊 3D 计算器</option>
             </select>
             <button class="ggbs__btn ggbs__btn--help" title="指令帮助：GeoGebra 指令速查 / JavaScript API / AI 句型；点「填入」直接进编辑框 ✓" @click="openHelp('syntax')">📖 指令帮助</button>
+            <label class="ggbs__check" title="点「▶ 运行」或「🤖 生成」时，自动清掉**上一次运行画出来的**对象 —— 免得新图跟上一次的图叠在一起 ✗。你手画的图形、绘图板里别的东西都不动 ✓；只读脚本（读回信息）什么都没画，也不会清 ✓；想让两次作图叠着看就把它勾掉 ✓（选择会记住）">
+              <input v-model="clearBefore" type="checkbox" @change="persistClear" /> 运行前清掉上一次的图
+            </label>
           </div>
           <div class="ggbs__ai">
             <span class="ggbs__aiicon">🤖</span>

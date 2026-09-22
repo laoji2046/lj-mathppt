@@ -56,10 +56,9 @@ export const SAMPLES: GgbSample[] = [
   { group: '基础作图', label: '等边三角形 + 外接圆（指令）', mode: 'cmd', code: [
     'A=(0,0)',
     'B=(4,0)',
-    'poly1=Polygon(A,B,3)',
-    'C=Vertex(poly1,3)',
+    'C=Rotate(B,60°,(A))',
+    'poly1=Polygon(A,B,C)',
     'circ=Circle(A,B,C)',
-    'G=Centroid(poly1)',
   ].join('\n') },
   { group: '基础作图', label: '垂直平分线 → 外心（指令）', mode: 'cmd', code: [
     'A=(0,0)',
@@ -197,7 +196,7 @@ export const SAMPLES: GgbSample[] = [
   { group: '变换', label: '旋转与轴对称（指令）', mode: 'cmd', code: [
     'poly1=Polygon((0,0),(3,0),(2,2))',
     'poly2=Rotate(poly1,90°,(0,0))',
-    'poly3=Reflect(poly1,yAxis)',
+    'poly3=Reflect(poly1,x=0)',
   ].join('\n') },
   { group: '变换', label: '位似（放大两倍）（指令）', mode: 'cmd', code: [
     'poly1=Polygon((0,0),(3,0),(2,2))',
@@ -415,7 +414,7 @@ export const HELP_GROUPS: GgbHelpGroup[] = [
     items: [
       c('Translate(poly1,u)', '平移（对象 + 向量）'),
       c('Rotate(poly1,90°,(0,0))', '旋转（对象 + 角 + 旋转中心）'),
-      c('Reflect(poly1,yAxis)', '轴对称（也可以对直线/点对称）'),
+      c('Reflect(poly1, x=0)', '关于直线 x=0 对称（写反射轴的方程 ✓ —— 写 yAxis 这个版本反而不认 ✗）'),
       c('Dilate(poly1,2,(0,0))', '位似（放大 2 倍，中心原点）'),
       c('u=Vector((1,2))', '自由向量'),
       c('Zip(f,x,l1)', '把函数作用到列表上（批量计算）'),
