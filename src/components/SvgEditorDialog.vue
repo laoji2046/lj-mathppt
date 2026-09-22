@@ -227,6 +227,7 @@ function onVertexDown(e: PointerEvent, it: Item, idx: number) {
   if (tool.value !== 'select') return
   e.stopPropagation()
   selId.value = it.id
+  syncStyleFrom(it)
   vDrag = { idx }
   bindDrag()
 }
@@ -280,6 +281,52 @@ function insertVertexAt(it: Item, p: Pt) {
   it.x = b2.x; it.y = b2.y; it.w = b2.w; it.h = b2.h
   msg.value = '加了一个顶点（拖它可以微调 ✓）'
 }
+/* ---------------- 【v1509】样式控件**既改选中的那一笔、也改"下一笔的默认"** ✓ ---------------- */
+/** 把选中项的颜色/线宽/线型回填到控件上（选中谁，控件就显示谁 ✓ 不然改的时候一脸问号 ✗） */
+function syncStyleFrom(it: Item) {
+  stroke.value = it.stroke || '#1a1a1a'
+  fill.value = it.fill ?? 'none'
+  strokeWidth.value = it.strokeWidth ?? 3
+  dash.value = it.dash || 'solid'
+  if (it.sides) sides.value = it.sides
+  if (it.cornerRadius !== undefined) cornerRadius.value = it.cornerRadius
+  if (it.kind === 'arrow' && it.arrowHead) arrowHead.value = it.arrowHead
+  if (it.kind === 'text') textValue.value = it.text || ''
+  if (it.kind === 'figure' && it.figKind) figKind.value = it.figKind
+}
+function applyStroke(v: string) { stroke.value = v; const it = sel.value; if (it) { snapshot(); it.stroke = v } }
+function applyFill(v: string) { fill.value = v; const it = sel.value; if (it) { snapshot(); it.fill = v } }
+function applyWidth(v: number) {
+  const n = Math.max(1, Math.min(20, Number(v) || 3))
+  strokeWidth.value = n
+  const it = sel.value
+  if (it) { snapshot(); it.strokeWidth = n }
+}
+function applyDash(v: string) { dash.value = v; const it = sel.value; if (it) { snapshot(); it.dash = v } }
+function applySides(v: number) {
+  const n = Math.max(3, Math.min(12, Math.round(Number(v) || 5)))
+  sides.value = n
+  const it = sel.value
+  if (it && (it.kind === 'ngon' || it.kind === 'star')) {
+    snapshot()
+    it.sides = n
+    it.points = undefined      // 拖过顶点的话按新边数重新生成（不然改了没反应 ✗）
+    const b = boxOf(it)
+    it.x = b.x; it.y = b.y; it.w = b.w; it.h = b.h
+  }
+}
+function applyCorner(v: number) {
+  const n = Math.max(0, Math.min(160, Math.round(Number(v) || 0)))
+  cornerRadius.value = n
+  const it = sel.value
+  if (it && it.kind === 'roundrect') { snapshot(); it.cornerRadius = n }
+}
+/** 控件上显示的值：选中了就显示选中项的 ✓ */
+const shownFill = computed(() => (sel.value ? (sel.value.fill ?? 'none') : fill.value))
+const shownDash = computed(() => (sel.value ? (sel.value.dash || 'solid') : dash.value))
+const shownWidth = computed(() => (sel.value ? sel.value.strokeWidth : strokeWidth.value))
+const shownStroke = computed(() => (sel.value ? sel.value.stroke : stroke.value))
+
 /** 选中项改一个数值（X / Y / 宽 / 高 ✓） */
 function setNum(key: 'x' | 'y' | 'w' | 'h', v: string) {
   const it = sel.value
@@ -500,7 +547,7 @@ function onItemDown(e: PointerEvent, it: Item) {
   if (tool.value !== 'select') return
   e.stopPropagation()
   selId.value = it.id
-  if (it.kind === 'text') textValue.value = it.text || ''
+  syncStyleFrom(it)
   drag = { mode: 'move', id: it.id, last: pt(e) }
   bindDrag()
 }
@@ -686,7 +733,9 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
 
 <template>
   <Teleport to="body">
-    <div class="svgx" @click.self="emit('close')">
+    <!-- ⚠ 只认 ✕ / 取消 / Esc 关闭 ✗ —— 原来写 @click.self 是"点弹窗外面任何地方就关"，
+         画到一半点到旁边那条缝就把整张图丢了 ✗（题库浮窗 v1502 踩过同一个坑 ✓ 这里照那条纪律改 ✓） -->
+    <div class="svgx">
       <div class="svgx__box">
         <header class="svgx__head">
           <span class="svgx__title">{{ isEdit ? 'SVG 编辑器 · 改这张图' : 'SVG 编辑器' }}</span>
@@ -703,16 +752,16 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
           </button>
           <span class="svgx__sep"></span>
           <label class="svgx__lab">线色
-            <input v-model="stroke" type="color" class="svgx__color" />
+            <input :value="shownStroke" type="color" class="svgx__color" @input="applyStroke(($event.target as HTMLInputElement).value)" />
           </label>
           <span class="svgx__swatches">
-            <button v-for="c in SWATCHES" :key="c" class="svgx__sw" :style="{ background: c }" :title="'线色 ' + c" @click="stroke = c" />
+            <button v-for="c in SWATCHES" :key="c" class="svgx__sw" :class="{ 'svgx__sw--on': shownStroke === c }" :style="{ background: c }" :title="'线色 ' + c" @click="applyStroke(c)" />
           </span>
           <label class="svgx__lab">线宽
-            <input v-model.number="strokeWidth" type="number" min="1" max="20" class="svgx__num" />
+            <input :value="shownWidth" type="number" min="1" max="20" class="svgx__num" @change="applyWidth(Number(($event.target as HTMLInputElement).value))" />
           </label>
           <label class="svgx__lab">线型
-            <select v-model="dash" class="svgx__sel">
+            <select :value="shownDash" class="svgx__sel" @change="applyDash(($event.target as HTMLSelectElement).value)">
               <option v-for="s in LINE_STYLES" :key="s.v" :value="s.v">{{ s.label }}</option>
             </select>
           </label>
@@ -720,23 +769,23 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
           <label class="svgx__lab">填充
             <span class="svgx__swatches">
               <button
-                v-for="c in FILL_SWATCHES" :key="c" class="svgx__sw" :class="{ 'svgx__sw--on': fill === c, 'svgx__sw--none': c === 'none' }"
-                :style="c === 'none' ? {} : { background: c }" :title="c === 'none' ? '不填充（只描边 ✓）' : ('填充 ' + c)" @click="fill = c"
+                v-for="c in FILL_SWATCHES" :key="c" class="svgx__sw" :class="{ 'svgx__sw--on': shownFill === c, 'svgx__sw--none': c === 'none' }"
+                :style="c === 'none' ? {} : { background: c }" :title="c === 'none' ? '不填充（只描边 ✓）' : ('填充 ' + c)" @click="applyFill(c)"
               >{{ c === 'none' ? '无' : '' }}</button>
             </span>
           </label>
-          <input v-model="fill" type="color" class="svgx__color" title="自定义填充色" />
+          <input :value="shownFill === 'none' ? '#ffffff' : shownFill" type="color" class="svgx__color" title="自定义填充色" @input="applyFill(($event.target as HTMLInputElement).value)" />
           <span class="svgx__sep"></span>
           <label v-if="tool === 'arrow' || (sel && sel.kind === 'arrow')" class="svgx__lab">箭头
-            <select v-model="arrowHead" class="svgx__sel" @change="sel && sel.kind === 'arrow' && (sel.arrowHead = arrowHead)">
+            <select v-model="arrowHead" class="svgx__sel" @change="sel && sel.kind === 'arrow' && (snapshot(), sel.arrowHead = arrowHead)">
               <option v-for="a in ARROW_HEADS" :key="a.v" :value="a.v">{{ a.label }}</option>
             </select>
           </label>
           <label v-if="tool === 'ngon' || (sel && (sel.kind === 'ngon' || sel.kind === 'star'))" class="svgx__lab">边数
-            <input v-model.number="sides" type="number" min="3" max="12" class="svgx__num" />
+            <input :value="sides" type="number" min="3" max="12" class="svgx__num" @change="applySides(Number(($event.target as HTMLInputElement).value))" />
           </label>
           <label v-if="tool === 'roundrect' || (sel && sel.kind === 'roundrect')" class="svgx__lab">圆角
-            <input v-model.number="cornerRadius" type="number" min="0" max="120" class="svgx__num" />
+            <input :value="cornerRadius" type="number" min="0" max="120" class="svgx__num" @change="applyCorner(Number(($event.target as HTMLInputElement).value))" />
           </label>
           <label v-if="tool === 'text' || (sel && sel.kind === 'text')" class="svgx__lab">文字
             <input v-model="textValue" class="svgx__txt" placeholder="图上的字" @input="onTextInput" />
@@ -819,7 +868,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
         </div>
 
         <footer class="svgx__foot">
-          <span class="svgx__hint">{{ sel ? '选中了：拖它挪位置、拉右下角缩放；拖小圆点改形状、双击顶点删、双击边上加点 ✓' : (TOOLS.find((t) => t.v === tool) || TOOLS[0]).hint }}</span>
+          <span class="svgx__hint">{{ sel ? '选中了：拖它挪位置、拉右下角缩放；拖小圆点改形状、双击顶点删、双击边上加点；上面那些颜色/线宽/填充改的就是**它** ✓' : (TOOLS.find((t) => t.v === tool) || TOOLS[0]).hint }}</span>
           <span v-if="sel" class="svgx__n">已选：{{ sel.kind === 'figure' ? figLabel(sel.figKind) : (KIND_LABEL[sel.kind] || sel.kind) }}</span>
           <!-- 【v1508】数值微调（选中后可直接改 ✓） -->
           <span v-if="sel" class="svgx__nums">
