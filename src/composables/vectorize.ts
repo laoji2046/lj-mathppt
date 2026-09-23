@@ -393,6 +393,13 @@ export interface VectorizeOpt {
    *  ⚠ 这道闸门是关键：不加它会把"坐标轴穿过立方体顶点"这类**正常穿过**也拆掉，
    *  实测 cubeaxes 边召回 87.5→50.0、边精度 77.8→38.1 ✗✗。设为 0 = 关掉闸门（只留档用）。 */
   splitCrossCos?: number
+  /** 【v1537·B】"纯交叉去点"：**十字交叉处不该有顶点**（用户 2026-09-23 的通用规则）——
+   *  补 `dissolveCrossings()` 的缺口（那个只管度 4，**度 3 会漏**）。**1 = 开（默认 ✓）**；0 = 关。
+   *  判据三条同时成立才删：① 有一对反向共线入射边（cos ≤ −`collinearCos`）；② 另有边从它上方穿过；
+   *  ③ 其余入射边**全被那条穿越边覆盖**（不满足 = 真拐角被穿过 → 按规则"不拆"、保留 ✓）。
+   *  实测：删掉 `demo111` 的 `v2` → `V10/E16/D5 → V9/E14/D4`（那笔"回归锁"其实记的是 bug ✗）；
+   *  `5.png` 的 `v7/v8/v12` 夹角 160°/166°/35° 无共线对 → 一个都不动 ✓ */
+  crossDissolve?: number
   /** 【v1525】把"被字母切断的线"接回去（两头都是断头、缺口 ≤1.2 字高、共线、中间有字母 ✓）：1 = 开（默认 ✓）；0 = 关。 */
   labelHeal?: number
   /** 【v1524】按字母数剪多余顶点：1 = 开；**0 = 关（默认 ✗）**。
@@ -2402,7 +2409,103 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     if (!acted) break
   }
   }
+
+  /** 【v1537·B】"纯交叉去点"：**十字交叉处本来就不该有顶点**（用户 2026-09-23 的通用规则）。
+   *  这是 `dissolveCrossings()` 的**补集** —— 那个只管"**度 4** + 两对共线"，度 3 的会漏掉 ✗。
+   *
+   *  实测漏掉的那一例（`demo111.png` 的 `v2(276,255)`）：
+   *    · 两入射边 `4-2`(−71°) 与 `2-3`(108°) **相差 179°（完全共线）** = 一条直线从 v 穿过；
+   *    · 水平边 `9-5` 又从 v 上方穿过（垂距 1.0px）→ 是个**纯十字交叉** ✗；
+   *    · 但它只有**度 3**：水平线的左半是独立边 `2-9`、右半被 `9-5` 覆盖 → `dissolveCrossings` 不管。
+   *  去掉它（合并 `4-2`+`2-3` → `4-3`，再去掉被 `9-5` 完全覆盖的 `2-9`）得
+   *    `V10/E16/D5 → V9/E14/D4` —— 这正是回归锁里"记着一个 bug"的那笔（锁不是真值 ✗）。
+   *
+   *  判据（三条同时成立）：
+   *    ① 该顶点有一对**反向共线**的入射边（cos ≤ −`collinearCos`，默认 −0.98）= 直线从它穿过；
+   *    ② 另有一条**非入射边**从它上方穿过（垂距 ≤ `splitCrossPerp`、投影 t ∈ (0.15, 0.85)）；
+   *    ③ **其余入射边必须全被那条穿越边覆盖**（否则说明 v 还有别的真实连接，不能删）。
+   *  → 三条都成立 = 纯粹的十字交叉，删掉该顶点：共线的那对合并成一条、被覆盖的重复边去掉 ✓
+   *  ⚠ 只满足 ①②（不满足③）的**是真拐角被穿过**，按用户规则"**不拆**"→ 原样保留 ✓
+   *    实测 `5.png` 的 `v7`(160°) / `v8`(166°) / `v12`(35°) 都不是共线对 → 一个都不动 ✓ */
+  const dissolveCrossVerts = () => {
+    if ((opt.crossDissolve ?? 1) === 0) return
+    const perpMax = opt.splitCrossPerp ?? 2
+    const cosTh = -(opt.collinearCos ?? 0.98)
+    for (let guard = 0; guard < 200; guard++) {
+      const inc: number[][] = verts.map(() => [])
+      outEdges.forEach((e, i) => { inc[e[0]].push(i); inc[e[1]].push(i) })
+      let acted = false
+      for (let v = 0; v < verts.length && !acted; v++) {
+        const E = inc[v]
+        if (E.length < 3) continue                       // 度 < 3 不可能是"穿过的线 + 本线上的点"
+        // ① 找一对反向共线的入射边
+        let p1 = -1, p2 = -1
+        for (let a = 0; a < E.length && p1 < 0; a++) {
+          const oa = outEdges[E[a]][0] === v ? outEdges[E[a]][1] : outEdges[E[a]][0]
+          const ux = verts[oa].x - verts[v].x, uy = verts[oa].y - verts[v].y
+          const lu = Math.hypot(ux, uy) || 1
+          for (let b = a + 1; b < E.length; b++) {
+            const ob = outEdges[E[b]][0] === v ? outEdges[E[b]][1] : outEdges[E[b]][0]
+            const wx = verts[ob].x - verts[v].x, wy = verts[ob].y - verts[v].y
+            const lw = Math.hypot(wx, wy) || 1
+            if ((ux / lu) * (wx / lw) + (uy / lu) * (wy / lw) <= cosTh) { p1 = E[a]; p2 = E[b]; break }
+          }
+        }
+        if (p1 < 0) continue                             // 不是直线穿过 → 真拐角，别动 ✓
+        // ② 找一条非入射边从 v 上方穿过
+        let thru = -1
+        for (let k = 0; k < outEdges.length; k++) {
+          if (E.indexOf(k) >= 0) continue
+          const A = verts[outEdges[k][0]], B = verts[outEdges[k][1]]
+          const dx = B.x - A.x, dy = B.y - A.y
+          const L2 = dx * dx + dy * dy
+          if (L2 < 1) continue
+          const L = Math.sqrt(L2)
+          const t = ((verts[v].x - A.x) * dx + (verts[v].y - A.y) * dy) / L2
+          if (t <= 0.15 || t >= 0.85) continue
+          if (Math.abs((verts[v].x - A.x) * dy - (verts[v].y - A.y) * dx) / L > perpMax) continue
+          thru = k; break
+        }
+        if (thru < 0) continue                           // 没有边穿过 → 不是交叉点 ✓
+        // ③ 其余入射边必须全被 thru 覆盖（否则 v 还有真实连接，不能删）
+        const TA = verts[outEdges[thru][0]], TB = verts[outEdges[thru][1]]
+        const tdx = TB.x - TA.x, tdy = TB.y - TA.y
+        const tL2 = tdx * tdx + tdy * tdy
+        const drop: number[] = [p1, p2]
+        let okAll = true
+        for (const ei of E) {
+          if (ei === p1 || ei === p2) continue
+          const o = outEdges[ei][0] === v ? outEdges[ei][1] : outEdges[ei][0]
+          const ox = verts[o].x - TA.x, oy = verts[o].y - TA.y
+          const tt = tL2 < 1 ? 0 : (ox * tdx + oy * tdy) / tL2
+          const px = TA.x + tt * tdx, py = TA.y + tt * tdy
+          if (tt < -0.02 || tt > 1.02 || Math.hypot(verts[o].x - px, verts[o].y - py) > perpMax) { okAll = false; break }
+          drop.push(ei)                                  // 被完全覆盖 = 重复边，一起去掉 ✓
+        }
+        if (!okAll) continue                             // 真拐角被穿过 → 按用户规则"不拆"、保留 ✓
+        // 执行：共线那对合并成一条，去掉被覆盖的重复边与 v 本身
+        const oa = outEdges[p1][0] === v ? outEdges[p1][1] : outEdges[p1][0]
+        const ob = outEdges[p2][0] === v ? outEdges[p2][1] : outEdges[p2][0]
+        const add: [number, number, number] = [oa, ob, (outEdges[p1][2] || outEdges[p2][2]) ? 1 : 0]
+        outEdges = outEdges.filter((_, i) => drop.indexOf(i) < 0).map((e) => e.slice() as [number, number, number])
+        outEdges.push(add)
+        verts.splice(v, 1)
+        for (const e of outEdges) {
+          if (e[0] > v) e[0]--
+          if (e[1] > v) e[1]--
+        }
+        if ((opt.dashDebug ?? 0) !== 0) {
+          console.log('[cross]  纯交叉去点: 删 #' + v + '，合并 #' + oa + '—#' + ob +
+            '，另去掉 ' + (drop.length - 2) + ' 条被覆盖的重复边')
+        }
+        acted = true
+      }
+      if (!acted) break
+    }
+    dedupe()
+  }
   dissolveCrossings()
+  dissolveCrossVerts()
   dedupe()
   mergeVerts(opt.mergeR ?? 8)
   dedupe()
@@ -3015,6 +3118,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   //     另一个顶点上，那个新接头若正好落在一条直线上就形成假交点（度 4），此前没人再复核它。
   collinearSimplify()
   dissolveCrossings()
+  dissolveCrossVerts()
   // 精修会把顶点挪位置，**挪完必须再合并一次** —— 否则可能留下两个几乎重合的顶点，
   // 它们的手柄叠在一起，用户会有一个点点不到也拖不动
   mergeVerts(opt.mergeR ?? 8)
@@ -3036,6 +3140,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   // 规整会挪顶点 → 再走一遍收尾清理（共线假点 / 假交点 / 重合点 ✓）
   collinearSimplify()
   dissolveCrossings()
+  dissolveCrossVerts()
   mergeVerts(opt.mergeR ?? 8)
   dropIsolated()
   dedupe()
