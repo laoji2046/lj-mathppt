@@ -387,7 +387,7 @@ const line = computed(() => el.value as LineElement | undefined)
 const arrow = computed(() => el.value as ArrowElement | undefined)
 const pen = computed(() => el.value as PenElement | undefined)
 const mathfig = computed(() => el.value as MathFigureElement | undefined)
-/** 是否有"顶点"概念（立体几何 / 复刻图形 / 可拖顶点图形）—— 有才显示「显示点」开关 */
+/** 是否有"顶点"概念（立体几何 / 图形重建 / 可拖顶点图形）—— 有才显示「显示点」开关 */
 const hasVertices = computed(() => {
   const k = mathfig.value?.kind
   if (!k) return false

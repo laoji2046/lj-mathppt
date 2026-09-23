@@ -6,7 +6,7 @@ import { registerAddon } from './registry'
 
 export function registerBuiltinAddons() {
   // ── 导入导出 ──────────────────────────────────────────────
-  registerAddon({ id: 'pdf-gen', name: 'PDF 生成', desc: 'A4 文档编辑器：正文写公式与插图，再交给打印对话框另存 PDF（矢量文字）', icon: 'paper', category: '导入导出', sizeHint: 39 })
+  registerAddon({ id: 'pdf-gen', name: '试卷编辑', desc: 'A4 文档编辑器：正文写公式与插图，再交给打印对话框另存 PDF（矢量文字）', icon: 'paper', category: '导入导出', sizeHint: 39 })
   registerAddon({ id: 'pptx-import', name: 'PPT 导入', desc: '解析 .pptx：文字/公式(OMML→LaTeX)/图片/表格/矢量图形一并搬入，可再按内容套用模板', icon: 'file', category: '导入导出', sizeHint: 16 })
   registerAddon({ id: 'docx-import', name: 'Word 导入', desc: '解析 .docx：一题一页、图片内嵌；MathType 公式会明确报数', icon: 'file', category: '导入导出', sizeHint: 11 })
   registerAddon({ id: 'pdf-import', name: 'PDF 导入', desc: '自动判断有无文本层：有就抽成可编辑文字，没有就每页一张图', icon: 'file', category: '导入导出', sizeHint: 12, runtime: { key: 'pdfjs', mb: 1.3, note: 'pdfjs 解析引擎（仅导入时用）' } })

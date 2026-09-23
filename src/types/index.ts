@@ -460,8 +460,8 @@ export type MathFigureKind =
   | 'vennFigure' | 'setNumberline'
 
 /** 数学图形分类（面板按这个分组显示） */
-export type MathFigureCat = '平面图形' | '立体几何' | '复刻图形' | '函数图像' | '圆锥曲线' | '辅助标注' | '统计图表' | '集合'
-export const MATH_FIGURE_CATS: MathFigureCat[] = ['函数图像', '圆锥曲线', '平面图形', '立体几何', '复刻图形', '统计图表', '集合', '辅助标注']
+export type MathFigureCat = '平面图形' | '立体几何' | '图形重建' | '函数图像' | '圆锥曲线' | '辅助标注' | '统计图表' | '集合'
+export const MATH_FIGURE_CATS: MathFigureCat[] = ['函数图像', '圆锥曲线', '平面图形', '立体几何', '图形重建', '统计图表', '集合', '辅助标注']
 
 export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathFigureCat }[] = [
   // ---- 统计图（【M2.11】） ----
@@ -658,7 +658,7 @@ export interface MathFigureElement extends ElementBase {
   /** 每个顶点的字母标注（下标/上标用 _ 和 ^，如 "A_1" "B^2"、\' 加撇），长度与顶点数一致 */
   /**
    * 是否在顶点画**小圆点**。默认**不画** —— 也就是"只有字母、没有圆点"，跟原来的观感一致。
-   * 勾上才画圆点（教材风）。字母不受它影响。复刻图形 / 立体几何 / 可拖顶点图形都适用。
+   * 勾上才画圆点（教材风）。字母不受它影响。图形重建 / 立体几何 / 可拖顶点图形都适用。
    */
   showDots?: boolean
   vlabels?: (string | null)[]

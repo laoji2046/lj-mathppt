@@ -18,8 +18,8 @@ import FigurePreview from './elements/MathFigureElement.vue'
 const store = useDeckStore()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
-/** 复刻图形：从原图逐个描下来的立体几何图，插入后仍是可编辑的矢量图形 */
-const RECAST = '复刻图形' as MathFigureCat
+/** 图形重建：从原图逐个描下来的立体几何图，插入后仍是可编辑的矢量图形 */
+const RECAST = '图形重建' as MathFigureCat
 
 const groups = computed(() => MATH_FIGURE_CATS.map((c) => ({
   cat: c,
@@ -138,7 +138,7 @@ function insert(kind: MathFigureKind) {
 }
 
 /** 复刻图：连同顶点 / 边拓扑 / 字母一起插入，并按原图宽高比给尺寸 */
-/** 复刻图形的卡片走同一条"交给 sink"的路（原来只会在画布上插入 ✗ —— 文档里点它没反应） */
+/** 图形重建的卡片走同一条"交给 sink"的路（原来只会在画布上插入 ✗ —— 文档里点它没反应） */
 async function onPickPreset(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
   const sink = figPaletteSink.value
   if (!sink) {

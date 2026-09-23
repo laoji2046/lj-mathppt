@@ -609,7 +609,7 @@ watch(ver, () => { void refreshNow() })
                   <button class="hd__btn" title="三维立体图：在三维窗口里调好后点「插入到当前页」即落到讲义 ✓" @click="insert3DFigure">三维图</button>
                 </div>
                 <label>图注<input :value="sel.img?.caption || ''" placeholder="例如：图 1 椭圆与两条切线" @input="setFigCaption(($event.target as HTMLInputElement).value)" /></label>
-                <!-- 【M2.7】位置与宽度：与「PDF 生成」那套一致（居中/居左/居右/左浮/右浮 + 宽度% ✓） -->
+                <!-- 【M2.7】位置与宽度：与「试卷编辑」那套一致（居中/居左/居右/左浮/右浮 + 宽度% ✓） -->
                 <div class="hd__row2">
                   <label>位置
                     <select :value="sel.img?.layout || 'center'" @change="setFigLayout(($event.target as HTMLSelectElement).value)">

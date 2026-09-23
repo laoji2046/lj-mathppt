@@ -49,13 +49,13 @@ export function renderFigureSvg(el: SlideElement): string {
  * 单元格里的图形标记：{{fig:cube}}
  * 取值可以是：
  *   ① 图形库的 kind 代号（cube / linear / sine / circle / parabola / cylinder …，共 74 种）
- *   ② **复刻图形**那批 preset 的**名字**（如 {{fig:正方体 ABCD-A₁B₁C₁D₁（含三棱锥）}}）—— 它们不是 kind，
+ *   ② **图形重建**那批 preset 的**名字**（如 {{fig:正方体 ABCD-A₁B₁C₁D₁（含三棱锥）}}）—— 它们不是 kind，
  *      但用户常用的四棱锥/正方体都在那里，所以按名字也认一遍。
  * 名字里可能有空格/中文，所以这里不限制字符集，只到第一个 }} 为止。
  */
 export const FIG_MARK_RE = /\{\{fig:([^{}:]+)(?::(\d+))?\}\}/g
 
-/** 按名字找复刻图形 preset */
+/** 按名字找图形重建 preset */
 function presetByName(name: string) {
   const n = name.trim()
   return SOLID_FIGURE_PRESETS.find((p) => p.name === n || p.name.split(/[（(]/)[0].trim() === n)

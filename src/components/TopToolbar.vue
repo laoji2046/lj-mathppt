@@ -407,7 +407,7 @@ function autoTemplate() {
   flashToast()
 }
 
-/** addon 开关：关掉后入口隐藏、代码永不加载（先把「PDF 生成」接上做样板） */
+/** addon 开关：关掉后入口隐藏、代码永不加载（先把「试卷编辑」接上做样板） */
 function openAddonMgr() { fileOpen.value = false; addonMgrOpen.value = true }
 
 function addonOn(id: string) { return addonState.enabled[id] !== false }
@@ -899,8 +899,8 @@ onBeforeUnmount(() => {
       <button class="btn" title="数学讲义：写讲义（知识梳理 / 例题精讲 / 变式 / 练习），一键切学生版与教师版，打印导出 PDF" @click="emit('open-handout')">
         <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.paper"></svg></span>讲义
       </button>
-      <button v-if="addonOn('pdf-gen')" class="btn" title="PDF 生成：把 Markdown / 试卷写成 A4 文档并导出 PDF" @click="openPaper">
-        <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.paper"></svg></span>PDF生成
+      <button v-if="addonOn('pdf-gen')" class="btn" title="试卷编辑：把 Markdown / 试卷写成 A4 文档并导出 PDF" @click="openPaper">
+        <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.paper"></svg></span>试卷编辑
       </button>
       <button class="btn btn--primary" @click="present">
         <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.play"></svg></span>演示

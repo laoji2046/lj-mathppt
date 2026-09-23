@@ -48,7 +48,7 @@ export interface HdBlock {
     src?: string
     assetId?: number
     caption?: string
-    /** 【M2.7】位置：居中 / 居左 / 居右 / 左浮动 / 右浮动 ✓（对齐「PDF 生成」那套写法 ✓） */
+    /** 【M2.7】位置：居中 / 居左 / 居右 / 左浮动 / 右浮动 ✓（对齐「试卷编辑」那套写法 ✓） */
     layout?: 'center' | 'left' | 'right' | 'float-left' | 'float-right'
     /** 【M2.7】宽度（% ✓ 10–100）—— 浮动时建议 35–50 ✓ */
     width?: number

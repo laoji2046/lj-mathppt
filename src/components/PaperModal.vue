@@ -14,7 +14,7 @@ import { paperInsertSink, paperPending } from '@/ui/paper'
 import type { PaperInsertPayload } from '@/ui/paper'
 
 /**
- * PDF 生成（A4 分页 + 题号识别），移植自参考版 LJ-PPT 的 PaperMode。
+ * 试卷编辑（A4 分页 + 题号识别），移植自参考版 LJ-PPT 的 PaperMode。
  * - 左侧：输入（# 标题、## 方块标题、### 小标题、1. 大题号、(1) 小题号、$公式$）+ 字体/排版/模板控制。
  * - 右侧：A4 预览（MathJax 渲染公式），支持缩放、插入图片([图N])、保存 PDF。
  */
@@ -1178,6 +1178,7 @@ async function savePdf() {
         ok = true
     }
   } catch (e) {
+    // ⚠ 这里说的是"**导出 PDF** 这一步失败"，不是"试卷编辑"失败 → 保持原话 ✓
     console.error('PDF 生成失败，回退打印：', e)
     paperMsg.value = 'PDF 生成失败 → 已改用打印方式：' + (e && (e as any).message ? (e as any).message : String(e))
   } finally {
@@ -1414,7 +1415,7 @@ watch([headerText, footerText], () => render())
       <div class="pm__backdrop"></div>
       <div class="pm__box">
         <header class="pm__head">
-          <span>PDF 生成 · A4 文档</span>
+          <span>试卷编辑 · A4 文档</span>
           <button class="pm__x" @click="emit('close')" title="关闭"><AppIcon name="close" :size="13" /></button>
         </header>
         <div class="pm__body">
@@ -1603,7 +1604,7 @@ watch([headerText, footerText], () => render())
     <div v-if="helpOpen" class="pm__help">
       <div class="pm__helpbox">
         <header class="pm__helphead">
-          <strong>PDF 生成 · 语法帮助</strong>
+          <strong>试卷编辑 · 语法帮助</strong>
           <button class="pm__x" @click="helpOpen = false"><AppIcon name="close" :size="13" /></button>
         </header>
         <div class="pm__helpbody">
