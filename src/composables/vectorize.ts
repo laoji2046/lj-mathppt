@@ -400,6 +400,31 @@ export interface VectorizeOpt {
    *  实测：删掉 `demo111` 的 `v2` → `V10/E16/D5 → V9/E14/D4`（那笔"回归锁"其实记的是 bug ✗）；
    *  `5.png` 的 `v7/v8/v12` 夹角 160°/166°/35° 无共线对 → 一个都不动 ✓ */
   crossDissolve?: number
+  /** 【v1539】"共线重叠的悬空端"重定向：度 1 端点落在另一条**共线**边的内部时，
+   *  把那条边改指到该边前进方向的端点上（去掉重复段、**不拆任何边**）。
+   *
+   *  ⛔ **默认 0 = 关（留档，别再翻 ✗）** —— 几何上完全成立，但**过不了闸门**：
+   *    · 顶点召回 97.2% → **95.4%** ✗（会删掉真顶点）
+   *    · 真值图 `3-人工修正` V18 → **V17** ✗（那是**人工修正过**的图，它的悬空端是真的）
+   *    · 只换来 `5.png` 落在线上 4→3 的边际收益 ✗
+   *
+   *  **为什么几何上对、结果却错**：判据是"`[v,u]` 这一段被 E2 覆盖了 = 重复画的墨"。
+   *  但**几何无法区分"重复的墨"和"一根真的短线头恰好搭在另一条线上"** ——
+   *  后者的 `v` 是**真实顶点**（教材图里线头常停在某个点上），删了就丢点 ✗。
+   *  实测 `5.png` 的 `v6`（该删）与 `3-人工修正` 的那些（不该删）**判据、垂距、共线度全一样**。
+   *  → **缺的是一个正交信息：`v` 附近有没有字母标注**。真顶点几乎总有标注，
+   *    重建出来的假端点没有。要用上 `peelLabels` 的标注框才能可靠区分（**待办**）。
+   *
+   *  试过并否掉的**闸门**（数据都在，别再翻）：
+   *    ① 不加"`u !== o`"护栏 → 改指成**自环** `o—o`，被 dedupe 删掉 → `3-人工修正` V18→**V14**、
+   *       `P-ABCD-EF` V9→**V8** ✗✗（6 次触发里 3 次是自环）
+   *    ② 不加"只虚线"闸门 → 动到实线：`3-人工修正` V18→**V15** ✗
+   *    ③ 两道都加 → `3-人工修正` 仍 V18→**V17** ✗、合成召回仍掉 ✗
+   *
+   *  实测（真图 `5.png`，说明判据本身是对的）：`v6(122,202)` 是悬空虚线端、落在 `0-7` 的 57% 处，
+   *  且 `v0(65,150)`/`v6`/`v7(168,239)`/`v13(222,286)` **四点共线**（垂距全 ≤2.1px）
+   *  → `[v6,v7]` 确实是重复段 → `6-13` 该改指为 `7-13` ✓（就是过不了闸门） */
+  overlapStub?: number
   /** 【v1525】把"被字母切断的线"接回去（两头都是断头、缺口 ≤1.2 字高、共线、中间有字母 ✓）：1 = 开（默认 ✓）；0 = 关。 */
   labelHeal?: number
   /** 【v1524】按字母数剪多余顶点：1 = 开；**0 = 关（默认 ✗）**。
@@ -2504,8 +2529,93 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     }
     dedupe()
   }
+
+  /** 【v1539】"共线重叠的悬空端"→ **重定向**（纯去重，**一根线都不用拆** ✓）：
+   *  度 1 的端点 `v` 落在另一条边 `E2` 的**内部**，且它挂的那条边 `e` 与 `E2` **共线**
+   *  → 说明 `[v, u]` 这一段被 `E2` 覆盖了、是**重复画的墨**
+   *    （`u` = `E2` 上位于 `e` 前进方向那一侧的端点）
+   *  → 把 `e` 的 `v` 端改指到 `u`，`v` 随之消失。**几何一动不动**，只是去掉了重复段 ✓
+   *
+   *  实测（真图 `5.png`）：`v6(122,202)` 是度 1 悬空虚线端，落在虚线 `0-7` 的 57% 处（垂距 2.1px），
+   *  而它挂的 `6-13` 与 `0-7` **共线** —— `v0(65,150)` / `v6` / `v7(168,239)` / `v13(222,286)`
+   *  **四点共线**（垂距全 ≤2.1px）→ `[v6,v7]` 这段是重复的 → 改指到 `v7`，`6-13` 变成 `7-13` ✓
+   *
+   *  ⚠ 与 `pruneDashDup`（v1535，默认关）的区别：那个把碎段**整条剪掉**，这个只**截掉重复的那段** ✓
+   *  ⚠ 与 `splitCross`（v1537，用户已否 ✗）的区别：那个要**拆开穿过的边**，这个**不拆任何边** ✓
+   */
+  const retargetOverlapStub = () => {
+    if ((opt.overlapStub ?? 0) === 0) return
+    const perpMax = opt.splitCrossPerp ?? 2
+    const cosGate = opt.splitCrossCos ?? 0.97
+    for (let guard = 0; guard < 200; guard++) {
+      const deg = new Array(verts.length).fill(0)
+      const inc: number[][] = verts.map(() => [])
+      outEdges.forEach((e, i) => { deg[e[0]]++; deg[e[1]]++; inc[e[0]].push(i); inc[e[1]].push(i) })
+      let acted = false
+      for (let v = 0; v < verts.length && !acted; v++) {
+        if (deg[v] !== 1) continue                       // 只看悬空端
+        const ei = inc[v][0]
+        const o = outEdges[ei][0] === v ? outEdges[ei][1] : outEdges[ei][0]
+        const ux = verts[o].x - verts[v].x, uy = verts[o].y - verts[v].y
+        const lu = Math.hypot(ux, uy)
+        if (lu < 1) continue
+        const dx = ux / lu, dy = uy / lu                 // e 从 v 指向 o 的方向
+        for (let k = 0; k < outEdges.length; k++) {
+          if (k === ei) continue
+          // ⚠ 只处理**两边都是虚线**的情形 —— 共线重叠这族全出在虚线上（虚线是重建出来的、
+          //   没有原墨迹约束）；实线是真的画出来的，重叠的可能性低得多，动了容易误伤 ✗
+          //   实测（v1539）：不加这道闸门会动到 `3-人工修正`（V18→**V15**）✗
+          if (!outEdges[ei][2] || !outEdges[k][2]) continue
+          const A = verts[outEdges[k][0]], B = verts[outEdges[k][1]]
+          const wx = B.x - A.x, wy = B.y - A.y
+          const l2 = wx * wx + wy * wy
+          if (l2 < 1) continue
+          const L = Math.sqrt(l2)
+          const t = ((verts[v].x - A.x) * wx + (verts[v].y - A.y) * wy) / l2
+          if (t <= 0.1 || t >= 0.9) continue             // v 得落在 E2 的**中间**
+          if (Math.abs((verts[v].x - A.x) * wy - (verts[v].y - A.y) * wx) / L > perpMax) continue
+          if (Math.abs((wx / L) * dx + (wy / L) * dy) < cosGate) continue   // e 必须与 E2 共线
+          // 找 E2 上位于 e 前进方向那一侧的端点 u
+          let u = -1, bu = 1e9
+          for (const cand of [outEdges[k][0], outEdges[k][1]]) {
+            const px = verts[cand].x - verts[v].x, py = verts[cand].y - verts[v].y
+            const pr = px * dx + py * dy                 // 沿 e 前进方向的投影
+            if (pr <= 1) continue                        // 在身后（或就是自己）→ 不行
+            const d = Math.hypot(px, py)
+            if (d < bu) { bu = d; u = cand }
+          }
+          if (u < 0) continue
+          // ⚠ 若 u 就是这条边自己的另一端 o → 整条边都落在 E2 内部（完全重复）。
+          //   那种情况"改指"会变成**自环** `o—o`，随后被 dedupe 删掉 → 等于把整条边删了 ✗
+          //   实测（v1539）：不加这条护栏会造出自环 `#18—#18`/`#15—#15`/`#0—#0`，
+          //   把 `3-人工修正` V18→**V14**、`P-ABCD-EF` V9→**V8** 全弄坏 ✗✗
+          //   完全重复那族交给 `pruneDashDup`（v1535，默认关）去处理，这里**保守跳过** ✓
+          if (u === o) continue
+          // 执行：e 的 v 端改指到 u，然后删掉度 0 的 v（自包含清理 —— 别调 dropIsolated，
+          //   它定义在本函数之后，会撞 TDZ ✗）
+          if (outEdges[ei][0] === v) outEdges[ei][0] = u
+          else outEdges[ei][1] = u
+          if ((opt.dashDebug ?? 0) !== 0) {
+            console.log('[overlap]  悬空端重定向: #' + v + '(' + verts[v].x.toFixed(0) + ',' + verts[v].y.toFixed(0) +
+              ') 落在边 #' + outEdges[k][0] + '—#' + outEdges[k][1] + ' 的 ' + (t * 100).toFixed(0) +
+              '% 处 → 边 #' + v + '—#' + o + ' 改指为 #' + u + '—#' + o)
+          }
+          verts.splice(v, 1)
+          for (const e of outEdges) {
+            if (e[0] > v) e[0]--
+            if (e[1] > v) e[1]--
+          }
+          acted = true
+          break
+        }
+      }
+      if (!acted) break
+    }
+    dedupe()
+  }
   dissolveCrossings()
   dissolveCrossVerts()
+  retargetOverlapStub()
   dedupe()
   mergeVerts(opt.mergeR ?? 8)
   dedupe()
@@ -3119,6 +3229,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   collinearSimplify()
   dissolveCrossings()
   dissolveCrossVerts()
+  retargetOverlapStub()
   // 精修会把顶点挪位置，**挪完必须再合并一次** —— 否则可能留下两个几乎重合的顶点，
   // 它们的手柄叠在一起，用户会有一个点点不到也拖不动
   mergeVerts(opt.mergeR ?? 8)
@@ -3141,6 +3252,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   collinearSimplify()
   dissolveCrossings()
   dissolveCrossVerts()
+  retargetOverlapStub()
   mergeVerts(opt.mergeR ?? 8)
   dropIsolated()
   dedupe()
