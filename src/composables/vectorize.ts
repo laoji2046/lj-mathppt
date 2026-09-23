@@ -101,8 +101,26 @@ export interface VectorizeOpt {
   eps?: number
   /** 当成"一截短划"的最大长度（图对角线的比例），超过的算实线段 */
   pieceMax?: number
-  /** 虚线端点沿自身方向往外找落点的半径（px） */
+  /** 虚线端点沿自身方向往外找落点的半径（px，默认 90）。
+   *  【v1535】原来 72 太小 —— 真图里虚线端点离真顶点常有 80~110px（差着两三个划的间距）→ 接不上、
+   *  端点退化成"度 1 悬空虚线端"（= 假顶点）✗。实测（`.probe/vecbench.cjs`，基线 `vecbase8.json`）：
+   *  · 顶点精度 82.4→**85.5**、边召回 82.2→**82.5**、边精度 75.5→**77.8**、虚实线 89.4→**89.9**、
+   *    位置RMS 1.0→**0.9**、平行 0.55→**0.43°**、垂直 0.43→**0.37°**；顶点召回 97.2 / 等长 0.21% 持平。
+   *    **7 项改善、2 项持平、0 项变差** ✓；4 张实图锁**逐位不动** ✓。
+   *  · 真图（`.probe/_realview.cjs`，用户给的 1/5/7/13.png）：1.png 顶点 9→**8**（真值正好 8 个）
+   *    且"悬空虚线端"1→**0** ✓；13.png 保持干净（0 悬空 / 0 落在线上）✓。
+   *  ⚠ 必须和 `extendPerp` 一起改：单独放大它会乱抓远处顶点（13.png 顶点 14→15 ✗）。
+   *  ⚠ 是**绝对像素**、不随图幅缩放（与旧默认 72 一致）；图幅远大于 600px 时可能偏小，尚未验证。 */
   extendR?: number
+  /** 【v1535】虚线端点往外找落点时允许的**横向偏离上限（绝对像素，默认 10）**。
+   *  原来只有"夹角 cos > 0.9"这一条 ✗，那是**距离相关**的：距离 d 处允许横向偏离 d×0.436，
+   *  d=90 时高达 39px → 一放大 `extendR` 就开始乱抓远处顶点 ✗。
+   *  实测（真图 13.png）：不收横向偏离而只放大 extendR，一条虚线会**跳过**近处的断头、
+   *  抓到 119px 外的底角，顺手把一个真顶点留成"度 1 悬空实线端"（顶点 14→15 ✗）。
+   *  窗口扫描（R=90 固定）：4 → 顶点精度 80.9 ✗ 太紧；**10 / 12 → 85.5 / 77.8（最佳）**；
+   *  16 → 84.4 / 75.8；20 / 30 → 顶点精度回到 85.5 但边精度 76.6、虚实线 89.4，且 13.png 又坏（15 顶点 ✗）。
+   *  → 取 10 ✓ */
+  extendPerp?: number
   /** 收缩"过短的边"的阈值（图对角线的比例） */
   short?: number
   /** 交点精修的最大位移（图对角线的比例） */
@@ -2485,7 +2503,13 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
 
   // 虚线的短划天然够不到交点（差着一两个划的间距），沿自身方向往外延长，吸附到近旁的顶点上
   const findAlong = (p: { x: number; y: number }, dx: number, dy: number) => {
-    const r = opt.extendR ?? 72
+    const r = opt.extendR ?? 90
+    // 【v1535】横向偏离上限（**绝对像素**）—— 原来只用"夹角 cos > 0.9"✗，那是**距离相关**的：
+    //   距离 d 处允许横向偏离 d×0.436，d=90 时高达 39px → 一放大 extendR 就开始乱抓远处顶点 ✗
+    //   实测（真图 13.png）：extendR 72→90 时一条虚线**跳过**近处的断头、抓到 119px 外的底角 v10，
+    //   顺手把一个真顶点留成"度 1 悬空实线端"（顶点 14→15 ✗）。
+    //   换成绝对横向距离之后，`extendR` 就可以放心放大（见 extendR 的注释）✓
+    const perpMax = opt.extendPerp ?? 10
     const deg = new Array(verts.length).fill(0)
     for (const e of outEdges) { deg[e[0]]++; deg[e[1]]++ }
     let best = -1, bestJ = -1, bd = 1e9, bdJ = 1e9
@@ -2494,6 +2518,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       const d = Math.hypot(vx, vy)
       if (d < 3 || d > r) continue
       if ((vx / d) * dx + (vy / d) * dy < 0.9) continue          // 偏离方向 25° 以上不要
+      if (Math.abs(vx * dy - vy * dx) > perpMax) continue        // 横向偏离超限不要（dx,dy 是单位向量 → 叉积就是垂距 ✓）
       // 岔路口（度 >= 2）比"上一条短划的断头"更可能是这条虚线真正的落点
       if (deg[i] >= 2) { if (d < bdJ) { bdJ = d; bestJ = i } }
       else if (d < bd) { bd = d; best = i }
