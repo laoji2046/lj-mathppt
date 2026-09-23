@@ -33,6 +33,31 @@ export interface VectorizeOpt {
   mergeR?: number
   /** 去毛刺：短于这么长的单端路径丢掉（px） */
   spur?: number
+  /** ⚠【v1529】**短枝形态判据**的最大枝长（图对角线比例）—— **实测负收益，已否掉 ✗，默认 0（关）**，别再翻 ✗
+   *
+   * 想解决的问题（是真的 ✓）：一端自由的路径比 `spur`（6px）长、但形态上就是根毛刺时，
+   *   自由端会变成多余顶点、还把真顶点拉偏 —— cubeaxes T4 被一根 26px 短枝拉偏 0.061（1.54×vtol）。
+   *   而全局加大 `spur` 也是负收益 ✗（12/40 档都测过）。
+   *
+   * 判据（四条同时成立才剪）：枝长 ≤ `spurBranchMax` + 与主干夹角 ≤ `spurBranchDeg`(25°) +
+   *   主干 ≥ 3×枝长 + 自由端附近无字母。
+   *
+   * ✗ 为什么还是不行：**"贴主干的短枝"与"被骨架切断的主干残端"在几何上无法区分** —— 这是
+   *   本文件第三次实测撞上同一堵墙（① mergeCollinear：共线边合并 79.4%→72.2%；② 全局 spur 加大：
+   *   69.6→67.1/65.0；③ 本判据：见下）。残端剪掉 = 线头回缩（v1527 刚治好的病）。
+   *
+   * 实测（默认参数 0.07/25°/0.05）：**与基线逐位相同** —— 合成图里没有一根枝四条全中 ✓（判据够严）。
+   *   放宽到 60°/0.02/0.12：顶点精度 69.6→68.1 ✗、边召回 79.4→78.4 ✗、平行误差 0.61°→1.35° ✗✗。
+   *   放宽到 90°/0/0.2（几乎不设防）：精度 65.3 ✗✗、虚实 89.8 ✗、**实图锁 3-人工修正 V19→V16 ✗✗
+   *   （三个真顶点消失）、P-ABCD-EF V10→V11 ✗** —— 真线被当枝剪了。
+   *   顶点召回全程 94.0% 一格未涨：能剪掉的枝**全都不在真值顶点缺口的路径上** ✗。
+   *
+   * 传非 0 值仅为复现实测。真要救 T4 类顶点，得从"骨架切断/顶点生成位置"下手，不是剪枝。 */
+  spurBranchMax?: number
+  /** 短枝与主干的夹角门槛（度，默认 25；T4 实测枝贴着主干 17°）。只配 `spurBranchMax` 生效 */
+  spurBranchDeg?: number
+  /** 短枝自由端"附近有字母就不剪"的半径（图对角线比例，默认 0.05）。只配 `spurBranchMax` 生效 */
+  spurBranchLabelR?: number
   /** 路径简化容差（px） */
   eps?: number
   /** 当成"一截短划"的最大长度（图对角线的比例），超过的算实线段 */
@@ -1732,7 +1757,51 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
 
   const freeA = (p: SkGraph['paths'][number]) => p.aId < 0 && p.bId < 0
   const spur = opt.spur ?? 6
-  const paths = G.paths.filter((P) => freeA(P) || (P.aId >= 0 && P.bId >= 0) || plen(P.pts) > spur)
+  // 【v1529】**短枝形态判据**：一端自由的路径即使比 `spur` 长，只要四条同时成立也剪——
+  //   ① 枝长 ≤ `spurBranchMax`（默认 0.07×对角线）；② 与主干夹角 ≤ `spurBranchDeg`（默认 25°，贴着主干走）；
+  //   ③ 主干长度 ≥ 3×枝长（对面是条像样的线，不是另一根毛刺）；④ 枝的**自由端**附近没有字母。
+  //
+  // 动机（实测）：cubeaxes T4 顶点被一根 26px 短枝拉偏 0.061（1.54×vtol）——`spur=6` 剪不掉；
+  //   全局加大 `spur`（12/40）又是负收益（顶点精度 69.6→67.1/65.0 ✗、边召回 79.4→77.5/76.1 ✗）。
+  //
+  // ⚠ 已知歧义（为什么判据要这么严）：**"贴着主干伸出的短枝"与"被骨架切断的主干残端"在几何上
+  //   难以区分** ✗ —— 残端剪掉 = 线头回缩（v1527 刚治过的病）。④号判据（端点附近无字母）和
+  //   ③号判据（主干 ≥3×枝长）就是为它设的：残端通常连着坐标轴 / 长线，一旦像"线头"就不动它。
+  //   若基准台仍见负收益，默认关（`spurBranchMax=0` 一刀切回旧行为，逐位一致）。
+  const branchMax = (opt.spurBranchMax ?? 0) * diag
+  const branchCos = Math.cos((opt.spurBranchDeg ?? 25) * Math.PI / 180)
+  const branchLabelR = (opt.spurBranchLabelR ?? 0.05) * diag
+  const nearLabelPt = (x: number, y: number) => {
+    for (const L of labels) if (Math.hypot(L.cx - x, L.cy - y) < branchLabelR) return true
+    return false
+  }
+  const isSpurBranch = (P: SkGraph['paths'][number]) => {
+    if (!((P.aId < 0) !== (P.bId < 0))) return false            // 只管"一端自由"的路径
+    const L = plen(P.pts)
+    if (L > branchMax || L <= spur) return false                // 太长不像枝；太短原逻辑就剪
+    const anchorId = P.aId >= 0 ? P.aId : P.bId
+    const tip = P.aId < 0 ? P.pts[0] : P.pts[P.pts.length - 1]   // pts[0] 对应 a 端（见 buildGraph）
+    const anchor = G.nodes[anchorId]
+    let trunkLen = 0, tx = 0, ty = 0
+    for (const Q of G.paths) {
+      if (Q === P) continue
+      if (Q.aId !== anchorId && Q.bId !== anchorId) continue
+      const ql = plen(Q.pts)
+      if (ql <= trunkLen) continue
+      trunkLen = ql
+      const other = Q.aId === anchorId ? Q.pts[Q.pts.length - 1] : Q.pts[0]
+      tx = other[0] - anchor.cx; ty = other[1] - anchor.cy
+    }
+    if (trunkLen < 3 * L) return false                           // ③ 主干要明显更长
+    const bl = Math.hypot(tip[0] - anchor.cx, tip[1] - anchor.cy)
+    const tl = Math.hypot(tx, ty)
+    if (bl < 1e-6 || tl < 1e-6) return false
+    if ((tip[0] - anchor.cx) * tx + (tip[1] - anchor.cy) * ty < branchCos * bl * tl) return false   // ② 夹角太大
+    if (nearLabelPt(tip[0], tip[1])) return false                // ④ 端点附近有字母 → 可能是真线头
+    return true
+  }
+  const paths = G.paths.filter((P) =>
+    freeA(P) || (P.aId >= 0 && P.bId >= 0) || (plen(P.pts) > spur && !(branchMax > 0 && isSpurBranch(P))))
 
   interface Seg { a: [number, number]; b: [number, number]; len: number; aId: number; bId: number }
   const segs: Seg[] = []

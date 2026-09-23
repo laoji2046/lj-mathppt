@@ -242,6 +242,36 @@ function labelHtml(i: number): string {
 const anchorN = computed(() => (res.value?.anchors || []).filter((a) => !!(a.text || '').trim()).length)
 const orphanN = computed(() => Math.max(0, anchorN.value - labels.value.filter((s) => (s || '').trim()).length))
 
+/**
+ * 【v1529】**同名 anchor 去重**：几何图里一个字母标注只对应**一个**顶点 ——
+ * 图上同一个字母出现两处，必然有一处是错的 ✗。
+ *
+ * ⚠ 根因不在配对逻辑 ✓（`adopt` 里 `vTake` / `aTake` 已经是严格一对一：
+ *   一个顶点只吃一个字母、一个字母只给一个顶点）。真因是 **OCR 认出了两份同名 anchor** ——
+ *   真字母 + 一处噪声，或者 `C₁` 丢了下标被认成 `C` ✗ —— 两份各自配到不同顶点，
+ *   于是图上就出现两个 `C` ✗。
+ *
+ * 这里只让**置信度最高**的那份参与自动配对，其余**不删**（anchor 还在，
+ * 用户点「再自动配一次」或在右边手填仍能补上 ✓），只是不参与这轮自动配。
+ *
+ * ⚠ 已知副作用（要留意）：若 OCR 真把 `C₁` 认成了 `C`，去重后 `C₁` 那个角会**没有字母**
+ *   （而原来是两个角都显示 `C`）。哪个更好取决于 OCR 质量 —— 实测下来"一个角空着待手填"
+ *   比"两处同名让人以为是同一点"更好改 ✗→✓。
+ */
+function anchorKeepByText<T extends { text?: string; conf?: number }>(anchors: T[]): Set<number> {
+  const best = new Map<string, { k: number; conf: number }>()
+  anchors.forEach((a, k) => {
+    const t = (a.text || '').trim()
+    if (!t) return
+    const c = a.conf ?? 0
+    const prev = best.get(t)
+    if (!prev || c > prev.conf) best.set(t, { k, conf: c })
+  })
+  const keep = new Set<number>()
+  for (const v of best.values()) keep.add(v.k)
+  return keep
+}
+
 /** 再自动配一次字母：半径和置信度都放宽。
  *  默认配对只认识别框 0.16 以内、置信度 ≥0.7 的字母；扫描件的字母常常差一点就配不上，
  *  配不上就一个字都不显示 —— 用户要的"自动识别原图的字母"就卡在这一步。 */
@@ -250,10 +280,12 @@ function rematch() {
   if (!r) return
   const n = pts.value.length / 2
   const RAD = 0.32, CONF = 0.45
+  const keep = anchorKeepByText(r.anchors)            // 【v1529】同名只留置信度最高的那份
   const cand: { i: number; k: number; d: number }[] = []
   for (let i = 0; i < n; i++) {
     const vx = pts.value[i * 2], vy = pts.value[i * 2 + 1]
     for (let k = 0; k < r.anchors.length; k++) {
+      if (!keep.has(k)) continue
       const an = r.anchors[k]
       if (!(an.text || '').trim() || an.conf < CONF) continue
       const d = Math.hypot(an.x - vx, an.y - vy)
@@ -291,10 +323,12 @@ function adopt(r: VectorizeResult) {
   lconf.value = new Array(n).fill(0)
   // 字母 → 顶点：**全局按距离贪心配对**（而不是每个顶点各找各的最近字母）——
   // 后者会让某个顶点把旁边另一个顶点真正的字母抢走
+  const keep = anchorKeepByText(r.anchors)            // 【v1529】同名只留置信度最高的那份
   const cand: { i: number; k: number; d: number }[] = []
   for (let i = 0; i < n; i++) {
     const vx = pts.value[i * 2], vy = pts.value[i * 2 + 1]
     for (let k = 0; k < r.anchors.length; k++) {
+      if (!keep.has(k)) continue
       const an = r.anchors[k]
       if (!an.text || an.conf < 0.7) continue         // 没认出来 / 认得很虚的不管
       const d = Math.hypot(an.x - vx, an.y - vy)
