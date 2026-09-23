@@ -751,7 +751,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 数学图形：单独成一项（用得最多，不藏在「绘制/形状」下拉里） -->
-      <button class="btn" title="数学图形：抛物线 / 三角形 / 贝塞尔 / 自定义多边形 / 三维立体图 / 从图片复刻" @click="openFig()">
+      <button class="btn" title="数学图形：抛物线 / 三角形 / 贝塞尔 / 自定义多边形 / 三维立体图 / 自图片重建" @click="openFig()">
         <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.fig"></svg></span>数学图形
       </button>
 

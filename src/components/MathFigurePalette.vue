@@ -5,7 +5,7 @@ import { listFigures, removeFigure, touchFigure } from '@/composables/useFigureL
 import type { FigureEntry } from '@/composables/useFigureLibrary'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
-import type { MathFigureCat, MathFigureElement, MathFigureKind, SlideElement } from '@/types'
+import type { ImageElement, MathFigureCat, MathFigureElement, MathFigureKind, SlideElement } from '@/types'
 import { createElement, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS } from '@/types'
 import { DEFAULT_PIECEWISE, figureBox, viewAspect } from '@/composables/mathPlot'
 import { THM_LABELS } from '@/composables/solid3d'
@@ -193,7 +193,7 @@ async function delSaved(f: FigureEntry) {
 const THUMB_W = 108
 const THUMB_H = 108
 
-/** 从图片复刻：选一张线稿，转到「图片转图形」弹窗里识别 + 改 */
+/** 自图片重建：选一张线稿，转到「图片转图形」弹窗里识别 + 改 */
 const fileInput = ref<HTMLInputElement | null>(null)
 function pickImage() { fileInput.value?.click() }
 function onPicked(e: Event) {
@@ -208,6 +208,32 @@ function onPicked(e: Event) {
 /** 缩略图里把原始尺寸等比缩到卡片内 */
 function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
   return Math.min(THUMB_W / p.w, THUMB_H / p.h)
+}
+
+/**
+ * **自画布重建**：对画布上**已有的图片元素**重建 —— 走"替换这张图片"那条路 ✓
+ * （= `openVectorize(src, id)`，识别完可以「插入为新图形」或「替换这张图片」）
+ *
+ * ⚠ 这条入口原来**只在属性面板里**（选中图片 → 「✎ 转成矢量图形」）✗ ——
+ *    从图形面板这边够不着，所以在这里补一块卡片 ✓
+ * 取哪一张：① 当前**正好选中一张**图片 → 直接用它（最省事）；
+ *          ② 否则列出**当前页所有图片**让用户挑；
+ *          ③ 当前页一张图片都没有 → 弹层里给一句提示，指路「自图片重建…」✓
+ */
+const imgPick = ref(false)
+/** 当前页上的图片元素（"自画布重建"的候选） */
+const pageImages = computed<ImageElement[]>(() =>
+  ((store.currentSlide?.elements ?? []) as SlideElement[]).filter((e): e is ImageElement => e.type === 'image'),
+)
+function recastFromCanvas() {
+  const sel = store.selectedElements.filter((e): e is ImageElement => e.type === 'image')
+  const cand = sel.length === 1 ? sel : pageImages.value
+  if (cand.length === 1) { openVectorize(cand[0].src, cand[0].id); emit('close'); return }
+  imgPick.value = true
+}
+function pickCanvasImage(el: ImageElement) {
+  openVectorize(el.src, el.id)
+  emit('close')
 }
 </script>
 
@@ -242,7 +268,7 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
         <template v-if="current && current.cat === RECAST">
           <button class="card card--recast card--pick" title="选一张线稿（几何插图 / 函数图），自动识别成可拖顶点的数学图形" @click="pickImage">
             <span class="card__thumb"><span class="recast__plus">＋</span></span>
-            <span class="card__name">从图片复刻…</span>
+            <span class="card__name">自图片重建…</span>
           </button>
           <button
             class="card card--recast card--pick"
@@ -251,6 +277,14 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
           >
             <span class="card__thumb"><span class="recast__plus">⬢</span></span>
             <span class="card__name">三维立体图…</span>
+          </button>
+          <button
+            class="card card--recast card--pick"
+            title="把画布上已有的图片重新识别成可拖顶点的数学图形 —— 识别完可「插入为新图形」或「替换这张图片」"
+            @click="recastFromCanvas"
+          >
+            <span class="card__thumb"><span class="recast__plus">▣</span></span>
+            <span class="card__name">自画布重建…</span>
           </button>
           <button
             v-for="p in SOLID_FIGURE_PRESETS"
@@ -288,6 +322,28 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
         <template v-if="figPaletteSink">点哪张就把哪张插进 PDF 文档（不用先放到画布上，插入后仍可移走）</template>
         <template v-else>点击插入；插入后可在画布拖动缩放到合适大小，属性面板可改颜色 / 线宽 / 填充</template>
       </div>
+      <!-- 自画布重建：当前页有多个（或 0 个）图片元素时的挑图弹层 -->
+      <div v-if="imgPick" class="imgpick" @click.self="imgPick = false">
+        <div class="imgpick__box">
+          <div class="imgpick__hd">选一张画布上的图片<em>共 {{ pageImages.length }} 张</em></div>
+          <div v-if="pageImages.length" class="imgpick__list">
+            <button
+              v-for="(e, i) in pageImages"
+              :key="e.id"
+              class="imgpick__it"
+              title="重建这张（识别完可替换它本身）"
+              @click="pickCanvasImage(e)"
+            >
+              <img :src="e.src" alt="">
+              <span>图片 {{ i + 1 }}</span>
+            </button>
+          </div>
+          <div v-else class="imgpick__empty">
+            当前页还没有图片元素 —— 先用上面的「自图片重建…」选一张线稿，或把图片拖进画布 ✓
+          </div>
+          <button class="imgpick__x" @click="imgPick = false">取消</button>
+        </div>
+      </div>
       <input ref="fileInput" type="file" accept="image/*" style="display:none" @change="onPicked">
 
       <!-- 屏幕外渲染：插入 PDF 文档时，用"真正会插入的那个元素"在这里渲染一份再抓 SVG，
@@ -320,7 +376,7 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
   align-items: center;
   justify-content: center;
 }
-.palette__box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); padding: 14px 16px;
+.palette__box { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); padding: 14px 16px;
   max-width: 800px;
   width: 92vw;
   max-height: 86vh;
@@ -392,4 +448,17 @@ function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
 /* 屏幕外渲染容器：只为"抓一份真元素的 SVG"，不参与显示 */
 .palette__hidden { position: fixed; left: -99999px; top: 0; pointer-events: none; opacity: 0; }
 .palette__hint { margin-top: 12px; font-size: 12px; color: var(--muted); }
+
+/* 自画布重建：挑图弹层（盖在面板内部，不动全局层级） */
+.imgpick { position: absolute; inset: 0; z-index: 5; background: rgba(20, 24, 34, 0.45); display: flex; align-items: center; justify-content: center; }
+.imgpick__box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); padding: 14px 16px; width: min(560px, 86%); max-height: 72vh; display: flex; flex-direction: column; }
+.imgpick__hd { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
+.imgpick__hd em { font-style: normal; font-weight: 400; font-size: 12px; color: var(--muted); margin-left: 6px; }
+.imgpick__list { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; overflow: auto; }
+.imgpick__it { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px; cursor: pointer; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; color: var(--text); }
+.imgpick__it:hover { background: var(--brand-soft); border-color: var(--brand-400); }
+.imgpick__it img { width: 100%; height: 76px; object-fit: contain; background: #fff; border-radius: 4px; }
+.imgpick__empty { font-size: 13px; color: var(--muted); line-height: 1.7; padding: 4px 2px 2px; }
+.imgpick__x { margin-top: 12px; align-self: flex-end; padding: 5px 14px; font-size: 12px; cursor: pointer; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--gray-600); }
+.imgpick__x:hover { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); }
 </style>
