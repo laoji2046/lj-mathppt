@@ -1,7 +1,7 @@
 /**
  * 线稿自动矢量化：位图 → 顶点 + 边表 + 虚实线。
  *
- * 「复刻图形」里那 8 套是手工量的；这个模块把「量」这一步自动化：
+ * 「图形重建」里那 8 套是手工量的；这个模块把「量」这一步自动化：
  * 试卷 / 讲义里的立体几何插图都是干净的黑白线稿，直接把它拆成
  * 「归一化顶点 + 边拓扑 + 哪条线是虚线」，出来就是普通的数学图形元素，可以拖点、改线型。
  *
@@ -383,6 +383,97 @@ export interface VectorizeOpt {
    *    · 真图：`perp=4` 时 `4.png` 9→**8**（落在线上 1→**0**）、`9.png` 12→**11**（落在线上 4→3）；
    *      `perp=6` 再改善 `2.png` 13→**12**（落在线上 2→**1**、悬空 4→**3**）✓ 都是改善、无变差 ✓ */
   dashPrunePerp?: number
+  /** 【v1543】`pruneDashDup` 是否也剪"**实线**重复残段"（默认 0，待验）。
+   *
+   * 为什么需要：原判据②要求"悬空端挂的那条边**是虚线**"、③要求"落在**另一条虚线**内部" ✗ ——
+   *   但真图上同一族的重复残段**也会是实线** ✗
+   *
+   * ★ 这一族是 v1543 用**修正后的 `_sickcheck.cjs`** 才发现的（原先被误报成"★漏边" ✗）：
+   *   `9.png  v2(200,224)实`  墨占比 100%、延伸方向**已被别的边覆盖 100%** ← 落在 `4-1虚` 内部
+   *   `10.png v3(240,167)实`  覆盖 100%
+   *   `12.png v8(434,209)虚`  覆盖 100%
+   *   → **三张图同一病根** ✓（比原先以为的"单张孤例"有价值得多 ✓）
+   *
+   * 病根（`9.png` 实测 ✓，`_inkprobe.cjs --seg 210,188,164,372`）：原图那条线
+   *   **上段是 104px 连续实线**（t=0.00~0.55）、**下段才是短划虚线**（t=0.56~0.98，断口 1~3px + 一个 29px）
+   *   → 重建把它**整条**标成了 `4-1虚`（**虚线吞掉了实线段** ✗）→ `2-1实` 只是**重复的实线残段** ✗
+   *   → 正确修法是"**去掉重复**"而不是"补接"✓（补接只会让重复更严重 ✗）
+   *
+   * 用法：1 = 只放宽②（允许悬空端挂**实线**残段）。③ 仍要求落在**虚线**边内部 ✓
+   *   ⚠ ④ 共线闸门（`dashPruneCos`，默认 0.98）**必须保留** —— 它是"重复的墨"与
+   *     "真的短线头搭在线上"的**唯一可判区别** ✓（两者垂距/度数完全一样 ✗）
+   *   ⚠ ⑥（`dashPruneLabelR`）也要保留 —— 见下
+   *
+   * ⛔ **实测未转正（v1543），默认 0** ✗ —— 有效果但过不了"真值图不能变差"这条硬标准：
+   *   · ✓ 有效：`9.png` 顶点 11→**10**、边 18→**17**、落在线上 3→**2**；
+   *     `10.png` 顶点 9→**8**、边 17→**16**、落在线上 1→**0**；`12.png` 不动
+   *   · ✓ 合成基准 8 张**逐位不动**（97.2 / 86.5 / 82.5 / 78.5）
+   *   · ✗ **破实图锁**：`3-人工修正` V18/E18 → **V16/E16**（剪掉 `#20` 两个点）
+   *   · ✗ 曾试过"跟着一起放宽③（允许落在**实线**边内部）"→ 更糟，见 ③ 处注释 ✗
+   *
+   * **为什么卡住**：`3-人工修正` 上被剪的 `#20` 两处，⑥ 的"附近有标注"闸门**没能护住** ——
+   *   实测最近标注 **166px / 162px**（门槛 52px）。根因是**注入的标注集不完整**：
+   *   那张图有 **18 个顶点、只注入了 9 个标注框** ✗ → 真顶点也可能没标注 ✗
+   *   （`_realview.cjs` 输出 `labels=8 [注入标注框 9]` ✓）
+   *   → ⑥ 在 `3-人工修正` 上护住了 **4/5** 个候选（标注距离 23 / 48 / 32 / 9 / 49 / 46px）✓，只有 `#20` 漏网 ✗
+   *
+   * **原图像素裁决（已做，两处结论不同 ✗）**：
+   *   · `#20(486,481)` 的实线残段 `#20—#5(538,482)` 落在 `#27(223,467)—#36(642,481)虚` 的 63% 处：
+   *     `_inkprobe --box 470,466,570,490` 显示 y≈480-483 是一条**虚线**（短划 ~15px、间隙 ~4-5px），
+   *     x≈537 有一条**竖实线**（`#5` 正是交点）。而 `#20` **正上方没有任何竖线** → 它**不是岔路口**、
+   *     是虚线**上的一个多余点** ✗ → **剪掉是对的** ✓（即锁里的 V18 在这里其实是错的）
+   *   · `#20(545,296)` 的 `#20—#1(560,318)` 落在 `#7(432,121)—#15(649,463)虚` 的 51% 处：
+   *     那块区域**两条斜线交织**（`--box 530,286,575,326`），判据本身模糊、**结论未定** ⚠
+   *   → 两处一处支持剪、一处未定 ⇒ **证据不足以改锁**，保持默认 0 ✓
+   *
+   * **下一步（谁接着做）**：把 `#20(545,296)` 那块用更细的采样（`--step 1` + 更宽窗口）看全，
+   *   若能证明它也是虚线上的多余点 → 就可以把锁改成 V16 并转正本选项 ✓ */
+  dashPruneSolid?: number
+  /** 【v1543】配合 `dashPruneSolid` 的**字母距离门槛**（px，默认 `0.05 × 对角线`）。
+   *  判据：悬空端 `v` 到任一字母标注中心 < 这个门槛 → **判定为真顶点、不剪** ✓
+   *  ★ 这是"重复的墨"与"真顶点"的**唯一正交信息**（几何判据完全分不开 ✗，见 `dashPruneSolid` 注释） */
+  dashPruneLabelR?: number
+  /** 【v1543】`extendDashed` 的 `findAlong` 是否加"**延伸路径上不能是连着的一片墨**"这道闸门
+   *  （默认 0）。原理与实测见 `findAlong` 内的注释 ✓
+   *
+   * ⛔ **实测否掉（v1543），别再翻** ✗ —— 两个版本都过不了：
+   *   · **`=1` 墨占比版**：合成基准 顶点精度 86.5→**76.8**、边召回 82.5→**78.4**、
+   *     边精度 78.5→**72.0**；实图锁 4 张全破（`demo111` V9→**V11**、`P-ABCD-EF` V9→**V15**）✗✗
+   *     原因：虚线短划密时，路径中段本来就有墨 → 把**正当的**延伸全挡了 ✗
+   *   · **`=2` 最长连续墨段版**（`extendMaxRun`）：信号对了，但**档位无解** ✗
+   *     `maxRun=24/32/40/48` → `P-ABCD-EF` V9→**V11** ✗（破锁）；
+   *     `maxRun=64` → 合成基准 + 4 张锁**全绿** ✓，**但对 6 张真图（`2/4/6/9/10/12.png`）
+   *     **逐位不动** ✗✗ —— 即"绿"是因为**它几乎不触发**，不是因为它修对了 ✗
+   *
+   * ★★ **否掉它的真正收获（这条比选项本身重要）**：
+   *   它证明了 **`9.png` 的"虚实归属错误"根本不在 `extendDashed` 这一层** ✓
+   *   证据（`dashDebug=1` 实测）：`9.png` 那条"吞掉实线段"的虚线边 `#2(201,224)—#5(162,362)`
+   *   在**早期补接**（~2718 行）运行时**就已经存在**了，而 `extendDashed` 在 **3326 行**才跑 ✗
+   *   → 病根在**更上游**：初始矢量化（`vectorizeFromInk`）里的**短划/实线分类**、
+   *     或"骨架 → 图"那一步就把整条线（上段 104px 实线 + 下段短划）**判成了一整条虚线** ✗
+   *   → 下一步应该去查**短划分类**（哪个函数给 `edge[2]` 赋值），别再在 `extendDashed` 上花时间 ✓ */
+  extendInkGate?: number
+  /** 【v1543】配合 `extendInkGate=2` 的**最长连续墨段上限**（px，默认 24）。
+   *  延伸路径上出现比这个更长的连续墨 → 判定那是**实线**（虚线是短划 + 间隙）→ 不延伸 ✓ */
+  extendMaxRun?: number
+  /** 【v1543】`linkOK` 的**最小间隙门槛**（px，默认 0 = 原行为）。
+   *  思路：虚线链的相邻短划之间**必须有真实的缝** ✓，而原来 `gap = 0`（首尾相接/重叠）
+   *  也允许链接 → 一条**实线**被骨架在岔路口切成的碎片也能被编进"虚线链"、
+   *  于是整条实线被标成 `dash: 1` ✗
+   *
+   * ⛔ **实测否掉（v1543），别再翻** ✗：`linkMinGap = 2 / 4 / 6` 三档
+   *   · 合成基准 + 4 张实图锁**全部保住** ✓（只有垂直误差 0.38→0.37/0.39、平行 0.45→0.48 的抖动）
+   *   · 但对 6 张真图（`2/4/6/9/10/12.png`）**逐位不动** ✗✗
+   *  → 结论：`9.png` 的"虚实归属错误"**不是**"首尾相接的碎片被编进虚线链"造成的 ✗
+   *
+   * ★ 连同上一条 `extendInkGate` 的否定，v1543 一共排除了**两个**关于
+   *   "9.png 那条虚线为什么吞掉了 104px 实线"的假设（`extendDashed` 层 ✗、链编成层 ✗）
+   *   → 剩下的可疑处：**`segs` 本身是怎么分段的**（`isCurve` / `aId`/`bId` 的匹配、
+   *     以及 `s.len <= maxPiece` 那条"自由短段"判据）—— 见 2356~2463 行 ✓ */
+  linkMinGap?: number
+  /** 【v1543】配合 `extendInkGate` 的**墨占比门槛**（默认 0.35，与早期补接的判据④同款）。
+   *  延伸路径中段（t=0.2~0.8）的墨占比 > 这个值 → 判定"那里本来就有线" → 不延伸 ✓ */
+  extendInkTol?: number
   /** 【v1537】"打断穿越"：一条边的**内部**从另一个顶点的正上方穿过去却没断开（真图上很常见）。
    *  **0 = 关（默认 ✓，留档）**；1 = 在该顶点处**一拆为二**；2 = **只截断**（丢被覆盖的那段）；
    *  3 = 同 2 但只处理**虚线**边。
@@ -477,7 +568,9 @@ export interface VectorizeOpt {
    *  ⚠ 实测 1 会误合并真顶点（1-原图 10→8 ✗、3-人工修正 19→18 ✗），所以默认不动 ✓。 */
   healByBlob?: number
   /**
-   * 【v1540 · 默认 1 ✓】`healCutLines` 的 **T 形交汇缺口**：把"线穿过 T 形点继续延伸"也补上。
+   * 【v1540 · 默认 1 ✓】早期补接（2718 行那道匿名循环）的 **T 形交汇缺口**：把"线穿过 T 形点继续延伸"也补上。
+   * ⚠ 命名勘误（v1543）：这里**不是** `healCutLines`（那个在 3498 行、是**最后**一道补接）✗ ——
+   *   本选项、`healMaxD`、`healDeg0`、`healByBlob`、`healTee` 全都作用在**早期那道匿名循环**上 ✓
    *
    * 病根（`7.png` 实测 ✓）：`facing` 判据要求"两点**各自**都有一条边**同向**指着对方"，
    *   而 T 形交汇点（`v8(269,368)`，度 3：边朝上 `3-8` / 朝左 `8-5` / 朝右 `8-7`）**没有朝下的边** ✗
@@ -511,6 +604,28 @@ export interface VectorizeOpt {
    *   · `--check vecbase10.json` 无回归 ✓（默认值改动后基线依然有效，不必新建基线）
    */
   healTee?: number
+  /** 【v1543】早期补接（2718 行那道匿名循环）的**距离上限**（px，默认 48）。
+   *  ⚠ 真图上"被切断的线段"可能比 48px 长得多 —— 实测 `9.png` 的 `v2(200,224)`（度 1 悬空**实**线端）
+   *  到它该接的 `v9(186,285)` 距离 **62.6px** ✗
+   *  ⛔ **实测否掉（v1543），别再翻** ✗：放宽到 64/80 之后
+   *    · `9.png` **完全没变** ✗（卡点不是距离 —— 见 `healDeg0`，真卡点是**判据④**）
+   *    · `2.png` 反而变差：顶点 12→**13**、边 19→**21**、虚 11→**13** ✗✗（放宽距离引入了误接）
+   *    · 合成基准 48~80 档**全部不变**（合成图没有"长距离漏边"这个毛病）
+   *  → **默认保持 48** ✓ */
+  healMaxD?: number
+  /** 【v1543】早期补接允许"**目标点是度 0 的孤立点**"（默认 0）。
+   *  病根假设：`9.png` 的 `v2(200,224)` 度 1 悬空**实**线端，该接的 `v9(186,285)` 在那个阶段
+   *  是度 0（孤立点、没有边）→ `facing()` 对度 0 恒 false → 接不上 ✗（`healTee` 也救不了：它要度 ≥ 3 ✗）
+   *
+   *  ⛔ **实测否掉（v1543），别再翻** ✗（`--opt healDeg0=1` 全量 A/B）：
+   *    · 合成基准 8 张 + 实图锁 4 张**逐位不动** ✓
+   *    · ★ 想修的 `9.png` **一动不动** ✗✗ —— 因为真正的闸门是**判据④**，不是 `facing` ✗
+   *      （`labelDebug=1` 实测：`#2(201,224)d2 — #15(188,267)d0` 间距 45、`facing` 以
+   *       `mx(i)=1.00` **通过** ✓，然后被 ④ 以"墨占 **0.93**（零容差 **0.93**）> 0.35"挡下 ✗）
+   *    · 反倒把 `2.png` 全面弄坏：顶点 12→**13**、边 19→**20**、虚 11→**12**、落在线上 1→**2** ✗✗
+   *    · `6.png` 落在线上 0→**1** ✗、`12.png` 悬空虚线端 1→**2** ✗
+   *  → **默认 0** ✓。**病根不在这一层** —— 见 `healMaxD` 与 README v1543 的"虚实归属"一节 ✗ */
+  healDeg0?: number
   /**
    * 【A1 · 可注入】外部给定的**字形识别结果** —— 让 node 探针也能覆盖「依赖 labels」的分支。
    *
@@ -2300,6 +2415,16 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     const b0 = along(B.a), b1 = along(B.b)
     const lo = Math.min(b0, b1), hi = Math.max(b0, b1)
     const gap = Math.max(0 - hi, lo - ul)
+    // 【v1543】★ 最小间隙门槛：**虚线链的相邻短划之间必须有真实的缝** ✓
+    //   原来 `gap = 0`（首尾相接/重叠）也允许 ✓ → 一条**实线**被骨架在岔路口切成的碎片
+    //   也能被编进"虚线链"，于是整条实线被标成 `dash: 1` ✗
+    //   ★ 这是 `9.png`"**虚线吞掉 104px 实线段**"最可能的机制（实测那条错边的
+    //     `#2(201,224)—#5(162,362)虚` 在 `extendDashed` 之前就已存在 ✓ 见 `extendInkGate` 注释）
+    //   ⚠ `gap` 的定义是"沿方向的距离"：**相接 = 0**、重叠取 0 ✓
+    //   ⚠⚠ `gap` 其实**可以是负数**（B 整个落在 A 的"后方"时，`0 - hi` 与 `lo - ul` 都是负的 ✗）
+    //      → 必须先 `Math.max(0, gap)` 再比，否则默认值 0 也会挡掉这批合法链接 ✗
+    //        （实测：直接写 `gap < 0` 会让默认口径也变 —— 垂直误差 0.38→0.37、平行 0.45→0.48 ✗）
+    if (Math.max(0, gap) < (opt.linkMinGap ?? 0)) return false
     return gap <= Math.max(20, 3.5 * Math.max(ul, vl))
   }
   const freeSegs: Seg[] = [], fixedSegs: Seg[] = []
@@ -2695,8 +2820,10 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   mergeVerts(opt.mergeR ?? 8)
   dedupe()
 
-  // 【字母切断线的补接】被抹掉的字母会把压在它下面的线切断，于是同一条线上留下两个近邻顶点 ——
-  // 多出来的那个就是用户说的"不必要的点"（实测 (157,163)/(176,198)=C₂、(292,466)/(286,486)=A₂）。
+  // ---------- ★【早期补接】把"被字母切断的线"接回去（这道匿名循环 ≠ 3498 行的 `healCutLines` ✗） ----------
+  // ⚠ 命名勘误（v1543）：本文件里有**两处**补接，很容易搞混 —— 认准行号 ✗→✓：
+  //   · **这里（~2718）**：早期那道匿名循环。选项 `healMaxD` / `healDeg0` / `healTee` / `healByBlob` 作用于此 ✓
+  //   · **3498 行**：`healCutLines(bodyH)`，真正的**最后**一道（缺口 ≤ 1.2 字高、两头都度 1、`cos ≤ −0.92`）✓
   // 判据三条一起用：①两点够近；②**正中间确实有一个被抹掉的字母**；③两点各自都有一条边大致指着对方
   // （同一条线的两截，而不是拐角）。三条都不满足就不接 —— 宁可少接不可错接。
   for (let guard = 0; guard < 80; guard++) {
@@ -2706,7 +2833,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       for (let j = i + 1; j < verts.length; j++) {
         const dx = verts[j].x - verts[i].x, dy = verts[j].y - verts[i].y
         const d = Math.hypot(dx, dy)
-        if (d < 2 || d > 48) continue
+        if (d < 2 || d > (opt.healMaxD ?? 48)) continue
         // 【v1523】①' **至少有一头是"断头"（度 1）** —— 补接要修的正是"线被字母切断、留下两个半截端点"。
         //   两头都是有连线的正常顶点时合并，就是在把两个真顶点粘成一个 ✗（实测 3-人工修正 19→16 ✗、
         //   user1 10→8 ✗）。断头判据把这一整类误合并挡在门外 ✓。
@@ -2745,33 +2872,52 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
           return { mx, mn }
         }
         const facing = (v: number) => edgeCos(v).mx > 0.8
-        /**
-         * 【v1540】**纯 T 形点**：没有任何边朝对方（`mx` 也小）+ 有边反向共线（`mn < −0.8`，
-         *   即两点连线是那条边的**延长线**）✓
-         *   ★ 这一条是收紧的关键 ✗→✓：只判 `backCollinear` 时，**真岔路口**也满足（一条线穿过它）
-         *   → 实测 `7.png` 一次命中 **5 对**、顶点 14→**10** ✗✗（`#6(137,392)d4` 这种真四岔口被合并 ✗）。
-         *   加上 `mx < 0.8` 之后只剩 `#12—#14` 一对 ✓ ——
-         *   `#6` 的 `mx = 0.96`（有边顺接 = 一条线穿过它）→ 排除 ✓；
-         *   `#12` 的 `mx = 0.02`（边全朝上/左/右，**没有**朝下的）→ 命中 ✓
-         */
-        const teeV = (v: number) => degOf(v) >= 3 && edgeCos(v).mx < 0.8 && edgeCos(v).mn < -0.8
-        if (!facing(i) || !facing(j)) {
-          // 【v1540 · healTee】T 形交汇缺口 —— 见 `VectorizeOpt.healTee` 注释 ✓
-          //   判据：**一头是纯 T 形点、另一头顺接**（两点连线是 T 形点那条反向边的延长线 ✓）
-          if ((opt.healTee ?? 1) === 0) continue
-          if (!((teeV(i) && facing(j)) || (teeV(j) && facing(i)))) continue
-          if ((opt.labelDebug ?? 0) !== 0) console.log('[heal] T 形缺口: #' + i + '(' + verts[i].x.toFixed(0) + ',' + verts[i].y.toFixed(0) + ') — #' + j + '(' + verts[j].x.toFixed(0) + ',' + verts[j].y.toFixed(0) + ')  mx(i)=' + edgeCos(i).mx.toFixed(2) + ' mn(i)=' + edgeCos(i).mn.toFixed(2) + ' mx(j)=' + edgeCos(j).mx.toFixed(2) + ' mn(j)=' + edgeCos(j).mn.toFixed(2))
+        // 【v1543】度 0 的孤立点**没有边** → `facing` 恒 false ✗（`9.png` 的 `v9` 就是这种）
+        //   允许"恰好一头是孤立点"时只要求**另一头** facing ✓（两头都是孤立点则不接）
+        const isoI = degOf(i) === 0, isoJ = degOf(j) === 0
+        // ★ 这里**必须**用 `if / else { }` 而不是 `if (...) { ... } else const x = ...` ✗ ——
+        //   `else` 后面跟 `const` 声明在 JS 里是**语法错误**（"declaration in single-statement context"），
+        //   esbuild 直接报 `Cannot use a declaration in a single-statement context` ✗
+        const deg0Only = (opt.healDeg0 ?? 0) !== 0 && isoI !== isoJ
+        if (deg0Only) {
+          if ((opt.labelDebug ?? 0) !== 0) {
+            const nbrs = (v: number) => outEdges.filter((E) => E[0] === v || E[1] === v).map((E) => {
+              const o = E[0] === v ? E[1] : E[0]
+              return '#' + o + '(' + verts[o].x.toFixed(0) + ',' + verts[o].y.toFixed(0) + ')' + (E[2] ? '虚' : '实')
+            }).join(' ') || '（无边）'
+            console.log('[heal]   deg0 对: mx(i)=' + edgeCos(i).mx.toFixed(2) + ' mx(j)=' + edgeCos(j).mx.toFixed(2) + (facing(i) || facing(j) ? ' ✓ 过' : ' ✗ facing 挡住') + '  i 的边: ' + nbrs(i) + '  j 的边: ' + nbrs(j))
+          }
+          if (!(facing(i) || facing(j))) continue
+        } else {
+          /**
+           * 【v1540】**纯 T 形点**：没有任何边朝对方（`mx` 也小）+ 有边反向共线（`mn < −0.8`，
+           *   即两点连线是那条边的**延长线**）✓
+           *   ★ 这一条是收紧的关键 ✗→✓：只判 `backCollinear` 时，**真岔路口**也满足（一条线穿过它）
+           *   → 实测 `7.png` 一次命中 **5 对**、顶点 14→**10** ✗✗（`#6(137,392)d4` 这种真四岔口被合并 ✗）。
+           *   加上 `mx < 0.8` 之后只剩 `#12—#14` 一对 ✓ ——
+           *   `#6` 的 `mx = 0.96`（有边顺接 = 一条线穿过它）→ 排除 ✓；
+           *   `#12` 的 `mx = 0.02`（边全朝上/左/右，**没有**朝下的）→ 命中 ✓
+           */
+          const teeV = (v: number) => degOf(v) >= 3 && edgeCos(v).mx < 0.8 && edgeCos(v).mn < -0.8
+          if (!facing(i) || !facing(j)) {
+            // 【v1540 · healTee】T 形交汇缺口 —— 见 `VectorizeOpt.healTee` 注释 ✓
+            //   判据：**一头是纯 T 形点、另一头顺接**（两点连线是 T 形点那条反向边的延长线 ✓）
+            if ((opt.healTee ?? 1) === 0) continue
+            if (!((teeV(i) && facing(j)) || (teeV(j) && facing(i)))) continue
+            if ((opt.labelDebug ?? 0) !== 0) console.log('[heal] T 形缺口: #' + i + '(' + verts[i].x.toFixed(0) + ',' + verts[i].y.toFixed(0) + ') — #' + j + '(' + verts[j].x.toFixed(0) + ',' + verts[j].y.toFixed(0) + ')  mx(i)=' + edgeCos(i).mx.toFixed(2) + ' mn(i)=' + edgeCos(i).mn.toFixed(2) + ' mx(j)=' + edgeCos(j).mx.toFixed(2) + ' mn(j)=' + edgeCos(j).mn.toFixed(2))
+          }
         }
         // ★ v1525：**两点之间必须是"断的"** ✓ —— 线被字母切断时，那里的墨**跟着字母一起被抹掉了** ✓；
         //   而两个**真顶点**之间的线是连着的（虚线的短划也算 ✓）✗ —— 这一条专治"误合并真顶点" ✗。
         //   为什么以前没发现：node 端没有字形识别 → 这一刀根本不触发 ✗，只有**真浏览器**量得出来 ✓
         //   （实测：不加这条时 demo111 被并成 11 ✗、3-人工修正 19→18 ✗）。
-        let inkHit = 0, samples = 0
+        let inkHit = 0, samples = 0, strictHit = 0
         for (let k = 1; k <= 15; k++) {
           const t = k / 16
           const qx = Math.round(verts[i].x + dx * t), qy = Math.round(verts[i].y + dy * t)
           if (qx < 0 || qy < 0 || qx >= W || qy >= H) continue
           samples++
+          if (ink[qy * W + qx]) strictHit++
           let hit = false
           for (let oy = -1; oy <= 1 && !hit; oy++) {
             for (let ox = -1; ox <= 1 && !hit; ox++) {
@@ -2782,7 +2928,18 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
           }
           if (hit) inkHit++
         }
-        if (samples && inkHit / samples > 0.35) continue
+        if (samples && inkHit / samples > 0.35) {
+          // 【v1543】把实际墨占比打出来 —— ★ 这一条是"探针口径"最容易搞混的地方：
+          //   外部探针（`_inkprobe.cjs`，自己解码 PNG + 自己的灰度阈值）说"全程有墨"，
+          //   但**管道自己的 `ink` 掩码**（`inkFromRgba` + `stripText` 之后）可能完全不同 ✗
+          //   → 判据④ 量的是**管道掩码**，两者不一致时以管道为准 ✓
+          //   ★★ 同时打**零容差**占比（只看落点那一个像素）：
+          //     `3×3` 有容差 → 1~2px 的小断口会被**糊过去**（看着"有墨"），
+          //     但**细化（thinning）照样会在那里断开** ✗ → 于是出现"墨占 0.93 却接不上"的怪象 ✓
+          //     两个数字一比就知道是"真连续"还是"被容差糊住了" ✓
+          if ((opt.labelDebug ?? 0) !== 0) console.log('[heal]   ④ 墨占 ' + (inkHit / samples).toFixed(2) + '（零容差 ' + (strictHit / samples).toFixed(2) + '）> 0.35 ✗ 挡住（这段在管道掩码里是连着的 → 不是被字母切断）')
+          continue
+        }
         verts[i].x = (verts[i].x + verts[j].x) / 2
         verts[i].y = (verts[i].y + verts[j].y) / 2
         for (const e of outEdges) { if (e[0] === j) e[0] = i; if (e[1] === j) e[1] = i }
@@ -2884,6 +3041,46 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       if (d < 3 || d > r) continue
       if ((vx / d) * dx + (vy / d) * dy < 0.9) continue          // 偏离方向 25° 以上不要
       if (Math.abs(vx * dy - vy * dx) > perpMax) continue        // 横向偏离超限不要（dx,dy 是单位向量 → 叉积就是垂距 ✓）
+      // ★★【v1543】新增闸门：**延伸路径上不能是"连着的一片墨"** ✗→✓
+      //   虚线延伸的**本质**是"跨过**空白**去够到交点"（短划天然够不到交点，差一两个划的间距）✓
+      //   → 路径中段应该是**空的** ✓
+      //   如果路径上全是墨，说明那里**本来就有线**（实线 / 另一条线 / 已经是同一条线）
+      //   → 再连一条边就是**造重复** ✗
+      //   ★ 这条是 `9.png` / `10.png` / `12.png` / `3-人工修正` 四张图**同一个病根**的解药：
+      //     实测 `9.png`：虚线边被延伸跨过 **104px 连续实线**（原图 `v1(210,188)→v4(164,372)`
+      //     上段 t=0.00~0.55 是连续实线、下段 t=0.56~0.98 才是短划）→ 虚线**吞掉了实线段** ✗
+      //     实测 `3-人工修正`：`E27 #17→#15 长335 na=7 → #17改指#7` → 造出 **407px** 的 `#7—#15`，
+      //     而那条线上真实墨只有 ~160px（断口 99px / 26px / 29px）✗
+      //   采样取**中段 20%~80%**（避开两端：起点是短划、终点可能是横穿的另一条线 ✓）
+      //   ⚠ **`extendInkGate=1`（墨占比版）实测否掉，别再翻** ✗：虚线短划密时路径中段本来就有墨
+      //     → 合成基准 顶点精度 86.5→**76.8**、边召回 82.5→**78.4**、边精度 78.5→**72.0**，
+      //       实图锁 4 张全破（`demo111` V9→**V11**、`P-ABCD-EF` V9→**V15**）✗✗
+      //   → 正确的信号不是"墨占比"，是"**最长连续墨段**"：虚线 = 短划（≤ ~18px）+ 间隙；
+      //     实线 = 连续长墨 ✓ 用 `extendInkGate=2`（`extendMaxRun` 默认 24px）✓
+      if ((opt.extendInkGate ?? 0) === 1) {
+        let hit2 = 0, n2 = 0
+        for (let k = 2; k <= 8; k++) {
+          const t = k / 10
+          const qx = Math.round(p.x + vx * t), qy = Math.round(p.y + vy * t)
+          if (qx < 0 || qy < 0 || qx >= W || qy >= H) continue
+          n2++
+          if (ink[qy * W + qx]) hit2++
+        }
+        if (n2 && hit2 / n2 > (opt.extendInkTol ?? 0.35)) continue
+      } else if ((opt.extendInkGate ?? 0) === 2) {
+        // 沿路径逐像素走，统计**最长连续有墨段**（两端各留 3px 不计 —— 起点是短划、终点可能横穿另一条线 ✓）
+        const total = Math.round(d)
+        const ux2 = vx / d, uy2 = vy / d
+        let run = 0, maxRun = 0
+        for (let s = 3; s <= total - 3; s++) {
+          const qx = Math.round(p.x + ux2 * s), qy = Math.round(p.y + uy2 * s)
+          if (qx < 0 || qy < 0 || qx >= W || qy >= H) { run = 0; continue }
+          // ±1 邻域（抗锯齿的细线常常只有半像素宽 ✓），但**不**跨像素连段（避免把小间隙糊掉 ✗）
+          const on = ink[qy * W + qx] || (qy > 0 && ink[(qy - 1) * W + qx]) || (qy + 1 < H && ink[(qy + 1) * W + qx])
+          if (on) { run++; if (run > maxRun) maxRun = run } else run = 0
+        }
+        if (maxRun > (opt.extendMaxRun ?? 24)) continue
+      }
       // 岔路口（度 >= 2）比"上一条短划的断头"更可能是这条虚线真正的落点
       if (deg[i] >= 2) { if (d < bdJ) { bdJ = d; bestJ = i } }
       else if (d < bd) { bd = d; best = i }
@@ -2969,11 +3166,30 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       for (let v = 0; v < verts.length && !acted; v++) {
         if (deg[v] !== 1) continue
         const ei0 = inc[v][0]
-        if (!outEdges[ei0][2]) continue                        // 只处理虚线碎段
+        // 【v1543】② 原来只处理**虚线**碎段 ✗ → `dashPruneSolid=1` 时也允许实线残段 ✓（见选项注释）
+        if (!outEdges[ei0][2] && (opt.dashPruneSolid ?? 0) === 0) continue
         const u = outEdges[ei0][0] === v ? outEdges[ei0][1] : outEdges[ei0][0]
         const P = verts[v]
+        // ⑥【v1543】`dashPruneSolid=1` 时**必须**再问一句"`v` 附近有没有字母标注" ✓
+        //   ★ 这是"**重复的墨**"与"**真顶点**"的**唯一正交信息**（几何判据完全分不开 ✗）：
+        //     教材图里真顶点几乎总带一个字母（`A`/`B`/`P`…），而重建出来的假端点没有 ✓
+        //   ⚠ 不加这条会破实图锁 ✗：`3-人工修正` V18→**V16**（那张图是**人工修正过**的，
+        //     它的悬空端全是**真的**）—— 与 v1539 `overlapStub` 踩的是**同一个坑** ✓
+        //     （`overlapStub` 的注释里早就写明了"缺的就是这个正交信息"，这里补上 ✓）
+        if ((opt.dashPruneSolid ?? 0) !== 0) {
+          const rLbl = opt.dashPruneLabelR ?? 0.05 * diag
+          let nearLbl = false, dLbl = 1e9
+          for (const L of letterPts) { const dd = Math.hypot(L.cx - P.x, L.cy - P.y); if (dd < dLbl) dLbl = dd; if (dd < rLbl) nearLbl = true }
+          if ((opt.dashDebug ?? 0) !== 0) console.log('[dash]  ⑥ #' + v + '(' + P.x.toFixed(0) + ',' + P.y.toFixed(0) + ') 最近标注 ' + (dLbl > 1e8 ? '无' : dLbl.toFixed(0) + 'px') + ' / 门槛 ' + rLbl.toFixed(0) + ' → ' + (nearLbl ? '判定真顶点、不剪 ✓' : '无标注、可剪'))
+          if (nearLbl) continue
+        }
         for (let k = 0; k < outEdges.length; k++) {
           if (k === ei0 || !outEdges[k][2]) continue
+          // ⚠ 【v1543】③ **不能**跟着 `dashPruneSolid` 一起放宽 ✗→✓（实测破锁）：
+          //   放宽③（允许落在**实线**边内部）会剪掉 `3-人工修正` 的 `#20` 两个**真顶点** ✗✗
+          //   （`dashDebug=1` 实测：`#20(545,296)` 的虚线 `#20—#1` 落在 `#7—#15` 的 51% 处、
+          //     `#20(486,481)` 的虚线 `#20—#5` 落在 `#27—#36` 的 63% 处 → V18→**V16** ✗）
+          //   而 `9.png` 要剪的 `2-1实` 落在 `4-1虚`（**本来就是虚线**）内部 ✓ → 只需放宽② ✓
           const e2 = outEdges[k]
           if (e2[0] === v || e2[1] === v) continue             // 自己那条不算
           const A = verts[e2[0]], B = verts[e2[1]]
@@ -3011,7 +3227,9 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
             if (e[1] > v) e[1]--
           }
           if ((opt.dashDebug ?? 0) !== 0) console.log('[dash]  剪重复碎段: #' + v + '(' + P.x.toFixed(0) + ',' + P.y.toFixed(0) +
-            ') 的虚线 #' + v + '—#' + u + ' 落在 #' + e2[0] + '—#' + e2[1] + ' 的 ' + (t * 100).toFixed(0) + '% 处')
+            ') 的边 #' + v + '—#' + u + '(' + verts[u].x.toFixed(0) + ',' + verts[u].y.toFixed(0) + ')' + (outEdges[ei0][2] ? '虚' : '**实**') +
+            ' 落在 #' + e2[0] + '(' + A.x.toFixed(0) + ',' + A.y.toFixed(0) + ')—#' + e2[1] + '(' + B.x.toFixed(0) + ',' + B.y.toFixed(0) + ')' + (e2[2] ? '虚' : '**实**') +
+            ' 的 ' + (t * 100).toFixed(0) + '% 处')
           acted = true
           break
         }
@@ -3357,7 +3575,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
 
   // 【v1518】几何规整（约束吸附）—— 放在所有形态改动之后、导出之前 ✓
   snapGeometry(verts, outEdges, diag, opt, fittedArcs)
-  // 【v1519 · C】模板匹配：这张图如果就是「复刻图形」里那 8 套之一，就直接换成人工核对过的几何
+  // 【v1519 · C】模板匹配：这张图如果就是「图形重建」里那 8 套之一，就直接换成人工核对过的几何
   //   （只在拓扑完全一致时才吸 —— 顶点/边/虚实线一条不增不减；有弧不匹配）
   if ((opt.figMatch ?? 1) !== 0 && !fittedArcs.length) {
     const flat: number[] = []
