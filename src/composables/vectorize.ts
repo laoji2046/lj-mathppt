@@ -418,6 +418,24 @@ export interface VectorizeOpt {
   segDbgY1?: number
   /** 【v1545】`segDebug` 的窗口半径（默认 40px） */
   segDbgR?: number
+  /** ⛔⛔【v1547 否掉，**默认 0，别再翻**】骨架追踪末端"吸附"到被占用的节点像素。
+   *
+   *  **病根是真的**（v1547 `dbg` 插桩实测，见 `buildGraph` 里那段注释）：`9.png` 那条实线段
+   *  的末端停在 `(200,224)`，而真节点 `(201,224)`（c3n1）**已被 `path#17` 占用** →
+   *  `nextPixel` 无路可走 → `bId=-1` → 32px 实墨被当成"自由短划"编进虚线链 ✗
+   *
+   *  **但"事后吸附"这个修法两档都实测变差** ✗：
+   *  - 1（直接吸附）：顶点精度 86.5→**80.9**、边精度 78.5→**73.3**、
+   *    `3-人工修正` V18→**V16**、`P-ABCD-EF` E14→**E12** ✗
+   *  - 加方向闸门后**更差**（80.2 / 72.4）✗
+   *
+   *  根因：骨架是 1px 线，"8 邻接"在斜向时可能只是**擦肩**（两条线靠近处像素相邻、
+   *  但属于不同线）→ 吸附会把不同线误连 ✗；方向闸门挡不住（擦肩处方向常常同向）✗
+   *  → **"邻接 + 方向"这个维度分不开"真续接"与"擦肩"，别再调阈值** ✗
+   *
+   *  正确的下一步：查**为什么 `(201,224)` 会被占用** —— 它是 c3 节点，按
+   *  `if (isNode[cur]) break` 不该被当中间点标记 → 即 **`usedPix` 的标记策略** ✗ */
+  skSnapNode?: number
   /** 【v1535】虚线扩展时**不碰"链内节点"** —— 2 = 任何"虚线度 ≥2"的节点都不碰（**默认 ✓**）；
    *  1 = 只不碰"虚线度 2 且两条虚线边共线"的节点；0 = 关（= 旧行为 ✗）。
    *  为什么：虚线在骨架上是一**条链**（每个短划组当节点、逐段相连：A—g1—g2—C），逐条边无条件往外接会把
@@ -1859,7 +1877,7 @@ function crossNum(sk: Uint8Array, p: number, W: number, H: number) {
 
 interface SkGraph { nodes: { cx: number; cy: number }[]; paths: { pts: [number, number][]; aId: number; bId: number }[]; stubs: Int32Array }
 
-export function buildGraph(sk: Uint8Array, W: number, H: number): SkGraph {
+export function buildGraph(sk: Uint8Array, W: number, H: number, dbg = false, snapNode = false): SkGraph {
   const nbrs = (i: number) => {
     const x = i % W, y = (i / W) | 0, a: number[] = []
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
@@ -1942,7 +1960,50 @@ export function buildGraph(sk: Uint8Array, W: number, H: number): SkGraph {
         usedPix[nx] = 1; prev = cur; cur = nx
       }
       const last = pts[pts.length - 1]
-      const lastPix = last[1] * W + last[0]
+      let lastPix = last[1] * W + last[0]
+      if (dbg) {
+        // 只打印"末端靠近 (200,224)"的那几条 —— 9.png 那条被虚线吞掉的实线段就在这儿
+        if (Math.abs(last[0] - 200) <= 8 && Math.abs(last[1] - 224) <= 8) {
+          const nbs = [...nbrs(lastPix)].map((q) => `(${q % W},${(q / W) | 0})c${crossNum(sk, q, W, H)}n${isNode[q]}u${usedPix[q]}`).join(' ')
+          console.log(
+            `[sk] path#${paths.length} pts=${pts.length} 首(${pts[0][0]},${pts[0][1]}) 末(${last[0]},${last[1]}) ` +
+              `末c=${crossNum(sk, lastPix, W, H)} 末n=${isNode[lastPix]} 末u=${usedPix[lastPix]} | 邻: ${nbs}`,
+          )
+        }
+      }
+      // ★★ 病根定位（v1547，`dbg` 插桩实测）：末端紧贴一个"已被别的路径占用"的节点像素 ✓
+      //   实测原文（9.png）：
+      //     [sk] path#33 pts=33 首(191,256) 末(200,224) 末c=2 末n=0 末u=1
+      //          邻: (201,223)c2n0u1  (201,224)c3n1u1  (200,225)c2n0u1
+      //   → 真节点 (201,224) 是 c3n1（确实是节点 ✓），但 **usedPix=1（被 path#17 先占了）**
+      //   → `nextPixel` 在 (200,224) 处找不到路（唯一的节点邻居被占）→ 返回 -1 → 停在 (200,224)
+      //   → isNode=0 → bId=-1 → 那 32px 实墨被当成"自由短划"编进虚线链 ✗
+      //   ⇒ 这是 v1545「虚线吞掉实线段」病根的**最上游原因**
+      //     （v1545 只知道"bId=-1"，不知**为何**；现在知道了 ✓）
+      //
+      // ⛔⛔【v1547 否掉，别再翻】"事后吸附"这个修法**两档都实测变差** ✗
+      //   ① 直接吸附（不带闸门）：顶点精度 86.5→**80.9**、边精度 78.5→**73.3**、
+      //      `3-人工修正` V18→**V16**、`P-ABCD-EF` E14→**E12** ✗
+      //   ② 加方向闸门（末端走向 vs 进节点方向，取 dot > 0 最大者）：**更差** 80.2 / 72.4 ✗
+      //   根因：骨架是 1px 线，"8 邻接"在斜向时可能只是**擦肩**（两条线靠近处像素相邻、
+      //   但属于不同线）→ 吸附会把不同线误连 ✗；方向闸门也挡不住（擦肩处方向常常同向）✗
+      //   → **"邻接 + 方向"这个维度分不开"真续接"与"擦肩"，别再调阈值** ✗
+      //   正确的下一步：查**为什么 (201,224) 会被占用** —— 它是 c3 节点，按上面的
+      //   `if (isNode[cur]) break` 不该被当中间点标记，即 **usedPix 的标记策略** ✗
+      if (snapNode && !isNode[lastPix] && pts.length >= 2) {
+        const pv = pts[pts.length - 2]
+        const dx = last[0] - pv[0], dy = last[1] - pv[1]
+        const dl = Math.hypot(dx, dy) || 1
+        let best = -1, bestDot = 0
+        for (const q of nbrs(lastPix)) {
+          if (!isNode[q] || !usedPix[q]) continue
+          const ex = (q % W) - last[0], ey = ((q / W) | 0) - last[1]
+          const el = Math.hypot(ex, ey) || 1
+          const dot = (dx * ex + dy * ey) / (dl * el)
+          if (dot > bestDot) { bestDot = dot; best = q }
+        }
+        if (best >= 0) lastPix = best
+      }
       paths.push({ pts, aId: nodeId[start], bId: isNode[lastPix] ? nodeId[lastPix] : -1 })
     }
   }
@@ -2323,7 +2384,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   const st = stripText(comp, W, diag, m.ink, opt)
   // 【v1523】第二刀：把**贴着线的字母**从图形线里切出来（stripText 只认孤立小块 ✗，见 peelLabels）
   const sk0 = thin(st.ink, W, H)
-  const G0 = buildGraph(sk0, W, H)
+  const G0 = buildGraph(sk0, W, H, (opt.segDebug ?? 0) !== 0, (opt.skSnapNode ?? 0) !== 0)
   const peel = (opt.labelPeel ?? 1) !== 0
     ? peelLabels(st.ink, W, H, diag, opt, st.anchors, { sk: sk0, G: G0 })
     : { ink: st.ink, anchors: [] as LetterBlob[], buds: 0, sk: sk0, G: G0 }
@@ -2362,7 +2423,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     W,
   )
   const sk = peel.sk ?? thin(ink, W, H)
-  const G = peel.G ?? buildGraph(sk, W, H)
+  const G = peel.G ?? buildGraph(sk, W, H, (opt.segDebug ?? 0) !== 0, (opt.skSnapNode ?? 0) !== 0)
 
   // 【v1533】**骨架端点吸附**：细线化在"T 形交汇"处会把**支线的骨架停在主干中心线外** 1~3px
   //   （粗线尤其明显：骨架停在离主干约半个线宽处）→ 真岔路口在骨架图上**不存在** →
