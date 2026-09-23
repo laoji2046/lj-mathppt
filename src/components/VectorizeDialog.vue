@@ -721,11 +721,34 @@ function advOpt(): VectorizeOpt {
   }
   return o as VectorizeOpt
 }
-/** 有没有偏离默认值（面板头上显示一个「已改」） */
-const advDirty = computed(() => {
-  for (const g of ADV_GROUPS) for (const d of g.items) if (adv[d.k] !== d.def) return true
-  return false
+/**
+ * 调松这几项**直接**会让"多余的点 / 线段""虚线整条消失"变多 —— 面板里要显眼提示 ✓。
+ * 实测（`.probe/_demo5.cjs`，同一张 P-ABCD-EF.png）：面板全默认 10 个顶点 ✓；
+ * 「共线判据=1 + 顶点合并=0 + 虚线链吸附=0 + 几何规整=0」四项一起拉松 → **18 个顶点** ✗✗。
+ * 用户上一轮就是这么被坑的 ✗：阈值存在 localStorage 里、一直生效、还跨版本 ✓，
+ * 结果"同一张图他 18 个点、我 10 个点"✗ —— 最容易被误判成算法退步 ✓。
+ */
+const ADV_WARN: Record<string, string> = {
+  collinearCos: '调到 1 = 不再把"直线上的多余点"并掉 → 多余的点会变多 ✗',
+  mergeR: '调到 0 = 重合的顶点不再合并 → 多余的点会变多 ✗',
+  snapDash: '调到 0 = 虚线端点吸不上顶点 → 虚线变悬空长线 + 两个多余顶点 ✗',
+  snapGeo: '关掉 = 位置不再吸正（该平行 / 直角 / 等长的线不再精确）✗',
+  snapDir: '调大 = 更多边被强行吸成水平 / 45° / 竖直 ✗',
+  snapPar: '调大 = 不该平行的边也被并成一组 ✗',
+  dashMinEdge: '调到 0 = 杂点凑出的假虚线边不再被丢掉 → 多余线段会变多 ✗',
+}
+/** 偏离默认值的项（面板头上显示「已改 N 项」，展开后逐项提示 ✓） */
+const advChanged = computed(() => {
+  const out: { k: string; label: string; cur: number; def: number; warn?: string }[] = []
+  for (const g of ADV_GROUPS) for (const d of g.items) {
+    if (adv[d.k] === d.def) continue
+    out.push({ k: d.k, label: d.label, cur: adv[d.k], def: d.def, warn: ADV_WARN[d.k] })
+  }
+  return out
 })
+const advDirty = computed(() => advChanged.value.length > 0)
+/** 其中"会让多余点变多"的那几项 —— 面板头上直接点名 ✓ */
+const advRisky = computed(() => advChanged.value.filter((c) => c.warn))
 
 // ---------------- 坐标换算 ----------------
 /** 屏幕坐标 → 识别框归一化坐标（顶点坐标用的是这一套） */
@@ -1833,16 +1856,42 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <button class="vd__advhead" @click="advOpen = !advOpen">
                 <span class="vd__advcaret">{{ advOpen ? '▾' : '▸' }}</span>
                 细调阈值
-                <b v-if="advDirty" class="vd__advdot" title="已改过阈值（不是默认值）">已改</b>
+                <b
+                  v-if="advDirty"
+                  class="vd__advdot"
+                  :class="{ 'vd__advdot--risk': advRisky.length > 0 }"
+                  :title="'已改 ' + advChanged.length + ' 项（不是默认值）：' + advChanged.map((c) => c.label).join('、')">已改 {{ advChanged.length }} 项</b>
                 <span class="vd__advsub">调完点下面「按新阈值重新识别」</span>
               </button>
               <div v-if="advOpen" class="vd__advbody">
+                <div v-if="advChanged.length" class="vd__advwarn" :class="{ 'vd__advwarn--risk': advRisky.length > 0 }">
+                  <template v-if="advRisky.length">
+                    <b>⚠ 有 {{ advRisky.length }} 项会让「多余的点 / 线段」变多：{{ advRisky.map((c) => c.label).join('、') }}</b>
+                  </template>
+                  <template v-else>
+                    <b>有 {{ advChanged.length }} 项不是默认值：{{ advChanged.map((c) => c.label).join('、') }}</b>
+                  </template>
+                  <ul class="vd__advwarnlist">
+                    <li v-for="c in advChanged" :key="c.k" :class="{ 'vd__advwarnli--risk': !!c.warn }">
+                      <i>{{ c.label }}</i>：现在 <b>{{ c.cur }}</b>，默认 <b>{{ c.def }}</b>
+                      <span v-if="c.warn"> —— {{ c.warn }}</span>
+                    </li>
+                  </ul>
+                  <div class="vd__row">
+                    <button class="vd__btn vd__btn--sm vd__btn--on" :disabled="busy" @click="advReset()">恢复默认（回到推荐值）</button>
+                  </div>
+                </div>
                 <div v-for="g in ADV_GROUPS" :key="g.title" class="vd__advgrp">
                   <div class="vd__advgt">{{ g.title }}</div>
-                  <label v-for="d in g.items" :key="d.k" class="vd__advrow" :title="d.hint + '（默认 ' + d.def + '）'">
+                  <label
+                    v-for="d in g.items"
+                    :key="d.k"
+                    class="vd__advrow"
+                    :class="{ 'vd__advrow--chg': adv[d.k] !== d.def, 'vd__advrow--risk': adv[d.k] !== d.def && !!ADV_WARN[d.k] }"
+                    :title="d.hint + '（默认 ' + d.def + '）' + (ADV_WARN[d.k] ? '  ⚠ ' + ADV_WARN[d.k] : '')">
                     <span class="vd__advlab">{{ d.label }}</span>
                     <input v-model.number="adv[d.k]" type="range" :min="d.min" :max="d.max" :step="d.step">
-                    <span class="vd__advval">{{ adv[d.k] }}</span>
+                    <span class="vd__advval">{{ adv[d.k] }}<i v-if="adv[d.k] !== d.def">（默认 {{ d.def }}）</i></span>
                   </label>
                 </div>
                 <div class="vd__row">
@@ -2024,4 +2073,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .vd__advlab { color: var(--gray-600); }
 .vd__advrow input[type='range'] { width: 100%; min-width: 0; accent-color: var(--brand-600); }
 .vd__advval { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+.vd__advval i { font-style: normal; font-size: 10px; color: var(--gray-500); }
+/* 「已改」要显眼：这几项正是"多余的点 / 线段"的元凶（见 ADV_WARN 的实测注释 ✓） */
+.vd__advdot--risk { color: #b91c1c; background: #fee2e2; border-color: #fca5a5; font-weight: 700; }
+.vd__advwarn { border: 1px solid var(--brand-400); background: var(--brand-soft); border-radius: var(--radius-sm); padding: 6px 8px; font-size: 12px; line-height: 1.55; color: var(--gray-700); }
+.vd__advwarn--risk { border-color: #fca5a5; background: #fef2f2; color: #7f1d1d; }
+.vd__advwarnlist { margin: 4px 0 6px; padding-left: 16px; }
+.vd__advwarnlist li { margin: 2px 0; }
+.vd__advwarnli--risk { color: #b91c1c; font-weight: 600; }
+.vd__advwarnlist i { font-style: normal; font-weight: 700; }
+.vd__advrow--chg .vd__advlab { color: var(--brand-800); font-weight: 600; }
+.vd__advrow--chg .vd__advval { color: var(--brand-800); font-weight: 700; }
+.vd__advrow--risk .vd__advlab, .vd__advrow--risk .vd__advval { color: #b91c1c; }
+.vd__advrow--risk input[type='range'] { accent-color: #dc2626; }
 </style>
