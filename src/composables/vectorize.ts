@@ -473,6 +473,25 @@ export interface VectorizeOpt {
    *      → 没引入结构性问题，推测是两条重合虚线边被简化合并 ✓（**未完全证实** ⚠）
    *  0 = 关（= v1549 及以前的行为 ✗） */
   dashRetargetGate?: number
+  /** ⛔【v1551 否掉，**默认 0，别再翻**】"本轮改指**接收**过的顶点，不该再被别的边当目标" ✗
+   *
+   *  病根（`6.png`，`dashDebug=1` 实测）：`E15 #14→#15` 把 `#15` 端改指到 `#16` → `#15` 变孤儿 ✗
+   *  紧接着 `E16 #16→#17` 又把 `#16` 端改指回 `#15`
+   *  → 造出 `#14—#16` 与 `#15—#17` 两条**交叉**边 → 后者被 `pruneDashDup` 判"落在前者 87% 处"剪掉 ✗
+   *  → 结果 `#17` 那条虚线**断成两截**（悬空虚线端 4 个 ✗）
+   *
+   *  **真图改善明显** ✓：`6.png` 悬空虚线端 **4→1**、`4.png` **2→1**、`9.png` 落在线上 **2→0**；
+   *  4 张实图锁**全对** ✓（`1-原图` / `demo111` / `P-ABCD-EF` 逐位不动 ✓）
+   *  ⚠ **但合成基准"顶点召回" 97.2→95.4 变差** ✗
+   *  → 按项目铁律（**合成基准是主判据**）**不能转正** ✗ —— 真图 3 处改善 vs 合成 1 项变差，
+   *    取舍留给后续（要么找到召回掉在哪张图，要么接受这个交换）✗
+   *
+   *  ⚠⚠ 另两版判据都**更差**（别再翻）：
+   *    · `curDeg(v0) === 1`（"源端点只连着这一条边"）→ 顶点精度 86.5→**82.6** ✗
+   *    · `curDeg(na) >= 1`（"目标还在图上"）→ 4 张锁全坏：`P-ABCD-EF` V9→**V13** ✗✗、
+   *      `3-人工修正` V18→V16 ✗、`demo111` V9→V8 ✗
+   *  1 = 开 */
+  dashClaim?: number
   /** 【v1535】虚线扩展时**不碰"链内节点"** —— 2 = 任何"虚线度 ≥2"的节点都不碰（**默认 ✓**）；
    *  1 = 只不碰"虚线度 2 且两条虚线边共线"的节点；0 = 关（= 旧行为 ✗）。
    *  为什么：虚线在骨架上是一**条链**（每个短划组当节点、逐段相连：A—g1—g2—C），逐条边无条件往外接会把
@@ -3619,6 +3638,20 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       }
       return false
     }
+    /** 【v1551】本轮"改指"**接收**过的顶点集合 —— 被接收过的顶点不该再被别的边当目标 ✗
+     *  病根（6.png）：`E15 #14→#15` 把 `#15` 端改指到 `#16` → `#15` 变成孤儿 ✗
+     *  紧接着 `E16 #16→#17` 又把 `#16` 端改指回 `#15`
+     *  → 造出 `#14—#16` 与 `#15—#17` 两条**交叉**边 → 后者被 `pruneDashDup` 判"落在前者 87% 处"剪掉 ✗
+     *  → 结果：`#17` 那条虚线**断成两截**（悬空虚线端 4 个 ✗）
+     *  实测：`6.png` 悬空虚线端 **4→1** ✓、边精度 78.5→**79.6** ✓、垂直误差 0.38→**0.33** ✓
+     *  ⚠ 代价：顶点召回 97.2→**95.4** ✗
+     *  ⚠⚠ 另两版判据都**更差**（别再翻）：
+     *    · `curDeg(v0) === 1`（"源端点只连着这一条边"）→ 顶点精度 86.5→**82.6** ✗
+     *      （它等价于 v1550 第一版那个更宽的判据 ✗）
+     *    · `curDeg(na) >= 1`（"目标还在图上"）→ 4 张锁全坏：`P-ABCD-EF` V9→**V13** ✗✗、
+     *      `3-人工修正` V18→V16 ✗、`demo111` V9→V8 ✗；且它**完全覆盖**了 `claimed`（结果逐位相同 ✗） */
+    const claimOn = (opt.dashClaim ?? 0) !== 0
+    const claimed = new Set<number>()
     let ei = -1
     for (const E of outEdges) {
       ei++
@@ -3628,14 +3661,18 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L
       const na = (chainOnly && isChainMid(E[0])) ? -2 : findAlong(A, -dx, -dy, ei, E[0])
       const nb = (chainOnly && isChainMid(E[1])) ? -2 : findAlong(B, dx, dy, ei, E[1])
-      const ra = na >= 0 && na !== E[1] && !solidAhead(E[0], na, -dx, -dy)
-      const rb = nb >= 0 && nb !== E[0] && !solidAhead(E[1], nb, dx, dy)
-      if (dbgD) console.log('[dash]  E' + ei + ' #' + E[0] + '→#' + E[1] + ' 长' + L.toFixed(0) +
+      const v0 = E[0], v1 = E[1]
+      // ★★ 【v1551】必须**顺序**执行（先 A 端、再判 B 端）✓ 两个条件：
+      //   ① `solidAhead` —— 别盖住实边（v1550 ✓）
+      //   ② `!claimed.has(v0)` —— 源端点若已被本轮的改指接收过，别再动它 ✗
+      const ra = na >= 0 && na !== v1 && !solidAhead(v0, na, -dx, -dy) && !(claimOn && claimed.has(v0))
+      if (ra) { E[0] = na; if (claimOn) claimed.add(na) }
+      const rb = nb >= 0 && nb !== E[0] && !solidAhead(v1, nb, dx, dy) && !(claimOn && claimed.has(v1))
+      if (rb) { E[1] = nb; if (claimOn) claimed.add(nb) }
+      if (dbgD) console.log('[dash]  E' + ei + ' #' + v0 + '→#' + v1 + ' 长' + L.toFixed(0) +
         '  na=' + na + ' nb=' + nb + (na === -2 || nb === -2 ? ' (=-2 = 链内节点，跳过 ✓)' : '') +
-        '  →  ' + (ra ? '#' + E[0] + '改指#' + na : '#' + E[0] + '不动' + (na >= 0 && na !== E[1] ? '(原端点已连别边 ✗)' : '')) +
-        ' , ' + (rb ? '#' + E[1] + '改指#' + nb : '#' + E[1] + '不动' + (nb >= 0 && nb !== E[0] ? '(原端点已连别边 ✗)' : '')))
-      if (ra) E[0] = na
-      if (rb) E[1] = nb
+        '  →  ' + (ra ? '#' + v0 + '改指#' + na : '#' + v0 + '不动') +
+        ' , ' + (rb ? '#' + v1 + '改指#' + nb : '#' + v1 + '不动'))
     }
     outEdges = outEdges.filter((e) => e[0] !== e[1])
   }
