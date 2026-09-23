@@ -101,6 +101,69 @@ export interface VectorizeOpt {
   eps?: number
   /** 当成"一截短划"的最大长度（图对角线的比例），超过的算实线段 */
   pieceMax?: number
+  /** 【v1545】"自由短段"（= 候选**短划**）的最大长度（图对角线的比例，默认 = `pieceMax`，即不改行为）。
+   *
+   *  ★ 为什么要拆出来：`pieceMax` 同时被**曲线判定**（`isCurve = poly.length >= 3 && plen2 > maxPiece`）
+   *  和**短划判定**（`freeSegs` 的 `s.len <= maxPiece`）用 —— 前者需要宽（弧要整条走曲线那条路），
+   *  后者需要**紧**（短划本来就短）✗ 混在一起 → 短划门槛宽了约 10 倍 ✗
+   *
+   *  病根（**原图像素实测**，`FILES=9`）：
+   *   · `_inkprobe --seg 200,224,164,372` → `墨段: t=0.00~0.51(77px)` —— 从 `v2(200,224)` 往下
+   *     **77px 是连续实墨**，再往下才是 2px 碎点 + 22px 大断口 + 两条 10px 短划 ✓
+   *   · `_inkprobe --seg 192,255,200,224` → `墨段: t=0.00~1.00(32px)` —— 这段 **32px 全程连续**
+   *     = **实线** ✓
+   *   · 但它在 `segDebug=1` 里是 `s26 ... len=32 aId=-1 bId=-1 → chain4` ✗ ——
+   *     因为 `32 <= maxPiece = 0.115 × 654 = 75.2` → 被判成"短划"编进了虚线链 ✗
+   *   · 那条链最后出**一条** `dash: 1` 的边 → **虚线吞掉了实线段** ✗（用户看到的现象）
+   *  真实短划只有 4~9px（= 0.006~0.014 × diag）；`0.115 × diag` 对短划宽了 ~10 倍 ✗
+   *
+   *  ⛔ **实测否掉（v1545），别再翻** ✗ —— 扫 `0.02 / 0.03 / 0.04 / 0.05 / 0.06 / 0.08`：
+   *   · `< 0.05` 能挡住 `9.png` 的 `c0`（32px），但**各图短划长度本来就不同** ✗
+   *     → `3-人工修正` 的虚线被碎成一堆碎片：V18 → **V38 / V29 / V23** ✗✗
+   *   · `>= 0.05` 不破锁，但**挡不住 `c0`**（32 / 654 = 0.049）→ 等于没改 ✗
+   *  → **绝对门槛无解**（"短划多长"是**逐图/逐线**的量，不能用全局比例）✓ */
+  dashMaxPiece?: number
+  /** 【v1545】`linkOK` 的**长度可比性**闸门：相邻两段要编进同一条虚线链，
+   *  长度之比不得超过这个倍数（默认 0 = 关，即旧行为）。
+   *
+   *  ★ 为什么必须是**相对**判据（`dashMaxPiece` 那条绝对门槛为什么无解）：
+   *   实测扫 `dashMaxPiece = 0.02/0.03/0.04/0.05/0.06/0.08`：
+   *     · `< 0.05` 能挡住 `9.png` 的 c0（32px），但**各图短划长度本来就不同** ✗
+   *       → `3-人工修正` 的虚线被碎成一堆碎片：V18 → **V38 / V29 / V23** ✗✗
+   *     · `>= 0.05` 不破锁，但**挡不住 c0**（32 / 654 = 0.049）→ 等于没改 ✗
+   *   → 全局绝对门槛无解 ✓（短划长度是**逐图/逐线**的量）
+   *
+   *  证据（`9.png`，原图像素 + `segDebug=1`）：
+   *   · `chain#4` 共 9 段，其中 8 段是 4~9px，唯独 **`c0 (192,255)—(200,224) len=32`**
+   *     —— 而 `_inkprobe --seg 192,255,200,224` 报 `墨段: t=0.00~1.00(32px)` = **全程连续实墨** ✗
+   *   · 32 / 5 ≈ **6.4 倍** → 单看数字，"长度可比"一条似乎就能把它挡在链外 ✓
+   *
+   *  ⛔ **实测否掉（v1545），别再翻** ✗ —— 扫 `2 / 3 / 4 / 5 / 6`：
+   *   · `2`：6 项变差（顶点精度 86.5→**80.4**、边召回 82.5→**73.0**）✗
+   *   · `3 / 4`：合成基准持平 ✓，但 `3-人工修正` V18→**V14** / E16 ✗✗
+   *   · `5 / 6`：合成基准持平 ✓ 且能挡住 `c0`，但 `3-人工修正` V18→**V17** ✗（丢一个**真**顶点）
+   *  → **相对门槛也无解**：`3-人工修正` 是**人工修正过**的图，它的顶点**全是真的**，
+   *    丢任何一个都不能接受 ✗（这条是"实图锁"最硬的一张）✓ */
+  linkLenRatio?: number
+  /** 【v1545】"自由段"端点**紧贴已有图节点**的判定半径（px，默认 0 = 关，即旧行为）。
+   *  半径内存在图节点 → 该端**不算自由端** → 这个段不是"候选短划" ✓
+   *
+   *  证据（`9.png`，`segDebug=1`）：`path#27` 的末端是 `(200,224)`，而真节点是 `(201,224)`
+   *  —— **只差 1px** ✗ 于是 `aId/bId` 全是 `-1` → `s26 (192,255)—(200,224) len=32` 落进
+   *  `freeSegs` → 被编进虚线链 ✗
+   *  而原图那段是 **32px 全程连续实墨**（`_inkprobe --seg 192,255,200,224` → `t=0.00~1.00(32px)`）✓
+   *
+   *  ⚠ 与 `dashMaxPiece` / `linkLenRatio` 的区别：那两条都是**长度**判据，实测都无解
+   *    （绝对门槛挡不住/碎图，相对门槛破 `3-人工修正` 锁 ✗，见各自注释）。
+   *    这条是**拓扑**判据 —— "端点已经在节点上了，它就不是断头" ✓
+   *
+   *  ⛔ **实测否掉（v1545），别再翻** ✗✗ —— 扫 `1 / 2 / 3 / 5`，四档**全崩**：
+   *   虚实线 89.9→**85.4**、边召回 82.5→**45.5**、边精度 78.5→**43.1**，
+   *   4 张实图锁的虚线边**全部归零**（`D0`）✗✗
+   *   原因：**大多数短划的端点本来就贴着某个节点**（虚线最后一截就停在顶点上 ✓）→
+   *   这条判据把**几乎所有短划**都踢出了 `freeSegs` ✗
+   *  → **拓扑判据在这个位置不成立** ✓ */
+  freeNodeR?: number
   /** 虚线端点沿自身方向往外找落点的半径（px，默认 90）。
    *  【v1535】原来 72 太小 —— 真图里虚线端点离真顶点常有 80~110px（差着两三个划的间距）→ 接不上、
    *  端点退化成"度 1 悬空虚线端"（= 假顶点）✗。实测（`.probe/vecbench.cjs`，基线 `vecbase8.json`）：
@@ -326,6 +389,35 @@ export interface VectorizeOpt {
    *  用来查"虚线被拆成两条带间隙的段、两端各留一个假顶点"（`.probe/_edge1.cjs` 的假顶点归因里
    *  16/20 个假顶点都落在真值边内部、且 13/16 落在**虚线**上 ✓） */
   dashDebug?: number
+  /** 【v1545】调试：1 = 把 `segs` 的**分段与归类**全打出来（`path#` → 每条路径怎么被 `rdp` 切成
+   *  `poly`、`isCurve`/`arc` 判定、每段 `len`/`aId`/`bId` → 最终落到 `curveSegs`/`freeSegs`/
+   *  `fixedSegs`/`chainN`/`leftover` 哪一类），外加链总览。
+   *
+   *  为什么需要：`9.png` 的 `v1(210,188)—v4(164,372)` 原图**上段 104px 是连续实线、下段才是
+   *  短划虚线**，重建却把整条标成 `4-1虚` ✗。前两层已证伪（`extendDashed` 层 / 虚线链编成层，
+   *  见 `extendInkGate`、`linkMinGap` 注释）→ **只剩 `segs` 本身怎么分段这一层** ✓
+   *
+   *  ★ 本文件里的两条"分段陷阱"（读代码时的第一嫌疑，靠本 dump 裁决）：
+   *   ① 只有**首段**继承 `P.aId`、**末段**继承 `P.bId`，**中间段一律 `(-1,-1)`** ✗
+   *      → 一条"一端自由"的长路径，中间段若 `len <= maxPiece` 就会落进 `freeSegs`
+   *        被 `linkOK` 编进虚线链 → **实线段被当成虚线短划** ✗
+   *   ② `tryFitArc` 命中时**整条路径直接 `continue`**，一个 `seg` 都不出 ✓
+   *      （所以"某条路径没有 seg"不一定是 bug，先看 `arc=1`）
+   *
+   *  用法（窗口是**数字**参数，因为 `--opt` 只收数字）：
+   *  `FILES=9 DUMP=1 node .probe/_realview.cjs --opt segDebug=1,segDbgX0=210,segDbgY0=188,segDbgX1=164,segDbgY1=372,segDbgR=40`
+   *  → 只打印"中点落在 `(X0,Y0)—(X1,Y1)` 这条线 ±R 内"的段，避免整图刷屏 ✓ */
+  segDebug?: number
+  /** 【v1545】`segDebug` 的窗口起点 x（像素，原图坐标）。不给 = 打印全部 */
+  segDbgX0?: number
+  /** 【v1545】`segDebug` 的窗口起点 y */
+  segDbgY0?: number
+  /** 【v1545】`segDebug` 的窗口终点 x */
+  segDbgX1?: number
+  /** 【v1545】`segDebug` 的窗口终点 y */
+  segDbgY1?: number
+  /** 【v1545】`segDebug` 的窗口半径（默认 40px） */
+  segDbgR?: number
   /** 【v1535】虚线扩展时**不碰"链内节点"** —— 2 = 任何"虚线度 ≥2"的节点都不碰（**默认 ✓**）；
    *  1 = 只不碰"虚线度 2 且两条虚线边共线"的节点；0 = 关（= 旧行为 ✗）。
    *  为什么：虚线在骨架上是一**条链**（每个短划组当节点、逐段相连：A—g1—g2—C），逐条边无条件往外接会把
@@ -445,17 +537,57 @@ export interface VectorizeOpt {
    *     `maxRun=64` → 合成基准 + 4 张锁**全绿** ✓，**但对 6 张真图（`2/4/6/9/10/12.png`）
    *     **逐位不动** ✗✗ —— 即"绿"是因为**它几乎不触发**，不是因为它修对了 ✗
    *
-   * ★★ **否掉它的真正收获（这条比选项本身重要）**：
-   *   它证明了 **`9.png` 的"虚实归属错误"根本不在 `extendDashed` 这一层** ✓
-   *   证据（`dashDebug=1` 实测）：`9.png` 那条"吞掉实线段"的虚线边 `#2(201,224)—#5(162,362)`
-   *   在**早期补接**（~2718 行）运行时**就已经存在**了，而 `extendDashed` 在 **3326 行**才跑 ✗
-   *   → 病根在**更上游**：初始矢量化（`vectorizeFromInk`）里的**短划/实线分类**、
-   *     或"骨架 → 图"那一步就把整条线（上段 104px 实线 + 下段短划）**判成了一整条虚线** ✗
-   *   → 下一步应该去查**短划分类**（哪个函数给 `edge[2]` 赋值），别再在 `extendDashed` 上花时间 ✓ */
+   * ★★★【v1545 **更正**】上面这段"否掉它的真正收获"里的结论是**错的** ✗✗ —— 病根**就在这一层** ✓
+   *   v1543 的原话：`9.png` 那条虚线边 `#2(201,224)—#5(162,362)` 在 `extendDashed` **之前**
+   *   就已经存在 → 所以病根不在这一层 ✗
+   *   **证据没错，推论错了** ✗：那条边在 `extendDashed` 之前是 `#5(162,362)—#2(201,224)`
+   *   —— 那是**正确的**（虚线从 v4 到 v2 ✓）；是 `extendDashed` 把它的 **`#2` 端改指到了 `#1`**
+   *   才变成 `#5—#1` ✗。当时只比对了"两端**存在**"，**没检查端点被改指** ✗
+   *   `dashDebug=1` 实测原文（v1545，`FILES=9`）：
+   *       [dash]  E14 #5→#2 长143  na=-1 nb=1  →  #5不动 , #2改指#1
+   *   → 最终边表里 `4-1虚` 与 `2-1实` **同时存在** → 虚线**吞掉了那 37px 实线段** ✗
+   *   → 解药是 `extendCoverGate`：问"这一段路上**有没有已经画着的边**" ✓
+   *     （★ 与"有没有**墨**"是两回事 —— 那正是 `extendInkGate` 失败的原因）✓ */
   extendInkGate?: number
   /** 【v1543】配合 `extendInkGate=2` 的**最长连续墨段上限**（px，默认 24）。
    *  延伸路径上出现比这个更长的连续墨 → 判定那是**实线**（虚线是短划 + 间隙）→ 不延伸 ✓ */
   extendMaxRun?: number
+  /** 【v1545】`extendDashed` 的 `findAlong` 新增闸门：**延伸路径上不能已经画着一条边** ✓
+   *  默认 0（= 旧行为，留档）；取值含义：
+   *   · **1** = 覆盖边必须是**实线**（`9.png` 那条就是实线 ✓）
+   *   · **2** = 覆盖边必须与延伸方向**共线**（"同一条线被画了两遍"的 signature）
+   *   · **3** = 两者都要
+   *   · **4** = 覆盖边必须**与延伸起点相连** ★（v1545 实测最准的一条 —— 语义是
+   *     "**这个端点已经连过去了**，中间没有缝要跨" ✓；`9.png` 的 `#2—#1` 正是如此）
+   *   · **5** = 候选点**已经是起点的直接邻居**（比 4 更窄：只看"直接相邻"）
+   *   · **6** = 4 + 实线
+   *
+   *  ⛔ **实测全否（v1545），别再翻** ✗ —— 6 档**全**让合成基准变差：
+   *   · `1 / 3 / 4`：顶点精度 86.5→83.2~84.9、边召回 82.5→79.8~81.5、边精度 78.5→75.0~76.7，
+   *     且 **破 `P-ABCD-EF` 锁**（V9→**V11**）✗✗
+   *   · `2`：6 项变差（顶点召回 97.2→**95.4**、顶点精度 86.5→**84.7**）✗
+   *   · `5 / 6`：不破锁，但顶点精度 86.5→84.9、边召回 82.5→81.5、边精度 78.5→76.7、
+   *     垂直 0.38→**0.49** ✗（`pabcdc1` 顶点 7→8、误边 3→6；`demo111` V9→V10）
+   *  ★ 结论：**"延伸时不许踩到已有边"这条思路本身不成立** ✗ —— 因为 `findAlong` 的
+   *    "**越链跳接**"是**承重**的（合成图的顶点合并全靠它；见 `dashChainOnly` 注释里
+   *    "只接虚线度=1 的端点 → `pabcdo` 边召回 80→70"那条）✗
+   *  → 但 `dashDebug=1` 的 trace **确证了病根就在这一层**（`E14 ... #2改指#1` ✓），
+   *    所以正确的修法应该在**上游**（别让那段实墨进链），而不是在 `findAlong` 上加闸门 ✓
+   *
+   *  ★ 与 `extendInkGate` 的**本质区别**（这解释了它为什么可能成、那个为什么不行）：
+   *   · `extendInkGate` 问"这一路上有没有**墨**" ✗ → 虚线短划密时到处都是墨 → 正当延伸被全挡 ✗
+   *   · 这里问"这一路上有没有**边**" ✓ → 墨可能是**同一条线自己**画的（那正该延伸过去），
+   *     而**边**是独立存在的第二条线（延伸过去就是造重复 ✗）
+   *  实测（`FILES=9`，`dashDebug=1`）：`E14 #5→#2 长143  na=-1 nb=1  →  #2改指#1` ✗
+   *  而 `#2—#1` 那 37px 本来就有实线 `2-1实` → 加闸门后 `#2` 不该再改指 ✓ */
+  extendCoverGate?: number
+  /** 【v1545】配合 `extendCoverGate` 的**覆盖比例门槛**（默认 0.6）：
+   *  沿 `p → 候选点` 采样，被别的边覆盖的比例 ≥ 这个值 → 判定"那里本来就有边" → 不延伸 ✓ */
+  extendCoverTol?: number
+  /** 【v1545】配合 `extendCoverGate` 的**覆盖判定垂距**（px，默认 4） */
+  extendCoverPerp?: number
+  /** 【v1545】配合 `extendCoverGate=2/3` 的**共线门槛**（默认 0.98，与 `dashPruneCos` 同款） */
+  extendCoverCos?: number
   /** 【v1543】`linkOK` 的**最小间隙门槛**（px，默认 0 = 原行为）。
    *  思路：虚线链的相邻短划之间**必须有真实的缝** ✓，而原来 `gap = 0`（首尾相接/重叠）
    *  也允许链接 → 一条**实线**被骨架在岔路口切成的碎片也能被编进"虚线链"、
@@ -466,10 +598,12 @@ export interface VectorizeOpt {
    *   · 但对 6 张真图（`2/4/6/9/10/12.png`）**逐位不动** ✗✗
    *  → 结论：`9.png` 的"虚实归属错误"**不是**"首尾相接的碎片被编进虚线链"造成的 ✗
    *
-   * ★ 连同上一条 `extendInkGate` 的否定，v1543 一共排除了**两个**关于
-   *   "9.png 那条虚线为什么吞掉了 104px 实线"的假设（`extendDashed` 层 ✗、链编成层 ✗）
-   *   → 剩下的可疑处：**`segs` 本身是怎么分段的**（`isCurve` / `aId`/`bId` 的匹配、
-   *     以及 `s.len <= maxPiece` 那条"自由短段"判据）—— 见 2356~2463 行 ✓ */
+   * ★【v1545 **更正**】v1543 据此排除的"`extendDashed` 层"是**误判** ✗（见 `extendInkGate` 注释的更正）；
+   *   真正被排除的只有**链编成层**（这条 `linkMinGap` 的否定是有效的 ✓）。
+   *   → v1545 用 `segDebug=1` 把 `segs` 那一层也查清了：**分段本身没问题** ✓
+   *     （`path#14 (201,224)—(211,188) len=37 → fixed` = 实线段被**正确**识别成实线 ✓；
+   *      `chain#4` 9 段从 (200,224) 到 (169,355) = 虚线段被**正确**编成一条链 ✓）
+   *   → 病根确认在 **`extendDashed` 把链端点 `#2` 延伸到了 `#1`** ✗（见 `extendCoverGate`）✓ */
   linkMinGap?: number
   /** 【v1543】配合 `extendInkGate` 的**墨占比门槛**（默认 0.35，与早期补接的判据④同款）。
    *  延伸路径中段（t=0.2~0.8）的墨占比 > 这个值 → 判定"那里本来就有线" → 不延伸 ✓ */
@@ -2369,13 +2503,40 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   interface Seg { a: [number, number]; b: [number, number]; len: number; aId: number; bId: number }
   const segs: Seg[] = []
   const maxPiece = (opt.pieceMax ?? 0.115) * diag
+  // 【v1545】"候选短划"的**独立**长度门槛（默认 = `maxPiece`，即不改变行为 ✓）
+  //   ★ 拆开的理由见 `dashMaxPiece` 的选项注释：`maxPiece` 是按**曲线**定的，对短划宽了 ~10 倍 ✗
+  const dashMax = (opt.dashMaxPiece ?? (opt.pieceMax ?? 0.115)) * diag
   // 曲线（弧、椭圆、圆）单独走一条路：折线一简化就成多段，而**相邻段之间天然不共线**，
   // 塞进下面的"按共线连成虚线链"里每段都会变成孤立的碎片，最后整条弧都画不出来。
   // 判据：这条路径够长、且简化后不止两个点（真直的线简化完就是两点）。
   const curveSegs: Seg[] = []
   /** 拟合成功的椭圆弧（像素坐标，最后统一归一化） */
   const fittedArcs: { cx: number; cy: number; rx: number; ry: number; a0: number; a1: number; dash: 0 | 1 }[] = []
+  // 【v1545 诊断】`segDebug`：把"每条路径怎么被切成 seg、每段落到哪一类"打出来。
+  // ★ 纯只读诊断、不参与任何几何计算 —— `dbgS=0`（默认）时下面这些分支全不进 ✓
+  // ★ 顺带解决一个读数陷阱：`pathDiag` 只收"过了 `P.pts.length < 2` 检查"的路径，
+  //   所以它和 `paths` 的**下标并不对应** ✗ → 把真实下标 `pi` 一起存进去 ✓
+  const dbgS = (opt.segDebug ?? 0) !== 0
+  const dbgCls = new Map<Seg, string>()
+  const segsPath: number[] = []
+  const pathDiag: { pi: number; aId: number; bId: number; plen2: number; polyLen: number; isCurve: boolean; arc: boolean; n: number; p0: [number, number]; p1: [number, number] }[] = []
+  let piCur = -1
+  /** `segDebug` 的窗口：中点落在 `(segDbgX0,segDbgY0)—(segDbgX1,segDbgY1)` 这条线 ±`segDbgR` 内才打印 */
+  const dbgWin = [opt.segDbgX0, opt.segDbgY0, opt.segDbgX1, opt.segDbgY1].every((v) => typeof v === "number")
+  const dbgR = opt.segDbgR ?? 40
+  const inWin = (mx: number, my: number) => {
+    if (!dbgS || !dbgWin) return true
+    const x0 = opt.segDbgX0 as number, y0 = opt.segDbgY0 as number
+    const wx = (opt.segDbgX1 as number) - x0, wy = (opt.segDbgY1 as number) - y0
+    const l2 = wx * wx + wy * wy
+    const vx = mx - x0, vy = my - y0
+    if (l2 < 1) return Math.hypot(vx, vy) <= dbgR
+    const t = (vx * wx + vy * wy) / l2
+    if (t < -0.1 || t > 1.1) return false
+    return Math.abs(vx * wy - vy * wx) / Math.sqrt(l2) <= dbgR
+  }
   for (const P of paths) {
+    piCur++
     if (P.pts.length < 2) continue
     const poly = rdp(P.pts, opt.eps ?? 2.2)
     let plen2 = 0
@@ -2390,6 +2551,8 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     // 弧代表这条路径时**不再出折线**：折线留着就会与弧重叠 —— 那正是 v1142 看到的"多画一段"。
     // 顶点不受影响：顶点是从骨架图 G.nodes 建的，与出不出折线无关。
     const arc = tryFitArc(P.pts, opt.arcMinSpan ?? 30)
+    const pd = dbgS ? pathDiag.length : -1
+    if (dbgS) pathDiag.push({ pi: piCur, aId: P.aId, bId: P.bId, plen2, polyLen: poly.length, isCurve, arc: !!arc, n: 0, p0: P.pts[0], p1: P.pts[P.pts.length - 1] })
     if (arc) { fittedArcs.push({ cx: arc.cx, cy: arc.cy, rx: arc.rx, ry: arc.ry, a0: arc.a0, a1: arc.a1, dash: 0 }); continue }
     void isCurve
     for (let k = 0; k < poly.length - 1; k++) {
@@ -2398,7 +2561,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       if (len < 2) continue
       const s = { a, b, len, aId: k === 0 ? P.aId : -1, bId: k === poly.length - 2 ? P.bId : -1 }
       if (isCurve) curveSegs.push(s)
-      else segs.push(s)
+      else { segs.push(s); if (dbgS) { segsPath.push(piCur); pathDiag[pd].n++ } }
     }
   }
 
@@ -2425,12 +2588,28 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     //      → 必须先 `Math.max(0, gap)` 再比，否则默认值 0 也会挡掉这批合法链接 ✗
     //        （实测：直接写 `gap < 0` 会让默认口径也变 —— 垂直误差 0.38→0.37、平行 0.45→0.48 ✗）
     if (Math.max(0, gap) < (opt.linkMinGap ?? 0)) return false
+    // 【v1545】长度可比性：一条**实墨长段**混进短划链 = 整条链出成"虚线" → 吞掉实线段 ✗
+    //   （证据与"为什么绝对门槛无解"见 `linkLenRatio` 的选项注释 ✓）
+    const ratio = opt.linkLenRatio ?? 0
+    if (ratio > 0 && Math.max(ul, vl) > ratio * Math.min(ul, vl)) return false
     return gap <= Math.max(20, 3.5 * Math.max(ul, vl))
+  }
+  // 【v1545】"自由端"再收紧一格：端点**紧贴已有图节点**（≤ `freeNodeR`）的段不算自由段 ✓
+  //   （`9.png` 的 `s26` 末端离真节点只差 1px ✗，见 `freeNodeR` 选项注释）
+  const freeNodeR = opt.freeNodeR ?? 0
+  const nearNode = (p: [number, number]) => {
+    if (freeNodeR <= 0) return false
+    for (let i = 0; i < G.nodes.length; i++) {
+      if (Math.hypot(G.nodes[i].cx - p[0], G.nodes[i].cy - p[1]) <= freeNodeR) return true
+    }
+    return false
   }
   const freeSegs: Seg[] = [], fixedSegs: Seg[] = []
   for (const s of segs) {
-    if (s.aId < 0 && s.bId < 0 && s.len <= maxPiece) freeSegs.push(s)
+    const isFree = s.aId < 0 && s.bId < 0 && s.len <= dashMax && !nearNode(s.a) && !nearNode(s.b)
+    if (isFree) freeSegs.push(s)
     else fixedSegs.push(s)
+    if (dbgS) dbgCls.set(s, isFree ? "free" : "fixed")
   }
   const usedS = new Array(freeSegs.length).fill(false)
   const chains: Seg[][] = [], leftover: Seg[] = []
@@ -2449,6 +2628,54 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     }
     if (chain.length >= 2) chains.push(chain)
     else leftover.push(chain[0])
+  }
+
+  // 【v1545 诊断】`segs` 的分段与归类总账（`segDebug=1`）✓
+  // 读法：先看 `path#` 那行的 `aId/bId/poly/arc`，再看它每段 `s#` 的 `len/aId/bId → 类`。
+  //   `→ free` 且 `len` 不小 = **实线段被当成了虚线短划** ✗（`9.png` 要找的就是这个）
+  //   `→ chainN` = 已被编进第 N 条虚线链（整条链最后出**一条** `dash: 1` 的边）
+  if (dbgS) {
+    for (let ci = 0; ci < chains.length; ci++) for (const s of chains[ci]) dbgCls.set(s, "chain" + ci)
+    for (const s of leftover) dbgCls.set(s, "leftover")
+    const mid = (s: Seg): [number, number] => [(s.a[0] + s.b[0]) / 2, (s.a[1] + s.b[1]) / 2]
+    const winTxt = dbgWin
+      ? "  窗口 (" + String(opt.segDbgX0) + "," + String(opt.segDbgY0) + ")—(" + String(opt.segDbgX1) + "," + String(opt.segDbgY1) + ") ±" + String(dbgR)
+      : "  （无窗口 → 全部打印）"
+    console.log("[seg] diag=" + diag.toFixed(1) + " maxPiece=" + maxPiece.toFixed(1) +
+      " paths=" + paths.length + " segs=" + segs.length + " curveSegs=" + curveSegs.length +
+      " free=" + freeSegs.length + " fixed=" + fixedSegs.length +
+      " chains=" + chains.length + " leftover=" + leftover.length + winTxt)
+    for (const d of pathDiag) {
+      const own: number[] = []
+      for (let k = 0; k < segs.length; k++) {
+        if (segsPath[k] !== d.pi) continue
+        const m = mid(segs[k])
+        if (inWin(m[0], m[1])) own.push(k)
+      }
+      if (!own.length && !(inWin(d.p0[0], d.p0[1]) || inWin(d.p1[0], d.p1[1]))) continue
+      console.log("[seg] path#" + d.pi + " aId=" + d.aId + " bId=" + d.bId + " plen=" + d.plen2.toFixed(0) +
+        " poly=" + d.polyLen + " isCurve=" + (d.isCurve ? 1 : 0) + " arc=" + (d.arc ? 1 : 0) + " → 出 segs=" + d.n +
+        "   (" + d.p0[0].toFixed(0) + "," + d.p0[1].toFixed(0) + ")—(" + d.p1[0].toFixed(0) + "," + d.p1[1].toFixed(0) + ")")
+      for (const k of own) {
+        const s = segs[k]
+        console.log("[seg]    s" + k + " (" + s.a[0].toFixed(0) + "," + s.a[1].toFixed(0) + ")—(" +
+          s.b[0].toFixed(0) + "," + s.b[1].toFixed(0) + ") len=" + s.len.toFixed(0) +
+          " aId=" + s.aId + " bId=" + s.bId + " → " + (dbgCls.get(s) ?? "?"))
+      }
+    }
+    for (let ci = 0; ci < chains.length; ci++) {
+      const C = chains[ci]
+      let sx = 0, sy = 0
+      for (const e of C) { const m = mid(e); sx += m[0]; sy += m[1] }
+      sx /= C.length; sy /= C.length
+      if (!inWin(sx, sy)) continue
+      console.log("[seg] chain#" + ci + " " + C.length + " 段 质心(" + sx.toFixed(0) + "," + sy.toFixed(0) + ")")
+      for (let k = 0; k < C.length; k++) {
+        console.log("[seg]      c" + k + " (" + C[k].a[0].toFixed(0) + "," + C[k].a[1].toFixed(0) + ")—(" +
+          C[k].b[0].toFixed(0) + "," + C[k].b[1].toFixed(0) + ") len=" + C[k].len.toFixed(0) +
+          " aId=" + C[k].aId + " bId=" + C[k].bId)
+      }
+    }
   }
 
   // snap：这条边的端点允许吸附到多远的已有顶点上（不给就用全局 snapR）。
@@ -3024,7 +3251,48 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   dedupe()
 
   // 虚线的短划天然够不到交点（差着一两个划的间距），沿自身方向往外延长，吸附到近旁的顶点上
-  const findAlong = (p: { x: number; y: number }, dx: number, dy: number) => {
+  /** 【v1545】`p → q` 这一段路上**已经被别的边覆盖**的比例（0~1）✓
+   *  `gate`：1 = 只认**实线**覆盖边；2 = 覆盖边须与 `p→q` **共线**；3 = 两者都要
+   *  ★ 关键差别（相对 `extendInkGate`）：这里问"有没有**边**"，不是"有没有**墨**" ✓
+   *    墨可以是**同一条线自己**画的（那正该延伸过去），
+   *    而**边**是独立存在的第二条线 —— 延伸过去就是造重复 ✗ */
+  const coverAlong = (p: { x: number; y: number }, q: { x: number; y: number }, skipE: number, gate: number, pIdx: number) => {
+    const dx = q.x - p.x, dy = q.y - p.y
+    const L = Math.hypot(dx, dy)
+    if (L < 4) return 0
+    const ux = dx / L, uy = dy / L
+    const perpCov = opt.extendCoverPerp ?? 4
+    const cosTh = opt.extendCoverCos ?? 0.98
+    const n = Math.max(3, Math.round(L / 4))
+    let hit = 0
+    for (let s = 1; s < n; s++) {
+      const t = s / n
+      const sx = p.x + dx * t, sy = p.y + dy * t
+      for (let k = 0; k < outEdges.length; k++) {
+        if (k === skipE) continue                       // 自己那条不算覆盖
+        const e = outEdges[k]
+        // 类型过滤：1 / 3 / 6 = 覆盖边必须是**实线**
+        if ((gate === 1 || gate === 3 || gate === 6) && e[2]) continue
+        // 4 / 6 = 覆盖边必须**与延伸起点相连**（= "这个端点已经连过去了，中间没有缝要跨" ✓）
+        if ((gate === 4 || gate === 6) && e[0] !== pIdx && e[1] !== pIdx) continue
+        const A = verts[e[0]], B = verts[e[1]]
+        const wx = B.x - A.x, wy = B.y - A.y
+        const l2 = wx * wx + wy * wy
+        if (l2 < 1) continue
+        const tt = ((sx - A.x) * wx + (sy - A.y) * wy) / l2
+        if (tt < 0 || tt > 1) continue                  // 不在那条边的跨度里
+        if (Math.abs((sx - A.x) * wy - (sy - A.y) * wx) / Math.sqrt(l2) > perpCov) continue
+        if (gate === 2 || gate === 3) {
+          const el = Math.sqrt(l2)
+          if (Math.abs(ux * (wx / el) + uy * (wy / el)) < cosTh) continue   // 只是穿过、不共线 → 不算覆盖
+        }
+        hit++
+        break
+      }
+    }
+    return hit / (n - 1)
+  }
+  const findAlong = (p: { x: number; y: number }, dx: number, dy: number, skipE: number, pIdx: number) => {
     const r = opt.extendR ?? 90
     // 【v1535】横向偏离上限（**绝对像素**）—— 原来只用"夹角 cos > 0.9"✗，那是**距离相关**的：
     //   距离 d 处允许横向偏离 d×0.436，d=90 时高达 39px → 一放大 extendR 就开始乱抓远处顶点 ✗
@@ -3080,6 +3348,20 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
           if (on) { run++; if (run > maxRun) maxRun = run } else run = 0
         }
         if (maxRun > (opt.extendMaxRun ?? 24)) continue
+      }
+      // ★★【v1545】新增闸门：**延伸路径上不能已经画着一条边** ✗→✓（详见 `extendCoverGate` 注释）
+      //   `9.png` 实测：`#2(201,224)` 沿方向够到 `#1(211,188)`，但那段 37px 上已经有实线 `2-1实`
+      //   → 再连一条虚线边就是**造重复** ✗
+      const gate = opt.extendCoverGate ?? 0
+      if (gate === 5) {
+        // 5 = 候选点**已经是起点的直接邻居**（= 那边已经画着一条边了，不需要延伸 ✗）
+        let isNbr = false
+        for (const e of outEdges) {
+          if ((e[0] === pIdx && e[1] === i) || (e[1] === pIdx && e[0] === i)) { isNbr = true; break }
+        }
+        if (isNbr) continue
+      } else if (gate !== 0) {
+        if (coverAlong(p, verts[i], skipE, gate, pIdx) >= (opt.extendCoverTol ?? 0.6)) continue
       }
       // 岔路口（度 >= 2）比"上一条短划的断头"更可能是这条虚线真正的落点
       if (deg[i] >= 2) { if (d < bdJ) { bdJ = d; bestJ = i } }
@@ -3138,8 +3420,8 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       const A = verts[E[0]], B = verts[E[1]]
       let dx = B.x - A.x, dy = B.y - A.y
       const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L
-      const na = (chainOnly && isChainMid(E[0])) ? -2 : findAlong(A, -dx, -dy)
-      const nb = (chainOnly && isChainMid(E[1])) ? -2 : findAlong(B, dx, dy)
+      const na = (chainOnly && isChainMid(E[0])) ? -2 : findAlong(A, -dx, -dy, ei, E[0])
+      const nb = (chainOnly && isChainMid(E[1])) ? -2 : findAlong(B, dx, dy, ei, E[1])
       if (dbgD) console.log('[dash]  E' + ei + ' #' + E[0] + '→#' + E[1] + ' 长' + L.toFixed(0) +
         '  na=' + na + ' nb=' + nb + (na === -2 || nb === -2 ? ' (=-2 = 链内节点，跳过 ✓)' : '') +
         '  →  ' + (na >= 0 && na !== E[1] ? '#' + E[0] + '改指#' + na : '#' + E[0] + '不动') +
