@@ -70,6 +70,33 @@ export interface VectorizeOpt {
    *   端点连线必过自身 ✗ 白算 —— refineCorners 注释里有这条教训）。
    *   留着是给真图上"十字交叉被平滑"的场景做实验用，四重防误伤见函数内注释。 */
   xGap?: number
+  /** 【v1533】**骨架端点吸附**半径（图对角线的比例），**默认 0.005**（≈2.8px @ diag 565）。
+   *
+   * 动机 ✓（cubeaxes T4 实测）：细线化在"T 形交汇"处会把**支线的骨架停在主干中心线外**一段
+   *   （粗线尤其明显，因为骨架停在离主干约半个线宽的位置）→ 真岔路口在骨架图上**根本不存在** →
+   *   顶点只从度≥2 的节点生成（1932 行），拐角不算节点 → 真值顶点永远匹配不上。
+   *   cubeaxes 实测：节点 #183 就在 T4 上（0.0px）却是 path99 的自由端点，长路径 path15 在
+   *   (309,350) 有个**拐角**（棱转底边），两者相距 **1px**、墨迹上明明连着 —— 骨架没接上。
+   *
+   * 做法：把"自由端点 ↔ 邻近路径"在最近点接起来（在最近点把主干劈成两段、共建节点）✓。
+   * 四道设防（每一道都是实测踩出来的）：
+   *   ① 只接"至少一端连着节点、长度在 `minStubLen`~`attachMaxStub` 之间"的**短接线头** ——
+   *      两端自由的碎枝/虚线短划不接（否则碎枝戳在实线中段会把边劈两半 ✗）；
+   *      过长的路径也不接（cubea1 那根 81px：接上去会改动虚线成链的碎片 → 丢 2 条长虚线 ✗）；
+   *   ② 必须**横插**（枝与主干夹角 ≥31°）：近共线时接上去等于在直线上硬插节点 ✗；
+   *   ③ 最近点距主干两端 ≥3px（免得劈出碎边）；主干要"像样"（≥9px 或一端连着节点）；
+   *   ④ 半径只有 2.8px（宁可少接，不可乱接）。
+   *
+   * 实测（8 套合成图 + 4 张实图锁）：顶点召回 94.0→95.1、顶点精度 72.3→72.8、边召回 79.4→81.0、
+   *   边精度 70.3→71.2、平行 0.82°→0.70°、垂直 0.81°→0.66°；**4 张实图锁逐位不动** ✓；
+   *   代价：等长误差 0.10%→0.12%（噪声级）。cubeaxes 顶点召回 90.9→100、边召回 62.5→75。
+   * 传 0 一刀切回旧行为（逐位一致）。 */
+  attachStub?: number
+  /** 【v1533】"接线头"长度上限（图对角线的比例），默认 0.05（≈28px）。见 `attachStub` 的 ①。 */
+  attachMaxStub?: number
+  /** 【v1533】吸附时"复用已有节点"的半径（图对角线的比例），默认 0.006（≈3.4px）。
+   *  见 `attachStub` 实现里的注释：新建顶点会抢走虚线链的端点吸附（cubea1 实测丢 2 条长虚线 ✗）。 */
+  attachReuse?: number
   /** 路径简化容差（px） */
   eps?: number
   /** 当成"一截短划"的最大长度（图对角线的比例），超过的算实线段 */
@@ -1766,6 +1793,94 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   )
   const sk = peel.sk ?? thin(ink, W, H)
   const G = peel.G ?? buildGraph(sk, W, H)
+
+  // 【v1533】**骨架端点吸附**：细线化在"T 形交汇"处会把**支线的骨架停在主干中心线外** 1~3px
+  //   （粗线尤其明显：骨架停在离主干约半个线宽处）→ 真岔路口在骨架图上**不存在** →
+  //   顶点只从度≥2 的节点生成（1932 行），拐角不算节点 → 真值顶点永远匹配不上 ✗
+  //   实测（cubeaxes T4）：节点 #183 就在 T4 上（0.0px）却是 `path99` 的**自由端点**，
+  //   长路径 `path15` 在 (309,350) 有个**拐角**（棱转底边），两者相距 **1px**、墨迹上明明连着。
+  //   做法：自由端点在 `attachR` 内够得着某条路径的**身段**时，在最近点把那条路径劈成两段、
+  //   共建一个节点，自由端点改指该节点 → 节点度 ≥2 → 后面就能生成顶点 ✓
+  //   设防：① 只处理自由端；② 最近点距主干两端 ≥3px（免得劈出碎边）；③ 主干要"像样"
+  //   （长度 ≥9px 或至少一端连着节点，虚线短划不会被劈）；④ 半径只有 4.5px（宁少接不乱接）。
+  const attachR = (opt.attachStub ?? 0.005) * diag
+  let attached = false
+  if (attachR > 0) {
+    const minSeg = 3
+    // ⚠ 判据收窄（实测 0.003~0.008 全档负收益的教训 ✗）：半径小到 1.7px 也会接错 ——
+    //   真正的病根不是"接多远"，而是"接谁"：字母剥下来的**残片**、被切断的**毛刺**都是两端自由的
+    //   小碎枝，一旦戳在实线中段就会把那条边**劈成两段** → 真值边 A-B 直接消失（pabcd 边召回
+    //   100→88.9 ✗、cubea1 87.5→75 ✗）。而 T4 那根 `path99` 是"一端连节点(#189)、一端悬空"的
+    //   **接线头**——这才是该接的。所以：只接"至少一端连着节点"的路径，且长度要像样 ✓
+    const minStubLen = Math.max(4, 0.01 * diag)
+    const maxStubLen = (opt.attachMaxStub ?? 0.05) * diag
+    for (let pass = 0; pass < 4; pass++) {
+      let acted = false
+      for (let pi = 0; pi < G.paths.length; pi++) {
+        const P = G.paths[pi]
+        if (P.aId < 0 && P.bId < 0) continue                      // 两端自由 = 碎枝/虚线短划，不接
+        if (plen(P.pts) < minStubLen) continue                     // 太短不像"接线头"
+        if (plen(P.pts) > maxStubLen) continue                     // 太长：更像"被劈开的碎片/虚线长划"，不接
+        for (const end of ['a', 'b'] as const) {
+          if ((end === 'a' ? P.aId : P.bId) >= 0) continue          // 只处理自由端
+          const ei = end === 'a' ? 0 : P.pts.length - 1
+          const E = P.pts[ei]
+          let best = -1, bi = -1, bd = attachR
+          for (let qi = 0; qi < G.paths.length; qi++) {
+            if (qi === pi) continue
+            const Q = G.paths[qi]
+            for (let k = 0; k < Q.pts.length; k++) {
+              const d = Math.hypot(Q.pts[k][0] - E[0], Q.pts[k][1] - E[1])
+              if (d < bd) { bd = d; best = qi; bi = k }
+            }
+          }
+          if (best < 0) continue
+          const Q = G.paths[best]
+          if (bi < minSeg || bi > Q.pts.length - 1 - minSeg) continue                  // 离主干端点太近
+          if (plen(Q.pts) < 3 * minSeg && Q.aId < 0 && Q.bId < 0) continue             // 主干不像样
+          // ⚠ 必须"横插"：枝与主干**近共线**时（夹角 ~0°/180°）接上去等于在一条直线上硬插一个节点，
+          //   把直边劈成两段、真值边直接消失 ✗（实测日志里近一半的吸附都是这种，pabcd 边召回 100→88.9）。
+          //   T4 那根是 90° 横插在**主干拐角**上（实测 90°/转角 63°）——这才是真岔路口 ✓
+          const j0 = Math.min(2, bi, Q.pts.length - 1 - bi)
+          const b0 = Q.pts[bi - j0], b1 = Q.pts[bi]
+          const u1x = b1[0] - b0[0], u1y = b1[1] - b0[1]
+          const u1l = Math.hypot(u1x, u1y) || 1
+          const k2 = Math.min(2, P.pts.length - 1)      // ⚠ 不能写成 min(2, len-1-ei)：end='b' 时恒为 0 → 取到端点自身 → 零向量 → 判据失效 ✗
+          const se = end === 'a' ? P.pts[k2] : P.pts[P.pts.length - 1 - k2]
+          const sx = se[0] - E[0], sy = se[1] - E[1]
+          const sl = Math.hypot(sx, sy) || 1
+          if (Math.abs((u1x * sx + u1y * sy) / (u1l * sl)) > 0.85) continue            // 夹角 <31° 或 >149°
+          const N0 = Q.pts[bi][0], N1 = Q.pts[bi][1]
+          // ⚠ **复用**附近已有节点，别凭空多一个顶点：新建顶点会"抢走"虚线链的端点吸附
+          //   （nearestOn 取最近顶点）——实测 cubea1 只接 1 处就丢了 2 条长虚线（E10/E11）✗。
+          //   复用的好处：T4 那根 path99 的自由端本来就是节点 #183(309,351)（1px 内）→ 直接复用 →
+          //   顶点正好落在真值 T4 上 ✓，且不引入新顶点。
+          const reuseR = (opt.attachReuse ?? 0.006) * diag
+          let N = -1
+          for (let k = 0; k < G.nodes.length; k++) {
+            if (Math.hypot(G.nodes[k].cx - N0, G.nodes[k].cy - N1) <= reuseR) { N = k; break }
+          }
+          if (N < 0) { N = G.nodes.length; G.nodes.push({ cx: N0, cy: N1 }) }
+          const qa = Q.aId, qb = Q.bId
+          G.paths[best] = { pts: Q.pts.slice(0, bi + 1), aId: qa, bId: N }
+          G.paths.push({ pts: Q.pts.slice(bi), aId: N, bId: qb })
+          if (end === 'a') P.aId = N; else P.bId = N
+          acted = true
+          attached = true
+        }
+      }
+      if (!acted) break
+    }
+    if (attached) {
+      // 度要重算（新节点 + 被接上的自由端），并重放 buildGraph 那条"度 1 的节点降级为自由端"规则 ✓
+      G.stubs = new Int32Array(G.nodes.length)
+      for (const p of G.paths) { if (p.aId >= 0) G.stubs[p.aId]++; if (p.bId >= 0) G.stubs[p.bId]++ }
+      for (const p of G.paths) {
+        if (p.aId >= 0 && G.stubs[p.aId] < 2) p.aId = -1
+        if (p.bId >= 0 && G.stubs[p.bId] < 2) p.bId = -1
+      }
+    }
+  }
 
   const freeA = (p: SkGraph['paths'][number]) => p.aId < 0 && p.bId < 0
   const spur = opt.spur ?? 6
