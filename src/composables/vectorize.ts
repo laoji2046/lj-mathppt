@@ -436,6 +436,22 @@ export interface VectorizeOpt {
    *  正确的下一步：查**为什么 `(201,224)` 会被占用** —— 它是 c3 节点，按
    *  `if (isNode[cur]) break` 不该被当中间点标记 → 即 **`usedPix` 的标记策略** ✗ */
   skSnapNode?: number
+  /** ⛔⛔【v1549 否掉，**默认 0，别再翻**】「孤立短划」判据：沿段方向两端延伸，
+   *  撞上**不属于本路径**的墨后，再看那段墨**连续多长**（≥ `dashIsoRun` = 实线段 ✗ 不进链）。
+   *
+   *  **想法**：`9.png` 的 `s26 (192,255)—(200,224)` 是一段 32px **实墨**却被当成"短划"编进链 ✗
+   *  上游（骨架追踪）3 档全否 ✗ → 以为缺的是"**这段墨属于哪条线**"这个信息 ✓
+   *
+   *  **实测：没有可用档位** ✗✗（详见代码里那段留档）：
+   *  - `dashIsoRun` ≤ 41 → 踢掉 `s26`，但 9.png **反而变差**（顶点 11→12、虚 7→8、落在线上 3→4 ✗）
+   *  - `dashIsoRun` ≥ 42 → 判据**空转**（逐位不动 ✗）
+   *  ⇒ **`s26` 进链不是那条错误的直接原因** ✗ → 病根只在 `extendDashed` 的"端点改指" ✓
+   *  0 = 关（**默认 ✓** = v1548 及以前的行为） */
+  dashIso?: number
+  /** 【v1549】`dashIso` 的延伸长度（px，默认 12）。短划长 4~9px、实线段 32px，12 足够 ✓ */
+  dashIsoR?: number
+  /** 【v1549】`dashIso` 的**连续墨门槛**（px，默认 25）—— 见 `dashIso` 的留档（**已否** ✗） */
+  dashIsoRun?: number
   /** 【v1535】虚线扩展时**不碰"链内节点"** —— 2 = 任何"虚线度 ≥2"的节点都不碰（**默认 ✓**）；
    *  1 = 只不碰"虚线度 2 且两条虚线边共线"的节点；0 = 关（= 旧行为 ✗）。
    *  为什么：虚线在骨架上是一**条链**（每个短划组当节点、逐段相连：A—g1—g2—C），逐条边无条件往外接会把
@@ -2591,6 +2607,10 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   const dbgS = (opt.segDebug ?? 0) !== 0
   const dbgCls = new Map<Seg, string>()
   const segsPath: number[] = []
+  /** 【v1549】`segs[i]` 属于**哪条路径**（存路径对象本身）—— `freeSegs` 的"孤立短划"判据要用 ✓
+   *  ⚠ 不能复用 `segsPath`：那是 `paths` 的下标，而 `paths = G.paths.filter(...)`（2572 行）
+   *  与 `G.paths` 的下标**不对应** ✗ */
+  const segsOwner: SkGraph["paths"][number][] = []
   const pathDiag: { pi: number; aId: number; bId: number; plen2: number; polyLen: number; isCurve: boolean; arc: boolean; n: number; p0: [number, number]; p1: [number, number] }[] = []
   let piCur = -1
   /** `segDebug` 的窗口：中点落在 `(segDbgX0,segDbgY0)—(segDbgX1,segDbgY1)` 这条线 ±`segDbgR` 内才打印 */
@@ -2633,7 +2653,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       if (len < 2) continue
       const s = { a, b, len, aId: k === 0 ? P.aId : -1, bId: k === poly.length - 2 ? P.bId : -1 }
       if (isCurve) curveSegs.push(s)
-      else { segs.push(s); if (dbgS) { segsPath.push(piCur); pathDiag[pd].n++ } }
+      else { segs.push(s); segsOwner.push(P); if (dbgS) { segsPath.push(piCur); pathDiag[pd].n++ } }
     }
   }
 
@@ -2676,9 +2696,75 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     }
     return false
   }
+  // 【v1549】★「孤立短划」判据：沿段方向两端延伸，撞上**不属于本路径**的墨后，
+  //   再看那段墨**连续多长** —— 这才是"短划"与"实线段"的真正分界 ✓
+  //   病根（v1545~v1548 追了 4 个版本）：`9.png` 的 `s26 (192,255)—(200,224)` 是一段 **32px 实墨**，
+  //   却被当成"自由短划"编进虚线链 → 整条链出成虚线 → 吞掉实线段 ✗
+  //   上游（骨架追踪）3 档全否 ✗ → 缺的是"**这段墨属于哪条线**"这个信息 ✓
+  //
+  //   ⚠⚠ 只判"撞上外部墨就算不孤立"**不行**（v1549 第一版实测：顶点精度 86.5→**50.6**、
+  //      `1-原图` 虚线边 D5→**D1** ✗✗）—— 因为**短划之间本来就挨得近**（断口 5~15px），
+  //      短划 A 延伸一下就撞上短划 B，于是所有虚线链全散 ✗
+  //   ⇒ 必须再数"撞到的那段墨的**连续长度**"：
+  //      · 短划 B 只有 4~9px → 还是"短划" ✓ 进链
+  //      · `path#17` 有 41px  → 是"实线段" ✗ 不进链
+  //      41 vs 9 差 4.5 倍，比 `dashMaxPiece` 那个 0.049 vs 0.05 的绝对门槛好得多 ✓
+  //  ⛔⛔【v1549 否掉，**默认 0，别再翻**】实测：**没有可用档位** ✗✗
+  //     · `isoMaxRun` ≤ 41（`s26` 撞到的 `path#17` 恰好连续 41px）→ `s26` 被踢出链 ✓
+  //       → 但 `9.png` **反而变差**：顶点 11→**12**、边 18→**19**、虚 7→**8**、
+  //         **落在线上 3→4** ✗（链被踢断，多出新的悬空端）
+  //     · `isoMaxRun` ≥ 42 → `s26` 留在链里 → 9.png **逐位不动**（= 判据空转 ✗）
+  //   而 `extRun(s26)` 是个**单一值 41**，门槛只能落在它两侧 → **无中间档** ✗
+  //   ⇒ **`s26` 进链并不是那条错误的直接原因** ✗ —— 修它反而把链踢断 ✗
+  //   ⇒ v1545 的结论依然成立：**病根只在 `extendDashed` 的"端点改指"** ✗
+  //     （`E14 #5→#2` 被改成 `#5→#1`，吞掉 `2-1实`；而 `findAlong` 的越链跳接是**承重**的，
+  //       不能在那里加闸门 ✗）→ 下一步应查"**改指前，原端点是否已连着实边**"这个拓扑闸门 ✓
+  const isoOn = (opt.dashIso ?? 0) !== 0
+  const isoR = opt.dashIsoR ?? 12
+  const isoMaxRun = opt.dashIsoRun ?? 25
+  /** 从段端点沿段方向延伸，找第一个**外部**墨像素；找到后沿同方向数它的**连续长度** ✓
+   *  @returns 连续长度（0 = 没撞上外部墨） */
+  const extRun = (si: number) => {
+    if (!isoOn) return 0
+    const P = segsOwner[si]
+    if (!P) return 0
+    const own = new Set<number>()
+    for (const [x, y] of P.pts) own.add(y * W + x)
+    const s = segs[si]
+    let ux = s.b[0] - s.a[0], uy = s.b[1] - s.a[1]
+    const ul = Math.hypot(ux, uy) || 1
+    ux /= ul; uy /= ul
+    const ends: [number, number, number, number][] = [
+      [s.a[0], s.a[1], -ux, -uy],
+      [s.b[0], s.b[1], ux, uy],
+    ]
+    let best = 0
+    for (const [px, py, dx, dy] of ends) {
+      let hit = -1
+      for (let t = 1; t <= isoR; t++) {
+        const x = Math.round(px + dx * t), y = Math.round(py + dy * t)
+        if (x < 0 || y < 0 || x >= W || y >= H) break
+        const q = y * W + x
+        if (!sk[q] || own.has(q)) continue
+        hit = t
+        break
+      }
+      if (hit < 0) continue
+      let run = 0
+      for (let t = hit; t <= hit + isoMaxRun; t++) {
+        const x = Math.round(px + dx * t), y = Math.round(py + dy * t)
+        if (x < 0 || y < 0 || x >= W || y >= H) break
+        if (!sk[y * W + x]) break
+        run++
+      }
+      if (run > best) best = run
+    }
+    return best
+  }
   const freeSegs: Seg[] = [], fixedSegs: Seg[] = []
-  for (const s of segs) {
-    const isFree = s.aId < 0 && s.bId < 0 && s.len <= dashMax && !nearNode(s.a) && !nearNode(s.b)
+  for (let si = 0; si < segs.length; si++) {
+    const s = segs[si]
+    const isFree = s.aId < 0 && s.bId < 0 && s.len <= dashMax && !nearNode(s.a) && !nearNode(s.b) && extRun(si) < isoMaxRun
     if (isFree) freeSegs.push(s)
     else fixedSegs.push(s)
     if (dbgS) dbgCls.set(s, isFree ? "free" : "fixed")
