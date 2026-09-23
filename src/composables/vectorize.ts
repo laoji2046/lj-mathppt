@@ -145,6 +145,8 @@ export interface VectorizeOpt {
   labelRescan?: number
   /** 调试：1 = 把每个候选芽的判定过程打到控制台（node 探针看"为什么没认出来"用 ✓） */
   labelDebug?: number
+  /** 【v1525】把"被字母切断的线"接回去（两头都是断头、缺口 ≤1.2 字高、共线、中间有字母 ✓）：1 = 开（默认 ✓）；0 = 关。 */
+  labelHeal?: number
   /** 【v1524】按字母数剪多余顶点：1 = 开；**0 = 关（默认 ✗）**。
    *  只剪"附近没有标注撑腰"的断头 / 连线上的度 2 点，剪到标注个数就停 ✓。
    *  ⚠ 实测（六张真图 + 8 套合成真值）：真图上有效（user2 22→18、user5 15→12，两条老样本一动不动 ✓），
@@ -169,6 +171,8 @@ export interface VectorizeStats {
   labels?: number
   /** 【v1524】按字母数剪掉了几个多余顶点 */
   pruned?: number
+  /** 【v1525】把"被字母切断的线"接回去了几处 */
+  healed?: number
   /** 识别框四条边上各有多少墨迹像素 —— 非 0 就说明这个框把图形切掉了一块。
    *  实测：image16 的框底边正压在字母 x 的腰上，x 只剩半个字形（像个 V），于是被认成了 v。
    *  只在显式传了 crop 时统计（整图识别时图片边缘本来就可能有内容，报这个没意义）。 */
@@ -1868,6 +1872,27 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
           return (ex / el) * ux + (ey / el) * uy > 0.8
         })
         if (!facing(i) || !facing(j)) continue
+        // ★ v1525：**两点之间必须是"断的"** ✓ —— 线被字母切断时，那里的墨**跟着字母一起被抹掉了** ✓；
+        //   而两个**真顶点**之间的线是连着的（虚线的短划也算 ✓）✗ —— 这一条专治"误合并真顶点" ✗。
+        //   为什么以前没发现：node 端没有字形识别 → 这一刀根本不触发 ✗，只有**真浏览器**量得出来 ✓
+        //   （实测：不加这条时 demo111 被并成 11 ✗、3-人工修正 19→18 ✗）。
+        let inkHit = 0, samples = 0
+        for (let k = 1; k <= 15; k++) {
+          const t = k / 16
+          const qx = Math.round(verts[i].x + dx * t), qy = Math.round(verts[i].y + dy * t)
+          if (qx < 0 || qy < 0 || qx >= W || qy >= H) continue
+          samples++
+          let hit = false
+          for (let oy = -1; oy <= 1 && !hit; oy++) {
+            for (let ox = -1; ox <= 1 && !hit; ox++) {
+              const nx = qx + ox, ny = qy + oy
+              if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue
+              if (ink[ny * W + nx]) hit = true
+            }
+          }
+          if (hit) inkHit++
+        }
+        if (samples && inkHit / samples > 0.35) continue
         verts[i].x = (verts[i].x + verts[j].x) / 2
         verts[i].y = (verts[i].y + verts[j].y) / 2
         for (const e of outEdges) { if (e[0] === j) e[0] = i; if (e[1] === j) e[1] = i }
@@ -1953,22 +1978,17 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     const r = opt.extendR ?? 72
     const deg = new Array(verts.length).fill(0)
     for (const e of outEdges) { deg[e[0]]++; deg[e[1]]++ }
-    const cand: { i: number; d: number; junction: boolean }[] = []
+    let best = -1, bestJ = -1, bd = 1e9, bdJ = 1e9
     for (let i = 0; i < verts.length; i++) {
       const vx = verts[i].x - p.x, vy = verts[i].y - p.y
       const d = Math.hypot(vx, vy)
       if (d < 3 || d > r) continue
       if ((vx / d) * dx + (vy / d) * dy < 0.9) continue          // 偏离方向 25° 以上不要
-      cand.push({ i, d, junction: deg[i] >= 2 })
+      // 岔路口（度 >= 2）比"上一条短划的断头"更可能是这条虚线真正的落点
+      if (deg[i] >= 2) { if (d < bdJ) { bdJ = d; bestJ = i } }
+      else if (d < bd) { bd = d; best = i }
     }
-    if (!cand.length) return -1
-    // ⚠ 试过"近的优先" ✗（一律近优先 / 只在 ≤24px 时近优先，两版都试了）：
-    //   整张图的虚线端点会改指到别的点上 → user2 22→23 ✗、3-人工修正 19→18 ✗（锁破 ✗）、
-    //   demo111 12→13 ✗ —— 太扰动 ✓，**回退**：保持原来的"岔路口优先" ✓。
-    //   （"跳过 17px 的断头去接 52px 的岔路口"那个毛病，交给下面"补接"那一刀去修 ✓。）
-    const jn = cand.filter((c) => c.junction).sort((a, b) => a.d - b.d)[0]
-    const nr = cand.slice().sort((a, b) => a.d - b.d)[0]
-    return (jn || nr).i
+    return bestJ >= 0 ? bestJ : best
   }
   const extendDashed = () => {
     for (const E of outEdges) {
@@ -2158,6 +2178,83 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   dropIsolated()
   dedupe()
 
+
+  // ---------- 【v1525】把"被字母切断的线"接回去（手术刀式：只认最严的那一种情形 ✓） ----------
+  // 为什么放在最后：断头是**后面的成链 / 吸附**造出来的 ✗ —— 放在中间态时那两截还不成对 ✓
+  // （v1524 试过把补接判据改宽，结果一处都没触发 ✓）。
+  // 判据（五条一起用，缺一不可 ✓）：
+  //   ① 两头**都是断头**（度 1）✓；② 缺口很小（≤ 1.2×字高、且 ≤26px）✓；
+  //   ③ 两截**共线**（把 i 的边方向当基准，j 的垂距 ≤3px、方向反向 cos ≤ -0.98）✓；
+  //   ④ **中间确实有个字母块**（连线中点 34px 内 ✓）—— 这是"线被字切断"的直接证据 ✓；
+  //   ⑤ 两点之间**不能夹着别的顶点** ✓。
+  // 实测（v1524 数据）：只有这一种最严的组合才不是"动一处、塌一片" ✗。
+  const healCutLines = (bodyH: number): number => {
+    const maxGap = Math.min(26, Math.max(10, 1.2 * bodyH))
+    let fixed = 0
+    for (let guard = 0; guard < 40; guard++) {
+      const inc: number[][] = verts.map(() => [])
+      outEdges.forEach((e, i) => { inc[e[0]].push(i); inc[e[1]].push(i) })
+      let acted = false
+      for (let i = 0; i < verts.length && !acted; i++) {
+        if (inc[i].length !== 1) continue
+        for (let j = 0; j < verts.length; j++) {
+          if (j === i || inc[j].length !== 1) continue
+          const dx = verts[j].x - verts[i].x, dy = verts[j].y - verts[i].y
+          const d = Math.hypot(dx, dy)
+          if ((opt.labelDebug ?? 0) !== 0 && d >= 3 && d <= 60) console.log('[heal2] #' + i + '(' + verts[i].x.toFixed(0) + ',' + verts[i].y.toFixed(0) + ') — #' + j + '(' + verts[j].x.toFixed(0) + ',' + verts[j].y.toFixed(0) + ') 间距 ' + d.toFixed(1) + (d > maxGap ? ' ✗ 超过缺口上限 ' + maxGap.toFixed(1) : ''))
+          if (d < 3 || d > maxGap) continue
+          const ux = dx / d, uy = dy / d
+          // ③ 两截共线、且各自往外
+          const dirOf = (v: number) => {
+            const e = outEdges[inc[v][0]]
+            const o = e[0] === v ? e[1] : e[0]
+            const ex = verts[o].x - verts[v].x, ey = verts[o].y - verts[v].y
+            const el = Math.hypot(ex, ey) || 1
+            return [ex / el, ey / el] as [number, number]
+          }
+          const [ax, ay] = dirOf(i), [bx, by] = dirOf(j)
+          if ((opt.labelDebug ?? 0) !== 0) console.log('[heal2]   #' + i + '→#' + j + ' cos_i ' + (ax * ux + ay * uy).toFixed(3) + ' cos_j ' + (bx * ux + by * uy).toFixed(3) + ' perp_i ' + Math.abs(-ax * uy + ay * ux).toFixed(3) + ' perp_j ' + Math.abs(-bx * uy + by * ux).toFixed(3) + ' 中点字母最近 ' + (() => { let m = 1e9; const mx2 = (verts[i].x + verts[j].x) / 2, my2 = (verts[i].y + verts[j].y) / 2; for (const L of letters) { const dd = Math.hypot(L.x - mx2, L.y - my2); if (dd < m) m = dd } return m.toFixed(0) })())
+          // 门槛是**照着实测数字定的** ✓：user2 那对真断头 cos −0.991 / 0.995、垂距 0.131 / 0.101 ✓；
+          //   同一张图里的假配对是 cos −0.786 / −0.463 与 cos 0.006 ✗ —— 两边都留了余量 ✓。
+          if (ax * ux + ay * uy > -0.92) continue                 // i 的边要朝着"远离 j"的方向 ✓
+          if (bx * ux + by * uy < 0.92) continue                  // j 的边要朝着"远离 i"的方向 ✓
+          if (Math.abs(-ax * uy + ay * ux) > 0.25) continue        // 两条边还要大致在同一条直线上 ✓
+          if (Math.abs(-bx * uy + by * ux) > 0.25) continue
+          // ④ 中间有字母
+          const mx = (verts[i].x + verts[j].x) / 2, my = (verts[i].y + verts[j].y) / 2
+          let hasLabel = false
+          for (const L of letters) if (Math.hypot(L.x - mx, L.y - my) < 34) { hasLabel = true; break }
+          if (!hasLabel) continue
+          // ⑤ 中间不夹别的顶点
+          let between = false
+          for (let k = 0; k < verts.length && !between; k++) {
+            if (k === i || k === j) continue
+            const tx = verts[k].x - verts[i].x, ty = verts[k].y - verts[i].y
+            const t = tx * ux + ty * uy
+            if (t <= 1 || t >= d - 1) continue
+            if (Math.abs(tx * -uy + ty * ux) > 3) continue
+            between = true
+          }
+          if (between) continue
+          // 合并：把 j 并进 i —— **位置保持 i 不动** ✓
+          // ⚠ 试过"挪到中点" ✗：中点可能正好落进另一个顶点的 8px 合并半径里 ✗ →
+          //   后面的 mergeVerts 会顺带把它吃掉 ✗（实测真浏览器里 3-人工修正 19→18 ✗、demo111 12→11 ✗）。
+          for (const e of outEdges) { if (e[0] === j) e[0] = i; if (e[1] === j) e[1] = i }
+          verts.splice(j, 1)
+          for (const e of outEdges) { if (e[0] > j) e[0]--; if (e[1] > j) e[1]-- }
+          fixed++
+          acted = true
+          break
+        }
+      }
+      if (!acted) break
+    }
+    return fixed
+  }
+  const healedN = (opt.labelHeal ?? 1) !== 0 ? healCutLines(labelCount.bodyH) : 0
+  // ⚠ 这里**不能**再跑 mergeVerts ✗：那是"挪顶点"的操作，会把刚接好的点又并进邻居里 ✗（上面那条实测 ✓）。
+  if (healedN) dedupe()
+
   // ---------- 【v1524】最后一步：按"标注个数"剪掉多余的顶点（用户的想法 ✓） ----------
   // 放在这里是因为**它必须是最后一个动顶点的步骤** ✗：前面任何一步（成链、精修、规整）都会再加回顶点，
   // 中间态剪了也白剪 ✓（实测 1-原图 中间态剪 6 个、最终数还是 10 ✗）。
@@ -2195,7 +2292,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       text: L.text,
       conf: +L.conf.toFixed(3),
     })),
-    stats: { verts: verts.length, edges: outEdges.length, dash: dashN, text: textN, bars: st.barCount, dashGroups: st.dashGroups, buds: peel.buds, labels: labelCount.n, pruned: prunedN, clipped },
+    stats: { verts: verts.length, edges: outEdges.length, dash: dashN, text: textN, bars: st.barCount, dashGroups: st.dashGroups, buds: peel.buds, labels: labelCount.n, pruned: prunedN, healed: healedN, clipped },
   }
 }
 
