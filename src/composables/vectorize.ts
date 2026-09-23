@@ -437,6 +437,41 @@ export interface VectorizeOpt {
    *  ⚠ 实测 1 会误合并真顶点（1-原图 10→8 ✗、3-人工修正 19→18 ✗），所以默认不动 ✓。 */
   healByBlob?: number
   /**
+   * 【v1540 · 默认 1 ✓】`healCutLines` 的 **T 形交汇缺口**：把"线穿过 T 形点继续延伸"也补上。
+   *
+   * 病根（`7.png` 实测 ✓）：`facing` 判据要求"两点**各自**都有一条边**同向**指着对方"，
+   *   而 T 形交汇点（`v8(269,368)`，度 3：边朝上 `3-8` / 朝左 `8-5` / 朝右 `8-7`）**没有朝下的边** ✗
+   *   → 竖线被 `stripText` 误抹的中段（`v8`→`v10(268,398)` 这 26px）**永远补不回来** ✗ → 真值边丢失 ✗
+   *   ★ 而 `3-8` 与 `v8→v10` 方向的 cos 正好是 **−1.00（完全反向共线）** —— 铁证它们在同一条线上 ✓
+   *   （那段墨之所以被抹：它是 3×23px 的竖直条，形状**真的像 "L"**，底部又正好接上斜虚线 `5-9` 的短划
+   *     → 被判成"紧凑块"抹掉；上下都被虚线的**间隙**隔开 → 成不了虚线链 → 落进 `texts` ✗
+   *     `.probe/labels/user7.json` 里那个 `L (276,385)` 距竖线中段只有 **7px** ✓ 铁证）
+   *
+   * 判据：**一头是"纯 T 形点"、另一头顺接** ✓（两点连线 = T 形点那条反向边的**延长线**）
+   *   · 顺接 `facing(v)` = 有边 cos > 0.8
+   *   · 纯 T 形点 `teeV(v)` = **度 ≥ 3** 且有边 cos < −0.8、**且没有任何边 cos > 0.8**
+   *
+   * ⚠ 两道门槛都是踩出来的，别删 ✗→✓：
+   *   ① **`mx < 0.8`**：只判"有反向共线的边"时，**真岔路口**也满足（一条线穿过它）→
+   *      实测 `7.png` 一次命中 **5 对**、顶点 14→**10** ✗✗（`#6(137,392)d4` 这种真四岔口被合并 ✗）。
+   *      加上之后只剩 1 对 ✓（`#6` 的 `mx = 0.96` = 有边顺接 → 排除 ✓）
+   *   ② **度 ≥ 3**：度 1 的点唯一那条边若背对目标，`mx = mn = −1.00` → 会被误判成"纯 T 形点"✗
+   *      （实测多减 2 个顶点 ✗）
+   *   ③ **`facing` 与 `teeV` 必须分开算**：图省事写成"取最同向那条边的 cos"（max）时，
+   *      T 形点会被自己的**横向边掩盖** ✗ —— `#12(269,369)d3` 的三条边 cos = −1.00 / 0.02 / −0.04，
+   *      max = **0.02** → 一个都判不出来 ✗
+   *
+   * 实测（v1540）：
+   *   · **13 张真图只动 `7.png` 一张** ✓ —— 顶点 14→**12**、边 21→**19**、虚 8→**7**、
+   *     悬空实线端 **1→0**、落在线上 3→**2**；`3-8实` + `10-11实` **合并成 `3-9实`**（漏掉的 26px 接上 ✓）
+   *     ★ 附带把 `v8`（竖线 × 水平虚线）和 `v10`（竖线 × 斜虚线）两个**不该存在的交叉点**也去掉了 ——
+   *       正好符合用户定的「**十字交叉处都不加点**」✓
+   *   · `2.png`（5 个悬空端）/ `4.png`（6 个）/ `6.png`（5 个）等 12 张**逐位不动** ✓ → 判据足够紧 ✓
+   *   · 合成基准 8 张 + 实图锁 4 张**逐位不动** ✓（它们没有字母 → 判据②不触发 → 天然不受影响 ✓）
+   *   · `--check vecbase10.json` 无回归 ✓（默认值改动后基线依然有效，不必新建基线）
+   */
+  healTee?: number
+  /**
    * 【A1 · 可注入】外部给定的**字形识别结果** —— 让 node 探针也能覆盖「依赖 labels」的分支。
    *
    * 背景：`recognizeLabels()` 靠 canvas 渲染字形模板做匹配，而探针里的 canvas 是 stub
@@ -2652,14 +2687,41 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
         if (!hasLabel) continue
         if ((opt.labelDebug ?? 0) !== 0) console.log('[heal] 试接 #' + i + '(' + verts[i].x.toFixed(0) + ',' + verts[i].y.toFixed(0) + ')d' + degOf(i) + ' — #' + j + '(' + verts[j].x.toFixed(0) + ',' + verts[j].y.toFixed(0) + ')d' + degOf(j) + '  间距 ' + d.toFixed(0) + '  最近字母 ' + (() => { let m = 1e9; for (const L of letterPts) { for (let k = 2; k <= 8; k++) { const t = k / 10; const px2 = verts[i].x + dx * t, py2 = verts[i].y + dy * t; const dd = Math.hypot(L.cx - px2, L.cy - py2); if (dd < m) m = dd } } return m.toFixed(0) })())
         // ③ 两点各自都有一条边指着对方
-        const facing = (v: number) => outEdges.some((E) => {
-          if (E[0] !== v && E[1] !== v) return false
-          const o = E[0] === v ? E[1] : E[0]
-          const ex = verts[o].x - verts[v].x, ey = verts[o].y - verts[v].y
-          const el = Math.hypot(ex, ey) || 1
-          return (ex / el) * ux + (ey / el) * uy > 0.8
-        })
-        if (!facing(i) || !facing(j)) continue
+        //   【v1540】`facing` / `backCollinear` **必须分开算** ✗→✓：
+        //   一开始图省事写成"取最同向那条边的 cos"（max），结果 **T 形点被自己的横向边掩盖** ✗ ——
+        //   实测 `#12(269,369)d3` 的三条边 cos = −1.00（朝上 `3-8`）/ 0.02（朝左 `8-5`）/ −0.04（朝右 `8-7`），
+        //   max = **0.02** → "有反向共线的边"判不出来 → T 形缺口一个都没命中 ✗
+        const edgeCos = (v: number) => {
+          let mx = -2, mn = 2
+          for (const E of outEdges) {
+            if (E[0] !== v && E[1] !== v) continue
+            const o = E[0] === v ? E[1] : E[0]
+            const ex = verts[o].x - verts[v].x, ey = verts[o].y - verts[v].y
+            const el = Math.hypot(ex, ey) || 1
+            const c = (ex / el) * ux + (ey / el) * uy
+            if (c > mx) mx = c
+            if (c < mn) mn = c
+          }
+          return { mx, mn }
+        }
+        const facing = (v: number) => edgeCos(v).mx > 0.8
+        /**
+         * 【v1540】**纯 T 形点**：没有任何边朝对方（`mx` 也小）+ 有边反向共线（`mn < −0.8`，
+         *   即两点连线是那条边的**延长线**）✓
+         *   ★ 这一条是收紧的关键 ✗→✓：只判 `backCollinear` 时，**真岔路口**也满足（一条线穿过它）
+         *   → 实测 `7.png` 一次命中 **5 对**、顶点 14→**10** ✗✗（`#6(137,392)d4` 这种真四岔口被合并 ✗）。
+         *   加上 `mx < 0.8` 之后只剩 `#12—#14` 一对 ✓ ——
+         *   `#6` 的 `mx = 0.96`（有边顺接 = 一条线穿过它）→ 排除 ✓；
+         *   `#12` 的 `mx = 0.02`（边全朝上/左/右，**没有**朝下的）→ 命中 ✓
+         */
+        const teeV = (v: number) => degOf(v) >= 3 && edgeCos(v).mx < 0.8 && edgeCos(v).mn < -0.8
+        if (!facing(i) || !facing(j)) {
+          // 【v1540 · healTee】T 形交汇缺口 —— 见 `VectorizeOpt.healTee` 注释 ✓
+          //   判据：**一头是纯 T 形点、另一头顺接**（两点连线是 T 形点那条反向边的延长线 ✓）
+          if ((opt.healTee ?? 1) === 0) continue
+          if (!((teeV(i) && facing(j)) || (teeV(j) && facing(i)))) continue
+          if ((opt.labelDebug ?? 0) !== 0) console.log('[heal] T 形缺口: #' + i + '(' + verts[i].x.toFixed(0) + ',' + verts[i].y.toFixed(0) + ') — #' + j + '(' + verts[j].x.toFixed(0) + ',' + verts[j].y.toFixed(0) + ')  mx(i)=' + edgeCos(i).mx.toFixed(2) + ' mn(i)=' + edgeCos(i).mn.toFixed(2) + ' mx(j)=' + edgeCos(j).mx.toFixed(2) + ' mn(j)=' + edgeCos(j).mn.toFixed(2))
+        }
         // ★ v1525：**两点之间必须是"断的"** ✓ —— 线被字母切断时，那里的墨**跟着字母一起被抹掉了** ✓；
         //   而两个**真顶点**之间的线是连着的（虚线的短划也算 ✓）✗ —— 这一条专治"误合并真顶点" ✗。
         //   为什么以前没发现：node 端没有字形识别 → 这一刀根本不触发 ✗，只有**真浏览器**量得出来 ✓
