@@ -3638,9 +3638,11 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       console.log('[dash] === extendDashed 前: ' + W + 'x' + H + ' 顶点 ' + verts.length + ' 边 ' + outEdges.length +
         ' 虚线边 ' + outEdges.filter((e) => e[2]).length + ' ===')
       for (const e of outEdges) {
-        if (!e[2]) continue
+        // 【v1559】`dashDebug=2` 时**连实线也列** ✓ —— 查"某条边是从哪来的"必需 ✗
+        //   （原来只列虚线 ✗，导致"实线边在 `extendDashed` 前就存在"这种情况**完全看不见** ✗）
+        if (!e[2] && (opt.dashDebug ?? 0) < 2) continue
         const A0 = verts[e[0]], B0 = verts[e[1]]
-        console.log('[dash]  虚 #' + e[0] + '(' + A0.x.toFixed(0) + ',' + A0.y.toFixed(0) + ')d' + deg0[e[0]] + '/dd' + dd0[e[0]] +
+        console.log('[dash]  ' + (e[2] ? '虚' : '**实**') + ' #' + e[0] + '(' + A0.x.toFixed(0) + ',' + A0.y.toFixed(0) + ')d' + deg0[e[0]] + '/dd' + dd0[e[0]] +
           ' — #' + e[1] + '(' + B0.x.toFixed(0) + ',' + B0.y.toFixed(0) + ')d' + deg0[e[1]] + '/dd' + dd0[e[1]] +
           '  长 ' + Math.hypot(B0.x - A0.x, B0.y - A0.y).toFixed(0))
       }
