@@ -2279,7 +2279,24 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       for (const E of outEdges) {
         const A2 = verts[E[0]], B2 = verts[E[1]]
         if (Math.hypot(A2.x - B2.x, A2.y - B2.y) > maxLen) continue
-        A2.x = (A2.x + B2.x) / 2; A2.y = (A2.y + B2.y) / 2
+        // 【v1530】合并位置取**连接数明显更高（≥2）**的一端，度差 ≤1 时取中点（原行为）✓
+        //   岔路口（度 ≥3）是骨架上结构性的节点，死端多半是毛刺/线头；无脑取中点会把真顶点拽离原位。
+        //   实测（基准台 8 套，逐图核对）：pabcdaxes 顶点精度 66.7→80.0、pabcdoaxes 70.0→77.8、
+        //   平均顶点精度 69.6→72.3、边精度 68.9→70.3、假顶点 84→81；**召回 4 项逐图全不恶化**、
+        //   实图锁 4 张逐位不动 ✓。代价：平行/垂直角误差微升（0.61°→0.82° / 0.73°→0.81°）。
+        //   ⚠ 只敢用"度差 ≥2"才抢位置：差 1（2v1）也抢的话 cubeaxes 顶点召回 90.9→81.8 ✗
+        //     （y 轴交点 T7 被挤到 1.01×vtol 上）。也**不能把 short 关掉**：收缩平时在大量并掉
+        //     "同一真值顶点被拆成两个"的假顶点（short=0 → 假顶点 84→105 ✗、实图 V19→23 ✗✗）。
+        //   未解决：cubeaxes T4（度 3 岔路口在真值 0.0px 处，仍被 26px 短枝的枝尖顶点顶掉）——
+        //   short=0 时它确能救回（召回 90.9→100%），但代价不可接受；根治得动骨架层（见 spurBranchMax 否证注释）。
+        const degV = (v: number) => {
+          let d = 0
+          for (const e of outEdges) { if (e[0] === v) d++; if (e[1] === v) d++ }
+          return d
+        }
+        const da = degV(E[0]), db = degV(E[1])
+        if (db >= da + 2) { A2.x = B2.x; A2.y = B2.y }
+        else if (Math.abs(da - db) <= 1) { A2.x = (A2.x + B2.x) / 2; A2.y = (A2.y + B2.y) / 2 }
         const j = E[1], k = E[0]
         for (const e of outEdges) {
           if (e[0] === j) e[0] = k
