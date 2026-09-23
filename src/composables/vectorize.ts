@@ -157,6 +157,28 @@ export interface VectorizeOpt {
    * 取值 ≈ 一个笔画宽（扫描件实测 2~3px / 对角 530px ≈ 0.005 ✓）。
    */
   labelKeepSW?: number
+  /** ⚠【v1528】合并「被顶点切断的共线边」—— **实测是负收益，已否掉 ✗，别再翻** ✗
+   *
+   * 想解决的问题（是真的 ✓）：坐标轴 / 长棱**穿过**图形顶点时，骨架在那一刀断成两截 →
+   *  输出 `A-V` 与 `V-B`，而真值是 `A-B` 一条 ✗。8 套真值丢 22 条边，其中 **5 条**是这种
+   *  （`.probe/_edge1.cjs` 逐边表 ✓：cubea1 E7、cubeaxes E13 y 轴、pabcdaxes E6、pabcdoaxes E9/E10）。
+   *
+   * ✗ 为什么还是不行：**误伤 > 收益**，因为两种情况在几何上**长得一模一样** ——
+   *  ① 该合的：y 轴**路过**正方体顶点 #2，被切成两截（真值是 1 条）；
+   *  ② 不该合的：cubea1 顶面的两条棱 E5/E6 在 (0.620,0.191) 处夹角仅 **约 2°**，
+   *     同样是"共线 + 中间有顶点"，但真值里是**两条独立边** ✗。
+   *  → 只靠"共线 + 中间有顶点"**无法区分** ① 和 ② ✗（试过加"度 ≥3""虚实一致""只做一轮"，都不解决这个歧义）。
+   *
+   * 实测（`mergeCollinear=1`，基准台 8 套）：边召回 **79.4% → 72.2%** ✗✗（cubea1 87.5→68.8、
+   *  cube7 84.6→69.2、pabcdc1 84.6→69.2、pabcdaxes 66.7→58.3），真图 `demo111` E17→E15、
+   *  `3-人工修正` E19→E18、`P-ABCD-EF` E14→E13 ✗（边被并没了）。唯一改善是虚实线 91.1→94.0% ✓，不抵。
+   *
+   * ⚠ **教训（探针也会骗人）**：`.probe/_edge1.cjs` 只统计"丢失的边能不能被救"（+5 ✓），
+   *  **没统计"合并会不会误伤"** —— 只看召回不看误伤，会得出完全相反的结论 ✗。
+   *  以后评估"合并类"改动，必须同时看**被合并掉的那些边原本是不是真值边**。 */
+  mergeCollinear?: number
+  /** 合并的共线门槛。**已随上面那刀一起否掉** ✗（0.97~0.995 全窗口都是负收益），留着仅为复现实测。 */
+  mergeCollinearCos?: number
   /** 找"字母芽"的半径（图对角线的比例，默认 0.055 ≈ 大半个字高）。取小了切不下整个字，取大了会把短线段当成字。 */
   labelBudR?: number
   /** 芽的最小高度（相对"字高参考"，默认 0.6）—— 比这更矮的块一律不是字（虚线短划、墨点碎屑）*/
@@ -1608,6 +1630,58 @@ function snapGeometry(
   }
 }
 
+/** 【v1528】把「被顶点切断的共线边」接回一条 ✓（开关与实测见 `VectorizeOpt.mergeCollinear`）
+ *
+ * 只处理"**穿过**"这一类：顶点 V 的两条边 `(A,V)`、`(V,B)` 虚实一致且 A-V-B 三点共线同向
+ * → 说明这两截本来是一条直线（坐标轴 / 长棱），只是路过 V 时被骨架切断了 ✗。
+ * 合并后 **V 依然是顶点**（它还连着别的边 ✓），变的是那两段合成一段 ✓。
+ *
+ * ⚠ 三条纪律（与 v1527 那次同款）：
+ *   ① 只做**一轮**、不迭代 —— 连锁合并会把折线一路并成一条直线 ✗；
+ *   ② 一条边最多参与一次合并（`used` 守着），否则十字交叉会并出 4 条 ✗；
+ *   ③ 默认关 → 与旧行为**逐位一致** ✓（`opt.mergeCollinear ?? 0` 不进分支）。 */
+function mergeCollinearEdges(edges: [number, number, number][], points: number[], opt: VectorizeOpt): [number, number, number][] {
+  const thr = opt.mergeCollinearCos ?? 0.98
+  const nv = points.length >> 1
+  const inc: number[][] = []
+  for (let i = 0; i < nv; i++) inc.push([])
+  edges.forEach((e, i) => { inc[e[0]].push(i); inc[e[1]].push(i) })
+  const drop = new Set<number>()
+  const add: [number, number, number][] = []
+  const P = (i: number) => [points[2 * i], points[2 * i + 1]] as const
+  for (let v = 0; v < nv; v++) {
+    const list = inc[v]
+    if (list.length < 2) continue
+    const used = new Set<number>()
+    for (let i = 0; i < list.length; i++) {
+      if (used.has(list[i])) continue
+      const e1 = edges[list[i]]
+      for (let j = i + 1; j < list.length; j++) {
+        if (used.has(list[j])) continue
+        const e2 = edges[list[j]]
+        if (e1[2] !== e2[2]) continue        // 虚实必须一致：实线不会和虚线接成一条
+        const a = e1[0] === v ? e1[1] : e1[0]
+        const b = e2[0] === v ? e2[1] : e2[0]
+        if (a === b) continue
+        const p0 = P(a), p1 = P(v), p2 = P(b)
+        const u1x = p1[0] - p0[0], u1y = p1[1] - p0[1]
+        const u2x = p2[0] - p1[0], u2y = p2[1] - p1[1]
+        const L1 = Math.hypot(u1x, u1y), L2 = Math.hypot(u2x, u2y)
+        if (L1 < 1e-9 || L2 < 1e-9) continue
+        if ((u1x * u2x + u1y * u2y) / (L1 * L2) < thr) continue   // 不共线同向 → 是拐角，不是"穿过"
+        used.add(list[i]); used.add(list[j])
+        drop.add(list[i]); drop.add(list[j])
+        add.push([a, b, e1[2]])
+        break
+      }
+    }
+  }
+  if (!add.length) return edges
+  const out = edges.filter((_, i) => !drop.has(i))
+  for (const e of add) out.push(e)
+  return out
+}
+
 function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [number, number, number, number] }, opt: VectorizeOpt = {}): VectorizeResult {
   const W = m.W, H = m.H, box = m.box
   const diag = Math.hypot(box[2] - box[0], box[3] - box[1])
@@ -2384,6 +2458,8 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     a1: +a.a1.toFixed(4),
     dash: a.dash,
   }))
+  // 【v1528】合并「被顶点切断的共线边」（默认关 ✓ —— 传 0 时这一行不进，与旧行为逐位一致）
+  if ((opt.mergeCollinear ?? 0) !== 0) outEdges = mergeCollinearEdges(outEdges, points, opt)
   return {
     W: bw, H: bh, box, imgW: W, imgH: H,
     points,

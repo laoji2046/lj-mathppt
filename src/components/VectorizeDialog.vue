@@ -1451,6 +1451,203 @@ function delEdge(i: number) {
   selE.value = null
 }
 
+/**
+ * 批量删掉若干顶点并**一次性重编号**，返回「旧索引 → 新索引」的函数。
+ *
+ * ⚠ 为什么不直接循环调 `finishRemove`：**保留点的索引会在每次删除后漂移** ——
+ *   合并/拉直都是"一次删好几个、还要记住留下的那个在哪"，逐个删必然错位。
+ *   这里统一先删数据、再让调用方拿着 fix 去改边，跟 `finishRemove` 的语义保持一致
+ *  （弧是**按下标引用顶点**的，漏了重编号弧就会接到别的点上 —— 实测踩过 ✗）。
+ */
+function removeVerts(ids: number[], mergedInto: number | null): (k: number) => number {
+  const del = new Set(ids)
+  const newIdx: number[] = []
+  let o = 0
+  for (let i = 0; i < nVerts.value; i++) newIdx.push(del.has(i) ? -1 : o++)
+  const fix = (k: number) => newIdx[k]
+  for (const i of ids.slice().sort((a, b) => b - a)) {
+    pts.value.splice(i * 2, 2)
+    labels.value.splice(i, 1)
+    lconf.value.splice(i, 1)
+    offs.value.splice(i, 1)
+  }
+  const mi = mergedInto === null ? null : fix(mergedInto)
+  arcs.value = arcs.value.flatMap((a) => {
+    const idx = arcIdxOf(a)
+    if (!idx) return [a]
+    const fixed = idx.map((k) => (del.has(k) ? mi : fix(k)))
+    if (fixed.some((k) => k === null || k < 0)) return []          // 控制点没了 → 这条曲线作废
+    const uniq: number[] = []
+    for (const k of fixed as number[]) if (uniq[uniq.length - 1] !== k) uniq.push(k)
+    if (uniq.length < 2) return []
+    return [{ ...a, pts: uniq, i0: undefined, i1: undefined }]
+  })
+  selArc.value = null
+  return fix
+}
+
+/**
+ * 【v1528】把选中的多个顶点**合并成一个**。
+ *
+ * 为什么要有它：自动识别常把**同一个真值顶点**拆成几个挨得很近的点，
+ *   或者给主干顶点挂一根短枝、枝端点又单独成一个点 ✗。全局的「顶点合并」滑块
+ *   （`mergeR`）只能**按距离无差别地并**，调大了会连真值里本来就挨得近的两个顶点一起并掉 ✗
+ *   —— 所以要能**自己挑中这几个再并** ✓（v1528 用户实测要求）。
+ *
+ * 保留谁 / 落点在哪（两条规则，都是为了让"主干点别被散点拽偏"）：
+ *   ① 保留**度最高**的那个（并列取离重心最近的）—— 主干顶点度大、枝端点度 1；
+ *   ② 位置：保留点度 ≥ 2 → **原地不动** ✓（并掉的是散点，不该挪动主干）；
+ *      全都是度 ≤ 1 的散点 → 落在这几个点的**重心**。
+ *   ③ 字母：保留点自己没字母时，继承一个被并掉点的字母（别把已经配好的字母丢了）。
+ */
+function mergeSelectedVertices() {
+  const ids = selVs.value.slice()
+  if (ids.length < 2) { note.value = '至少选中 2 个顶点才能合并'; return }
+  pushUndo()
+  const del = new Set(ids)
+  const deg = new Array(nVerts.value).fill(0)
+  for (const e of edges.value) { deg[e[0]]++; deg[e[1]]++ }
+  let cx = 0, cy = 0
+  for (const i of ids) { cx += pts.value[i * 2]; cy += pts.value[i * 2 + 1] }
+  cx /= ids.length; cy /= ids.length
+  let keep = ids[0], bs = -Infinity
+  for (const i of ids) {
+    const d = Math.hypot(pts.value[i * 2] - cx, pts.value[i * 2 + 1] - cy)
+    const sc = deg[i] * 1e3 - d * 1e2                 // 度优先，其次离重心近
+    if (sc > bs) { bs = sc; keep = i }
+  }
+  const tx = deg[keep] >= 2 ? pts.value[keep * 2] : cx
+  const ty = deg[keep] >= 2 ? pts.value[keep * 2 + 1] : cy
+  let lb = labels.value[keep], lc = lconf.value[keep], lo = offs.value[keep]
+  if (!lb || !lb.trim()) {
+    for (const i of ids) {
+      if (i === keep) continue
+      const s = labels.value[i]
+      if (s && s.trim()) { lb = s; lc = lconf.value[i]; lo = offs.value[i]; break }
+    }
+  }
+  // 1) 指向被并点的端点先改指 keep（此时都用旧索引）
+  let es = edges.value.map((e) => [
+    del.has(e[0]) ? keep : e[0],
+    del.has(e[1]) ? keep : e[1],
+    e[2],
+  ] as [number, number, number])
+  // 2) 去自环，重复边只留一条（实线压虚线）
+  const seen = new Map<string, [number, number, number]>()
+  for (const e of es) {
+    if (e[0] === e[1]) continue
+    const k = e[0] < e[1] ? `${e[0]}-${e[1]}` : `${e[1]}-${e[0]}`
+    const p = seen.get(k)
+    if (!p) { seen.set(k, e); continue }
+    if (p[2] && !e[2]) seen.set(k, e)
+  }
+  es = [...seen.values()]
+  // 3) 删点 + 重编号
+  const fix = removeVerts(ids.filter((i) => i !== keep), keep)
+  edges.value = es.map((e) => [fix(e[0]), fix(e[1]), e[2]] as [number, number, number])
+  const nk = fix(keep)
+  pts.value[nk * 2] = tx
+  pts.value[nk * 2 + 1] = ty
+  labels.value[nk] = lb
+  lconf.value[nk] = lc
+  offs.value[nk] = lo
+  selVs.value = [nk]
+  selE.value = null
+  note.value = `已把 ${ids.length} 个顶点合并成 1 个`
+}
+
+/**
+ * 【v1528】把选中的**一条折线拉成一条直边** —— 只留两个端点，中间那些多出来的点抹掉。
+ *
+ * 场景 ✓：识别常把一条直线边拆成 3~4 段（中间夹着几个共线的点），看着还行，
+ *   但顶点数虚高，后面连线 / 作截面都会多点 ✗。
+ *
+ * ⚠ 为什么只做**手动**、不做全自动：全自动版正是上一轮否掉的 `mergeCollinear` ✗
+ *   （`vectorize.ts` 里有完整实测：边召回 79.4% → 72.2% ✗✗，因为"坐标轴穿过正方体顶点"
+ *   与"顶面两条棱夹角仅 2°"在几何上**无法区分** ✗）。**让人看着点才不会误并** ✓。
+ *
+ * 用法：选中折线上的点（框选最省事）→ 点「拉成一条边」。
+ *   **只选中 1 个中间点时会自动沿"度 = 2"向两侧扩到整条极大链** ✓
+ *   —— 最常见的场景点一下就行，不用把一整串点都框进来。
+ */
+function straightenSelected() {
+  const ids = selVs.value.slice()
+  if (!ids.length) return
+  const nv = nVerts.value
+  const deg = new Array(nv).fill(0)
+  const adj: number[][] = Array.from({ length: nv }, () => [])
+  for (const e of edges.value) {
+    deg[e[0]]++; deg[e[1]]++
+    adj[e[0]].push(e[1]); adj[e[1]].push(e[0])
+  }
+  let chain: number[] = []
+  if (ids.length === 1) {
+    // 单点 → 向两侧扩成极大链
+    const s = ids[0]
+    if (deg[s] !== 2) { note.value = '这个顶点不是折线中间的点（连着它的线不是 2 条），请选中整条折线上的点'; return }
+    const walk = (start: number, from: number) => {
+      const out: number[] = []
+      let cur = start, prev = from
+      for (let step = 0; step < 16; step++) {
+        out.push(cur)
+        if (deg[cur] !== 2) break                       // 走到端点（度 ≠ 2）就停
+        const nx = adj[cur].find((x) => x !== prev)
+        if (nx === undefined) break
+        prev = cur; cur = nx
+      }
+      return out
+    }
+    const a = walk(adj[s][0], s), b = walk(adj[s][1], s)
+    chain = [...a.reverse(), s, ...b]
+  } else {
+    // 多点 → 必须恰好构成一条链（连通 + 两端度 1 + 中间度 2）
+    const sel = new Set(ids)
+    const sub = edges.value.filter((e) => sel.has(e[0]) && sel.has(e[1]))
+    const sd = new Map<number, number>()
+    for (const e of sub) { sd.set(e[0], (sd.get(e[0]) ?? 0) + 1); sd.set(e[1], (sd.get(e[1]) ?? 0) + 1) }
+    const ends = ids.filter((i) => (sd.get(i) ?? 0) === 1)
+    if (ends.length !== 2 || sub.length !== ids.length - 1) {
+      note.value = '选中的顶点不构成一条链（要么没选全，要么中间有岔路）'
+      return
+    }
+    const s0 = ends[0]
+    const out: number[] = [s0]
+    let cur = s0, prev = -1
+    for (let k = 0; k < ids.length; k++) {
+      const nx = sub.find((e) => (e[0] === cur && e[1] !== prev) || (e[1] === cur && e[0] !== prev))
+      if (!nx) break
+      const nxt = nx[0] === cur ? nx[1] : nx[0]
+      out.push(nxt); prev = cur; cur = nxt
+    }
+    chain = out
+  }
+  if (new Set(chain).size !== chain.length) { note.value = '这条线绕成了环，没法拉直 —— 请手动框选要拉直的那一段'; return }
+  if (chain.length < 3) { note.value = '这条线本来就是直的（没有多余的中间点）'; return }
+  // 中间点必须只在链上、不能有岔路 —— 否则删掉它会连旁边的线一起丢 ✗
+  const mids = chain.slice(1, -1)
+  for (const m of mids) {
+    if (deg[m] !== 2) { note.value = '中间有顶点还连着别的线，拉直会把那条线一起删掉 —— 请先处理岔路'; return }
+  }
+  pushUndo()
+  // 链上每条边找出来删掉，再补一条直通边；虚实按链上边的多数
+  const drop = new Set<number>()
+  const dashes: number[] = []
+  for (let k = 0; k < chain.length - 1; k++) {
+    const u = chain[k], v = chain[k + 1]
+    const j = edges.value.findIndex((e, jj) => !drop.has(jj) && ((e[0] === u && e[1] === v) || (e[0] === v && e[1] === u)))
+    if (j >= 0) { drop.add(j); dashes.push(edges.value[j][2]) }
+  }
+  const dash: 0 | 1 = dashes.filter((d) => d).length * 2 > dashes.length ? 1 : 0
+  const a = chain[0], b = chain[chain.length - 1]
+  const es = edges.value.filter((_, j) => !drop.has(j))
+  es.push([a, b, dash] as [number, number, number])
+  const fix = removeVerts(mids, null)
+  edges.value = es.map((e) => [fix(e[0]), fix(e[1]), e[2]] as [number, number, number])
+  selVs.value = [fix(a), fix(b)]
+  selE.value = null
+  note.value = `已把 ${chain.length} 个点的折线拉成 1 条边（去掉 ${mids.length} 个中间点）`
+}
+
 /** 改字母：一次连续输入只记一次历史 */
 const labelEditing = ref(false)
 function onLabelInput() {
@@ -1475,6 +1672,9 @@ function onKey(e: KeyboardEvent) {
     else if (selArc.value !== null) { e.preventDefault(); delArc(selArc.value) }
     else if (selE.value !== null) { e.preventDefault(); delEdge(selE.value) }
   }
+  // 【v1528】M = 合并选中的顶点；L = 拉直选中的折线（跟 Delete 一样只在非输入态生效 ✓）
+  if (!mod && e.key.toLowerCase() === 'm' && selVs.value.length > 1) { e.preventDefault(); mergeSelectedVertices() }
+  if (!mod && e.key.toLowerCase() === 'l' && selVs.value.length) { e.preventDefault(); straightenSelected() }
 }
 
 /** 组一个 mathfig 元素（坐标换算回整图，尺寸保持原图宽高比） */
@@ -1910,9 +2110,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <span class="vd__coordtip">%</span>
             </div>
 
-            <div v-if="selVs.length > 1" class="vd__row vd__row--sel">
+            <div v-if="selVs.length" class="vd__row vd__row--sel">
               <span class="vd__selnum">已选中 {{ selVs.length }} 个顶点</span>
-              <button class="vd__btn vd__btn--danger" @click="delSelectedVertices">全部删掉</button>
+              <button v-if="selVs.length > 1" class="vd__btn" @click="mergeSelectedVertices"
+                      title="并成一个点。保留连线条数最多的那个的位置，其它点的线都接到它身上（快捷键 M）">合并成一个点</button>
+              <button class="vd__btn" @click="straightenSelected"
+                      :title="selVs.length > 1 ? '只留两端、抹掉中间的点，连成一条直边（快捷键 L）' : '自动沿这条折线扩到两端，抹掉中间多余的点（快捷键 L）'">拉成一条边</button>
+              <button v-if="selVs.length > 1" class="vd__btn vd__btn--danger" @click="delSelectedVertices">全部删掉</button>
               <button class="vd__btn" @click="selVs = []">取消选择</button>
             </div>
 
