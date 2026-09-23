@@ -501,6 +501,23 @@ export interface VectorizeOpt {
    *      `3-人工修正` V18→V16 ✗、`demo111` V9→V8 ✗
    *  1 = 开 */
   dashClaim?: number
+  /** ⛔【v1554 否掉，**默认 0，别再翻**】把 `findAlong` 候选的排序键从**距离**换成**垂距** ✗
+   *
+   *  **想法**（`6.png` 的 `★漏边`）：`#27(77,389)` 该接 `#6(37,420)`（垂距 1.5px、cos 1.0 ✓ 完美贴合）
+   *  但 `#13(48,420)` 更近（42px vs 50px）→ 原逻辑按**距离**选就选了它（垂距 8.0px ✗ 勉强过门槛）
+   *
+   *  **实测：不但没修好，还把合成基准弄差了** ✗✗
+   *   · `6.png` 计数**逐位不动**（顶点 14 / 边 18 / 虚 10 / 悬空虚线端 4 ✗）
+   *   · 合成基准 4 项变差：顶点精度 86.5→**85.3**、边召回 82.5→**81.4**、
+   *     边精度 78.5→**76.5**、虚实线 89.9→**89.4** ✗
+   *
+   *  **为什么没修好**（`dashDebug=1` 实测原文）：
+   *   `E30 #27→#13 长42  na=25` ✗ —— `findAlong(#27,…)` 找到的是 **`#25`**，
+   *   而 `#25` 是**同一条虚线链的上一段**（`E24 #23→#25 长88  nb=27` ✗）
+   *   → 它离延伸线**更近**（perp 更小 ✗）⇒ 按垂距排反而**优先选同链节点** ✗
+   *   ⇒ **排序键换错了维度** ✗；而且 `#6`/`#13` 根本**没进候选**（不是被排序挤掉的 ✗）
+   *   → **改排序键解决不了这个漏边** ✗ */
+  extendPerpPick?: number
   /** 【v1535】虚线扩展时**不碰"链内节点"** —— 2 = 任何"虚线度 ≥2"的节点都不碰（**默认 ✓**）；
    *  1 = 只不碰"虚线度 2 且两条虚线边共线"的节点；0 = 关（= 旧行为 ✗）。
    *  为什么：虚线在骨架上是一**条链**（每个短划组当节点、逐段相连：A—g1—g2—C），逐条边无条件往外接会把
@@ -3507,6 +3524,8 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     //   顺手把一个真顶点留成"度 1 悬空实线端"（顶点 14→15 ✗）。
     //   换成绝对横向距离之后，`extendR` 就可以放心放大（见 extendR 的注释）✓
     const perpMax = opt.extendPerp ?? 10
+    /** 【v1554】候选排序键：0 = 按**距离**（原行为 ✓）；1 = 按**垂距**（谁更贴合延伸方向 ✓） */
+    const pickPerp = (opt.extendPerpPick ?? 0) !== 0
     const deg = new Array(verts.length).fill(0)
     for (const e of outEdges) { deg[e[0]]++; deg[e[1]]++ }
     let best = -1, bestJ = -1, bd = 1e9, bdJ = 1e9
@@ -3515,7 +3534,8 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       const d = Math.hypot(vx, vy)
       if (d < 3 || d > r) continue
       if ((vx / d) * dx + (vy / d) * dy < 0.9) continue          // 偏离方向 25° 以上不要
-      if (Math.abs(vx * dy - vy * dx) > perpMax) continue        // 横向偏离超限不要（dx,dy 是单位向量 → 叉积就是垂距 ✓）
+      const perp = Math.abs(vx * dy - vy * dx)                   // dx,dy 是单位向量 → 叉积就是垂距 ✓
+      if (perp > perpMax) continue                               // 横向偏离超限不要
       // ★★【v1543】新增闸门：**延伸路径上不能是"连着的一片墨"** ✗→✓
       //   虚线延伸的**本质**是"跨过**空白**去够到交点"（短划天然够不到交点，差一两个划的间距）✓
       //   → 路径中段应该是**空的** ✓
@@ -3571,8 +3591,13 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
         if (coverAlong(p, verts[i], skipE, gate, pIdx) >= (opt.extendCoverTol ?? 0.6)) continue
       }
       // 岔路口（度 >= 2）比"上一条短划的断头"更可能是这条虚线真正的落点
-      if (deg[i] >= 2) { if (d < bdJ) { bdJ = d; bestJ = i } }
-      else if (d < bd) { bd = d; best = i }
+      // 【v1554】★ 排序键默认仍是**距离**（原行为 ✓）；`extendPerpPick=1` 时改用**垂距** ✓
+      //   病根（`6.png`）：`#27(77,389)` 该接 `#6(37,420)`（**垂距 1.5px**、cos 1.0 ✓ 完美贴合方向）
+      //   但 `#13(48,420)` 更近（42px vs 50px）→ 按距离选就选了它（**垂距 8.0px** ✗ 勉强过门槛）
+      //   而延伸方向其实**精确指向 `#6`** ✓ → 该按"谁更贴合延伸方向"选，不是"谁更近" ✗
+      const kk = pickPerp ? perp : d
+      if (deg[i] >= 2) { if (kk < bdJ) { bdJ = kk; bestJ = i } }
+      else if (kk < bd) { bd = kk; best = i }
     }
     return bestJ >= 0 ? bestJ : best
   }
