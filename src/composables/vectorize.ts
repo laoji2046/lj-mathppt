@@ -1910,7 +1910,10 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   //   ① 附近 1.5 个字高内**有标注**的顶点一律不剪 ✓（那是有名字的点，剪了就是丢真顶点 ✗）；
   //   ② 只剪**断头**（度 1）或**落在另外两个顶点连线上的度 2 点** ✓（其余是真正的岔路口 ✓）；
   //   ③ 剪到目标数就停；**没有可剪的就停** ✓ —— 绝不为了凑数把真顶点剪掉 ✗。
-  const pruneToLabels = (target: number, bodyH: number) => {
+  // ⚠ "撑腰的标记"要包含**所有像字的块**（letters ∪ solid ✓），不能只用 letters ✗：
+  //   demo111 里两个**实心标注点**（12×12 圆点 ✓）不是"字母"、只是被判成短划的紧凑块 ✓，
+  //   它们所在的顶点于是"没人撑腰" ✗ → 目标 10 < 真值 12 → 会被剪掉一个真点 ✗（实测 12→11 ✗）。
+  const pruneToLabels = (target: number, bodyH: number, marks: { x: number; y: number }[]) => {
     if (target <= 0 || verts.length <= target) return 0
     const support = 1.5 * Math.max(6, bodyH)
     let cut = 0
@@ -1921,14 +1924,14 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       for (let v = 0; v < verts.length; v++) {
         const d = inc[v].length
         if (d < 1 || d > 2) continue                       // 度 0 的孤立点由 dropIsolated 管；度 ≥3 是岔路口，不剪 ✓
-        // ① 有字母撑腰 → 不剪 ✓
+        // ① 有标记撑腰 → 不剪 ✓
         let near = false
-        for (const b of letters) {
+        for (const b of marks) {
           if (Math.hypot(b.x - verts[v].x, b.y - verts[v].y) < support) { near = true; break }
         }
         if (near) continue
         let far = 1e9
-        for (const b of letters) {
+        for (const b of marks) {
           const dd = Math.hypot(b.x - verts[v].x, b.y - verts[v].y)
           if (dd < far) far = dd
         }
@@ -2262,7 +2265,11 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   //   但基准台会掉顶点召回 93.3%→87.7% ✗ —— 因为**合成图上的字大多压在线上** ✗，
   //   计数在那边只有 40/61 ✗（真图上的字是孤立 + 分离出来的，数得准 ✓）→ 目标偏低就会剪到真顶点 ✗。
   //   所以先留着开关，等"贴着线的字"识别率再上一个台阶，再把它改成默认 ✓。
-  prunedN = (opt.labelPrune ?? 0) !== 0 ? pruneToLabels(labelCount.n, labelCount.bodyH) : 0
+  // ⚠ 试过把"撑腰的标记"扩到 letters ∪ solid ✗（想让 demo111 的实心标注点也能保护自己的顶点 ✓）：
+  //   实测没用 ✓（demo111 还是 12→11 ✗，那两个点根本不在候选里 ✗），却让该剪的少剪了 ✗（user2 18→19 ✗）→ 回退 ✓。
+  prunedN = (opt.labelPrune ?? 0) !== 0
+    ? pruneToLabels(labelCount.n, labelCount.bodyH, letters)
+    : 0
   if (prunedN) { collinearSimplify(); dissolveCrossings(); dropIsolated(); dedupe() }
 
   const bw = box[2] - box[0], bh = box[3] - box[1]
