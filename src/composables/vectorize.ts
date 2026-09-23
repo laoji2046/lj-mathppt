@@ -304,6 +304,27 @@ export interface VectorizeOpt {
   labelRescan?: number
   /** 调试：1 = 把每个候选芽的判定过程打到控制台（node 探针看"为什么没认出来"用 ✓） */
   labelDebug?: number
+  /** 【v1534】调试：1 = 把 extendDashed 的每一步（每条虚线边的端点、findAlong 找到谁）打到控制台。
+   *  用来查"虚线被拆成两条带间隙的段、两端各留一个假顶点"（`.probe/_edge1.cjs` 的假顶点归因里
+   *  16/20 个假顶点都落在真值边内部、且 13/16 落在**虚线**上 ✓） */
+  dashDebug?: number
+  /** 【v1535】虚线扩展时**不碰"链内节点"** —— 2 = 任何"虚线度 ≥2"的节点都不碰（**默认 ✓**）；
+   *  1 = 只不碰"虚线度 2 且两条虚线边共线"的节点；0 = 关（= 旧行为 ✗）。
+   *  为什么：虚线在骨架上是一**条链**（每个短划组当节点、逐段相连：A—g1—g2—C），逐条边无条件往外接会把
+   *  链内节点"跳过"→ 一条链被拆成几条**重叠**的边、g1/g2 退化成度 1 悬空端 → 每个都是假顶点 ✗
+   *  （病根与实测见 extendDashed 的注释）。实测（`.probe/vecbench.cjs`，8 套合成真值 + 4 张实图）：
+   *    · 基线 0：顶点召回 95.1 / 精度 74.9、边召回 81.7 / 精度 72.9、虚实线 91.1、平行 0.64°、垂直 0.59°、等长 0.30%
+   *    · 1（只跳链内）：95.1 / 78.1、80.2 / 73.8、91.1、0.62 / 0.53 / 0.32 ✗ 边召回反而掉
+   *    · **2（默认）**：**97.2 / 82.4**、**82.2 / 75.5**、89.4、**0.55 / 0.43 / 0.21** ✓
+   *      —— 唯一"召回也涨"的方案；4 张实图 **3 张改善 / 1 张不动 / 0 张变差**（3-人工修正 V19→18、
+   *      demo111 V12→10、P-ABCD-EF V10→9、1-原图 逐位不动 ✓）。代价：虚实线 91.1→89.4（集中在 pabcdo 一张）
+   *    · ⚠ `mergeR` 拉大（10/14/18）补不回虚实线（88.1/88.1/90.4），召回还掉 → 别再试 ✗ */
+  dashChainOnly?: number
+  /** 【v1535】扩展虚线之后，剪掉"度 1 且落在另一条虚线内部"的重复碎段 —— 1 = 开；**0 = 关（默认）**。
+   *  这是 dashChainOnly 的替代路线：不拦扩展、只收拾结果。实测精度全场最好（顶点 83.2 / 边 78.1）
+   *  且**虚实线不掉**（91.1），但**召回掉了**（顶点 93.4 < 基线 95.1）且 `P-ABCD-EF.png` 变差（V10→V11）
+   *  → 默认关，留档 ✓（想换路线时 `--opt dashPruneDup=1` 直接开） */
+  dashPruneDup?: number
   /** 【v1525】把"被字母切断的线"接回去（两头都是断头、缺口 ≤1.2 字高、共线、中间有字母 ✓）：1 = 开（默认 ✓）；0 = 关。 */
   labelHeal?: number
   /** 【v1524】按字母数剪多余顶点：1 = 开；**0 = 关（默认 ✗）**。
@@ -2480,16 +2501,117 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     return bestJ >= 0 ? bestJ : best
   }
   const extendDashed = () => {
+    const dbgD = (opt.dashDebug ?? 0) !== 0
+    // 【v1535】扩展本身**保持原样**（每条虚线边的两端各自往外接）—— bug 不在扩展，在**扩展的结果**：
+    //   虚线在骨架上是一**条链**：每个短划组当节点、逐段相连 —— A — g1 — g2 — … — C。
+    //   逐条边无条件往外接时，链内节点会被"跳过"：
+    //     处理 A—g1 → g1 向前跳到 g2（多出 A—g2）；处理 g1—g2 → g1 退回 A、g2 跳到 C（变 A—C ✓）；
+    //     处理 g2—C → g2 退回 g1（多出 g1—C）→ 最终 {A—g2, A—C, g1—C} **三条重叠的边**，
+    //     而 g1、g2 各自退化成**度 1 的悬空端** → 每个都是一个假顶点 ✗
+    //     （实测 pabcd，`.probe/_edge1.cjs --opt dashDebug=1`：正好等于计分表里的 `假#5(0.383,0.728)`、`假#6(0.515,0.803)`）。
+    //   → 由紧跟其后的 `pruneDashDup()` 收拾：把"度 1 且落在另一条虚线**内部**"的碎段剪掉 ✓。
+    //   ⚠ 试过、否掉的两个变体（别再翻）✗：
+    //     · 只接"虚线度 = 1"的端点（链端点）：顶点精度 74.9→**82.4** ✓ 但 `pabcdo` 边召回 80→70、
+    //       边精度 80→58.3、虚实线 91.1→89.4 ✗ —— 那个图的 A 被拆成两个节点、靠扩展的"越链跳接"才连上。
+    //     · 只跳过"虚线度 2 且两虚线边共线"的节点：顶点精度只到 78.1、`cubea1` 61.5 ✗ 更差。
+    const chainOnly = opt.dashChainOnly ?? 2
+    // 链内节点 = 虚线度 2 且两条虚线边**共线**（一条直线穿过它）→ 扩展会把它"跳过"造成重叠边 ✗
+    const dinc: number[][] = verts.map(() => [])
+    outEdges.forEach((e, i) => { if (!e[2]) return; dinc[e[0]].push(i); dinc[e[1]].push(i) })
+    const isChainMid = (v: number) => {
+      if (chainOnly === 2) return dinc[v].length >= 2      // 严格：任何"虚线度 ≥2"的节点都不碰
+      if (dinc[v].length !== 2) return false
+      const [i1, i2] = dinc[v]
+      const o1 = outEdges[i1][0] === v ? outEdges[i1][1] : outEdges[i1][0]
+      const o2 = outEdges[i2][0] === v ? outEdges[i2][1] : outEdges[i2][0]
+      if (o1 === o2) return false
+      const c = verts[v], a = verts[o1], b = verts[o2]
+      const ux = a.x - c.x, uy = a.y - c.y, wx = b.x - c.x, wy = b.y - c.y
+      const lu = Math.hypot(ux, uy) || 1, lw = Math.hypot(wx, wy) || 1
+      return (ux / lu) * (wx / lw) + (uy / lu) * (wy / lw) <= -(opt.collinearCos ?? 0.98)
+    }
+    if (dbgD) {
+      const deg0 = new Array(verts.length).fill(0)
+      const dd0 = new Array(verts.length).fill(0)
+      for (const e of outEdges) { deg0[e[0]]++; deg0[e[1]]++; if (e[2]) { dd0[e[0]]++; dd0[e[1]]++ } }
+      console.log('[dash] === extendDashed 前: ' + W + 'x' + H + ' 顶点 ' + verts.length + ' 边 ' + outEdges.length +
+        ' 虚线边 ' + outEdges.filter((e) => e[2]).length + ' ===')
+      for (const e of outEdges) {
+        if (!e[2]) continue
+        const A0 = verts[e[0]], B0 = verts[e[1]]
+        console.log('[dash]  虚 #' + e[0] + '(' + A0.x.toFixed(0) + ',' + A0.y.toFixed(0) + ')d' + deg0[e[0]] + '/dd' + dd0[e[0]] +
+          ' — #' + e[1] + '(' + B0.x.toFixed(0) + ',' + B0.y.toFixed(0) + ')d' + deg0[e[1]] + '/dd' + dd0[e[1]] +
+          '  长 ' + Math.hypot(B0.x - A0.x, B0.y - A0.y).toFixed(0))
+      }
+    }
+    let ei = -1
     for (const E of outEdges) {
+      ei++
       if (!E[2]) continue
       const A = verts[E[0]], B = verts[E[1]]
       let dx = B.x - A.x, dy = B.y - A.y
       const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L
-      const na = findAlong(A, -dx, -dy), nb = findAlong(B, dx, dy)
+      const na = (chainOnly && isChainMid(E[0])) ? -2 : findAlong(A, -dx, -dy)
+      const nb = (chainOnly && isChainMid(E[1])) ? -2 : findAlong(B, dx, dy)
+      if (dbgD) console.log('[dash]  E' + ei + ' #' + E[0] + '→#' + E[1] + ' 长' + L.toFixed(0) +
+        '  na=' + na + ' nb=' + nb + (na === -2 || nb === -2 ? ' (=-2 = 链内节点，跳过 ✓)' : '') +
+        '  →  ' + (na >= 0 && na !== E[1] ? '#' + E[0] + '改指#' + na : '#' + E[0] + '不动') +
+        ' , ' + (nb >= 0 && nb !== E[0] ? '#' + E[1] + '改指#' + nb : '#' + E[1] + '不动'))
       if (na >= 0 && na !== E[1]) E[0] = na
       if (nb >= 0 && nb !== E[0]) E[1] = nb
     }
     outEdges = outEdges.filter((e) => e[0] !== e[1])
+  }
+
+  /** 【v1535】剪掉"扩展虚线时被跳过的链内节点"留下的碎段 ✓
+   *  扩展把一条虚线链 A—g1—g2—C 变成 {A—g2, A—C, g1—C} 之后，g1、g2 是**度 1 的悬空端**，
+   *  它们挂的那条边整个落在另一条虚线**内部**（共线 + 两端都在其区间里）→ 是纯重复，剪掉 ✓
+   *  判据（三条同时成立才剪，保守）：
+   *    ① 该点度 = 1（悬空端，不是岔路口）；② 它挂的那条边是虚线；
+   *    ③ 它落在**另一条虚线边**的内部（垂距 ≤ 2px、投影参数在 (0.06, 0.94) 之间，即真的在中间而不是端点附近）。
+   *  实测（`.probe/vecbench.cjs`，8 套合成真值 + 4 张实图）：见 README v1535 一节。 */
+  const pruneDashDup = () => {
+    for (let guard = 0; guard < 200; guard++) {
+      const deg = new Array(verts.length).fill(0)
+      const inc: number[][] = verts.map(() => [])
+      outEdges.forEach((e, i) => { deg[e[0]]++; deg[e[1]]++; inc[e[0]].push(i); inc[e[1]].push(i) })
+      let acted = false
+      for (let v = 0; v < verts.length && !acted; v++) {
+        if (deg[v] !== 1) continue
+        const ei0 = inc[v][0]
+        if (!outEdges[ei0][2]) continue                        // 只处理虚线碎段
+        const u = outEdges[ei0][0] === v ? outEdges[ei0][1] : outEdges[ei0][0]
+        const P = verts[v]
+        for (let k = 0; k < outEdges.length; k++) {
+          if (k === ei0 || !outEdges[k][2]) continue
+          const e2 = outEdges[k]
+          if (e2[0] === v || e2[1] === v) continue             // 自己那条不算
+          const A = verts[e2[0]], B = verts[e2[1]]
+          const dx = B.x - A.x, dy = B.y - A.y
+          const L2 = dx * dx + dy * dy
+          if (L2 < 1) continue
+          let t = ((P.x - A.x) * dx + (P.y - A.y) * dy) / L2
+          t = Math.max(0, Math.min(1, t))
+          const px = A.x + t * dx, py = A.y + t * dy
+          if (Math.hypot(P.x - px, P.y - py) > 2) continue     // 不在这条线上
+          if (t <= 0.06 || t >= 0.94) continue                 // 落在端点上 = 可能是真的分叉点，不动
+          // v 是"另一条虚线内部"的一个悬空端 → 它 + 它那条边都是重复的，剪掉
+          const kept = outEdges.filter((_, i) => i !== ei0).map((e) => e.slice() as [number, number, number])
+          outEdges = kept
+          verts.splice(v, 1)
+          for (const e of outEdges) {
+            if (e[0] > v) e[0]--
+            if (e[1] > v) e[1]--
+          }
+          if ((opt.dashDebug ?? 0) !== 0) console.log('[dash]  剪重复碎段: #' + v + '(' + P.x.toFixed(0) + ',' + P.y.toFixed(0) +
+            ') 的虚线 #' + v + '—#' + u + ' 落在 #' + e2[0] + '—#' + e2[1] + ' 的 ' + (t * 100).toFixed(0) + '% 处')
+          acted = true
+          break
+        }
+      }
+      if (!acted) break
+    }
+    dedupe()
   }
 
   // 度 2 且几乎在一条直线上的顶点 = 直线被切出来的假顶点
@@ -2646,6 +2768,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   }
 
   extendDashed()
+  if ((opt.dashPruneDup ?? 0) !== 0) pruneDashDup()
   collinearSimplify()
   contractShort((opt.short ?? 0.035) * diag)
   mergeVerts(opt.mergeR ?? 8)
