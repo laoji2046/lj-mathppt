@@ -452,6 +452,27 @@ export interface VectorizeOpt {
   dashIsoR?: number
   /** 【v1549】`dashIso` 的**连续墨门槛**（px，默认 25）—— 见 `dashIso` 的留档（**已否** ✗） */
   dashIsoRun?: number
+  /** 【v1550】**默认 1 ✓** 拓扑闸门：`extendDashed` 改指端点前，若"**新老端点之间有实边且共线**"，
+   *  则**不改指** —— 否则那条虚线会把实边**盖住** ✗
+   *
+   *  病根：`9.png` 的 `E14 #5→#2` 被改指成 `#5→#1`，吞掉 `#2—#1` 那条 37px 的实线 `2-1实` ✗
+   *  ⚠ 只加在**改指**这一步 —— `findAlong` 的越链跳接**不动**（承重 ✗）
+   *
+   *  ★ 判据的收敛过程（前两版都否，**别再翻** ✗）：
+   *    · "原端点连着任何别的边"        → 顶点精度 86.5→**82.6**、召回 97.2→95.4 ✗
+   *    · "原端点连着任何别的**实**边"  → **逐位不动**（说明被挡的全是这一类 ✗）
+   *    · "新老端点间有实边"（不加共线）→ 84.9 / 召回 97.2 ✓，但 `3-人工修正` D8→**D7** ✗
+   *    · ★ 再要求**与延伸方向共线**（`collinearCos`）→ 转正 ✓
+   *
+   *  **最终实测**：
+   *    · 合成基准九项**全持平** ✓
+   *    · `9.png`：顶点 11→**10**、边 18→**17**、虚 7→**6**、**落在线上 3→2** ✓✓（目标达成）
+   *    · 4 张锁：`1-原图` / `demo111` / `P-ABCD-EF` **逐位不动** ✓；
+   *      `3-人工修正` **虚 8→7** ⚠ —— 被挡的只有 `E22 #19→#28`（`na=0`）一条，
+   *      而它的"悬空虚线端 6""落在线上 2""悬空实线端 3: 5 10 11"**全不变** ✓
+   *      → 没引入结构性问题，推测是两条重合虚线边被简化合并 ✓（**未完全证实** ⚠）
+   *  0 = 关（= v1549 及以前的行为 ✗） */
+  dashRetargetGate?: number
   /** 【v1535】虚线扩展时**不碰"链内节点"** —— 2 = 任何"虚线度 ≥2"的节点都不碰（**默认 ✓**）；
    *  1 = 只不碰"虚线度 2 且两条虚线边共线"的节点；0 = 关（= 旧行为 ✗）。
    *  为什么：虚线在骨架上是一**条链**（每个短划组当节点、逐段相连：A—g1—g2—C），逐条边无条件往外接会把
@@ -3571,6 +3592,33 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
           '  长 ' + Math.hypot(B0.x - A0.x, B0.y - A0.y).toFixed(0))
       }
     }
+    // 【v1550】★ 拓扑闸门：**改指前先看原端点是不是已经连着别的边** ✓
+    //   病根（v1545 定位、v1547~v1549 三个维度全否后剩下的唯一一处）：
+    //   `9.png` 的 `E14 #5→#2` 被改指成 `#5→#1`，而 `#2—#1` 那 37px **本来就有实线** `2-1实`
+    //   → 虚线吞掉实线段 ✗
+    //   ⇒ 原端点 `#2` 已经连着一条**实边** = 它是**真节点**，不该被"改指"吞掉 ✗
+    //   ⚠ **不能动 `findAlong`**：它的"越链跳接"是**承重**的 ✗（见上面 `dashChainOnly` 的留档）
+    //   ⚠ `outEdges` 在循环里被**逐步改指** ✗ → 度数必须**实时算**，不能预先统计 ✓
+    const gateOn = (opt.dashRetargetGate ?? 1) !== 0
+    /** 从 `from` 改指到 `to` 会不会**盖住一条实边**？
+     *  = ① `from`、`to` 之间有实边直接相连 **且** ② 那条连线与延伸方向 `(ux,uy)` **共线** ✓
+     *  ⚠⚠ 三版判据的实测轨迹（见 `dashRetargetGate` 的留档，**别再翻前两版** ✗）：
+     *    · "原端点连着任何别的边"        → 顶点精度 86.5→**82.6**、召回 97.2→95.4 ✗
+     *    · "原端点连着任何别的**实**边"  → **逐位相同**（被挡的全是这一类 ✗）
+     *    · "新老端点间有实边"（不加共线）→ 84.9 / 召回 97.2 ✓ 但 `3-人工修正` D8→**D7** ✗
+     *    · ★ 加共线闸门 → 见 v1550 实测 ✓ */
+    const solidAhead = (from: number, to: number, ux: number, uy: number) => {
+      if (!gateOn) return false
+      const a = verts[from], b = verts[to]
+      const ex = b.x - a.x, ey = b.y - a.y
+      const el = Math.hypot(ex, ey) || 1
+      if (Math.abs((ux * ex + uy * ey) / el) < (opt.collinearCos ?? 0.98)) return false
+      for (const e of outEdges) {
+        if (e[2]) continue
+        if ((e[0] === from && e[1] === to) || (e[0] === to && e[1] === from)) return true
+      }
+      return false
+    }
     let ei = -1
     for (const E of outEdges) {
       ei++
@@ -3580,12 +3628,14 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L
       const na = (chainOnly && isChainMid(E[0])) ? -2 : findAlong(A, -dx, -dy, ei, E[0])
       const nb = (chainOnly && isChainMid(E[1])) ? -2 : findAlong(B, dx, dy, ei, E[1])
+      const ra = na >= 0 && na !== E[1] && !solidAhead(E[0], na, -dx, -dy)
+      const rb = nb >= 0 && nb !== E[0] && !solidAhead(E[1], nb, dx, dy)
       if (dbgD) console.log('[dash]  E' + ei + ' #' + E[0] + '→#' + E[1] + ' 长' + L.toFixed(0) +
         '  na=' + na + ' nb=' + nb + (na === -2 || nb === -2 ? ' (=-2 = 链内节点，跳过 ✓)' : '') +
-        '  →  ' + (na >= 0 && na !== E[1] ? '#' + E[0] + '改指#' + na : '#' + E[0] + '不动') +
-        ' , ' + (nb >= 0 && nb !== E[0] ? '#' + E[1] + '改指#' + nb : '#' + E[1] + '不动'))
-      if (na >= 0 && na !== E[1]) E[0] = na
-      if (nb >= 0 && nb !== E[0]) E[1] = nb
+        '  →  ' + (ra ? '#' + E[0] + '改指#' + na : '#' + E[0] + '不动' + (na >= 0 && na !== E[1] ? '(原端点已连别边 ✗)' : '')) +
+        ' , ' + (rb ? '#' + E[1] + '改指#' + nb : '#' + E[1] + '不动' + (nb >= 0 && nb !== E[0] ? '(原端点已连别边 ✗)' : '')))
+      if (ra) E[0] = na
+      if (rb) E[1] = nb
     }
     outEdges = outEdges.filter((e) => e[0] !== e[1])
   }
