@@ -343,6 +343,37 @@ export interface VectorizeOpt {
    *  且**虚实线不掉**（91.1），但**召回掉了**（顶点 93.4 < 基线 95.1）且 `P-ABCD-EF.png` 变差（V10→V11）
    *  → 默认关，留档 ✓（想换路线时 `--opt dashPruneDup=1` 直接开） */
   dashPruneDup?: number
+  /** 【v1537】"打断穿越"：一条边的**内部**从另一个顶点的正上方穿过去却没断开（真图上很常见）。
+   *  **0 = 关（默认 ✓，留档）**；1 = 在该顶点处**一拆为二**；2 = **只截断**（丢被覆盖的那段）；
+   *  3 = 同 2 但只处理**虚线**边。
+   *
+   *  ⚠ **这条路未走通，默认关** —— 病根已查实，但"该不该拆"是**建模选择**、不是单纯的 bug：
+   *    · 真图 `5.png` 4 处"落在线上"全是这个（`v6/v7/v8/v12`，垂距 1.2~2.1px）；
+   *    · 真图 `7.png` 3 处同族；
+   *    · ⚠ 但 `demo111.png` 的 `v2` **结构完全相同**（`9-5` 与 `2-9` 共线重叠、`v2` 落在 `9-5` 上），
+   *      且原图里那条水平虚线**本来就是一笔连通的** → 拆开是"按顶点断开"的作图习惯，不是纠错 ✗。
+   *      所以"修好 5.png"必然同时改动 demo111 —— 两者**结构上不可区分**，只能靠人定。
+   *
+   *  实测（`.probe/vecbench.cjs` + `.probe/_realview.cjs`，v1537）：
+   *    · 合成基准：**8 张全都不触发**（指标与 `vecbase9` 逐位一致）—— 合成图是干净的、没有共线重叠
+   *    · 真图 4 张：`5.png` 落在线上 **4→2**、悬空虚线端 2→1（mode 1）/ 2（mode 2）；
+   *      `7.png` 落在线上 **3→2**；`1.png`、`13.png` 不动 ✓
+   *    · 实图计数（**注意：这 4 张是"没有真值、只锁别变差"的回归锁**，不是真值）：
+   *      `demo111` V10/E16/D5 → **V9/E14/D4**（两种 mode 都是）✗
+   *    · 试过并否掉的**闸门**（都很重要，别再翻）：
+   *      ① 不加共线闸门 → cubeaxes 的坐标轴穿过立方体顶点也被拆，边召回 87.5→**50.0**、误边 6→**21** ✗✗
+   *      ② 不加"覆盖"闸门 → 丢掉真墨迹：`3-人工修正` V18→**V19**、`demo111` E16→**E15** ✗
+   *      ③ 只处理虚线边（mode 3）→ `demo111` 那条问题边本身就是虚线，**救不了** ✗
+   *  → 结论：**要修得换个地方**（在成图阶段就"共线重叠去重"，而不是事后拆），留档待议 ✓
+   *
+   *  与已有的 `dissolveCrossings()` **不是一回事**：那个删"度 4 的假交点"，这个拆"穿过度 2 真拐点的边"。 */
+  splitCross?: number
+  /** 【v1537】判"穿越"的**垂距上限（绝对像素，默认 2）**。 */
+  splitCrossPerp?: number
+  /** 【v1537】**共线闸门（默认 0.97）** —— 只有"穿越边"与穿越点处的某条入射边共线时才动手。
+   *  ⚠ 这道闸门是关键：不加它会把"坐标轴穿过立方体顶点"这类**正常穿过**也拆掉，
+   *  实测 cubeaxes 边召回 87.5→50.0、边精度 77.8→38.1 ✗✗。设为 0 = 关掉闸门（只留档用）。 */
+  splitCrossCos?: number
   /** 【v1525】把"被字母切断的线"接回去（两头都是断头、缺口 ≤1.2 字高、共线、中间有字母 ✓）：1 = 开（默认 ✓）；0 = 关。 */
   labelHeal?: number
   /** 【v1524】按字母数剪多余顶点：1 = 开；**0 = 关（默认 ✗）**。
@@ -2639,6 +2670,109 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     dedupe()
   }
 
+  /** 【v1537】"打断穿越"：一条边的**内部**从另一个顶点的正上方穿过去，却没在那里断开 ✗
+   *
+   *  为什么需要它：`extendDashed` 只保证"两端各自接上最近的顶点"，**不保证新造出来的这条长边
+   *  不从别的顶点身上穿过去**。而且实测发现"穿越"在扩展**之前**就存在了，扩展只是把它拉长：
+   *    · 真图 `5.png`：边 `#11(141,218)—#23(214,277)` 本来就穿过 `#12(171,243)`（t=0.42、垂距 0.59px），
+   *      扩展后变成 `#10(124,204)—#23`，`#12` 落在 53% 处（垂距 0.68px）→ 4 处"落在线上"全是这个。
+   *    · 真图 `7.png`：3 处同族。
+   *  → 所以只能做成**扩展之后的收尾 pass**，不能指望扩展本身修好。
+   *
+   *  ⚠ 与已有的 `dissolveCrossings()` **不是一回事**：那个处理"**度 4**、四边恰好组成两对共线"
+   *    （= 假交点，要**删掉**这个顶点）；这里处理的是"**度 2 的真拐点**被一条边从上方穿过"
+   *    （要**把那条边在该点拆开**）。两者判据、动作都相反，别合并。
+   *
+   *  判据（同时成立才算"穿越"）：该顶点不是这条边的端点；投影参数 t ∈ (0.15, 0.85)（真在中间）；
+   *    到直线的**垂距** ≤ `splitCrossPerp`（默认 2px）；且穿越边与穿越点处某条入射边**共线**
+   *    （`splitCrossCos`，默认 0.97 —— 这道闸门不能去，见 `splitCross` 选项注释）。
+   *  ⚠ **本路线实测未走通、默认关**（0）：`5.png` 能修掉一半，但 `demo111` 结构相同、必然同时被改，
+   *    而那是"按顶点断开"的建模选择而非纠错 → 完整数据与三条被否掉的闸门见 `splitCross` 选项注释 ✓
+   */
+  const splitCrossing = () => {
+    const mode = opt.splitCross ?? 0
+    if (mode === 0) return
+    const perpMax = opt.splitCrossPerp ?? 2
+    const cosGate = opt.splitCrossCos ?? 0.97
+    let n = 0
+    const skip = new Set<string>()                        // "看了但决定不动"的候选，避免空转
+    for (let guard = 0; guard < 200; guard++) {
+      let hitE = -1, hitV = -1, hitD = 0, hitO = -1
+      for (let i = 0; i < outEdges.length && hitE < 0; i++) {
+        const [a, b] = outEdges[i]
+        if (mode === 3 && !outEdges[i][2]) continue            // mode 3 = 只处理**虚线**边（虚线才是 extendDashed 造出来的）
+        const A = verts[a], B = verts[b]
+        const ux = B.x - A.x, uy = B.y - A.y
+        const L2 = ux * ux + uy * uy
+        if (L2 < 1) continue
+        const L = Math.sqrt(L2)
+        let bestD = 1e9
+        for (let v = 0; v < verts.length; v++) {
+          if (v === a || v === b) continue
+          const vx = verts[v].x - A.x, vy = verts[v].y - A.y
+          const t = (vx * ux + vy * uy) / L2
+          if (t <= 0.15 || t >= 0.85) continue
+          const d = Math.abs(vx * uy - vy * ux) / L        // 单位向量叉积 = 垂距 ✓
+          if (d > perpMax) continue
+          // ⚠ **共线闸门（关键）**：只有"穿越边"与穿越点处的某条入射边**共线**时，才说明这是
+          //   "两段共线的重复边叠在一起"，才该动它。否则是**正常的穿过**（坐标轴穿过立方体顶点、
+          //   一条棱从另一个顶点前面经过）—— 那种情况必须原样保留 ✗
+          //   实测（v1537）：不加这道闸门，cubeaxes 的坐标轴被当成"穿越"拆开 →
+          //   边召回 87.5→50.0、边精度 77.8→38.1、误边 6→21 ✗✗ 全盘崩
+          let collinearInc = -1
+          const uxn = ux / L, uyn = uy / L
+          for (let k = 0; k < outEdges.length; k++) {
+            if (k === i) continue
+            const e2 = outEdges[k]
+            const o = e2[0] === v ? e2[1] : (e2[1] === v ? e2[0] : -1)
+            if (o < 0) continue
+            const wx = verts[o].x - verts[v].x, wy = verts[o].y - verts[v].y
+            const lw = Math.hypot(wx, wy) || 1
+            if (Math.abs(uxn * (wx / lw) + uyn * (wy / lw)) >= cosGate) { collinearInc = o; break }
+          }
+          if (collinearInc < 0) continue
+          if (skip.has(v + ':' + a + ':' + b)) continue
+          if (d < bestD) { bestD = d; hitE = i; hitV = v; hitD = d; hitO = collinearInc }
+        }
+      }
+      if (hitE < 0) break
+      const e = outEdges[hitE]
+      const A = verts[e[0]], B = verts[e[1]]
+      const L = Math.hypot(B.x - A.x, B.y - A.y) || 1
+      const da = Math.hypot(verts[hitV].x - A.x, verts[hitV].y - A.y)
+      if (da < 3 || L - da < 3) break                       // 贴着端点，不算穿越，别硬拆
+      if (mode === 1) {
+        outEdges.splice(hitE, 1, [e[0], hitV, e[2]], [hitV, e[1], e[2]])
+      } else {
+        // 【mode 2 · 纯去重】只丢"**确实被那条共线入射边覆盖**"的那一段 —— 那一段是重复画的墨，
+        //   丢掉不损失任何信息 ✓。若两端都没被覆盖（= 真墨迹），什么都不做，别丢 ✗
+        //   实测（v1537）：不加这道"覆盖"闸门，`3-人工修正` V18→V19、`demo111` E16→E15 都变差 ✗
+        const cov = (p: number) => {
+          const P = verts[p], O = verts[hitO]
+          const ox = O.x - verts[hitV].x, oy = O.y - verts[hitV].y
+          const lo2 = ox * ox + oy * oy
+          if (lo2 < 1) return false
+          const t = ((P.x - verts[hitV].x) * ox + (P.y - verts[hitV].y) * oy) / lo2
+          if (t < -0.02 || t > 1.02) return false            // 不在那条边的跨度里
+          return Math.abs((P.x - verts[hitV].x) * oy - (P.y - verts[hitV].y) * ox) / Math.sqrt(lo2) <= perpMax
+        }
+        const covA = cov(e[0]), covB = cov(e[1])
+        if (covA && covB) outEdges.splice(hitE, 1)           // 整条边都是重复 → 删掉
+        else if (covA) outEdges[hitE] = [hitV, e[1], e[2]]   // 近端那段是重复 → 从命中点起截
+        else if (covB) outEdges[hitE] = [e[0], hitV, e[2]]
+        else { skip.add(hitV + ':' + e[0] + ':' + e[1]); continue }   // 两端都不是重复 → 真穿越，别动 ✗
+      }
+      n++
+      if ((opt.dashDebug ?? 0) !== 0) {
+        const t = da / L
+        console.log('[dash]  打断穿越(mode=' + mode + '): #' + hitV + '(' + verts[hitV].x.toFixed(0) + ',' +
+          verts[hitV].y.toFixed(0) + ') 落在边 #' + e[0] + '—#' + e[1] + ' 的 ' + (t * 100).toFixed(0) +
+          '% 处，垂距 ' + hitD.toFixed(2) + 'px')
+      }
+    }
+    if (n) dedupe()
+  }
+
   // 度 2 且几乎在一条直线上的顶点 = 直线被切出来的假顶点
   const collinearSimplify = () => {
     for (let guard = 0; guard < 500; guard++) {
@@ -2794,6 +2928,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
 
   extendDashed()
   if ((opt.dashPruneDup ?? 0) !== 0) pruneDashDup()
+  splitCrossing()                                        // 【v1537】扩展之后收拾"穿越"，让下游清理看到正确的图 ✓
   collinearSimplify()
   contractShort((opt.short ?? 0.035) * diag)
   mergeVerts(opt.mergeR ?? 8)
