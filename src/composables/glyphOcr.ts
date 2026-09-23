@@ -274,6 +274,12 @@ export function recognizeLabels(W: number, boxes: GlyphBox[]): LabelBox[] {
     let confSum = 0
     let confN = 0
     const emit = (p: GlyphBox, role: 'base' | 'sub' | 'sup') => {
+      // 【v1534】先按**原始墨迹块**的大小把关 ✓ —— 别看归一化画布里的像素数 ✗：
+      //   `normalizeMask` 会把块**按高度放大**到 GH=26，1×1 的碎点因此被放大成 26×26 的实心方块
+      //   → 归一化后的 `cnt` = 676，下面那条 `cnt < 8` 的闸门**形同虚设** ✗ → 碎点被"猜"成字母 ✗。
+      //   实测（四棱锥合成图）：1px / 4px 的碎片被认成 "L" / "V"，② 场景里还凭空多出 "M" / "o"。
+      //   真字母再小也有几十像素（19px 字号实测 60~110px、24px 字号 100+）→ 门槛取 8 零风险 ✓。
+      if (p.pix.length < 8) return
       const m = normalizeMask(W, p.pix, p)
       let cnt = 0
       for (let i = 0; i < m.length; i++) cnt += m[i]
