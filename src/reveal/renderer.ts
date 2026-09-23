@@ -1,7 +1,7 @@
 import type { Deck, Slide, SlideElement, TableElement, TextElement } from '@/types'
 import { inlineFiguresInText, renderFigureSvg } from '@/composables/figureRender'
 import { layoutTable } from '@/composables/tableLayout'
-import { animRevealClass, animTimingStyle, bulletMarker, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
+import { animRevealClass, animTimingStyle, bulletMarker, fitCap, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
 import { SOLID_VCOUNT, renderSolid, solidVerts, arcsSvg, type EdgeStyle, type FaceStyle, type SolidMesh } from '@/composables/solid3d'
 
 /**
@@ -455,7 +455,7 @@ function elementToHtmlInner(el: SlideElement): string {
     // \frac、\sum 的上下限会按 textstyle 排版，比画布上小一圈
     const inner = `width:100%;height:100%;display:flex;align-items:center;justify-content:center;` +
       `overflow:hidden;color:${el.color};font-size:${el.fontSize}px;`
-    return `<div style="${box}${rot}"${cls}${fragIdx}><div class="fx-math" data-cap="${el.fitMode === 'shrink' ? 1 : 4}" style="${inner}">\\[${esc(el.latex)}\\]</div></div>`
+    return `<div style="${box}${rot}"${cls}${fragIdx}><div class="fx-math" data-cap="${fitCap(el)}" style="${inner}">\\[${esc(el.latex)}\\]</div></div>`
   }
 
   if (el.type === 'geogebra') {
@@ -633,7 +633,7 @@ function elementToHtmlInner(el: SlideElement): string {
       const bodyHtml = ls ? '<span' + st + '>' + esc(normalizeMixed(ln)) + '</span>' : esc(normalizeMixed(ln))
       return wrapStart + bodyHtml + '</div>'
     }).join('')
-    return `<div style="${box}${rot}"${cls}${fragIdx}><div class="fx-mixed" data-cap="${el.fitMode === 'shrink' ? 1 : 4}" data-align="${el.align}" style="${inner}"><div class="fx-mixed-inner" style="width:fit-content;max-width:100%;transform-origin:${el.align === 'left' ? 'left' : el.align === 'right' ? 'right' : 'center'} center;text-align:${el.align};">${lineHtml}</div></div></div>`
+    return `<div style="${box}${rot}"${cls}${fragIdx}><div class="fx-mixed" data-cap="${fitCap(el)}" data-align="${el.align}" style="${inner}"><div class="fx-mixed-inner" style="width:fit-content;max-width:100%;transform-origin:${el.align === 'left' ? 'left' : el.align === 'right' ? 'right' : 'center'} center;text-align:${el.align};">${lineHtml}</div></div></div>`
   }
 
   // image
@@ -825,7 +825,9 @@ ${slides}
       if (!mjx) return;
       var nw = mjx.offsetWidth, nh = mjx.offsetHeight;
       if (!nw || !nh) return;
-      // 缩放上限由元素的 data-cap 决定（fill=4 拖动放大 / shrink=1 只缩小），与编辑器画布一致
+      // 缩放上限由元素的 data-cap 决定（值来自 types.fitCap），与编辑器画布一致。
+      // ⚠ 这里是注入到导出 HTML 的运行时字符串，不能 import；末尾的 '4' 只是属性缺失时的兜底，
+      //   改 fitCap 的 fill 档时必须同步这一处和下面 fitMixed 里的同名兜底
       var cap = parseFloat(box.getAttribute('data-cap') || '4') || 4;
       var f = Math.min(box.clientWidth / nw, box.clientHeight / nh, cap);
       if (!(f > 0)) return;
@@ -848,7 +850,7 @@ ${slides}
       var bw = box.clientWidth, bh = box.clientHeight;
       var nw = inner.offsetWidth, nh = inner.offsetHeight;
       if (!(nw > 0 && nh > 0 && bw > 0 && bh > 0)) continue;
-      var cap = parseFloat(box.getAttribute('data-cap') || '4') || 4;   // 与编辑器画布一致
+      var cap = parseFloat(box.getAttribute('data-cap') || '4') || 4;   // 值来自 types.fitCap；'4' 是属性缺失兜底，改 fitCap 时同步
       var f = Math.min(bw / nw, bh / nh, cap);
       // 原点必须与 flex 对齐一致：左对齐的内容贴左边缘，按 center 放大会有一半跑到框外被裁
       var al = box.getAttribute('data-align') || 'center';

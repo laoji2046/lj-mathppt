@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { MathElement } from '@/types'
+import { fitCap } from '@/types'
 import { fitMath, renderLatex } from '@/composables/useMathJax'
 import { inlineEditReq } from '@/ui/inlineEdit'
 import InlineEditor from '../InlineEditor.vue'
@@ -20,8 +21,8 @@ let raf = 0
 
 /** 拖动外框缩放时（useDragResize 直写 DOM 尺寸、不更新 store），
  *  宿主实际尺寸变化即重新缩放公式，实现“拖动中实时放大/缩小”。 */
-/** 缩放上限：'fill'（默认，拖动外框无级放大）最多放大到 4 倍；'shrink' 只缩小不放大 */
-const cap = computed(() => (props.el.fitMode === 'shrink' ? 1 : 4))
+/** 缩放上限（见 types 的 fitCap）：'fill' 最多放大到 4 倍；'shrink' 只缩小不放大 */
+const cap = computed(() => fitCap(props.el))
 
 function watchSize() {
   ro?.disconnect()

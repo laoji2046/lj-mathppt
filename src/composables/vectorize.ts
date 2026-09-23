@@ -12,7 +12,7 @@
  * 虚实线判定 100% 对；会多出几个落在直线上的冗余顶点，由调用方（VectorizeDialog）让用户删。
  */
 
-import { recognizeLabels, isBarLike } from './glyphOcr'
+import { recognizeLabels, isBarLike, type LabelBox } from './glyphOcr'
 import { matchFigure } from './figMatch'
 import type { FigureArc } from '@/types'
 
@@ -128,10 +128,35 @@ export interface VectorizeOpt {
    * 实测（.probe/vecbench.cjs 8 套合成真值 + 6 张真图）：删掉之后
    *   · 好的一面：user2 的顶点从 (216,93) 挪到真正的顶点 (216,77) ✓、顶点数 22→20 ✓、字母数正好 11（= 真值 ✓）；
    *   · 坏的一面：合成基准台顶点召回 93.3%→91.9% ✗、1-原图 10→8 ✗、3-人工修正 19→18 ✗。
-   * 原因是"删字母"会连带改变虚线成链的走向（字母位置原来是链的端点），下游一抖就是一两个顶点 ✗。
-   * 所以默认**只分离、不删**（零几何回归 ✓），要试这条路的用 labelCut=1。
+   * 所以 v1523~v1526 一直默认**只分离、不删**（零几何回归 ✓）。
+   *
+   * 【v1527 复测 —— 根因找到并修好，**默认已翻成 1** ✓】
+   *   根因（`.probe/_cut3.cjs` 实测）：标签字形**压在线上**、与线**共用墨迹像素** ✗ →
+   *   旧规则"离芽骨架近就删"把线的墨迹一起删了 → 线头回缩 / 线被切断 ✗（这就是"账算乱"的真相）。
+   *   `labelCut=1,labelKeepSW=0.0025` 实测（基准台 8 套合成真值 + 8 张真图）：
+   *     顶点召回 93.3%→**94.0%** ✓（比基线还好 ✓）、顶点精度 69.0%→**69.6%** ✓、位置RMS 1.2%→**1.1%** ✓、
+   *     边召回 72.4%→**79.4%** ✓、边精度 61.0%→**68.9%** ✓、虚实线 90.0%→**91.1%** ✓、平行误差 1.17°→**0.61°** ✓；
+   *     仅两项微差 ✗：垂直误差 0.62°→0.73°、等长误差 0.22%→0.23%（都在噪声量级）。
+   *     真图：多余顶点 **112→108** ✓，且**没有一张变差**（user2 +10→+8 ✓、user7 +3 不变 ✓、
+   *     1-原图 10→8 —— 按 v1524 核实的真值 8 是**修对了** ✓、demo111/3-人工修正/P-ABCD-EF 一动不动 ✓）。
+   *     耗时：8 张真图合计 135.2ms → 135.7ms（**1.00x** ✓，无净开销；单张最多 1.7x 但绝对值 12→21ms ✓）。
+   *   ⚠ 那两项微差是**知情的取舍** ✓（换 7 项改善，其中 4 项大幅），基线 `vecbase3.json` 已在 v1527 重存 ✓。
    */
   labelCut?: number
+  /**
+   * 【v1527】`labelCut=1` 时的"**护线**"宽度（图对角线的比例，**默认 0.0025** ✓）。
+   *
+   * 起因（实测数据见 `.probe/_cut3.cjs`）：标签字形**压在线上**，两者**共用同一批墨迹像素** ✗。
+   * 旧的删除规则是"离芽骨架比离别的骨架近就删"→ 那些共用的像素被判给芽 → **线的墨迹被删掉** ✗：
+   *   · pabcdoaxes：'y' 的芽框 (397,182)-(417,204) 正好盖住 y 轴的**尖端** (412,194) →
+   *     删完尖端退到 (397,183)，真顶点丢掉 ✗（顶点召回 88.9%→66.7% ✗）；
+   *   · 同一张图：'B' 的芽框 (38,233)-(54,249) 正好**横切** x 轴（该处线在 (45,244)）→ 线被切成两段，
+   *     外侧只剩 16px 的碎片、直接消失 ✗（x 轴尖端 (22,258) 丢掉 ✗）。
+   *
+   * 修法：**只删"离所有非芽骨架都比较远"的墨迹** —— 与线重叠的那部分留着，因为它本来就是线的墨迹 ✓。
+   * 取值 ≈ 一个笔画宽（扫描件实测 2~3px / 对角 530px ≈ 0.005 ✓）。
+   */
+  labelKeepSW?: number
   /** 找"字母芽"的半径（图对角线的比例，默认 0.055 ≈ 大半个字高）。取小了切不下整个字，取大了会把短线段当成字。 */
   labelBudR?: number
   /** 芽的最小高度（相对"字高参考"，默认 0.6）—— 比这更矮的块一律不是字（虚线短划、墨点碎屑）*/
@@ -156,6 +181,22 @@ export interface VectorizeOpt {
    *  0 = 只有**字形识别成功**的那些（默认 ✓ = v1522 的老行为）；1 = 所有被抹掉的小块。
    *  ⚠ 实测 1 会误合并真顶点（1-原图 10→8 ✗、3-人工修正 19→18 ✗），所以默认不动 ✓。 */
   healByBlob?: number
+  /**
+   * 【A1 · 可注入】外部给定的**字形识别结果** —— 让 node 探针也能覆盖「依赖 labels」的分支。
+   *
+   * 背景：`recognizeLabels()` 靠 canvas 渲染字形模板做匹配，而探针里的 canvas 是 stub
+   * （`.probe/*.cjs` 的 `stubCanvas` 让 `getImageData` 返回全透明）→ `templates()` 里
+   * 所有字形都被 `if (d[..+3] < 128) continue` 跳过 → 模板表为空 → 一个字形都认不出来
+   * → `letterPts` 为空 → `healCutLines` / `pruneToLabels` 的「中间有字母」判据**全部不触发** ✗。
+   * 于是凡依赖 labels 的改动，在 node 里量不出任何差别，只能开真浏览器重跑一遍（交接单纪律的由来）。
+   *
+   * 传了它就以它为准（**覆盖** `recognizeLabels` 的结果）；不传则保持原行为（零回归 ✓）。
+   * 只需要 `cx` / `cy`；`text` / `conf` 缺省按 `''` / `1` 填，只影响输出里的 `anchors` 标注。
+   *
+   * 典型用法：用真浏览器（`.probe/_ls17.cjs` 那套，有真字体）把一张图的 labels 导出成 JSON，
+   * node 探针读进来注入 → 之后所有依赖 labels 的分支都能在 node 里量 ✓。
+   */
+  labelBoxes?: Array<Pick<LabelBox, 'cx' | 'cy'> & Partial<LabelBox>>
 }
 
 export interface VectorizeStats {
@@ -725,8 +766,10 @@ export interface LetterBlob { x: number; y: number; pix: number[]; x0: number; y
  *
  * 分离出来的字变成**新的字母块**（与 stripText 的 anchors 同构）→ 并进字形识别队列 ✓ →
  * `VectorizeDialog.adopt()` 就能把它们配回顶点、显示成顶点字母 ✓。
- * ⚠ 默认**只分离、不删墨迹**（`labelCut=0`）：删掉字母会连带改变虚线成链的走向，
- *   基准台顶点召回 93.3%→91.9%、1-原图 10→8 ✗ —— 实测数据见 docs/矢量描摹-诊断.md · v1523。
+ * ⚠【v1527】**默认已经改成"分离 + 删墨迹"**（`labelCut=1` + `labelKeepSW=0.0025` ✓）：
+ *   v1523 时删墨迹会掉顶点（召回 93.3%→91.9%），根因是"字形与线**共用墨迹**、删的时候把线也删了" ✗；
+ *   加上"护线"之后召回反而升到 **94.0%** ✓ —— 完整实测见 VectorizeOpt.labelCut 的注释。
+ *   （旧数据：v1523 的 91.9% / 1-原图 10→8 ✗ 见 docs/矢量描摹-诊断.md。）
  */
 export function peelLabels(
   ink: Uint8Array, W: number, H: number, diag: number, opt: VectorizeOpt,
@@ -736,7 +779,7 @@ export function peelLabels(
   const R = Math.max(6, (opt.labelBudR ?? 0.055) * diag)
   const fillMin = opt.labelBudFill ?? 0.15
   // 不删墨迹时只跑一轮：墨迹没变，第二轮会把同一批字母再"发现"一遍 ✗
-  const cut = (opt.labelCut ?? 0) !== 0
+  const cut = (opt.labelCut ?? 1) !== 0
   const passes = cut ? Math.max(1, Math.round(opt.labelPass ?? 2)) : 1
   // 字高参考：stripText 抹掉的孤立小块几乎全是字母 ✓（虚线的短划会被"成链"留下、不会被抹掉 ✓）。
   // 教材图里**所有标注的字号是同一个**（实测 user2 全是 24px、1-原图 全是 19px、3-人工修正 全是 41px ✓）——
@@ -890,12 +933,52 @@ export function peelLabels(
         if (k <= 1) tips++
         if (k >= 3) fork = true
       }
-      if (tips < 1 && !fork) return (log('✗ 没端头也不分叉 ' + dbgTail), false)   // 没端头也不分叉 = 一段线
+      const dbgTF = dbgTail + ' 端头 ' + tips + ' 分叉 ' + (fork ? 1 : 0)
+      if (tips < 1 && !fork) return (log('✗ 没端头也不分叉 ' + dbgTF), false)   // 没端头也不分叉 = 一段线
+      // ⚠【v1527】试过「向外延伸」判据并**否掉** ✗ —— 别再试：
+      //   想法：真字母的笔画在自己那块里结束，而「长棱与虚线交点切出来的小段」沿棱方向能追很远。
+      //   实测（user7，`LABEL_DEBUG=1 LABEL_EXT=1 node .probe/_a1.cjs user7.png`）：
+      //     假 L(269,370)-(281,398) 追出 **204px** → 被正确排除 ✓
+      //     真 D(229,41)-(245,75)   追出 **142/2px** → **被误杀** ✗
+      //   —— 真字母同样会**单侧**压在长线上，所以「延伸长度」区分不了「字母贴线」和「线的一段」。
+      //   改用「单侧」判据也救不了（真 D 就是单侧 142/2）。形态对照见 .probe/shots/zoom-user7*.png。
+      //
+      // ⚠【v1527】又试了两条**输出端**判据（不改算法、零回归风险），也全否掉 ✗ —— 别再试：
+      //   量法：`node .probe/_bud14.cjs user7.png`（借 .probe/labels/*.json 里真浏览器认的字）
+      //   ② 宿主顶点「直通」（有两条共线入射边）→ 假芽必落在「长线被穿过」处，真角点不会。
+      //      实测：user7 的 15 个顶点里**直通顶点 0 个**（含假芽宿主 #10）→ 判据恒假，废 ✗
+      //   ③ 锚点到「最近输出边」的距离 → 假芽是线自己的一段，应当几乎贴线。
+      //      实测：真 P 3.6px / 真 d 9.2px / 假 L 8.3px → **真字母比假芽还贴线** ✗ 分不开
+      //
+      // 📌 本条的**规模**（决定值不值得继续投入）：8 张真图共 77 个锚点，人工核对 73 个
+      //    → 只多认 4 个（+5.5%），且其中**只有 1 个 conf ≥ 0.7**（就是 user7 这个 L，0.983）；
+      //    另一个假芽 'u' conf 0.56 已被 VectorizeDialog.adopt() 的 conf≥0.7 闸门挡住 ✓。
+      //    → 全量回归集里**只此一例**会真的显示到界面上，且弹窗本就能手改。
+      //    结论：判据已穷尽三条，收益 1/77，**建议就此收口**，别再改这里。
+      //    （对照：假芽**不会**造成多余顶点 —— 长棱在 #10 处仍是一条连续边，259px + 71px ✓）
       // ④ 落地：记成字母块（**只记字芯** ✓ —— 捎带进来的那截线不算这个字的墨迹）
+      // 【v1527】下刀时的"**护线**"（`labelKeepSW`，默认 0.0025；传 0 则退回旧行为 ✓）：
+      //   字形与线**共用墨迹**时，那些像素**仍算进字芯**（上面的形状判据一个字都不改 ✓），
+      //   但**不删** —— 因为它同时是线的墨迹，删了线头会回缩 / 线会被切断 ✗（见 VectorizeOpt.labelKeepSW 的实测）。
+      const swKeep = (opt.labelKeepSW ?? 0.0025) * diag
+      const sw2 = swKeep * swKeep
       let sx = 0, sy = 0
-      for (const i of core) { if (cut) out[i] = 0; sx += i % W; sy += (i / W) | 0 }
+      for (const i of core) {
+        if (cut) {
+          let isLine = false
+          if (sw2 > 0) {
+            const ix = i % W, iy = (i / W) | 0
+            for (const q of inOther) {
+              const qx = q % W, qy = (q / W) | 0
+              if ((qx - ix) * (qx - ix) + (qy - iy) * (qy - iy) <= sw2) { isLine = true; break }
+            }
+          }
+          if (!isLine) out[i] = 0
+        }
+        sx += i % W; sy += (i / W) | 0
+      }
       anchors.push({ x: sx / core.length, y: sy / core.length, pix: core, x0: dx0, y0: dy0, x1: dx1, y1: dy1 })
-      log('✓ 收下' + dbgTail)
+      log('✓ 收下' + dbgTF)
       return true
     }
 
@@ -1551,7 +1634,15 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   }
   const clipped = opt.crop ? clippedEdges(ink, W, box) : undefined
   // 被抹掉的那些小块其实是字母 —— 顺手认一下（模板匹配，见 glyphOcr.ts）
-  const labels = recognizeLabels(W, letters)
+  // ⚠ node 探针里模板表为空、认不出字（原因见 VectorizeOpt.labelBoxes 的注释）；
+  //   要在 node 里量「依赖 labels」的分支，就传 opt.labelBoxes 覆盖这里 ✓
+  const labels: LabelBox[] = opt.labelBoxes
+    ? opt.labelBoxes.map((L) => ({
+      ...L,
+      x0: L.x0 ?? L.cx, y0: L.y0 ?? L.cy, x1: L.x1 ?? L.cx, y1: L.y1 ?? L.cy,
+      text: L.text ?? '', conf: L.conf ?? 1,
+    }))
+    : recognizeLabels(W, letters)
   // "字母把线截断了"的补接要用**所有被抹掉的字母块**判位置，不能只认"字形识别成功"的那几个 ✗
   // （识别不出来时那一步等于没做，实测真图上正是它把线留在半路 → 多出一堆悬空顶点 ✗）
   const letterPts = (opt.healByBlob ?? 0) !== 0
@@ -2267,6 +2358,11 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   //   所以先留着开关，等"贴着线的字"识别率再上一个台阶，再把它改成默认 ✓。
   // ⚠ 试过把"撑腰的标记"扩到 letters ∪ solid ✗（想让 demo111 的实心标注点也能保护自己的顶点 ✓）：
   //   实测没用 ✓（demo111 还是 12→11 ✗，那两个点根本不在候选里 ✗），却让该剪的少剪了 ✗（user2 18→19 ✗）→ 回退 ✓。
+  // 【v1527 复测】配上 `labelCut=1,labelKeepSW=0.0025`（A2 那一刀）之后再量一次：
+  //   顶点精度 69.0%→**88.0%** ✓、边精度 61.0%→**83.4%** ✓、边召回 72.4%→**80.2%** ✓、平行误差 1.17°→**0.24°** ✓
+  //   —— 但**顶点召回 93.3%→88.4%** ✗ 依旧，且 demo111 仍 12→11 ✗（剪掉一个真点 ✗）。
+  //   结论不变：**前提不成立**（demo111 就是"12 顶点 / 10 标注"，v1524 已核实），目标数天生偏低 ✗。
+  //   → 继续默认关 ✓。要动它得先解决"顶点数 ≠ 标注数"的图（合成图 40/61 的计数覆盖率也是同一个坑 ✗）。
   prunedN = (opt.labelPrune ?? 0) !== 0
     ? pruneToLabels(labelCount.n, labelCount.bodyH, letters)
     : 0

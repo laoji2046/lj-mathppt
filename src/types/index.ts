@@ -273,6 +273,21 @@ export function shadowCss(key: string | undefined): string {
 }
 
 /**
+ * 公式 / 混排元素的**缩放上限**（倍数）—— 唯一的取值出口。
+ *
+ * - `'fill'`（默认）：拖动外框可无级放大，上限 4 倍；
+ * - `'shrink'`：只缩小不放大（模板里的版式经过校准，避免被撑大）。
+ *
+ * ⚠ 画布侧（`MathElement.vue` / `RichTextElement.vue` 的 `cap`）与导出侧
+ * （`reveal/renderer.ts` 写进 `data-cap`，再由放映期脚本读取）**必须用这一个函数**取值。
+ * 这条规则原先在 4 处各写了一遍字面量 `fitMode === 'shrink' ? 1 : 4`，
+ * 历史上「改一处漏三处」已经发生过三次（见 README 1101 / 1114 / 1115）。
+ */
+export function fitCap(el: { fitMode?: 'fill' | 'shrink' }): number {
+  return el.fitMode === 'shrink' ? 1 : 4
+}
+
+/**
  * 估算一段文字在给定宽度 / 字号下需要的高度（Markdown 导入时给元素框定高用）。
  * 口径与模板层一致：中文（含全角）算 1 字宽、西文 0.55、`$...$` 公式按源码长度的一半折算。
  * 为什么要按内容算：导入器原本把框高写死 120px —— 稍长的一段话塞进 120px 会被 shrink 缩到看不清，

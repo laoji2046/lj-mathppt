@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { typesetMixed } from '@/composables/useMathJax'
-import { escapeHtml, fontStack, shadowCss } from '@/types'
+import { escapeHtml, fitCap, fontStack, shadowCss } from '@/types'
 import type { RichTextElement } from '@/types'
 import { inlineEditReq } from '@/ui/inlineEdit'
 import InlineEditor from '../InlineEditor.vue'
@@ -57,8 +57,8 @@ const contentStyle = computed(() => ({
   whiteSpace: props.el.wrap === false ? 'pre' : 'pre-wrap',
 }))
 
-/** 缩放上限：'fill'（默认，拖动外框无级放大，最多 4 倍）；'shrink' 只缩小不放大 */
-const cap = computed(() => (props.el.fitMode === 'shrink' ? 1 : 4))
+/** 缩放上限（见 types 的 fitCap）：'fill' 最多放大 4 倍；'shrink' 只缩小不放大 */
+const cap = computed(() => fitCap(props.el))
 
 /**
  * 内容"真实占位"：布局尺寸与滚动尺寸取大。
