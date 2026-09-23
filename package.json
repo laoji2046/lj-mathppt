@@ -1,6 +1,6 @@
 {
   "name": "lj-mathslides-vue",
-  "version": "2026.09.1531",
+  "version": "2026.09.1532",
   "private": true,
   "description": "LJ-MathSlides Vue 鐗?鈥?鍦烘櫙鍥鹃┍鍔ㄧ殑骞荤伅鐗囩紪杈戝櫒楠ㄦ灦",
   "type": "module",
@@ -32,4 +32,3 @@
     "vue-tsc": "^2.1.10"
   }
 }
-

@@ -58,6 +58,18 @@ export interface VectorizeOpt {
   spurBranchDeg?: number
   /** 短枝自由端"附近有字母就不剪"的半径（图对角线比例，默认 0.05）。只配 `spurBranchMax` 生效 */
   spurBranchLabelR?: number
+  /** ⚠【v1532】**补交点**（实线版求交）开关，**默认 0（关）** —— 传 1 才生效。
+   *
+   * 动机 ✓：骨架会把"直线与近共线长线"的交点平滑掉（cubeaxes T4：底边与 x 轴融成长直路径，
+   *   棱的交点在骨架上不存在 → 真值顶点永远匹配不上）。
+   *
+   * ✗ 为什么默认关：**合成集零触发** —— ① T4 场景里棱与底边**共享端点**（都被 `addV` 并到了
+   *   枝尖），"相邻不处理"守卫直接跳过；② 就算补出来，交点是**度 2 共线中间点**，
+   *   下一步 `collinearSimplify` 立刻把它删掉 ✗。真要救 T4 得在骨架层（refineCorners 的
+   *   snapSkel 取向法 + 甩掉杂线），或者允许"共享端点时把端点沿棱挪到交点"（方向必须取骨架点，
+   *   端点连线必过自身 ✗ 白算 —— refineCorners 注释里有这条教训）。
+   *   留着是给真图上"十字交叉被平滑"的场景做实验用，四重防误伤见函数内注释。 */
+  xGap?: number
   /** 路径简化容差（px） */
   eps?: number
   /** 当成"一截短划"的最大长度（图对角线的比例），超过的算实线段 */
@@ -2399,6 +2411,60 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   mergeVerts(opt.mergeR ?? 8)
   dropIsolated()
   dedupe()
+  // 【v1532】**补交点**（实线版求交）：两条实线边本应相交、但交点处没有顶点 —— 骨架会把
+  //   "直线与近共线长线"的交点平滑掉（实测 cubeaxes T4：底边与 x 轴融成长直路径，
+  //   棱 E5 与之的交点在骨架上不存在 → 真值顶点永远匹配不上，输出里底边右端是 addV
+  //   凭空新建的枝尖点）。四重设防防误伤：
+  //   ① 交点在两条**线段**内（t ∈ [0.06, 0.94]，别贴端点）；
+  //   ② 交点距四个端点全部 ≥ 0.02×diag（别在已有顶点旁边重复建点）；
+  //   ③ 交点半径 3px 内有骨架墨迹（两条线真在那里交会，不是纯几何延伸）；
+  //   ④ 两线夹角 > ~6°（近共线的"相交"是 mergeCollinear 否掉的歧义区 ✗，不碰）。
+  //   虚线不管（虚线有自己的 extendDashed）。补完交给下面的 refineCorners 精修 ✓。
+  const closeGapsByIntersection = () => {
+    const minD = 0.02 * diag
+    for (let guard = 0; guard < 60; guard++) {
+      let acted = false
+      outer:
+      for (let i = 0; i < outEdges.length; i++) {
+        const E1 = outEdges[i]
+        if (E1[2]) continue
+        for (let j = i + 1; j < outEdges.length; j++) {
+          const E2 = outEdges[j]
+          if (E2[2]) continue
+          if (E1[0] === E2[0] || E1[0] === E2[1] || E1[1] === E2[0] || E1[1] === E2[1]) continue
+          const A = verts[E1[0]], B = verts[E1[1]], C = verts[E2[0]], D = verts[E2[1]]
+          const d1x = B.x - A.x, d1y = B.y - A.y, d2x = D.x - C.x, d2y = D.y - C.y
+          const den = d1x * d2y - d1y * d2x
+          if (Math.abs(den) < 1e-9) continue                                  // 平行/共线
+          const s = ((C.x - A.x) * d2y - (C.y - A.y) * d2x) / den
+          const t = ((C.x - A.x) * d1y - (C.y - A.y) * d1x) / den
+          if (s < 0.06 || s > 0.94 || t < 0.06 || t > 0.94) continue          // ① 段内
+          const px = A.x + s * d1x, py = A.y + s * d1y
+          if (Math.hypot(px - A.x, py - A.y) < minD || Math.hypot(px - B.x, py - B.y) < minD) continue
+          if (Math.hypot(px - C.x, py - C.y) < minD || Math.hypot(px - D.x, py - D.y) < minD) continue   // ②
+          const l1 = Math.hypot(d1x, d1y) || 1, l2 = Math.hypot(d2x, d2y) || 1
+          if (Math.abs(d1x * d2x + d1y * d2y) / (l1 * l2) > 0.995) continue   // ④ 夹角太小
+          let ink = false                                                     // ③ 交点处要有墨迹
+          const ix0 = Math.max(0, Math.round(px) - 3), ix1 = Math.min(W - 1, Math.round(px) + 3)
+          const iy0 = Math.max(0, Math.round(py) - 3), iy1 = Math.min(H - 1, Math.round(py) + 3)
+          for (let yy = iy0; yy <= iy1 && !ink; yy++) for (let xx = ix0; xx <= ix1; xx++) if (sk[yy * W + xx]) { ink = true; break }
+          if (!ink) continue
+          const pi = verts.length
+          verts.push({ x: px, y: py })
+          const e1b: [number, number, number] = [pi, E1[1], E1[2]]
+          E1[1] = pi
+          const e2b: [number, number, number] = [pi, E2[1], E2[2]]
+          E2[1] = pi
+          outEdges.push(e1b, e2b)
+          acted = true
+          break outer
+        }
+      }
+      if (!acted) break
+    }
+  }
+  if ((opt.xGap ?? 0) !== 0) closeGapsByIntersection()   // 【v1532】默认 0（关）：合成集零触发（T4 场景因共享端点被跳过、补出的点又是共线中间点会被 collinearSimplify 删掉），留作真图实验开关
+  dropIsolated()
   refineCorners((opt.refine ?? 0.03) * diag)
   // ⚠ 图的一次性清理必须放在**所有会改动图形态的步骤之后**。实测漏掉这两个收尾会留下用户点名的假顶点：
   //   · collinearSimplify 只在精修**之前**跑过 —— 而精修会挪顶点，挪完才变共线的"直线上的假顶点"（度 2）
