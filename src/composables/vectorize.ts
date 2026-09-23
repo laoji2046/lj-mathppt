@@ -853,6 +853,9 @@ export function peelLabels(
         if (isBarLike({ x0: px0, y0: py0, x1: px1, y1: py1, pix }, W)) continue
         for (const p of pix) core.push(p)
       }
+      // ⚠ 试过第三条路：字芯为空时改用"**笔画端头**"判据（真字的笔画在自己这块里结束 ✓，
+      //   线交叉的假芽在框外还接着墨 ✗），想救**直笔画字**（H、E、F、N… 以及基准台那 5 段直线拼的字 ✗）。
+      //   实测：基准台标注数一个没多（40/61 ✗），反而把 user2 的 11 变成 12 ✗（多认一个假字 ✗）→ **回退** ✗。
       if (core.length < 12) return (log('✗ 丢掉细长条后不剩什么（' + pieces + ' 块）'), false)
       let dx0 = W, dy0 = H, dx1 = -1, dy1 = -1
       for (const i of core) {
@@ -1855,6 +1858,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
           if (letterPts.some((L) => Math.hypot(L.cx - px2, L.cy - py2) < 34)) hasLabel = true
         }
         if (!hasLabel) continue
+        if ((opt.labelDebug ?? 0) !== 0) console.log('[heal] 试接 #' + i + '(' + verts[i].x.toFixed(0) + ',' + verts[i].y.toFixed(0) + ')d' + degOf(i) + ' — #' + j + '(' + verts[j].x.toFixed(0) + ',' + verts[j].y.toFixed(0) + ')d' + degOf(j) + '  间距 ' + d.toFixed(0) + '  最近字母 ' + (() => { let m = 1e9; for (const L of letterPts) { for (let k = 2; k <= 8; k++) { const t = k / 10; const px2 = verts[i].x + dx * t, py2 = verts[i].y + dy * t; const dd = Math.hypot(L.cx - px2, L.cy - py2); if (dd < m) m = dd } } return m.toFixed(0) })())
         // ③ 两点各自都有一条边指着对方
         const facing = (v: number) => outEdges.some((E) => {
           if (E[0] !== v && E[1] !== v) return false
@@ -1949,17 +1953,22 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     const r = opt.extendR ?? 72
     const deg = new Array(verts.length).fill(0)
     for (const e of outEdges) { deg[e[0]]++; deg[e[1]]++ }
-    let best = -1, bestJ = -1, bd = 1e9, bdJ = 1e9
+    const cand: { i: number; d: number; junction: boolean }[] = []
     for (let i = 0; i < verts.length; i++) {
       const vx = verts[i].x - p.x, vy = verts[i].y - p.y
       const d = Math.hypot(vx, vy)
       if (d < 3 || d > r) continue
       if ((vx / d) * dx + (vy / d) * dy < 0.9) continue          // 偏离方向 25° 以上不要
-      // 岔路口（度 >= 2）比"上一条短划的断头"更可能是这条虚线真正的落点
-      if (deg[i] >= 2) { if (d < bdJ) { bdJ = d; bestJ = i } }
-      else if (d < bd) { bd = d; best = i }
+      cand.push({ i, d, junction: deg[i] >= 2 })
     }
-    return bestJ >= 0 ? bestJ : best
+    if (!cand.length) return -1
+    // ⚠ 试过"近的优先" ✗（一律近优先 / 只在 ≤24px 时近优先，两版都试了）：
+    //   整张图的虚线端点会改指到别的点上 → user2 22→23 ✗、3-人工修正 19→18 ✗（锁破 ✗）、
+    //   demo111 12→13 ✗ —— 太扰动 ✓，**回退**：保持原来的"岔路口优先" ✓。
+    //   （"跳过 17px 的断头去接 52px 的岔路口"那个毛病，交给下面"补接"那一刀去修 ✓。）
+    const jn = cand.filter((c) => c.junction).sort((a, b) => a.d - b.d)[0]
+    const nr = cand.slice().sort((a, b) => a.d - b.d)[0]
+    return (jn || nr).i
   }
   const extendDashed = () => {
     for (const E of outEdges) {
