@@ -143,6 +143,13 @@ export interface VectorizeOpt {
   labelPass?: number
   /** 切完是否再跑一遍"挑小孤立块"（默认 0 = 不跑 ✗ —— 实测会把散开的虚线短划当字母抹掉） */
   labelRescan?: number
+  /** 调试：1 = 把每个候选芽的判定过程打到控制台（node 探针看"为什么没认出来"用 ✓） */
+  labelDebug?: number
+  /** 【v1524】按字母数剪多余顶点：1 = 开；**0 = 关（默认 ✗）**。
+   *  只剪"附近没有标注撑腰"的断头 / 连线上的度 2 点，剪到标注个数就停 ✓。
+   *  ⚠ 实测（六张真图 + 8 套合成真值）：真图上有效（user2 22→18、user5 15→12，两条老样本一动不动 ✓），
+   *   但合成图顶点召回 93.3%→87.7% ✗（那边的字大多压在线上、数不准 ✗）→ 默认先关 ✓，见诊断文档 · v1524。 */
+  labelPrune?: number
   /** "被抹掉的字母能把线补起来"（v1522 的补接）用哪些字母块：
    *  0 = 只有**字形识别成功**的那些（默认 ✓ = v1522 的老行为）；1 = 所有被抹掉的小块。
    *  ⚠ 实测 1 会误合并真顶点（1-原图 10→8 ✗、3-人工修正 19→18 ✗），所以默认不动 ✓。 */
@@ -158,6 +165,10 @@ export interface VectorizeStats {
   dashGroups: number
   /** 【v1523】从图形线里**分离出来的字母**个数（贴着线、原来根本没被挑出来的那些） */
   buds?: number
+  /** 【v1524】这张图**有几个标注**（正文号 + 下标配对之后的个数 ✓）—— 顶点数的参考目标 */
+  labels?: number
+  /** 【v1524】按字母数剪掉了几个多余顶点 */
+  pruned?: number
   /** 识别框四条边上各有多少墨迹像素 —— 非 0 就说明这个框把图形切掉了一块。
    *  实测：image16 的框底边正压在字母 x 的腰上，x 只剩半个字形（像个 V），于是被认成了 v。
    *  只在显式传了 crop 时统计（整图识别时图片边缘本来就可能有内容，报这个没意义）。 */
@@ -616,6 +627,8 @@ export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array
   const minPiece = opt.dashMinPiece ?? 4
   const bars: Comp[] = []
   const texts: Comp[] = []
+  /** 【v1524】被判成"短划"、但其实**不是细长条**的紧凑块 —— 只报给"数标注"用 ✓（不进墨迹 ✓） */
+  const solid: Comp[] = []
   for (const c of comp) {
     if (c.diag >= smallMax * diag) continue      // 大块 = 线网本体，留下
     const ax = axisOf(c, W)
@@ -628,10 +641,21 @@ export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array
     //   ⚠ 默认值是**扫出来的 0.35** ✗→✓：0.45/0.5 会把真短划一起丢掉（1-原图 掉 2 顶点 2 边 ✗），
     //     0.35 在两张实图上与基线逐项一致（10/18/6/0 与 19/19/9/1 ✓），合成 scorecard 也逐项一致 ✓。
     if (ax.fill < (opt.dashFill ?? 0.35)) { texts.push(c); continue }
+    // 【v1524】"实心"的小块里还有一类是**字**：扫描件的字 fill 在 0.24~0.45 ✓，可**矢量渲染 / 合成图**上的字
+    //   笔画挤在一起，主轴 fill 能到 0.8 ✗ → 会被当成虚线的短划留在墨迹里 ✗
+    //   （实测基准台 8 套合成图：61 个顶点字母只数出 38 个 ✗ → "按字母数剪顶点"就会剪到真顶点 ✗）。
+    //   补一刀：**细长条才是短划，不是细长条的紧凑块仍然是字** ✓（与上面那条判据正交 ✓，扫描件上
+    //   虚线短划实测 fill 0.75~1.5 且都是细长条 ✓，行为完全不变 ✓）。
     // 杂点：扫描噪声形成的小墨团，主轴长度往往只有 1~3px（真实短划十几像素）。
     // 若让它参与"虚线成链"，两个杂点就会凑成一条"两截的短虚线" → 凭空多出一条悬空线段。
     if (c.len < minPiece) { texts.push(c); continue }
     bars.push(c)
+    // 【v1524】"实心"的小块里还有一类是**字**：扫描件的字 fill 在 0.24~0.45 ✓，可**矢量渲染 / 合成图**上的字
+    //   笔画挤在一起，主轴 fill 能到 0.8 ✗ → 会被当成虚线的短划留在墨迹里 ✗
+    //   （实测基准台 8 套合成图：61 个顶点字母只数出 38 个 ✗ → "按字母数剪顶点"就会剪到真顶点 ✗）。
+    //   ⚠ 这一刀**只用于"数标注"**（solid 只是报告出来 ✓，不进墨迹、不进图 ✓）——
+    //     实测拿它去改墨迹会把真短划一起抹掉 ✗（1-原图 10→9、3-人工修正 19→18 ✗，两条老样本的锁就破了 ✗）。
+    if (!isBarLike({ x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1, pix: c.pix }, W)) solid.push(c)
   }
   const used = new Array(bars.length).fill(false)
   const groups: Comp[][] = []
@@ -672,7 +696,7 @@ export function stripText(comp: Comp[], W: number, diag: number, ink: Uint8Array
   const out = ink.slice()
   for (const c of texts) for (const p of c.pix) out[p] = 0
   const anchors = texts.map((c) => ({ x: c.cx, y: c.cy, pix: c.pix, x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1 }))
-  return { ink: out, anchors, dashGroups: groups.length, barCount: bars.length, textCount: texts.length }
+  return { ink: out, anchors, dashGroups: groups.length, barCount: bars.length, textCount: texts.length, solid }
 }
 
 /* ---------- 【v1523】字母分离：把"贴着线的字母"从图形线里切出来 ---------- */
@@ -706,7 +730,7 @@ export function peelLabels(
   pre?: { sk: Uint8Array; G: SkGraph },
 ): { ink: Uint8Array; anchors: LetterBlob[]; buds: number; sk?: Uint8Array; G?: SkGraph } {
   const R = Math.max(6, (opt.labelBudR ?? 0.055) * diag)
-  const fillMin = opt.labelBudFill ?? 0.3
+  const fillMin = opt.labelBudFill ?? 0.15
   // 不删墨迹时只跑一轮：墨迹没变，第二轮会把同一批字母再"发现"一遍 ✗
   const cut = (opt.labelCut ?? 0) !== 0
   const passes = cut ? Math.max(1, Math.round(opt.labelPass ?? 2)) : 1
@@ -739,7 +763,8 @@ export function peelLabels(
      * 试切一块：把"离这块骨架比离别的骨架更近"的墨迹划出来，**像字**才删。
      * 下刀只在字母与线的接触处（线自己的墨迹离线的骨架更近 ✓），所以图形线的走向、顶点位置都不动。
      */
-    const tryPeel = (budPix: number[]): boolean => {
+    const dbg = (opt.labelDebug ?? 0) !== 0
+    const tryPeel = (budPix: number[], tag = ''): boolean => {
       const budSet = new Set(budPix)
       let bx0 = W, by0 = H, bx1 = -1, by1 = -1
       for (const p of budPix) {
@@ -752,8 +777,9 @@ export function peelLabels(
       // ⚠ 便宜预筛放在最贵的"最近骨架"分配之前：大图里自由路径有上百条（虚线的每一截都是一条 ✗），
       //   每条都跑一遍分配就是几百万次距离计算（实测 3-人工修正 29ms → 245ms ✗）。
       //   骨架框本身就太大 / 太矮的，不可能是字（墨迹框最多比骨架框大一个笔画宽）✓。
-      if (Math.hypot(bx1 - bx0 + 1, by1 - by0 + 1) > R * 1.15 + 4) return false
-      if (by1 - by0 + 1 < minH * 0.8) return false
+      const log = (why: string) => { if (dbg) console.log('[peel] ' + tag + ' 骨架(' + bx0 + ',' + by0 + ')-(' + bx1 + ',' + by1 + ') ' + budPix.length + 'px → ' + why) }
+      if (Math.hypot(bx1 - bx0 + 1, by1 - by0 + 1) > R * 1.15 + 4) return (log('✗ 骨架框太大 ' + (bx1 - bx0 + 1) + 'x' + (by1 - by0 + 1)), false)
+      if (by1 - by0 + 1 < minH * 0.8) return (log('✗ 骨架太矮 ' + (by1 - by0 + 1) + ' < ' + (minH * 0.8).toFixed(1)), false)
       const pad = 2
       const gx0 = Math.max(0, bx0 - pad), gy0 = Math.max(0, by0 - pad)
       const gx1 = Math.min(W - 1, bx1 + pad), gy1 = Math.min(H - 1, by1 + pad)
@@ -785,10 +811,51 @@ export function peelLabels(
           if (db < dv) del.push(i)
         }
       }
-      if (del.length < 12) return false
-      // ③ 像不像一个字
-      let dx0 = W, dy0 = H, dx1 = -1, dy1 = -1
+      if (del.length < 12) return (log('✗ 墨迹太少 ' + del.length), false)
+      // ③ 像不像一个字 —— 先把这块墨迹拆成连通小块，**整块丢掉"细长条"**（线上的短划 / 短线段 ✓），
+      //   剩下的才叫"字芯"，后面的判据全部用字芯算 ✓。
+      //   ★ 这条是分开"真字母"和"线交叉点"的关键 ✓：
+      //     · 真字母（S、h、O、P、G…）本体是一块**不是细长条**的墨迹 ✓ → 留下 ✓；
+      //     · 交叉点上的假芽，每一块都是细长条（线、短划）✗ → 丢完什么都不剩 → 一眼不是字 ✓；
+      //     · 字母贴着线时，芽里常**捎带**上压着它的那一小截线 ✗ —— 丢掉它字芯才不被稀释 ✓
+      //       （实测 user7 的字母 O：按整块算实心度 0.18 差一点被否掉 ✗，丢掉那截线就是干净的 O ✓）。
+      const delSet = new Set(del)
+      const seenC = new Set<number>()
+      const core: number[] = []
+      let pieces = 0
       for (const i of del) {
+        if (seenC.has(i)) continue
+        pieces++
+        const pix: number[] = []
+        let px0 = W, py0 = H, px1 = -1, py1 = -1
+        const stack2 = [i]
+        seenC.add(i)
+        while (stack2.length) {
+          const p = stack2.pop() as number
+          pix.push(p)
+          const px = p % W, py = (p / W) | 0
+          if (px < px0) px0 = px
+          if (py < py0) py0 = py
+          if (px > px1) px1 = px
+          if (py > py1) py1 = py
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (!dx && !dy) continue
+              const nx = px + dx, ny = py + dy
+              if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue
+              const j = ny * W + nx
+              if (!delSet.has(j) || seenC.has(j)) continue
+              seenC.add(j)
+              stack2.push(j)
+            }
+          }
+        }
+        if (isBarLike({ x0: px0, y0: py0, x1: px1, y1: py1, pix }, W)) continue
+        for (const p of pix) core.push(p)
+      }
+      if (core.length < 12) return (log('✗ 丢掉细长条后不剩什么（' + pieces + ' 块）'), false)
+      let dx0 = W, dy0 = H, dx1 = -1, dy1 = -1
+      for (const i of core) {
         const px = i % W, py = (i / W) | 0
         if (px < dx0) dx0 = px
         if (py < dy0) dy0 = py
@@ -796,10 +863,10 @@ export function peelLabels(
         if (py > dy1) dy1 = py
       }
       const bw = dx1 - dx0 + 1, bh = dy1 - dy0 + 1
-      if (Math.hypot(bw, bh) > R * 1.15) return false                              // 太大 = 不是字
-      if (bh < minH) return false                                                  // 太矮 = 虚线短划/碎屑，不是字
-      if (del.length / (bw * bh) < fillMin) return false                           // 太空 = 线网
-      if (isBarLike({ x0: dx0, y0: dy0, x1: dx1, y1: dy1, pix: del }, W)) return false  // 细长条 = 线
+      const dbgTail = ' 字芯 ' + core.length + 'px ' + bw + 'x' + bh + ' fill=' + (core.length / (bw * bh)).toFixed(2)
+      if (Math.hypot(bw, bh) > R * 1.15) return (log('✗ 字芯框太大 ' + dbgTail), false)        // 太大 = 不是字
+      if (bh < minH) return (log('✗ 太矮 ' + dbgTail + ' < ' + minH.toFixed(1)), false)          // 太矮 = 虚线短划/碎屑
+      if (core.length / (bw * bh) < fillMin) return (log('✗ 太空 ' + dbgTail), false)            // 太空 = 线网
       let tips = 0, fork = false
       for (const p of budPix) {
         const px = p % W, py = (p / W) | 0
@@ -816,11 +883,12 @@ export function peelLabels(
         if (k <= 1) tips++
         if (k >= 3) fork = true
       }
-      if (tips < 1 && !fork) return false                                         // 没端头也不分叉 = 一段线
-      // ④ 落地：记成字母块（+ 按开关决定要不要真的把墨迹删掉）
+      if (tips < 1 && !fork) return (log('✗ 没端头也不分叉 ' + dbgTail), false)   // 没端头也不分叉 = 一段线
+      // ④ 落地：记成字母块（**只记字芯** ✓ —— 捎带进来的那截线不算这个字的墨迹）
       let sx = 0, sy = 0
-      for (const i of del) { if (cut) out[i] = 0; sx += i % W; sy += (i / W) | 0 }
-      anchors.push({ x: sx / del.length, y: sy / del.length, pix: del, x0: dx0, y0: dy0, x1: dx1, y1: dy1 })
+      for (const i of core) { if (cut) out[i] = 0; sx += i % W; sy += (i / W) | 0 }
+      anchors.push({ x: sx / core.length, y: sy / core.length, pix: core, x0: dx0, y0: dy0, x1: dx1, y1: dy1 })
+      log('✓ 收下' + dbgTail)
       return true
     }
 
@@ -847,7 +915,7 @@ export function peelLabels(
       }
       // 一条引出线都没有 = 本来就孤立（stripText 已经管过）→ 不在这儿重复下刀
       if (!escape || !budPix.length) continue
-      if (tryPeel(budPix)) found++
+      if (tryPeel(budPix, '①#' + v + '(' + Jx.toFixed(0) + ',' + Jy.toFixed(0) + ')')) found++
     }
 
     // ② 没有交叉点的骨架块：字母只是**挨着**线（骨架其实没接上）—— 实测真题图里的 S、h 都是这种 ✗
@@ -904,11 +972,20 @@ export function peelLabels(
       const dy = Math.max(0, Math.max(a.y0 - b.y1, b.y0 - a.y1))
       return Math.max(dx, dy)
     }
+    // ⚠ 并块必须**有上限**：只按"间距 ≤3px"并，虚线的短划会一节一节把图形串成一块 ✗
+    //   （实测 user7 并出了 328×403 的巨块，真正的字母 N 就永远轮不到被判定 ✗✗）。
+    //   并出来的外框一旦超过"一个字的大小"就说明这是在并线、不是在并笔画 ✓ —— 停手 ✓。
+    const mergeCap = R * 1.25
     for (let i = 0; i < cand.length; i++) {
       for (let j = i + 1; j < cand.length; j++) {
         if (gap(cand[i], cand[j]) > 3) continue
         const ra = gFind(i), rb = gFind(j)
-        if (ra !== rb) guf[rb] = ra
+        if (ra === rb) continue
+        const a = cand[i], b = cand[j]
+        const w = Math.max(a.x1, b.x1) - Math.min(a.x0, b.x0) + 1
+        const h = Math.max(a.y1, b.y1) - Math.min(a.y0, b.y0) + 1
+        if (Math.hypot(w, h) > mergeCap) continue
+        guf[rb] = ra
       }
     }
     const merged = new Map<number, number[]>()
@@ -918,13 +995,67 @@ export function peelLabels(
       if (g) g.push(...c.pix)
       else merged.set(k, c.pix.slice())
     })
-    for (const seed of merged.values()) if (tryPeel(seed)) found++
+    for (const seed of merged.values()) if (tryPeel(seed, '②孤岛')) found++
     // 这一轮如果真删了墨迹，骨架/图就作废了（下一轮本来也会重算 ✓）；没删就能直接交给调用方复用 ✓
     lastSk = found && cut ? undefined : sk
     lastG = found && cut ? undefined : G
     if (!found) break
   }
   return { ink: out, anchors, buds: anchors.length, sk: lastSk, G: lastG }
+}
+
+
+/* ---------- 【v1524】字母计数器：这张图里到底有几个标注 ---------- */
+
+/**
+ * 数"这张图里有几个标注"（= 用户的想法：**顶点数 = 字母个数** ✓）。
+ *
+ * 为什么单靠"被抹掉的小块个数"不行 ✗：一个标注会被拆成好几块 ——
+ *   · 下标（C₁ 的 1）本来就是独立小块 ✓；
+ *   · 被图形线穿过的字，会被切成两半 ✓；
+ *   · 虚线的短划、墨点碎屑也混在同一个列表里 ✗。
+ *
+ * 三步（都是尺度无关的 ✓）：
+ *   ① 丢掉不像字的块：墨迹太少（<12px）的碎屑、**细长条**（虚线的短划 = 一条线 ✓）；
+ *   ② 按**字号分档**：高度 ≥ 0.75×最大字高的算"正文号"，矮一档的是下标/上标 ✓
+ *      —— 教材图里同一个图只有一种字号，这一刀把下标和碎屑挡在计数之外 ✓；
+ *   ③ **下标配对**：与某个正文号"水平缝 ≤ 0.5×字高、中心高度差 ≤ 0.75×字高"的小块并进同一个标注 ✓
+ *      （与 glyphOcr.groupBoxes 同一套几何，两处口径一致 ✓）。
+ *
+ * 返回的 `n` 就是"这张图该有几个点"的目标值 ✓（交给 pruneToLabels 用）。
+ * ⚠ 前提是**每个顶点都有字母** ✓ —— 实测有图不满足（图里有没标注的顶点，见 docs/矢量描摹-诊断.md · v1524 ✗），
+ *   所以它不是"真值"，只是一个**上界/参考值**：剪顶点时只剪"没有字母撑腰"的那些 ✓。
+ */
+export function countLabels(blobs: LetterBlob[], W: number): { n: number; bodyH: number; bodies: LetterBlob[] } {
+  const boxes = blobs.filter((b) => b.pix.length >= 12 && !isBarLike(b, W))
+  if (!boxes.length) return { n: 0, bodyH: 0, bodies: [] }
+  const hOf = (b: LetterBlob) => b.y1 - b.y0 + 1
+  const bodyH = boxes.reduce((m, b) => Math.max(m, hOf(b)), 0)
+  const bodyMin = 0.75 * bodyH
+  const bodies = boxes.filter((b) => hOf(b) >= bodyMin)
+  // 并标注（下标配对 / 被线切开的同一个字）：并查集，几何与 glyphOcr.groupBoxes 一致 ✓
+  const parent = boxes.map((_, i) => i)
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])))
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i], b = boxes[j]
+      const H = Math.max(hOf(a), hOf(b))
+      const gap = Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1)
+      if (gap > 0.5 * H) continue
+      const cyA = (a.y0 + a.y1) / 2, cyB = (b.y0 + b.y1) / 2
+      if (Math.abs(cyA - cyB) > 0.75 * H) continue
+      const ra = find(i), rb = find(j)
+      if (ra !== rb) parent[rb] = ra
+    }
+  }
+  // 一个标注 = 一组；**只有含正文号的组才算**（孤零零的下标/碎屑不算一个点 ✓）
+  const bodyIdx = new Set(bodies.map((b) => boxes.indexOf(b)))
+  const groups = new Set<number>()
+  for (let i = 0; i < boxes.length; i++) {
+    if (!bodyIdx.has(i)) continue
+    groups.add(find(i))
+  }
+  return { n: groups.size, bodyH, bodies }
 }
 
 // ---------- Zhang-Suen 细化 ----------
@@ -1419,6 +1550,11 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   const letterPts = (opt.healByBlob ?? 0) !== 0
     ? letters.map((a) => ({ cx: a.x, cy: a.y }))
     : labels.map((L) => ({ cx: L.cx, cy: L.cy }))
+  // 【v1524】字母计数器：这张图有几个标注（下游"按字母数剪顶点"的目标 ✓）
+  const labelCount = countLabels(
+    letters.concat(st.solid.map((c) => ({ x: c.cx, y: c.cy, pix: c.pix, x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1 }))),
+    W,
+  )
   const sk = peel.sk ?? thin(ink, W, H)
   const G = peel.G ?? buildGraph(sk, W, H)
 
@@ -1739,6 +1875,73 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
     }
     if (!acted) break
   }
+
+  // ---------- 【v1524】按字母数剪掉多余的顶点（用户的想法：顶点数 = 字母个数 ✓） ----------
+  // 目标 = countLabels 数出来的标注个数 ✓。**只剪"没有字母撑腰"的顶点** ✓：
+  //   ① 附近 1.5 个字高内**有标注**的顶点一律不剪 ✓（那是有名字的点，剪了就是丢真顶点 ✗）；
+  //   ② 只剪**断头**（度 1）或**落在另外两个顶点连线上的度 2 点** ✓（其余是真正的岔路口 ✓）；
+  //   ③ 剪到目标数就停；**没有可剪的就停** ✓ —— 绝不为了凑数把真顶点剪掉 ✗。
+  const pruneToLabels = (target: number, bodyH: number) => {
+    if (target <= 0 || verts.length <= target) return 0
+    const support = 1.5 * Math.max(6, bodyH)
+    let cut = 0
+    for (let guard = 0; guard < 40 && verts.length > target; guard++) {
+      const inc: number[][] = verts.map(() => [])
+      outEdges.forEach((e, i) => { inc[e[0]].push(i); inc[e[1]].push(i) })
+      let pick = -1, pickScore = -1
+      for (let v = 0; v < verts.length; v++) {
+        const d = inc[v].length
+        if (d < 1 || d > 2) continue                       // 度 0 的孤立点由 dropIsolated 管；度 ≥3 是岔路口，不剪 ✓
+        // ① 有字母撑腰 → 不剪 ✓
+        let near = false
+        for (const b of letters) {
+          if (Math.hypot(b.x - verts[v].x, b.y - verts[v].y) < support) { near = true; break }
+        }
+        if (near) continue
+        let far = 1e9
+        for (const b of letters) {
+          const dd = Math.hypot(b.x - verts[v].x, b.y - verts[v].y)
+          if (dd < far) far = dd
+        }
+        if (d === 2) {
+          // ② 度 2：只剪**基本落在另两个顶点连线上**的点（真拐点不剪 ✓）
+          const e1 = inc[v][0], e2 = inc[v][1]
+          const o1 = outEdges[e1][0] === v ? outEdges[e1][1] : outEdges[e1][0]
+          const o2 = outEdges[e2][0] === v ? outEdges[e2][1] : outEdges[e2][0]
+          if (o1 === o2) continue
+          const a = verts[o1], b2 = verts[o2], p = verts[v]
+          const abx = b2.x - a.x, aby = b2.y - a.y
+          const L = Math.hypot(abx, aby) || 1
+          const perp = Math.abs((p.x - a.x) * (-aby / L) + (p.y - a.y) * (abx / L))
+          if (perp > 0.02 * diag) continue
+        }
+        // 打分：断头优先（离字母越远越该剪 ✓）
+        const score = (d === 1 ? 1e6 : 0) + far
+        if (score > pickScore) { pickScore = score; pick = v }
+      }
+      if (pick < 0) break                                   // ③ 没有可剪的就停 ✓
+      const v = pick
+      if (inc[v].length === 1) {
+        outEdges.splice(inc[v][0], 1)
+      } else {
+        const e1 = inc[v][0], e2 = inc[v][1]
+        const o1 = outEdges[e1][0] === v ? outEdges[e1][1] : outEdges[e1][0]
+        const o2 = outEdges[e2][0] === v ? outEdges[e2][1] : outEdges[e2][0]
+        const dash = (outEdges[e1][2] || outEdges[e2][2]) ? 1 : 0
+        const hi = Math.max(e1, e2), lo = Math.min(e1, e2)
+        outEdges.splice(hi, 1); outEdges.splice(lo, 1)
+        outEdges.push([o1, o2, dash])
+      }
+      verts.splice(v, 1)
+      for (const e of outEdges) { if (e[0] > v) e[0]--; if (e[1] > v) e[1]-- }
+      cut++
+    }
+    return cut
+  }
+  // ⚠ 这一刀必须放在**最后**（所有会改顶点数的步骤之后）：
+  //   实测放在中间时，后面的 extendDashed / 精修 / 规整又会把顶点加回来 ✗
+  //   （1-原图 中间态剪了 6 个、最终数还是 10 ✗）—— 那样"目标 = 标注个数"根本对不上 ✓。
+  let prunedN = 0
   dedupe()
 
   // 虚线的短划天然够不到交点（差着一两个划的间距），沿自身方向往外延长，吸附到近旁的顶点上
@@ -1946,6 +2149,16 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   dropIsolated()
   dedupe()
 
+  // ---------- 【v1524】最后一步：按"标注个数"剪掉多余的顶点（用户的想法 ✓） ----------
+  // 放在这里是因为**它必须是最后一个动顶点的步骤** ✗：前面任何一步（成链、精修、规整）都会再加回顶点，
+  // 中间态剪了也白剪 ✓（实测 1-原图 中间态剪 6 个、最终数还是 10 ✗）。
+  // ⚠ 默认 **0（关）**：这一刀在真图上有效（user2 22→18 ✓、user5 15→12 ✓、两条老样本一动不动 ✓），
+  //   但基准台会掉顶点召回 93.3%→87.7% ✗ —— 因为**合成图上的字大多压在线上** ✗，
+  //   计数在那边只有 40/61 ✗（真图上的字是孤立 + 分离出来的，数得准 ✓）→ 目标偏低就会剪到真顶点 ✗。
+  //   所以先留着开关，等"贴着线的字"识别率再上一个台阶，再把它改成默认 ✓。
+  prunedN = (opt.labelPrune ?? 0) !== 0 ? pruneToLabels(labelCount.n, labelCount.bodyH) : 0
+  if (prunedN) { collinearSimplify(); dissolveCrossings(); dropIsolated(); dedupe() }
+
   const bw = box[2] - box[0], bh = box[3] - box[1]
   const points: number[] = []
   for (const v of verts) {
@@ -1973,7 +2186,7 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
       text: L.text,
       conf: +L.conf.toFixed(3),
     })),
-    stats: { verts: verts.length, edges: outEdges.length, dash: dashN, text: textN, bars: st.barCount, dashGroups: st.dashGroups, buds: peel.buds, clipped },
+    stats: { verts: verts.length, edges: outEdges.length, dash: dashN, text: textN, bars: st.barCount, dashGroups: st.dashGroups, buds: peel.buds, labels: labelCount.n, pruned: prunedN, clipped },
   }
 }
 
