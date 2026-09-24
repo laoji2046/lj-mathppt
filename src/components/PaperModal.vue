@@ -474,6 +474,18 @@ function imageHtml(html: string): string {
     let align = '', width = '', rotate = '', float = '', caption = ''
     ;(params || '').split(':').forEach((p) => {
       if (!p) return
+      // 【v1583】属性式别名 ✓（用户偏好）：`w=200` / `w=50%` / `align=left` / `float` / `float=left` / `rotate=-30`
+      //   ⚠ 纯数字（如 `-30`）在下面**仍然当旋转角度** ✓（老行为不动 ✗）——
+      //     所以**像素宽度必须写 `w=200`** ✓（否则跟旋转撞车 ✗）
+      const am = /^([a-zA-Z]+)=(.*)$/.exec(p)
+      if (am) {
+        const k = am[1].toLowerCase(), v = am[2]
+        if (k === 'w' || k === 'width') { width = /^\d+$/.test(v) ? 'max-width:' + v + 'px;' : 'max-width:' + v + ';'; return }
+        if (k === 'align') { if (v === 'left' || v === 'right' || v === 'center') align = v; return }
+        if (k === 'float') { float = v === 'left' ? 'left' : 'right'; return }
+        if (k === 'rotate') { if (/^-?\d+$/.test(v)) rotate = 'transform:rotate(' + v + 'deg);'; return }
+        caption = p; return
+      }
       if (p === 'center' || p === 'left' || p === 'right') align = p
       else if (p === 'float') float = 'right'
       else if (p === 'floatleft') float = 'left'
@@ -670,6 +682,8 @@ const HELP: { title: string; ex: { code: string; desc: string }[] }[] = [
     { code: '![图:center:60%](images/x.png)', desc: '居中 + 宽度 60%' },
     { code: '![图:right](images/x.png)　![图:45](images/x.png)', desc: '右对齐 / 旋转 45°' },
     { code: '[图1]　[图2:center]　[图3:60%]　[图4:45]　[图5:图注文字]', desc: '传统 [图N] 标记：center/left/right 对齐；float 右浮、floatleft 左浮；宽度%(如 60%)；角度(如 45)；其余为图注' },
+    { code: '[图1:w=200]　[图2:w=50%]　[图3:align=left]　[图4:w=200:float]　[图5:float=left:w=40%]　[图6:w=180:rotate=-15]',
+      desc: '属性式（推荐）：w=200 像素宽、w=50% 百分比宽；align=left|center|right 对齐；float 右浮（文字从左边绕）、float=left 左浮；rotate=-15 旋转。多个参数用 : 串起来。⚠ 像素宽**必须**写 w=200 —— 光写 200 会被当成旋转角度' },
   ]},
       { title: '题目块（题干 / 选项 / 解析）', ex: [
         {
