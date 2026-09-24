@@ -69,8 +69,6 @@ const bodyCols = ref(1)
  * ⚠ 'fill' 必须配合**确定高度** ✗（column-fill:auto 只对定高容器生效 ✓）。
  */
 const colFill = ref<'fill' | 'balance'>('fill')
-/** 位图 PDF 的图片格式 —— 文字页用 PNG 明显更清晰 ✓，代价是体积大些 ✓（默认 JPEG 省体积 ✓） */
-const pdfFmt = ref<'jpeg' | 'png'>('jpeg')
 /** 页眉页脚预设模板 —— 一键填好常用栏位 ✓（{page} 会被替换成页码 ✓） */
 const HF_PRESETS = [
   { id: '', name: '不使用模板' },
@@ -1083,109 +1081,25 @@ function exportJson() {
   a.href = url; a.download = '试卷.json'; a.click()
   URL.revokeObjectURL(url)
 }
-async function ensurePdfLibs() {
-  const w = window as any
-  if (w.html2canvas && w.jspdf && w.jspdf.jsPDF) return
-  const load = (src: string) => new Promise<void>((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = () => res(); s.onerror = () => rej(new Error('加载失败: ' + src)); document.head.appendChild(s) })
-  const base = window.location.origin + '/'
-  const jobs: Promise<void>[] = []
-  if (!w.html2canvas) jobs.push(load(base + 'pdf/html2canvas.min.js'))
-  if (!w.jspdf || !w.jspdf.jsPDF) jobs.push(load(base + 'pdf/jspdf.umd.min.js'))
-  await Promise.all(jobs)
-}
 /**
  * 打印 / 另存为 PDF —— **矢量**那条路 ✓。
  *
- * 为什么不直接用 savePdf ✗：那条走 html2canvas + jsPDF ✓，是把整页画成 JPEG 再贴上去 ✓ ——
- * 文字不可选、不可搜、放大发虚 ✗。而本组件**早就写好了 @media print 样式** ✓
- *（隐藏界面、A4 尺寸、page-break-after 分页 ✓），所以浏览器自带的「打印为 PDF」就是矢量输出 ✓。
+ * 本组件**早就写好了 @media print 样式** ✓（隐藏界面、A4 尺寸、page-break-after 分页 ✓），
+ * 所以浏览器自带的「打印为 PDF」就是矢量输出 ✓ —— 文字可选可搜、放大不虚 ✓。
  * 这里只是**把那个能力做成按钮** ✓。
+ *
+ * 【v1589】⚠ 原来的「保存PDF」（html2canvas + jsPDF）已**移除** ✗：
+ *   它把每页 `.paper-page` **画成位图**再贴上去 ✓ →
+ *   ① 文字不可选、不可搜、放大发虚 ✗
+ *   ② **含分式的行会被裁** ✗（MathJax 的 SVG 带基线偏移 ✓ 分母往下沉 ✓
+ *      超出容器盒 ✓ html2canvas 按盒子截图 → **分母被切掉** ✓，用户两次截图为证 ✓）
+ *   那条路修不动（**是 html2canvas 对 MathJax 的固有局限** ✗）→ 直接去掉 ✓。
+ *   要 PDF 就用这个「打印」按钮 ✓（**矢量 ✓ 不裁 ✓**）。
  */
 function printPdf() {
   window.print()
 }
 
-async function savePdf() {
-  try {
-    await ensurePdfLibs()
-  } catch (e) {
-    console.error('PDF 库加载失败，回退打印：', e)
-    paperMsg.value = 'PDF 库没能加载（可能是离线或网络受限）→ 已改用「打印」方式；请在打印对话框里选「另存为 PDF」'
-    window.print()
-    return
-  }
-  const a4 = a4El.value
-  if (!a4) { window.print(); return }
-  const pages = Array.from(a4.querySelectorAll('.paper-page')) as HTMLElement[]
-  if (!pages.length) { window.print(); return }
-  const w = window as any
-  const JsPDF = w.jspdf && w.jspdf.jsPDF
-  const h2c = w.html2canvas
-  if (!JsPDF || !h2c) { window.print(); return }
-  // ⭐ 必须在**生成之前**先把「另存为」弹出来 ✗：
-  //   showSaveFilePicker 要求**用户点击的瞬时授权**（约 5 秒内有效 ✓），
-  //   而生成 PDF 要花几秒 ✓ —— 顺序反了授权就过期 ✓ → SecurityError ✓ → 只能回退下载 ✗
-  //   （用户实测：提示「已用浏览器下载方式保存」但没有任何对话框 ✓ 正是这个原因 ✓）。
-  let fileHandle: { createWritable: () => Promise<{ write: (b: Blob) => Promise<void>; close: () => Promise<void> }> } | null = null
-  const picker = (window as unknown as { showSaveFilePicker?: (o: unknown) => Promise<any> }).showSaveFilePicker
-  const guessName = (headerText.value || '试卷讲义').replace(/[\\/:*?"<>|]/g, '_') + '.pdf'
-  if (typeof picker === 'function') {
-    try {
-      fileHandle = await picker({ suggestedName: guessName, types: [{ description: 'PDF 文件', accept: { 'application/pdf': ['.pdf'] } }] })
-    } catch (err: any) {
-      if (err && (err.name === 'AbortError' || err.name === 'NotAllowedError')) { paperMsg.value = '已取消保存'; return }
-      paperMsg.value = '无法打开「另存为」对话框（' + (err && err.name ? err.name : String(err)) + '）→ 改用下载方式'
-      fileHandle = null
-    }
-  }
-
-  const prevZoom = a4.style.zoom
-  a4.style.zoom = '1'
-  let ok = false
-  try {
-    const pdf = new JsPDF({ unit: 'mm', format: 'a4' })
-    for (let i = 0; i < pages.length; i++) {
-      if (i) pdf.addPage()
-      // ⚠ 必须给反馈 ✗ —— 原来整个循环没有任何提示 ✓，看起来就是「点了没反应」✓（用户实测 ✓）
-      paperMsg.value = '正在生成 PDF…第 ' + (i + 1) + ' / ' + pages.length + ' 页（页数多时较慢，请稍候）'
-      await new Promise((r) => setTimeout(r, 30))   // 让提示先渲染出来 ✓ 并给主线程喘口气 ✓
-      // ⚠ scale 3 → 2 ✗：A4 按 3 倍是 2382×3367 px ✓ 单页 canvas 约 32 MB ✓ 多页必然卡死 ✓
-      const canvas = await h2c(pages[i], { scale: 2, useCORS: true, backgroundColor: '#ffffff' })
-      const isPng = pdfFmt.value === 'png'
-      // ⚠ JPEG 质量 0.95 → 0.85 ✗：体积与耗时都明显下降 ✓ 印刷质量足够 ✓
-      const img = isPng ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.85)
-      pdf.addImage(img, isPng ? 'PNG' : 'JPEG', 0, 0, 210, 297)
-      await new Promise((r) => setTimeout(r, 0))   // 每页之间让出主线程 ✓
-    }
-    // ⭐ 写文件：有 handle 就写到你选的目录 ✓，否则回退下载 ✓
-    const fname = (headerText.value || '试卷讲义').replace(/[\\/:*?"<>|]/g, '_') + '.pdf'
-    const outBlob = pdf.output('blob')
-    if (fileHandle) {
-      try {
-        const writable = await fileHandle.createWritable()
-        await writable.write(outBlob)
-        await writable.close()
-        paperMsg.value = '已保存：' + fname
-        ok = true
-      } catch (err: any) {
-        pdf.save(fname)
-        paperMsg.value = '写入所选位置失败（' + (err && err.name ? err.name : String(err)) + '）→ 已下载到默认位置：' + fname
-        ok = true
-      }
-    } else {
-      pdf.save(fname)
-      paperMsg.value = '已保存到默认下载位置：' + fname
-        ok = true
-    }
-  } catch (e) {
-    // ⚠ 这里说的是"**导出 PDF** 这一步失败"，不是"试卷编辑"失败 → 保持原话 ✓
-    console.error('PDF 生成失败，回退打印：', e)
-    paperMsg.value = 'PDF 生成失败 → 已改用打印方式：' + (e && (e as any).message ? (e as any).message : String(e))
-  } finally {
-    a4.style.zoom = prevZoom
-  }
-  if (!ok) window.print()
-}
 function insertBlank() {
   const v = Number(blankVal.value) || 4
   const u = blankUnit.value === 'mm' ? 'mm' : 'cm'
@@ -1532,9 +1446,7 @@ watch([headerText, footerText], () => render())
   <button class="pm__btn" title="在光标处插入本地图片" @click="insertImage">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg><span>图片</span>
                 </button>
-                <button class="pm__btn" title="直接生成多页 PDF" @click="savePdf">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10M7 9l5 4 5-4"/><path d="M5 19h14"/></svg><span>保存PDF</span>
-                </button>                <button class="pm__btn pm__btn--primary" title="打印 / 另存为 PDF（矢量文字，可搜索可选中；比图片版更清晰）" @click="printPdf">
+                <button class="pm__btn pm__btn--primary" title="打印 / 另存为 PDF（矢量文字，可搜索可选中；比截图版清晰）" @click="printPdf">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></svg>
                 </button>
                 <button v-if="imgDirHint" class="pm__btn" :title="'重新读取本地图（根目录：' + imgDirHint + '）'" @click="refreshImages">
@@ -1556,10 +1468,6 @@ watch([headerText, footerText], () => render())
                 <select class='pm__btn' style='padding:0 6px' title='页眉页脚模板：一键填好常用栏位' @change='applyHeaderPreset(($event.target as HTMLSelectElement).value)'>
                   <option value=''>页眉页脚模板…</option>
                   <option v-for='p in HF_PRESETS' v-show='p.id' :key='p.id' :value='p.id'>{{ p.name }}</option>
-                </select>
-                <select class='pm__btn' style='padding:0 6px' v-model='pdfFmt' title='位图 PDF 用哪种图片格式：PNG 文字更清晰，JPEG 体积更小'>
-                  <option value='jpeg'>位图 JPEG</option>
-                  <option value='png'>位图 PNG</option>
                 </select>
                 <button class="pm__btn" title="把当前排版参数存为默认（下次打开自动套用）" @click="saveAsDefaults">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>
