@@ -1124,6 +1124,40 @@ function insertBlank() {
   insertMarker('[' + v + u + ']')
   blankOpen.value = false
 }
+/** 【v1594】在**当前行行首**插入前缀（`# ` / `1. ` / `{b}` 这类**行首格式** ✓）
+ *  该行已经以这个前缀开头 → **去掉它** ✓（**再点一次取消** ✓ 跟 Word 的加粗按钮一个手感 ✓） */
+function insertLinePrefix(prefix: string) {
+  const el = inputEl.value
+  const cur = input.value
+  const s = el?.selectionStart ?? cur.length
+  const ls = cur.lastIndexOf('\n', s - 1) + 1                  // 当前行行首 ✓
+  const le = cur.indexOf('\n', s)
+  const lineEnd = le < 0 ? cur.length : le
+  const line = cur.slice(ls, lineEnd)
+  const text = line.startsWith(prefix) ? line.slice(prefix.length) : prefix + line
+  input.value = cur.slice(0, ls) + text + cur.slice(lineEnd)
+  if (el) {
+    const pos = Math.max(ls, s + (text.length - line.length))
+    requestAnimationFrame(() => { el.focus(); el.selectionStart = el.selectionEnd = pos })
+  }
+  render()
+}
+/** 【v1594】用 `before`/`after` 包住**选中的文字**（**行内格式** ✓ 如 `$公式$` ✓）
+ *  没选中就插入一对空标记、光标停在中间 ✓
+ *  ⚠ 跟 `insertMarker` 不同 ✗ —— 那个是**整块标记**（自动补换行 ✓），这个是**行内** ✓ */
+function wrapSel(before: string, after = before) {
+  const el = inputEl.value
+  const cur = input.value
+  const s = el?.selectionStart ?? cur.length
+  const e = el?.selectionEnd ?? cur.length
+  const sel = cur.slice(s, e)
+  input.value = cur.slice(0, s) + before + sel + after + cur.slice(e)
+  if (el) {
+    const pos = s + before.length + sel.length
+    requestAnimationFrame(() => { el.focus(); el.selectionStart = el.selectionEnd = pos })
+  }
+  render()
+}
 function insertMarker(marker: string) {
   const el = inputEl.value
   const cur = input.value
@@ -1419,6 +1453,22 @@ watch([headerText, footerText], () => render())
               </div>
           <div class="pm__split">
           <div class="pm__left" @dragover.prevent @drop.prevent="onDropImages($event)">
+              <!-- 【v1594】格式工具栏（像 Word 那样点按钮改格式 ✓）——
+                   全部**复用**已有的 Markdown 语法 ✓ **不引入新格式** ✓ -->
+              <div class="pm__fmtbar">
+                <button class="pm__fmt" title="一级标题（# 标题）" @click="insertLinePrefix('# ')">H1</button>
+                <button class="pm__fmt" title="二级标题（## 粗体无框）" @click="insertLinePrefix('## ')">H2</button>
+                <button class="pm__fmt" title="三级标题（### 小标题）" @click="insertLinePrefix('### ')">H3</button>
+                <span class="pm__fmtsep"></span>
+                <button class="pm__fmt" title="大题号（1. 2. 3.…）" @click="insertLinePrefix('1. ')">1.</button>
+                <button class="pm__fmt" title="小题号（(1) (2)…）" @click="insertLinePrefix('(1) ')">(1)</button>
+                <span class="pm__fmtsep"></span>
+                <button class="pm__fmt" title="整段加粗（再点一次取消）" @click="insertLinePrefix('{b}')"><b>B</b></button>
+                <button class="pm__fmt" title="整段斜体（再点一次取消）" @click="insertLinePrefix('{i}')"><i>I</i></button>
+                <button class="pm__fmt" title="插入公式：选中文字会被包成 $…$" @click="wrapSel('$')">$x$</button>
+                <button class="pm__fmt" title="整段颜色（再点一次取消）" @click="insertLinePrefix('{c:#c00}')"><span style="color:#c00">A</span></button>
+                <span class="pm__fmtip">改的是<b>当前行</b>；公式会包住<b>选中</b>的文字</span>
+              </div>
               <textarea ref="inputEl" v-model="input" class="pm__input" rows="18" @input="onInput" placeholder="# 标题  ## 知识梳理  1. 已知 $f(x)=x^2$ 求 $f(2)$"></textarea>
               <div class="pm__actions">
                 <button class="pm__btn" title="在光标处插入换页标记 [换页]" @click="insertMarker('[换页]')">
@@ -1591,6 +1641,17 @@ watch([headerText, footerText], () => render())
 .pm__grp > summary::before { content: '▸'; font-size: 10px; display: inline-block; transition: transform .15s; }
 .pm__grp[open] > summary::before { transform: rotate(90deg); }
 .pm__grp[open] > summary { margin-bottom: 2px; }
+/* 【v1594】格式工具栏（Word 手感 ✓）—— 全部复用已有语法 ✓ 不引入新格式 ✓ */
+.pm__fmtbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; flex: 0 0 auto; }
+.pm__fmt {
+  min-width: 30px; height: 26px; padding: 0 7px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: #fff; color: var(--text);
+  border-radius: 6px; font-size: 12px; font-weight: 600; line-height: 1;
+}
+.pm__fmt:hover { background: var(--gray-50); border-color: var(--brand); color: var(--brand); }
+.pm__fmt:active { transform: scale(0.95); }
+.pm__fmtsep { width: 1px; height: 18px; background: var(--border-strong); margin: 0 3px; }
+.pm__fmtip { font-size: 11px; color: var(--muted); margin-left: 6px; }
 /* 【v1581】编辑区改为**自适应撑满剩余高度** ✓（原来是 `height: 30vh` 固定 ✗）：
    控件组折叠后腾出的空间直接变成编辑区高度 ✓；`min-height` 保证折叠全展开时也不至于太矮 ✓ */
 .pm__input { flex: 1 1 auto; min-height: 26vh; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; line-height: 1.5; overflow-y: auto; border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px; }
