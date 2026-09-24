@@ -1338,8 +1338,6 @@ watch([headerText, footerText], () => render())
           <button class="pm__x" @click="emit('close')" title="关闭"><AppIcon name="close" :size="13" /></button>
         </header>
         <div class="pm__body">
-          <div class="pm__split">
-          <div class="pm__left" @dragover.prevent @drop.prevent="onDropImages($event)">
               <div class="pm__controls">
                 <div class="pm__ctlrow">
                   <label>模板</label>
@@ -1419,6 +1417,8 @@ watch([headerText, footerText], () => render())
                   </div>
                 </details>
               </div>
+          <div class="pm__split">
+          <div class="pm__left" @dragover.prevent @drop.prevent="onDropImages($event)">
               <textarea ref="inputEl" v-model="input" class="pm__input" rows="18" @input="onInput" placeholder="# 标题  ## 知识梳理  1. 已知 $f(x)=x^2$ 求 $f(2)$"></textarea>
               <div class="pm__actions">
                 <button class="pm__btn" title="在光标处插入换页标记 [换页]" @click="insertMarker('[换页]')">
@@ -1559,12 +1559,19 @@ watch([headerText, footerText], () => render())
 .pm__x:hover { color: var(--text); }
 .pm__body { flex: 1; min-height: 0; padding: 10px 14px; overflow: hidden; display: flex; flex-direction: column; }
 .pm__split { flex: 1; min-height: 0; display: flex; gap: 14px; }
-.pm__left { flex: 0 0 42%; display: flex; flex-direction: column; gap: 8px; min-width: 300px; min-height: 0; overflow: auto; }
+/* 【v1592】属性上移后，左侧只剩"编辑区 + 按钮" ✓ 不再需要 42% 那么宽 ✓ */
+.pm__left { flex: 1 1 50%; display: flex; flex-direction: column; gap: 8px; min-width: 300px; min-height: 0; overflow: auto; }
 .pm__right { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+/* 【v1592】属性上移到**窗口顶部** ✓（原来在左侧竖排 ✗，用户要求"属性都改到窗口上方" ✓）
+   ⇒ 改成**横向流式**：各组（页面与字体 / ▾段落与题号 / ▸页眉页脚）**并排** ✓
+   折叠的组只占一个摘要标题的宽度 ✓ 所以整体通常只占 2~3 行 ✓ */
 .pm__controls {
-  display: flex; flex-direction: column; gap: 10px;
-  border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--bg-sunken);
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 18px;
+  border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; background: var(--bg-sunken);
+  flex: 0 0 auto; margin-bottom: 8px;
 }
+/* 折叠组在 flex 里按**内容宽度**排 ✓ 不撑满一行 ✓ */
+.pm__grp { flex: 0 0 auto; }
 .pm__ctlrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
 .pm__ctlrow label { font-weight: 600; color: var(--text); white-space: nowrap; }
 .pm__ctlrow select, .pm__ctlrow input { border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 6px; font-size: 12px; width: auto; background: #fff; }
