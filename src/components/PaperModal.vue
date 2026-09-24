@@ -1215,28 +1215,35 @@ function focusMdLine(line: number) {
 }
 /** 【v1602】双击预览里的某块 → 源码光标跳到**对应行** ✓
  *  用途：预览里看到要改的地方，回源码**找不到** ✓（用户实报 ✓）
- *  ⚠ 用**文本匹配**定位 ✓（跟 v1597 的 `patchMdBlock` 同源 ✓，但这里**只读不写** ✓）
- *    代价：**同一文本出现多次时跳第一个** ✓（可接受 ✓） */
+ *  【v1603】⚠ 原来限定了几种选择器（`h2` / `.paper-q` / `p` …）✗ 实测**匹配不到** ✓
+ *    （块被包在 `.pp-block` 里 ✓ 公式又拆成多层 ✓ 选择器很难列全 ✗）
+ *  ⇒ 改成**从点击处一直往上找** ✓ 不依赖选择器 ✓：
+ *    谁的文本能对上源码，就跳那一行 ✓（`<span>` 对不上就继续往上 ✓ 到 `<p>` 通常就对上了 ✓）
+ *  代价：**同一文本出现多次时跳第一个** ✓（可接受 ✓） */
 function jumpToMdLine(e: MouseEvent) {
-  const el = (e.target as HTMLElement).closest<HTMLElement>(
-    'h2, .paper-sec-title, .paper-sub, .paper-box-title, .paper-q, p, figure, figcaption')
-  if (!el) return
-  const text = (el.textContent || '').trim()
-  if (!text) return
   const lines = input.value.split('\n')
-  let hit = -1
-  for (let i = 0; i < lines.length; i++) if (stripMdMark(lines[i]) === text) { hit = i; break }
-  if (hit < 0) {
-    // 退一步：用**前 18 字**做前缀匹配 ✓
-    //（块里的文字可能被 DOM 拼得跟源码不完全一样 ✓ 比如公式被拆成好几段 ✓）
+  /** 在源码里找这段文字所在行 ✓（先整行精确 ✓ 再前 18 字前缀 ✓） */
+  const findLine = (text: string): number => {
+    if (!text) return -1
+    for (let i = 0; i < lines.length; i++) if (stripMdMark(lines[i]) === text) return i
     const head = text.slice(0, 18)
     if (head) for (let i = 0; i < lines.length; i++) {
-      if (stripMdMark(lines[i]).startsWith(head)) { hit = i; break }
+      if (stripMdMark(lines[i]).startsWith(head)) return i
     }
+    return -1
   }
-  if (hit < 0) { paperMsg.value = '没在源码里找到这一段（可能是自动生成的）'; return }
-  focusMdLine(hit)
-  paperMsg.value = '已跳到源码第 ' + (hit + 1) + ' 行'
+  let el: HTMLElement | null = e.target as HTMLElement
+  const root = a4El.value
+  while (el && el !== root) {
+    const hit = findLine((el.textContent || '').trim())
+    if (hit >= 0) {
+      focusMdLine(hit)
+      paperMsg.value = '已跳到源码第 ' + (hit + 1) + ' 行'
+      return
+    }
+    el = el.parentElement
+  }
+  paperMsg.value = '没在源码里找到这一段（可能是自动生成的）'
 }
 
 // ---------------- 【v1601】选中图片 → 工具条改大小 / 对齐 / 文绕图 ----------------
