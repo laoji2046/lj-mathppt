@@ -1187,6 +1187,60 @@ const DEFAULTS_KEY = 'lj-paper-defaults-v1'
  *    **各写一遍字段名** ✗ → **漏一个就出诡异行为** ✓
  *    （v1585 的 `bodyCols` 就是这么丢的：`saveDraft` 存了 ✓ 但 `watch` / `restoreDraft` 漏了 ✓）
  *  ⇒ **新增字段只改这里** ✓ —— 别再往那五处各抄一遍 ✗ */
+// ---------------- 【v1595】右侧 tab：预览 / 所见即所得编辑 ----------------
+/** 右侧显示哪个 ✓（`preview` = 现有 A4 分页预览 ✓ / `edit` = 可编辑 ✓） */
+const rightTab = ref<'preview' | 'edit'>('preview')
+const editEl = ref<HTMLElement | null>(null)
+/** 进入编辑 tab 时**重建**编辑器内容 ✓
+ *  ⚠ 只在**切 tab 那一刻**重建 ✗ —— 编辑过程中**不能重建** ✓ 否则光标会丢 ✓ */
+function rebuildEditor() {
+  const el = editEl.value
+  if (!el) return
+  // ⚠ 故意**不调 MathJax** ✗ —— 公式保持 `$…$` 纯文本 ✓ 这样反向转换才取得回原式 ✓
+  el.innerHTML = parse(input.value) || '<p style="color:#999">（空）在下面直接写吧</p>'
+}
+
+/** 可编辑 HTML → Markdown ✓（**反向转换** ✓ 只覆盖项目已有的语法子集 ✓）
+ *  ⚠ 这是**单向**同步 ✓：编辑器改动 → Markdown ✓；
+ *    Markdown 那边再改会**覆盖**编辑器（切到编辑 tab 时重建 ✓）
+ *  ⚠ 复杂块（题目块 / 选项 / 表格 / 行内样式）**降级成纯文本** ✗ ——
+ *    不丢内容 ✓ 但会丢结构 ✓（第一步先这样 ✓ 后续再补 ✗） */
+function htmlToMd(root: HTMLElement): string {
+  const lines: string[] = []
+  const push = (s: string) => { if (s) lines.push(s) }
+  const walk = (el: Element) => {
+    for (const node of Array.from(el.children)) {
+      const cls = String(node.className || '')
+      if (cls.includes('page-break')) { push('[换页]'); continue }
+      if (node.tagName === 'H2') { push('# ' + (node.textContent || '').trim()); continue }
+      if (cls.includes('paper-sec-title')) { push('## ' + (node.textContent || '').trim()); continue }
+      if (cls.includes('paper-sub')) { push('### ' + (node.textContent || '').trim()); continue }
+      const t = (node.textContent || '').trim()
+      if (!t) continue
+      if (node.children.length && !/^(P|DIV|FIGURE)$/.test(node.tagName)) { walk(node); continue }
+      push(t)
+    }
+  }
+  walk(root)
+  return lines.join('\n\n')
+}
+/** 编辑器改动 → 同步回 Markdown ✓（**防抖 400ms** ✓ 别每敲一个字就重渲染整个 A4 预览 ✓） */
+let editTimer = 0
+function onEditInput() {
+  clearTimeout(editTimer)
+  editTimer = window.setTimeout(() => {
+    const el = editEl.value
+    if (!el) return
+    input.value = htmlToMd(el)
+    render()          // 只重渲染**预览** ✓ 不碰编辑器 ✓ 光标安全 ✓
+  }, 400)
+}
+/** 切 tab ✓（进编辑时重建 ✓ 因为 Markdown 那边可能变过 ✓） */
+function switchRightTab(t: 'preview' | 'edit') {
+  rightTab.value = t
+  if (t === 'edit') requestAnimationFrame(() => rebuildEditor())
+}
+
 const PF = {
   template, fontFamily, fontSize, fontColor, lineHeight, para, indent, h2size, numStyle,
   optLayout, headerText, footerText, pdfName, gapQ, headerGap, footerGap, autoNum, bodyCols,
@@ -1562,13 +1616,24 @@ watch([headerText, footerText], () => render())
               <p class="pm__hint">题号/标题自动识别、$...$ 公式、[图N] 图片、[换页] 分页、页眉页脚 {page}/{total}。点「<b>帮助</b>」看全部语法与示例。</p>
             </div>
             <div class="pm__right">
-              <div class="pm__zoom">
-                <button @click="zoomBy(-0.1)"><AppIcon name="minus" :size="14" /></button>
-                <span>{{ Math.round(zoom * 100) }}%</span>
-                <button @click="zoomBy(0.1)"><AppIcon name="plus" :size="14" /></button>
-                <button @click="zoomReset">重置</button>
+              <!-- 【v1595】右侧两个 tab ✓：预览（A4 分页）/ 编辑（所见即所得 ✓） -->
+              <div class="pm__tabs">
+                <button :class="{ 'pm__tab--on': rightTab === 'preview' }" @click="switchRightTab('preview')">预览</button>
+                <button :class="{ 'pm__tab--on': rightTab === 'edit' }" @click="switchRightTab('edit')">编辑</button>
+                <span class="pm__tabtip">编辑里的改动会同步回左边的 Markdown；公式保持 $…$ 原样、不渲染</span>
               </div>
-              <div ref="a4El" class="pm__a4"></div>
+              <div v-show="rightTab === 'preview'" class="pm__pane">
+                <div class="pm__zoom">
+                  <button @click="zoomBy(-0.1)"><AppIcon name="minus" :size="14" /></button>
+                  <span>{{ Math.round(zoom * 100) }}%</span>
+                  <button @click="zoomBy(0.1)"><AppIcon name="plus" :size="14" /></button>
+                  <button @click="zoomReset">重置</button>
+                </div>
+                <div ref="a4El" class="pm__a4"></div>
+              </div>
+              <div v-show="rightTab === 'edit'" class="pm__pane">
+                <div ref="editEl" class="pm__edit" contenteditable="true" spellcheck="false" @input="onEditInput"></div>
+              </div>
               <div ref="pageEl" class="paper-flow" style="position:absolute;left:-99999px;top:0;pointer-events:none;"></div>
             </div>
           </div>
@@ -1614,6 +1679,28 @@ watch([headerText, footerText], () => render())
 /* 【v1593】`position: relative` 给缩放栏做定位基准 ✓ —— 它改成**浮层**后不占高度 ✓
    右侧预览就能从顶部开始 ✓ **与左侧编辑区顶部对齐** ✓（用户要求 ✓） */
 .pm__right { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+/* 【v1595】右侧 tab 栏（预览 / 编辑 ✓） */
+.pm__tabs { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 0 0 6px; }
+.pm__tabs button {
+  border: 1px solid var(--border-strong); background: #fff; color: var(--text);
+  border-radius: 7px; padding: 5px 14px; cursor: pointer; font-size: 12.5px; font-weight: 600;
+}
+.pm__tabs button.pm__tab--on { background: var(--brand); border-color: var(--brand); color: #fff; }
+.pm__tabtip { font-size: 11px; color: var(--muted); margin-left: 6px; }
+/* ⚠ tab 面板必须**撑满剩余高度** ✓ —— 否则里面的 `.pm__a4 { flex: 1 }` 会失效 ✓ */
+.pm__pane { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; position: relative; }
+/* 【v1595】所见即所得编辑器 —— 白纸手感 ✓ 用跟 A4 一致的中文字体 ✓
+   ⚠ 这里**不渲染 MathJax** ✗：公式保持 `$…$` 纯文本 ✓ 反向转换才取得回原式 ✓ */
+.pm__edit {
+  flex: 1 1 auto; min-height: 0; overflow: auto; background: #fff; border: 1px solid var(--border-strong);
+  border-radius: 8px; padding: 18px 22px; font-family: "Times New Roman", "SimSun", serif;
+  font-size: 14px; line-height: 1.8; outline: none;
+}
+.pm__edit:focus { border-color: var(--brand); }
+.pm__edit h2 { font-size: 20px; text-align: center; margin: 0 0 8px; font-weight: 700; letter-spacing: 2px; }
+.pm__edit .paper-sec-title { font-weight: 700; margin: 12px 0 4px; font-size: 15px; letter-spacing: 1px; }
+.pm__edit .paper-sub { font-weight: 700; margin: 8px 0 2px; }
+.pm__edit p { margin: 6px 0; }
 /* 【v1592】属性上移到**窗口顶部** ✓（原来在左侧竖排 ✗，用户要求"属性都改到窗口上方" ✓）
    ⇒ 改成**横向流式**：各组（页面与字体 / ▾段落与题号 / ▸页眉页脚）**并排** ✓
    折叠的组只占一个摘要标题的宽度 ✓ 所以整体通常只占 2~3 行 ✓ */
