@@ -1190,6 +1190,55 @@ const DEFAULTS_KEY = 'lj-paper-defaults-v1'
  *    **各写一遍字段名** ✗ → **漏一个就出诡异行为** ✓
  *    （v1585 的 `bodyCols` 就是这么丢的：`saveDraft` 存了 ✓ 但 `watch` / `restoreDraft` 漏了 ✓）
  *  ⇒ **新增字段只改这里** ✓ —— 别再往那五处各抄一遍 ✗ */
+// ---------------- 【v1602】双击预览 → 源码光标跳到对应行 ----------------
+/** 去掉行首的 Markdown 标记 ✓（用于跟预览里块的**纯文本**比较 ✓） */
+function stripMdMark(s: string): string {
+  return s
+    .replace(/^\s*#{1,6}\s+/, '')          // # 标题
+    .replace(/^\s*\d+[.、．]\s*/, '')       // 1. 大题号
+    .replace(/^\s*\([0-9]+\)\s*/, '')       // (1) 小题号
+    .replace(/^\s*\[[^\]]*\]\s*/, '')       // [题] [选项] [解析] [换页] 这类标记
+    .replace(/^\s*\{[^}]*\}\s*/, '')        // {b} {c:#c00} 等段落前缀
+    .trim()
+}
+/** 【v1602】把 textarea 光标放到第 `line` 行 ✓（**选中整行** ✓ 一眼看到 ✓）并滚到可见 ✓ */
+function focusMdLine(line: number) {
+  const el = inputEl.value
+  if (!el) return
+  const lines = input.value.split('\n')
+  let pos = 0
+  for (let i = 0; i < line && i < lines.length; i++) pos += lines[i].length + 1
+  el.focus()
+  el.setSelectionRange(pos, pos + (lines[line] || '').length)
+  // ⚠ 滚动按**行高估算** ✓（13px × 1.5 ≈ 19.5px ✓ 跟 CSS 一致 ✓）—— 不必去测像素 ✓
+  el.scrollTop = Math.max(0, line * 19.5 - el.clientHeight / 2)
+}
+/** 【v1602】双击预览里的某块 → 源码光标跳到**对应行** ✓
+ *  用途：预览里看到要改的地方，回源码**找不到** ✓（用户实报 ✓）
+ *  ⚠ 用**文本匹配**定位 ✓（跟 v1597 的 `patchMdBlock` 同源 ✓，但这里**只读不写** ✓）
+ *    代价：**同一文本出现多次时跳第一个** ✓（可接受 ✓） */
+function jumpToMdLine(e: MouseEvent) {
+  const el = (e.target as HTMLElement).closest<HTMLElement>(
+    'h2, .paper-sec-title, .paper-sub, .paper-box-title, .paper-q, p, figure, figcaption')
+  if (!el) return
+  const text = (el.textContent || '').trim()
+  if (!text) return
+  const lines = input.value.split('\n')
+  let hit = -1
+  for (let i = 0; i < lines.length; i++) if (stripMdMark(lines[i]) === text) { hit = i; break }
+  if (hit < 0) {
+    // 退一步：用**前 18 字**做前缀匹配 ✓
+    //（块里的文字可能被 DOM 拼得跟源码不完全一样 ✓ 比如公式被拆成好几段 ✓）
+    const head = text.slice(0, 18)
+    if (head) for (let i = 0; i < lines.length; i++) {
+      if (stripMdMark(lines[i]).startsWith(head)) { hit = i; break }
+    }
+  }
+  if (hit < 0) { paperMsg.value = '没在源码里找到这一段（可能是自动生成的）'; return }
+  focusMdLine(hit)
+  paperMsg.value = '已跳到源码第 ' + (hit + 1) + ' 行'
+}
+
 // ---------------- 【v1601】选中图片 → 工具条改大小 / 对齐 / 文绕图 ----------------
 /** 当前选中的图号 ✓（0 = 没选 ✓） */
 const selFig = ref(0)
@@ -1673,8 +1722,10 @@ watch([headerText, footerText], () => render())
                 <button @click="zoomBy(0.1)"><AppIcon name="plus" :size="14" /></button>
                 <button @click="zoomReset">重置</button>
               </div>
-              <!-- 【v1601】点图 → 选中 ✓（点别处取消 ✓） -->
-              <div ref="a4El" class="pm__a4" @click="onA4ClickFig"></div>
+              <!-- 【v1601】点图 → 选中 ✓（点别处取消 ✓）
+                   【v1602】双击任意块 → 左边源码光标**跳到对应行** ✓
+                   ⚠ 双击时会先触发两次 `click` ✓（即"选图" ✓）—— 无害 ✓ 反而顺手 ✓ -->
+              <div ref="a4El" class="pm__a4" title="双击可跳到左边源码的对应行" @click="onA4ClickFig" @dblclick="jumpToMdLine"></div>
               <!-- 【v1601】图片工具条 ✓ —— 选中图后出现 ✓ 点选代替手写参数 ✓
                    ⚠ 浮在预览右上角（缩放栏**下方** ✓）不占高度 ✓ 所以不影响左右顶部对齐 ✓ -->
               <div v-if="selFig" class="pm__figbar">
