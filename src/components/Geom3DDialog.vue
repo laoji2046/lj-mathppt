@@ -13,7 +13,7 @@
 import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
-import { buildSolid, labelOffsetsFrom, LABEL_DIR_VEC, projectGeom, resolveVertices, solveView, type Geom3D, type LabelDir } from '@/composables/geom3d'
+import { buildSolid, faceUV, labelOffsetsFrom, LABEL_DIR_VEC, projectGeom, resolveVertices, solveView, type Geom3D, type LabelDir } from '@/composables/geom3d'
 import { GEOM3D_PRESETS, GEOM3D_PROMPT } from '@/composables/geom3dPrompt'
 import { renderSolid, arcsSvg, vertexDotsSvg } from '@/composables/solid3d'
 import { closeGeom3D, geom3dSink } from '@/ui/geom3d'
@@ -451,8 +451,38 @@ function dragOnMove(e: PointerEvent) {
     if (l2 < 1e-6) return
     const t = ((cx - a2[0]) * dx + (cy - a2[1]) * dy) / l2
     tgt.on = { kind: 'edge', a: on.a, b: on.b, t: Math.round(Math.max(0, Math.min(1, t)) * 1000) / 1000 }
+  } else if (on.kind === 'face' || on.kind === 'plane') {
+    // 面 / 三点平面：用**2D 重心坐标**反解（仿射变换保持重心坐标 ✓）
+    //   `mouse = P₀ + α(P₁−P₀) + β(P₂−P₀)` → 解 2×2 线性方程组；α、β 在 3D 里是**同一组** ✓
+    const names = (on.kind === 'face' ? on.face : on.through) || []
+    const P2 = names.map(at2)
+    if (P2.length < 3 || P2.some((q) => !q)) return
+    const p0 = P2[0] as [number, number], p1 = P2[1] as [number, number], p2 = P2[2] as [number, number]
+    const e1x = p1[0] - p0[0], e1y = p1[1] - p0[1]
+    const e2x = p2[0] - p0[0], e2y = p2[1] - p0[1]
+    const det = e1x * e2y - e1y * e2x
+    if (Math.abs(det) < 1e-6) return
+    const vx = cx - p0[0], vy = cy - p0[1]
+    const al = (vx * e2y - vy * e2x) / det
+    const be = (e1x * vy - e1y * vx) / det
+    // 换成 3D 点，再取**面内正交基**下的 (u,v)
+    //   ⚠ 必须和 `resolveOnPoint` 用**同一套基**（`faceUV` ✓），否则拖完位置会跳 ✗
+    const all = resolveVertices(m)
+    const Q = names.map((n) => all[n]).filter(Boolean) as [number, number, number][]
+    if (Q.length < 3) return
+    const X: [number, number, number] = [
+      Q[0][0] + al * (Q[1][0] - Q[0][0]) + be * (Q[2][0] - Q[0][0]),
+      Q[0][1] + al * (Q[1][1] - Q[0][1]) + be * (Q[2][1] - Q[0][1]),
+      Q[0][2] + al * (Q[1][2] - Q[0][2]) + be * (Q[2][2] - Q[0][2]),
+    ]
+    const uv = faceUV(Q, X)
+    if (!uv) return
+    const rr = (v: number) => Math.round(v * 1000) / 1000
+    tgt.on = on.kind === 'face'
+      ? { kind: 'face', face: on.face, u: rr(uv.u), v: rr(uv.v) }
+      : { kind: 'plane', through: on.through, u: rr(uv.u), v: rr(uv.v) }
   } else {
-    return   // 面 / 圆的反解下一步做（面要用 2D 仿射坐标、圆要解椭圆逆映射 ✗）
+    return   // 圆的反解下一步做（投影把圆变成椭圆，要解椭圆的逆映射 ✗）
   }
   raw.value = JSON.stringify(next, null, 1)
   parse()

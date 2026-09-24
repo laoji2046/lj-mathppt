@@ -306,6 +306,40 @@ export function resolveVertices(m: Geom3D): Record<string, [number, number, numb
   return out
 }
 
+/** 【v1571】过 `Q[0..2]` 的平面上的**面内正交基** ✓
+ *  `e₁ = normalize(Q₁−Q₀)`、`n = e₁×(Q₂−Q₀)`、`e₂ = n×e₁` —— **必须正交** ✗：
+ *  直接拿 `Q₁−Q₀`、`Q₂−Q₀` 当基的话它们不正交，点会沿斜方向漂 ✗
+ *  三点共线 / 重合 → `null` ✓ */
+export function faceBasis(Q: [number, number, number][]): {
+  o: [number, number, number]
+  e1: [number, number, number]
+  e2: [number, number, number]
+} | null {
+  if (!Q || Q.length < 3) return null
+  const d1 = sub(Q[1], Q[0])
+  const l1 = Math.hypot(d1[0], d1[1], d1[2])
+  if (l1 < 1e-9) return null
+  const e1: [number, number, number] = [d1[0] / l1, d1[1] / l1, d1[2] / l1]
+  const nr = cross(e1, sub(Q[2], Q[0]))
+  const ln = Math.hypot(nr[0], nr[1], nr[2])
+  if (ln < 1e-9) return null
+  const n1: [number, number, number] = [nr[0] / ln, nr[1] / ln, nr[2] / ln]
+  return { o: Q[0], e1, e2: cross(n1, e1) }
+}
+
+/** 【v1571】把三维点 `X` **投影到平面上**并给出面内坐标 `(u,v)` ✓
+ *  与 `resolveOnPoint` 的 `face`/`plane` 用**同一套基** —— 拖动时用它才不会跳 ✓ */
+export function faceUV(Q: [number, number, number][], X: [number, number, number]): { u: number; v: number } | null {
+  const B = faceBasis(Q)
+  if (!B) return null
+  const w = sub(X, B.o)
+  // 先投影到平面（消掉法向分量 ✗），再取面内两个分量 ✓
+  const nrm = cross(B.e1, B.e2)
+  const dn = dot(w, nrm)
+  const wp: [number, number, number] = [w[0] - nrm[0] * dn, w[1] - nrm[1] * dn, w[2] - nrm[2] * dn]
+  return { u: dot(wp, B.e1), v: dot(wp, B.e2) }
+}
+
 /** 【v1571】把「受约束点」的约束解析成三维坐标 ✓
  *  · `edge`   —— `A + t·(B−A)`，t 夹到 [0,1]
  *  · `face` / `plane` —— `P₀ + u·e₁ + v·e₂`，`e₁/e₂` 是**面内的正交基** ✓
@@ -328,20 +362,12 @@ export function resolveOnPoint(
   if (on.kind === 'face' || on.kind === 'plane') {
     const names = (on.kind === 'face' ? on.face : on.through) || []
     const P = names.map((n) => out[n]).filter(Boolean) as [number, number, number][]
-    if (P.length < 3) return null
-    const e1 = sub(P[1], P[0])
-    const l1 = Math.hypot(e1[0], e1[1], e1[2])
-    if (l1 < 1e-9) return null
-    const u1: [number, number, number] = [e1[0] / l1, e1[1] / l1, e1[2] / l1]
-    const nrm = cross(u1, sub(P[2], P[0]))
-    const ln = Math.hypot(nrm[0], nrm[1], nrm[2])
-    if (ln < 1e-9) return null          // 三点共线 → 定不出平面
-    const n1: [number, number, number] = [nrm[0] / ln, nrm[1] / ln, nrm[2] / ln]
-    const u2 = cross(n1, u1)            // 与 u1 正交且仍在面内 ✓
+    const B = faceBasis(P)
+    if (!B) return null                 // 点不够 / 三点共线 → 定不出平面 ✓
     return [
-      r4(P[0][0] + u1[0] * on.u + u2[0] * on.v),
-      r4(P[0][1] + u1[1] * on.u + u2[1] * on.v),
-      r4(P[0][2] + u1[2] * on.u + u2[2] * on.v),
+      r4(B.o[0] + B.e1[0] * on.u + B.e2[0] * on.v),
+      r4(B.o[1] + B.e1[1] * on.u + B.e2[1] * on.v),
+      r4(B.o[2] + B.e1[2] * on.u + B.e2[2] * on.v),
     ]
   }
   if (on.kind === 'circle') {
