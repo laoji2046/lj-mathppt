@@ -518,6 +518,14 @@ export interface VectorizeOpt {
    *   ⇒ **排序键换错了维度** ✗；而且 `#6`/`#13` 根本**没进候选**（不是被排序挤掉的 ✗）
    *   → **改排序键解决不了这个漏边** ✗ */
   extendPerpPick?: number
+  /** 【v1563】**默认 8**（= `mergeR` ✗）`refineCorners` 精修后的位置**不能贴到别的顶点身上** ✓
+   *  距离小于它就不挪 —— 精修的本意是"把顶点推回**真正的角**"✗，推到别人身上就完全违背了 ✗
+   *  病根（`pabcdc1`，v1562 实测 ✗）：`#4 (221,193)` 被挪 **10.8px** 到 `(214,185)`，
+   *  而 `#3`（= `O` ✗）就在 `(216,185)` → 相距 **2px** → 被 `mergeVerts(8)` 合并
+   *  → `collinearSimplify` 把合并后的顶点当"`A—D` 直线上的假顶点"删掉
+   *  → **`O`（锥体的高）消失** ✗
+   *  ⚠ 调小 `refine`（限制位移上限）**不行** ✗：要小到 **1.5px** 才有效，那等于关掉精修 ✗ */
+  refineMinGap?: number
   /** 【v1535】虚线扩展时**不碰"链内节点"** —— 2 = 任何"虚线度 ≥2"的节点都不碰（**默认 ✓**）；
    *  1 = 只不碰"虚线度 2 且两条虚线边共线"的节点；0 = 关（= 旧行为 ✗）。
    *  为什么：虚线在骨架上是一**条链**（每个短划组当节点、逐段相连：A—g1—g2—C），逐条边无条件往外接会把
@@ -4060,13 +4068,38 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
         const dd = Math.hypot(ddx, ddy)
         if (dd < 0.4) continue
         if (dd > maxMove) { ddx *= maxMove / dd; ddy *= maxMove / dd }
-        // 【v1562】`dashDebug >= 4` 时打印**位移 > 5px** 的顶点 ✓
-        //   —— 查"某个顶点被精修挪到哪去了"必需 ✗（`pabcdc1` 的 `O` 就是被这个挪到 `A—D` 直线上，
-        //      随后被紧跟着的 `collinearSimplify` 当"直线上的假顶点"删掉 ✗ 实测 `refine=0` 能救回 ✓）
+        // ⛔⛔【v1563 否掉，**默认 0 = 关，别再翻**】"精修后的位置不能贴到别的顶点身上" ✗
+        //   **想法**（`pabcdc1`，v1562 实测 ✗）：`#4 (221,193)` 被挪 **10.8px** 到 `(214,185)`，
+        //   而 `#3`（= `O` ✗）就在 `(216,185)` → 相距 **2px** → 被 `mergeVerts(8)` 合并
+        //   → `collinearSimplify` 当"`A—D` 直线上的假顶点"删掉 → **`O`（锥体的高）消失** ✗
+        //
+        //   **实测：能救回 `O`，但整体大幅变差** ✗✗
+        //   | `refineMinGap` | `pabcdc1` 召回 | 平均顶点精度 |
+        //   |---|---|---|
+        //   | 0（关） | 85.7% ✗ | **86.5%** ✓ |
+        //   | 2 | **100%** ✓ | **83.7%** ✗ |
+        //   | 3 / 4 / 5 | 100% ✓ | 82.6% ✗ |
+        //   | 8 | 100% ✓ | **81.6%** ✗✗ |
+        //   ⇒ 而且 `pabcdc1` 自己识别V 变成 **9**（多 2 个假顶点 ✗）
+        //   ⇒ 原因：**挡住精修会让顶点停在"粗线拐角往里缩"的位置**（`refineCorners` 的注释：
+        //     "粗线在拐角处细化后骨架的'角'会往里缩一圈（实测偏 2%~3%）"✗）→ 引入新的位置误差 ✗
+        //
+        //   ★★ **但顺手挖出了更上游的真相**：`#3` 和 `#4` 都是**从 `A` 出发的虚线端点**
+        //     （`A—#3` 长 94、`A—#4` 长 99，终点相距仅 9.4px ✗）
+        //     ⇒ **它们是两条几乎重合的虚线链** ✗ —— 真值里 `A` 到 `D` 方向**只有一条** ✓
+        //     ⇒ 所以真正的病根**更上游**：**虚线编链把同一方向的短划编成了两条重叠的链** ✗
+        const nx2 = verts[v].x + ddx, ny2 = verts[v].y + ddy
+        let tooClose = false
+        for (let k = 0; k < verts.length; k++) {
+          if (k === v) continue
+          if (Math.hypot(verts[k].x - nx2, verts[k].y - ny2) < (opt.refineMinGap ?? 0)) { tooClose = true; break }
+        }
         if ((opt.dashDebug ?? 0) >= 4 && dd > 5) {
           console.log('[refine] #' + v + '(' + verts[v].x.toFixed(0) + ',' + verts[v].y.toFixed(0) + ') → (' +
-            X.toFixed(0) + ',' + Y.toFixed(0) + ')  位移 ' + dd.toFixed(1) + '  邻居 ' + inc[v].length)
+            X.toFixed(0) + ',' + Y.toFixed(0) + ')  位移 ' + dd.toFixed(1) + '  邻居 ' + inc[v].length +
+            (tooClose ? '  ⛔ 太贴别的顶点，不挪 ✓' : ''))
         }
+        if (tooClose) continue
         verts[v].x += ddx; verts[v].y += ddy
         moved = true
       }
