@@ -1216,36 +1216,34 @@ function onInput() { clearTimeout(renderTimer); renderTimer = window.setTimeout(
 // ---- 草稿持久化：关闭后重开保留最后编辑内容 ----
 const DEFAULTS_KEY = 'lj-paper-defaults-v1'
 /** 设置快照 —— 草稿与「默认设置」共用一份实现 ✓（别各写各的 ✗） */
-function settingsSnapshot() {
-  return {
-    template: template.value, fontFamily: fontFamily.value, fontSize: fontSize.value,
-    fontColor: fontColor.value, lineHeight: lineHeight.value, para: para.value, indent: indent.value,
-    h2size: h2size.value, numStyle: numStyle.value, optLayout: optLayout.value,
-    headerText: headerText.value, footerText: footerText.value, gapQ: gapQ.value,
-    headerGap: headerGap.value, footerGap: footerGap.value, autoNum: autoNum.value, bodyCols: bodyCols.value,
+/** 【v1587】试卷编辑的**可持久化排版字段** —— **一处定义、五处共用** ✓
+ *  ⚠ 原来 `saveDraft` / `watch` / `restoreDraft` / `settingsSnapshot` / `applySettings`
+ *    **各写一遍字段名** ✗ → **漏一个就出诡异行为** ✓
+ *    （v1585 的 `bodyCols` 就是这么丢的：`saveDraft` 存了 ✓ 但 `watch` / `restoreDraft` 漏了 ✓）
+ *  ⇒ **新增字段只改这里** ✓ —— 别再往那五处各抄一遍 ✗ */
+const PF = {
+  template, fontFamily, fontSize, fontColor, lineHeight, para, indent, h2size, numStyle,
+  optLayout, headerText, footerText, gapQ, headerGap, footerGap, autoNum, bodyCols,
+}
+type PFRef = { value: unknown }
+/** 当前值 → 普通对象 ✓（草稿 / 默认设置共用 ✓） */
+function pfSnapshot(): Record<string, unknown> {
+  const o: Record<string, unknown> = {}
+  for (const [k, r] of Object.entries(PF)) o[k] = (r as PFRef).value
+  return o
+}
+/** 普通对象 → 写回各 ref ✓（`undefined` 跳过 ✓ 保留当前值 ✓） */
+function pfApply(s: Record<string, unknown> | null | undefined) {
+  if (!s) return
+  for (const [k, r] of Object.entries(PF)) {
+    if (s[k] === undefined) continue
+    // `bodyCols` 夹到 1~3 ✓（越界值会让分栏渲染错乱 ✗）
+    ;(r as PFRef).value = k === 'bodyCols' ? Math.max(1, Math.min(3, Number(s[k]) || 1)) : s[k]
   }
 }
-function applySettings(s: any) {
-  if (!s) return
-  if (s.template !== undefined) template.value = s.template
-  if (s.fontFamily !== undefined) fontFamily.value = s.fontFamily
-  if (s.fontSize) fontSize.value = s.fontSize
-  if (s.fontColor) fontColor.value = s.fontColor
-  if (s.lineHeight) lineHeight.value = s.lineHeight
-  if (s.para !== undefined) para.value = s.para
-  if (s.indent !== undefined) indent.value = s.indent
-  if (s.h2size) h2size.value = s.h2size
-  if (s.numStyle) numStyle.value = s.numStyle
-  if (s.optLayout) optLayout.value = s.optLayout
-  if (s.headerText !== undefined) headerText.value = s.headerText
-  if (s.footerText !== undefined) footerText.value = s.footerText
-  if (s.gapQ !== undefined) gapQ.value = s.gapQ
-  if (s.headerGap !== undefined) headerGap.value = s.headerGap
-  if (s.footerGap !== undefined) footerGap.value = s.footerGap
-  // 【v1585】跟草稿那个是**同一个毛病** ✗ —— `settingsSnapshot` 存了 `bodyCols` ✓ 但这里没读 ✓
-  if (s.bodyCols !== undefined) bodyCols.value = Math.max(1, Math.min(3, Number(s.bodyCols) || 1))
-  if (s.autoNum !== undefined) autoNum.value = s.autoNum
-  if (s.bodyCols) bodyCols.value = Number(s.bodyCols) || 1
+function settingsSnapshot() { return pfSnapshot() }
+function applySettings(s: Record<string, unknown> | null | undefined) {
+  pfApply(s)
   render()
 }
 function saveAsDefaults() {
@@ -1279,10 +1277,8 @@ async function offloadDraftImages() {
 
 function saveDraft() {
   try {
-    const d: Record<string, unknown> = { images: images.value, input: input.value, template: template.value, fontFamily: fontFamily.value, fontSize: fontSize.value, fontColor: fontColor.value,
-      lineHeight: lineHeight.value, para: para.value, indent: indent.value, numStyle: numStyle.value, headerText: headerText.value,
-      footerText: footerText.value, autoNum: autoNum.value, h2size: h2size.value, gapQ: gapQ.value, headerGap: headerGap.value,
-      footerGap: footerGap.value, optLayout: optLayout.value, bodyCols: bodyCols.value }
+    // 【v1587】排版字段统一走 `pfSnapshot()` ✓ —— 正文与图库是**内容**（不是排版参数 ✓），单独带上 ✓
+    const d: Record<string, unknown> = { ...pfSnapshot(), images: images.value, input: input.value }
     const json = JSON.stringify(d)
     if (!draftNeedsOffload(json.length)) { localStorage.setItem(DRAFT_KEY, json); return }
     // 图太大：草稿本体**去掉 images**（这样一定存得下 ✓），图转存内容库 → 恢复时再取回来
@@ -1320,25 +1316,9 @@ function restoreDraft(): boolean {
       })()
     }
     if (typeof d.input === 'string') input.value = d.input
-    if (typeof d.template === 'string') template.value = d.template
-    if (typeof d.fontFamily === 'string') fontFamily.value = d.fontFamily
-    if (typeof d.fontSize === 'number') fontSize.value = d.fontSize
-    if (typeof d.fontColor === 'string') fontColor.value = d.fontColor
-    if (typeof d.lineHeight === 'number') lineHeight.value = d.lineHeight
-    if (typeof d.para === 'number') para.value = d.para
-    if (typeof d.indent === 'number') indent.value = d.indent
-    if (typeof d.numStyle === 'string') numStyle.value = d.numStyle
-    if (typeof d.headerText === 'string') headerText.value = d.headerText
-    if (typeof d.footerText === 'string') footerText.value = d.footerText
-    if (typeof d.autoNum === 'boolean') autoNum.value = d.autoNum
-    if (typeof d.h2size === 'number') h2size.value = d.h2size
-    if (typeof d.gapQ === 'number') gapQ.value = d.gapQ
-    if (typeof d.headerGap === 'number') headerGap.value = d.headerGap
-    if (typeof d.footerGap === 'number') footerGap.value = d.footerGap
-    if (typeof d.optLayout === 'string') optLayout.value = d.optLayout
-    // 【v1585】原来漏了这行 ✗ —— `saveDraft` 存了 `bodyCols` 但**这里没读** ✓，
-    //   所以分栏设置存得进草稿、**恢复不回来** ✗（实测 `draftCols:2` 但重开还是 1 ✓）
-    if (typeof d.bodyCols === 'number') bodyCols.value = Math.max(1, Math.min(3, d.bodyCols))
+    // 【v1587】排版字段统一走 `pfApply()` ✓
+    //   （原来这里逐条抄了 18 行 ✗ —— v1585 就漏过 `bodyCols` ✓ 现在不可能再漏 ✓）
+    pfApply(d)
     return true
   } catch { return false }
 }
@@ -1377,10 +1357,9 @@ function onQuestionInsert(p: PaperInsertPayload) {
 
 let draftTimer: number | undefined
 function saveDraftSoon() { clearTimeout(draftTimer); draftTimer = window.setTimeout(saveDraft, 300) }
-// 【v1585】⚠ 这个列表**必须跟 `saveDraft` 里保存的字段一一对应** ✗ ——
-//   原来漏了 `bodyCols`：改完分栏**不碰别的** → 草稿里还是旧值 ✗
-//   （改分栏后再动别的控件反而会保住 ✓ 因为 `saveDraft` 里有它 ✓）—— 典型漏字段 bug ✓
-watch([input, template, fontFamily, fontSize, fontColor, lineHeight, para, indent, numStyle, headerText, footerText, autoNum, h2size, gapQ, headerGap, footerGap, optLayout, bodyCols], saveDraftSoon)
+// 【v1587】watch 源直接由 `PF` 生成 ✓ —— **再也不会漏字段** ✓
+//   （v1585 的 `bodyCols` 就是这么漏的：`saveDraft` 存了、这里没监听 ✓）
+watch([...Object.values(PF), input], saveDraftSoon)
 
 onMounted(() => {
   if (!restoreDraft() && !input.value.trim()) input.value = DEFAULT

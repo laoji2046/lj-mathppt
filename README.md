@@ -3,7 +3,7 @@
 与根目录的原版应用**并行开发**，互不干扰。这一步的目标是把架构从「DOM 即模型」
 换成「场景图驱动」，并验证它在 Vue 3 + TypeScript 下跑得通。
 
-> **当前版本：2026.09.1586**（**以 `package.json` 的 `version` 为准** —— 此处的手写锚点曾一度滞后 160 个版本，
+> **当前版本：2026.09.1587**（**以 `package.json` 的 `version` 为准** —— 此处的手写锚点曾一度滞后 160 个版本，
 > 今后不再手写；**1317 → 1527 的变更记录已回填进本文「更新日志」**（按阶段合并，共 18 条）。
 > 源码快照 `_backup/rollback-*`；dev 端口 `http://127.0.0.1:5173`；演示 exe 在 `lj-mathslides-demo/lj-mathslides.exe`）
 >
@@ -472,6 +472,36 @@ label("$A$", (2.399, 2.306));
 > 共 **12 个标签** ✓（均为轻量标签，与既有标签一致）。若哪天再漏，按
 > `git log --format='%ad %s' --date=short | grep v1522` 找到该版本的**最新一条**提交再补 ✓。
 > **1348 / 1415 / 1431 / 1486 是跳号**（历史上没有任何提交用过），补不了属正常 ✓。
+
+### 2026-09-24（v2026.09.1587）
+
+**1587 · 试卷编辑：排版字段「一处定义、五处共用」** ✓（**根治漏字段**）
+
+**起因**：v1585 的 `bodyCols` bug（**存了读不回**）—— 根子是
+`saveDraft` / `watch` / `restoreDraft` / `settingsSnapshot` / `applySettings`
+**五个地方各写一遍字段名** ✗ **漏一个就出诡异行为** ✓
+
+**做法** ✓：
+
+```ts
+const PF = { template, fontFamily, fontSize, …, bodyCols }   // ← 一处定义 ✓
+function pfSnapshot() { … }   // 当前值 → 普通对象 ✓
+function pfApply(s) { … }     // 普通对象 → 写回各 ref ✓
+```
+
+- `saveDraft` = `{ ...pfSnapshot(), images, input }` ✓（**内容与排版分开** ✓）
+- `watch([...Object.values(PF), input], saveDraftSoon)` ✓ ← **再也不会漏** ✓
+- `restoreDraft` = `pfApply(d)` ✓（原来**逐条抄 18 行** ✗）
+- `settingsSnapshot` / `applySettings` = 薄封装 ✓
+
+**⚠ 顺带更正一处我上一轮的误判** ✗：
+`applySettings` **原本就有 `bodyCols`** ✓（`if (s.bodyCols) …` ✓）——
+我 v1585 说它"漏了"是**看漏了**（那段缩进乱 + 我只 grep 到 `importJson` 那处）。
+**真正漏的只有草稿链那两处**（`watch` / `restoreDraft`），实测 `ok: true` 已证明 ✓
+
+**回归**：`.probe/_draft.cjs` → `draftCols: 2` / `after: "2"` / **`ok: true`** ✓、`errors: []` ✓
+
+**★ 价值**：**新增字段只改 `PF` 一处** ✓ —— 从"**可能漏**"变成"**不可能漏**" ✓
 
 ### 2026-09-24（v2026.09.1586）
 
