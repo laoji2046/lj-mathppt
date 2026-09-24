@@ -109,9 +109,20 @@ const innerHtml = computed(() => {
   if (SOLID_VCOUNT[kind]) {
     // 字母始终画；顶点圆点默认**不画**（只有勾了 showDots 才画，保持原来的观感）
     const solid = renderSolid(kind, pts.value, w, h, stroke, s, fillColor, dashed, props.el.vlabels, props.el.edgeStyles, solidSel.elementId === props.el.id ? (solidSel.vertex ?? undefined) : undefined, solidSel.elementId === props.el.id ? (solidSel.edge ?? undefined) : undefined, props.el.labelOffsets, props.el.faceStyles, solidSel.elementId === props.el.id ? (solidSel.face ?? undefined) : undefined, props.el.mesh)
-    if (props.el.showDots !== true) return solid
+    // 【v1573】后加的点（自由点 / 受约束点）**始终**画圆点 —— 与 `showDots` 无关 ✓
+    const dots = (() => {
+      const idx = props.el.dotIdx
+      if (!idx?.length) return ''
+      const coords: number[] = []
+      for (const i of idx) {
+        if (i * 2 + 1 >= pts.value.length) continue
+        coords.push(pts.value[i * 2], pts.value[i * 2 + 1])
+      }
+      return coords.length ? vertexDotsSvg(coords, w, h, stroke) : ''
+    })()
+    if (props.el.showDots !== true) return solid + dots
     // 顶点小圆点：与三维弹窗预览共用 vertexDotsSvg（只此一份实现）
-    return solid + vertexDotsSvg(pts.value, w, h, stroke)
+    return solid + dots + vertexDotsSvg(pts.value, w, h, stroke)
   }
 
   switch (kind) {

@@ -137,6 +137,15 @@ parse()
 
 /** 顶点小圆点：默认不画（只有字母，与原观感一致）；插入/保存时会写进元素 */
 const showDots = ref(false)
+/** 【v1573】**后加的点**（自由点 / 受约束点）的名字 —— 这些点**始终**画圆点 ✓
+ *  理由：它们是"你加的东西"，不该跟顶点一样默认只剩字母（否则容易找不到 ✗）
+ *  顶点仍由 `showDots` 控制 —— 保持"默认只有字母、与原观感一致" ✓ */
+const extraDotNames = computed(() => {
+  const s = new Set<string>()
+  for (const k of model.value?.freePoints || []) if (k?.name) s.add(k.name)
+  for (const k of model.value?.onPoints || []) if (k?.name) s.add(k.name)
+  return s
+})
 
 // 从画布上的三维图形回来 → 还原模型和视角（继续改）
 if (props.editId) {
@@ -189,6 +198,15 @@ const svg = computed(() => {
   let out = solid + arcsSvg(p.arcs, W.value, H, '#1a1a1a', 2.6)
   // 顶点圆点：与画布/缩略图/导出共用同一个函数（只此一份实现）
   if (showDots.value) out = vertexDotsSvg(p.points, W.value, H, '#1a1a1a') + out
+  // 【v1573】后加的点（自由点 / 受约束点）**始终**画成圆点 ✓ —— 与 `showDots` 无关 ✓
+  if (extraDotNames.value.size) {
+    const coords: number[] = []
+    order.value.forEach((n, i) => {
+      if (!extraDotNames.value.has(n)) return
+      coords.push(p.points[i * 2], p.points[i * 2 + 1])
+    })
+    if (coords.length) out = vertexDotsSvg(coords, W.value, H, '#1a1a1a') + out
+  }
   // 多选的点自己描一圈（renderSolid 只支持选中一个顶点）
   for (const i of selPoints.value) {
     const cx = p.points[i * 2] * W.value, cy = p.points[i * 2 + 1] * H
@@ -1136,6 +1154,18 @@ function insert() {
     // **把源模型存进元素** —— 否则插进画布就"死"了，改不了视角也改不了模型
     geom3d: { model: m as unknown as Record<string, unknown>, azim: azim.value, elev: elev.value },
     showDots: showDots.value || undefined,
+    // 【v1573】后加的点（自由点 / 受约束点）在 `points` 里的下标 ——
+    //   画布渲染时给它们**始终**画圆点 ✓（顶点仍受 `showDots` 控制 ✓）
+    //   元素里只有投影后的 `points` + 字母，分不出"哪些是后加的" ✗ → 插入时先算好 ✓
+    dotIdx: (() => {
+      const names = new Set<string>()
+      for (const k of m.freePoints || []) if (k?.name) names.add(k.name)
+      for (const k of m.onPoints || []) if (k?.name) names.add(k.name)
+      if (!names.size) return undefined
+      const idx: number[] = []
+      order.value.forEach((n, i) => { if (names.has(n)) idx.push(i) })
+      return idx.length ? idx : undefined
+    })(),
   }
   const el = props.editId ? findEl(props.editId) : undefined
   if (el) {

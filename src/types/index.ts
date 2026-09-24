@@ -661,6 +661,9 @@ export interface MathFigureElement extends ElementBase {
    * 勾上才画圆点（教材风）。字母不受它影响。图形重建 / 立体几何 / 可拖顶点图形都适用。
    */
   showDots?: boolean
+  /** 【v1573】后加的点（自由点 / 受约束点）在 `points` 里的下标 —— 画布渲染时**始终**画圆点 ✓
+   *  （顶点仍受 `showDots` 控制；元素里只有投影后的 `points` + 字母，分不出哪些是后加的 ✗） */
+  dotIdx?: number[]
   vlabels?: (string | null)[]
   /** 每条边的样式覆盖（实线/虚线/点线、粗细、颜色），索引与立体边表一致 */
   edgeStyles?: ({ dash?: 'solid' | 'dash' | 'dot'; width?: number; color?: string; arrow?: boolean } | null)[]
