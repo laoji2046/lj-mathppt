@@ -1187,6 +1187,45 @@ const DEFAULTS_KEY = 'lj-paper-defaults-v1'
  *    **各写一遍字段名** ✗ → **漏一个就出诡异行为** ✓
  *    （v1585 的 `bodyCols` 就是这么丢的：`saveDraft` 存了 ✓ 但 `watch` / `restoreDraft` 漏了 ✓）
  *  ⇒ **新增字段只改这里** ✓ —— 别再往那五处各抄一遍 ✗ */
+// ---------------- 【v1600】公式符号面板 ----------------
+/** 面板是否展开 ✓（纯 UI 状态 ✗ 不进 `PF` ✓） */
+const texOpen = ref(false)
+/** 【v1600】公式符号面板 —— 针对"**记不住 LaTeX 命令**"（用户实报 ✓）
+ *  `a` / `b` 是**包裹前后缀** ✓ 走 `wrapSel` ✓ —— **先选中文字再点，会把它包起来** ✓
+ *  ⚠ 符号类（如 `\leq ` ✓）的 `b` 是空串 ✓ 光标停在插入内容**后面** ✓ 继续打字即可 ✓ */
+const TEX_GROUPS = [
+  { g: '结构', items: [
+    { t: '分式', a: '\\frac{', b: '}{}' },
+    { t: '根号', a: '\\sqrt{', b: '}' },
+    { t: '上标', a: '^{', b: '}' },
+    { t: '下标', a: '_{', b: '}' },
+    { t: '绝对值', a: '|', b: '|' },
+    { t: '向量', a: '\\vec{', b: '}' },
+    { t: '求和', a: '\\sum_{', b: '}^{}' },
+    { t: '积分', a: '\\int_{', b: '}^{}' },
+    { t: '极限', a: '\\lim_{', b: '}' },
+  ] },
+  { g: '关系', items: [
+    { t: '≤', a: '\\leq ', b: '' }, { t: '≥', a: '\\geq ', b: '' }, { t: '≠', a: '\\neq ', b: '' },
+    { t: '≈', a: '\\approx ', b: '' }, { t: '±', a: '\\pm ', b: '' }, { t: '×', a: '\\times ', b: '' },
+    { t: '÷', a: '\\div ', b: '' }, { t: '∞', a: '\\infty ', b: '' },
+    { t: '∈', a: '\\in ', b: '' }, { t: '∉', a: '\\notin ', b: '' },
+    { t: '⊂', a: '\\subset ', b: '' }, { t: '⊆', a: '\\subseteq ', b: '' },
+    { t: '∩', a: '\\cap ', b: '' }, { t: '∪', a: '\\cup ', b: '' },
+  ] },
+  { g: '希腊', items: [
+    { t: 'α', a: '\\alpha ', b: '' }, { t: 'β', a: '\\beta ', b: '' }, { t: 'γ', a: '\\gamma ', b: '' },
+    { t: 'θ', a: '\\theta ', b: '' }, { t: 'π', a: '\\pi ', b: '' }, { t: 'λ', a: '\\lambda ', b: '' },
+    { t: 'μ', a: '\\mu ', b: '' }, { t: 'σ', a: '\\sigma ', b: '' }, { t: 'φ', a: '\\varphi ', b: '' },
+    { t: 'ω', a: '\\omega ', b: '' }, { t: 'Δ', a: '\\Delta ', b: '' }, { t: 'Ω', a: '\\Omega ', b: '' },
+  ] },
+  { g: '箭头', items: [
+    { t: '→', a: '\\to ', b: '' }, { t: '⇒', a: '\\Rightarrow ', b: '' },
+    { t: '⇔', a: '\\Leftrightarrow ', b: '' }, { t: '∵', a: '\\because ', b: '' },
+    { t: '∴', a: '\\therefore ', b: '' },
+  ] },
+]
+
 const PF = {
   template, fontFamily, fontSize, fontColor, lineHeight, para, indent, h2size, numStyle,
   optLayout, headerText, footerText, pdfName, gapQ, headerGap, footerGap, autoNum, bodyCols,
@@ -1467,7 +1506,18 @@ watch([headerText, footerText], () => render())
                 <button class="pm__fmt" title="整段斜体（再点一次取消）" @click="insertLinePrefix('{i}')"><i>I</i></button>
                 <button class="pm__fmt" title="插入公式：选中文字会被包成 $…$" @click="wrapSel('$')">$x$</button>
                 <button class="pm__fmt" title="整段颜色（再点一次取消）" @click="insertLinePrefix('{c:#c00}')"><span style="color:#c00">A</span></button>
+                <span class="pm__fmtsep"></span>
+                <!-- 【v1600】公式符号面板开关 ✓（针对"记不住 LaTeX 命令" ✓） -->
+                <button class="pm__fmt" :class="{ 'pm__fmt--on': texOpen }" title="公式符号面板：点一下插入，不用记 LaTeX 命令" @click="texOpen = !texOpen">∑ 公式</button>
                 <span class="pm__fmtip">改的是<b>当前行</b>；公式会包住<b>选中</b>的文字</span>
+              </div>
+              <!-- 【v1600】公式符号面板 ✓ —— 点符号就插入 ✓（`wrapSel` ✓ 选中文字会被包住 ✓） -->
+              <div v-if="texOpen" class="pm__tex">
+                <div v-for="g in TEX_GROUPS" :key="g.g" class="pm__texrow">
+                  <span class="pm__texlab">{{ g.g }}</span>
+                  <button v-for="it in g.items" :key="it.t" class="pm__texbtn" :title="'插入 ' + it.a + it.b" @click="wrapSel(it.a, it.b)">{{ it.t }}</button>
+                </div>
+                <div class="pm__texfoot">点一下就插入；<b>先选中文字再点</b>，会把它包起来</div>
               </div>
               <textarea ref="inputEl" v-model="input" class="pm__input" rows="18" @input="onInput" placeholder="# 标题  ## 知识梳理  1. 已知 $f(x)=x^2$ 求 $f(2)$"></textarea>
               <div class="pm__actions">
@@ -1652,6 +1702,23 @@ watch([headerText, footerText], () => render())
 .pm__fmt:active { transform: scale(0.95); }
 .pm__fmtsep { width: 1px; height: 18px; background: var(--border-strong); margin: 0 3px; }
 .pm__fmtip { font-size: 11px; color: var(--muted); margin-left: 6px; }
+/* 【v1600】公式符号面板 ✓（针对"记不住 LaTeX 命令" ✓） */
+.pm__fmt--on { background: var(--brand); border-color: var(--brand); color: #fff; }
+.pm__tex {
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg-sunken);
+  padding: 6px 8px; margin-bottom: 6px; flex: 0 0 auto;
+  display: flex; flex-direction: column; gap: 3px; max-height: 172px; overflow-y: auto;
+}
+.pm__texrow { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; }
+.pm__texlab { font-size: 11px; color: var(--muted); width: 30px; flex: none; font-weight: 600; }
+.pm__texbtn {
+  min-width: 26px; height: 24px; padding: 0 6px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: #fff; color: var(--text);
+  border-radius: 5px; font-size: 13px; line-height: 1;
+}
+.pm__texbtn:hover { background: var(--brand-50); border-color: var(--brand); color: var(--brand); }
+.pm__texbtn:active { transform: scale(0.94); }
+.pm__texfoot { font-size: 11px; color: var(--muted); margin-top: 3px; }
 /* 【v1581】编辑区改为**自适应撑满剩余高度** ✓（原来是 `height: 30vh` 固定 ✗）：
    控件组折叠后腾出的空间直接变成编辑区高度 ✓；`min-height` 保证折叠全展开时也不至于太矮 ✓ */
 .pm__input { flex: 1 1 auto; min-height: 26vh; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; line-height: 1.5; overflow-y: auto; border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px; }
