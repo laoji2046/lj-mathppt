@@ -91,6 +91,10 @@ export interface Geom3DView {
   azim: number
   /** 仰角（度）：>0 俯视（看得见上底面），教材多在 10~30 */
   elev: number
+  /** 【v1577】**斜二测**（教材最常用的画法 ✓）：1 = 开
+   *  x 轴水平、z 轴竖直、y 轴与 x 成 45° 且**长度取一半** ✓
+   *  ⚠ 此时 `azim` / `elev` **不生效** ✗（斜二测的视角是固定的 ✓） */
+  oblique?: 0 | 1
 }
 
 /** 顶点名 → 应用里的标注写法：A1 → A_1（应用里 _ 是下标） */
@@ -619,10 +623,19 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
    *  ⇒ 一切"按名字找 `points` 下标"的地方都得用它 ✓ */
   pointNames?: string[]
 } {
-  const d = viewDir(view.azim, view.elev)
+  // 【v1577】**斜二测**（教材画法 ✓）：x 轴水平、z 轴竖直、y 轴与 x 成 45° 且**长度取一半** ✓
+  //   ★ `sc` 是**线性**的 ✗ → 换 `right` / `up` 这两个向量就够，
+  //     虚实判定、圆 / 弧、截面 …… **全都不用改** ✓
+  //   视线方向取 `-y`（观察者在 y 负方向 ✓）—— 它决定"哪条棱画虚线" ✓
+  //   ⚠ 此时 `azim` / `elev` 不生效（斜二测视角固定 ✓）
+  const oblique = view.oblique === 1
+  const OBL = 0.5                                        // y 轴缩短一半 ✓
+  const OBL_C = Math.cos(Math.PI / 4), OBL_S = Math.sin(Math.PI / 4)
+  const d: [number, number, number] = oblique ? [0, -1, 0] : viewDir(view.azim, view.elev)
   const aDeg = (view.azim * Math.PI) / 180
-  const right = norm([-Math.sin(aDeg), Math.cos(aDeg), 0])
-  const up = cross(d, right)
+  // y 轴与 x 成 45°：它的 x 分量进 `right`、z 分量进 `up`（屏幕 y 向上为正 ✗）
+  const right: [number, number, number] = oblique ? [1, OBL * OBL_C, 0] : norm([-Math.sin(aDeg), Math.cos(aDeg), 0])
+  const up: [number, number, number] = oblique ? [0, OBL * OBL_S, 1] : cross(d, right)
   // 屏幕坐标：x 向右、y 向下（所以 up 取负）
   const sc = (p: [number, number, number]): [number, number] => [dot(p, right), -dot(p, up)]
 

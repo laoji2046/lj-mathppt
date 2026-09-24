@@ -27,7 +27,9 @@ const H = 620
 /** 左侧面板页签：一次只显示一类控件（控件太多，不分页就是一面墙） */
 const tab = ref<'model' | 'draw' | 'list'>('model')
 /** 当前投影（只算一次，预览 / 属性 / 命中测试共用） */
-const proj = computed(() => (model.value ? projectGeom(model.value, { azim: azim.value, elev: elev.value }) : null))
+const proj = computed(() => (model.value
+  ? projectGeom(model.value, { azim: azim.value, elev: elev.value, oblique: oblique.value ? 1 : 0 })
+  : null))
 
 // ---------------- 选择（点 / 线） ----------------
 /** 选中的点（可多选 —— 连线和作平面都要多点）。存的是投影 points 的下标，
@@ -101,6 +103,8 @@ const SAMPLE = `{
 
 const raw = ref(SAMPLE)
 const azim = ref(-35)
+/** 【v1577】**斜二测**（教材最常用的画法 ✓）：勾上后 `azim` / `elev` 不生效 ✓ */
+const oblique = ref(false)
 const elev = ref(20)
 const parseErr = ref('')
 const alignImg = ref('')
@@ -117,7 +121,7 @@ const nextName = computed(() => order.value[clicks.value.length] || '')
 function parse() {
   parseErr.value = ''
   try {
-    const m = JSON.parse(raw.value) as Geom3D & { view?: { azim?: number; elev?: number } }
+    const m = JSON.parse(raw.value) as Geom3D & { view?: { azim?: number; elev?: number; oblique?: number } }
     // 圆柱 / 圆锥只用 primitive、没有 vertices，别把它们拒了
     const hasVerts = !!m.vertices && Object.keys(m.vertices).length > 0
     if (!m || typeof m !== 'object' || (!hasVerts && !m.primitive)) {
@@ -127,6 +131,7 @@ function parse() {
     if (m.view) {
       if (typeof m.view.azim === 'number') azim.value = m.view.azim
       if (typeof m.view.elev === 'number') elev.value = m.view.elev
+      oblique.value = m.view.oblique === 1   // 【v1577】斜二测 ✓
     }
   } catch (e) {
     parseErr.value = 'JSON 解析失败：' + (e as Error).message
@@ -167,6 +172,7 @@ if (props.editId) {
     raw.value = JSON.stringify(g.model, null, 1)
     if (typeof g.azim === 'number') azim.value = g.azim
     if (typeof g.elev === 'number') elev.value = g.elev
+    oblique.value = (g as { oblique?: number }).oblique === 1   // 【v1577】斜二测 ✓
     parse()
   }
 }
@@ -1191,7 +1197,7 @@ function insert() {
     // 字母位置：插进元素时按元素尺寸重算比例（元素尺寸和预览不一样）
     labelOffsets: labelOffsetsFrom(m, order.value, W.value, H) ?? undefined,
     // **把源模型存进元素** —— 否则插进画布就"死"了，改不了视角也改不了模型
-    geom3d: { model: m as unknown as Record<string, unknown>, azim: azim.value, elev: elev.value },
+    geom3d: { model: m as unknown as Record<string, unknown>, azim: azim.value, elev: elev.value, oblique: oblique.value ? 1 : 0 },
     showDots: showDots.value || undefined,
     // 【v1573】后加的点（自由点 / 受约束点）在 `points` 里的下标 ——
     //   画布渲染时给它们**始终**画圆点 ✓（顶点仍受 `showDots` 控制 ✓）
@@ -1550,11 +1556,19 @@ function insert() {
           <p v-if="parseErr" class="g3__sec g3__sec--model g3__err">{{ parseErr }}</p>
           <div class="g3__sec g3__sec--model g3__row">
             <label class="g3__f">方位角 azim <b>{{ azim }}°</b>
-              <input v-model.number="azim" type="range" min="-180" max="180" step="1">
+              <input v-model.number="azim" type="range" min="-180" max="180" step="1" :disabled="oblique">
             </label>
             <label class="g3__f">仰角 elev <b>{{ elev }}°</b>
-              <input v-model.number="elev" type="range" min="-80" max="80" step="1">
+              <input v-model.number="elev" type="range" min="-80" max="80" step="1" :disabled="oblique">
             </label>
+          </div>
+          <!-- 【v1577】斜二测（教材最常用的画法 ✓）：x 轴水平、z 轴竖直、y 轴与 x 成 45° 且长度取一半 ✓ -->
+          <div class="g3__sec g3__sec--model g3__row">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+              <input v-model="oblique" type="checkbox">
+              <span>斜二测（教材画法：y 轴 45°、长度减半）</span>
+            </label>
+            <span class="g3__tip g3__tip--inline">勾上后方位角 / 仰角不生效</span>
           </div>
           <p class="g3__sec g3__sec--model g3__tip">教材常用：方位角 −60~−10°，仰角 10~30°（正值是俯视，看得见上底面）。</p>
 
