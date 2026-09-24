@@ -1097,6 +1097,20 @@ function exportJson() {
  *   要 PDF 就用这个「打印」按钮 ✓（**矢量 ✓ 不裁 ✓**）。
  */
 function printPdf() {
+  // 【v1590】⚠ 浏览器「打印为 PDF」的**默认文件名 = `document.title`** ✗ ——
+  //   原来印出来是「LJ-MathSlides v2026.09.1588 — 幻灯片编辑器」✓（用户实报 ✓）
+  //   ⇒ 打印前**临时把标题换成试卷名** ✓ 打完（或取消）再还原 ✓
+  //   名字优先取**页眉文字** ✓（页眉本来就是"试卷名"语义 ✓），空则用「试卷讲义」✓
+  const prev = document.title
+  document.title = (headerText.value || '试卷讲义').replace(/[\\/:*?"<>|]/g, '_')
+  const restore = () => {
+    document.title = prev
+    window.removeEventListener('afterprint', restore)
+  }
+  window.addEventListener('afterprint', restore)
+  // ⚠ 兜底：用户**取消**打印时，部分浏览器不触发 `afterprint` ✗ → 60 秒后强制还原 ✓
+  //   （打印对话框**打开那一刻**就已经取走标题了 ✓ 所以晚点还原不影响文件名 ✓）
+  window.setTimeout(restore, 60000)
   window.print()
 }
 
