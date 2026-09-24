@@ -1561,7 +1561,9 @@ watch([headerText, footerText], () => render())
 .pm__split { flex: 1; min-height: 0; display: flex; gap: 14px; }
 /* 【v1592】属性上移后，左侧只剩"编辑区 + 按钮" ✓ 不再需要 42% 那么宽 ✓ */
 .pm__left { flex: 1 1 50%; display: flex; flex-direction: column; gap: 8px; min-width: 300px; min-height: 0; overflow: auto; }
-.pm__right { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+/* 【v1593】`position: relative` 给缩放栏做定位基准 ✓ —— 它改成**浮层**后不占高度 ✓
+   右侧预览就能从顶部开始 ✓ **与左侧编辑区顶部对齐** ✓（用户要求 ✓） */
+.pm__right { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
 /* 【v1592】属性上移到**窗口顶部** ✓（原来在左侧竖排 ✗，用户要求"属性都改到窗口上方" ✓）
    ⇒ 改成**横向流式**：各组（页面与字体 / ▾段落与题号 / ▸页眉页脚）**并排** ✓
    折叠的组只占一个摘要标题的宽度 ✓ 所以整体通常只占 2~3 行 ✓ */
@@ -1637,7 +1639,15 @@ watch([headerText, footerText], () => render())
 .pm__zoom button:hover { background: var(--gray-50); }
 .pm__hint { font-size: 12px; color: var(--muted); line-height: 1.6; margin: 0; }
 .pm__hint code { background: #f2f2f2; border-radius: 4px; padding: 0 4px; }
-.pm__zoom { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
+/* 【v1593】缩放栏改成**浮在预览右上角** ✓ —— 原来它在流里占一行 ✗
+   → 右侧内容被它顶下去 ✓ 跟左侧编辑区**顶部不齐** ✓（用户实报 ✓）
+   浮层后不占高度 ✓ 左右顶部自然对齐 ✓；浅底 + 阴影保证在深灰预览底上看得清 ✓ */
+.pm__zoom {
+  position: absolute; top: 8px; right: 16px; z-index: 5;
+  display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text);
+  background: rgba(255, 255, 255, 0.94); border: 1px solid var(--border); border-radius: 8px;
+  padding: 3px 6px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
 .pm__zoom span { min-width: 48px; text-align: center; font-weight: 600; }
 .pm__a4 { flex: 1; min-height: 0; background: #525659; padding: 14px; overflow: auto; }
 .pm__help { position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }
