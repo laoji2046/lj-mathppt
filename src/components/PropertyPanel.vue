@@ -542,20 +542,13 @@ function dashCn(v: string) { return v === 'dash' ? '虚线' : v === 'dot' ? '点
 
 // 【v1606】点样式 ✓ —— 照 `edgeStyleAt` 那套 ✓
 //   （用户要求："为选中的点添加圆点大小、颜色、点型属性" ✓）
-/** 【v1607】点型**只留两种** ✓（用户要求："只留 圆点、正方形" ✓）
- *  ⚠ `dotSvg` 里的 `ring` / `squareRing` / `triangle` / `diamond` 分支**保留** ✗ ——
- *    老文档里若用过那些形状 ✓ 删了会退化成默认实心圆 ✓（不丢数据 ✓ 但会变样 ✓）
- *    ⇒ UI 不再提供 ✓ 但渲染端认得 ✓ */
+/** 【v1608】点型 **4 种** ✓（用户要求："要有空心圆与空心正方形" ✓）
+ *  ⚠ `dotSvg` 里的 `triangle` / `diamond` 分支仍**保留** ✗ —— 老文档用过的不丢数据 ✓ */
 const POINT_SHAPES = [
   { v: 'dot', t: '圆点', icon: '●' },
+  { v: 'ring', t: '空心圆', icon: '○' },
   { v: 'square', t: '正方形', icon: '■' },
-]
-/** 四档大小 ✓（`size` 是**倍数** ✓ 1 = 默认半径 ✓） */
-const POINT_SIZES = [
-  { v: 0.6, t: '小' },
-  { v: 1, t: '中' },
-  { v: 1.5, t: '大' },
-  { v: 2, t: '特大' },
+  { v: 'squareRing', t: '空心正方形', icon: '□' },
 ]
 // ⚠ 名字要跟**圆锥曲线那套**（`pointColors` / `setPointColor`）区分开 ✗
 //   —— 那是二维标注点，这是三维顶点圆点，两套不同的东西 ✓
@@ -564,7 +557,13 @@ function pointStyleAt(i: number): PointStyle | null {
   return (mathfig.value?.pointStyles?.[i] || null) as PointStyle | null
 }
 function pointShapeAt(i: number): string { return pointStyleAt(i)?.shape || 'dot' }
-function pointSizeAt(i: number): number { return pointStyleAt(i)?.size || 1 }
+/** 【v1608】大小改成**数字档位** ✓（跟边线的"粗细"一个交互 ✓ 用户要求 ✓）
+ *  ⚠ 对外显示 **1~10** ✓ 但**存的是倍数** ✓（**3 = 默认半径** ✓）
+ *    存倍数是为了元素缩放后仍协调 ✓（存像素会失调 ✓） */
+function pointSizeAt(i: number): number {
+  const sz = pointStyleAt(i)?.size
+  return sz ? Math.round(sz * 3) : 3
+}
 function pointColorAt(i: number): string { return pointStyleAt(i)?.color || '#333333' }
 function setPointPatch(i: number, o: Partial<PointStyle>) {
   const m = mathfig.value; if (!m) return
@@ -574,7 +573,9 @@ function setPointPatch(i: number, o: Partial<PointStyle>) {
   patch({ pointStyles: arr } as Partial<SlideElement>)
 }
 function setPointShape(i: number, v: string) { setPointPatch(i, { shape: v as PointStyle['shape'] }) }
-function setPointSize(i: number, v: number) { setPointPatch(i, { size: v }) }
+function setPointSize(i: number, v: number) {
+  setPointPatch(i, { size: Math.max(1, Math.min(10, v || 3)) / 3 })
+}
 /** ⚠ 叫 `setDotColor` ✗ —— `setPointColor` 已被**圆锥曲线标注点**占用 ✓ */
 function setDotColor(i: number, c: string) { setPointPatch(i, { color: c }) }
 
@@ -1701,10 +1702,8 @@ function layerTypeLabel(type: string) {
               <span class="solid-prop__dash">
                 <button v-for="sh in POINT_SHAPES" :key="sh.v" class="seg__btn" :class="{ 'seg__btn--on': pointShapeAt(i - 1) === sh.v }" :title="sh.t" @click="setPointShape(i - 1, sh.v)">{{ sh.icon }}</button>
               </span>
-              <span class="solid-prop__dash">
-                <button v-for="sz in POINT_SIZES" :key="sz.v" class="seg__btn" :class="{ 'seg__btn--on': pointSizeAt(i - 1) === sz.v }" @click="setPointSize(i - 1, sz.v)">{{ sz.t }}</button>
-              </span>
-              <input type="color" :value="pointColorAt(i - 1)" @input="setDotColor(i - 1, ($event.target as HTMLInputElement).value)" />
+              <input type="number" min="1" max="10" class="solid-prop__w" :value="pointSizeAt(i - 1)" title="点的大小（3 = 默认）" @input="setPointSize(i - 1, num(($event.target as HTMLInputElement).value, 3))" />
+              <ColorSwatches :model-value="pointColorAt(i - 1)" @update:model-value="(v) => setDotColor(i - 1, v as string)" />
             </div>
             <div class="solid-prop__title">边线样式 <span class="solid-prop__sub">（线型 / 粗细 / 颜色）</span></div>
             <div v-for="i in edgeCount" :key="'e' + i" class="solid-prop__edge" :class="{ 'solid-prop__edge--sel': selEdge === i - 1 }">
