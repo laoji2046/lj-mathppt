@@ -4060,6 +4060,13 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
         const dd = Math.hypot(ddx, ddy)
         if (dd < 0.4) continue
         if (dd > maxMove) { ddx *= maxMove / dd; ddy *= maxMove / dd }
+        // 【v1562】`dashDebug >= 4` 时打印**位移 > 5px** 的顶点 ✓
+        //   —— 查"某个顶点被精修挪到哪去了"必需 ✗（`pabcdc1` 的 `O` 就是被这个挪到 `A—D` 直线上，
+        //      随后被紧跟着的 `collinearSimplify` 当"直线上的假顶点"删掉 ✗ 实测 `refine=0` 能救回 ✓）
+        if ((opt.dashDebug ?? 0) >= 4 && dd > 5) {
+          console.log('[refine] #' + v + '(' + verts[v].x.toFixed(0) + ',' + verts[v].y.toFixed(0) + ') → (' +
+            X.toFixed(0) + ',' + Y.toFixed(0) + ')  位移 ' + dd.toFixed(1) + '  邻居 ' + inc[v].length)
+        }
         verts[v].x += ddx; verts[v].y += ddy
         moved = true
       }
