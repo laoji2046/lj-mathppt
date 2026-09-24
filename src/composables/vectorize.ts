@@ -2995,13 +2995,22 @@ function vectorizeFromInk(m: { ink: Uint8Array; W: number; H: number; box: [numb
   }
 
   const mergeVerts = (r: number) => {
+    // 【v1561】`dashDebug >= 3` 时打印每次合并 ✓ —— 查"某个顶点被谁吃掉了"必需 ✗
+    //   （`pabcdc1` 的 `O` 就是被这个函数吃掉的：`mergeR=0` 能把召回拉回 100% ✗，
+    //    而 `mergeR=2` 就已经丢 ✗ → 有个 <2px 的顶点把它并走了 ✗）
+    const dbgM = (opt.dashDebug ?? 0) >= 3
     let again = true
     while (again) {
       again = false
       outer:
       for (let i = 0; i < verts.length; i++) {
         for (let j = i + 1; j < verts.length; j++) {
-          if (Math.hypot(verts[i].x - verts[j].x, verts[i].y - verts[j].y) >= r) continue
+          const dd = Math.hypot(verts[i].x - verts[j].x, verts[i].y - verts[j].y)
+          if (dd >= r) continue
+          if (dbgM) {
+            console.log('[merge] r=' + r + '  #' + j + '(' + verts[j].x.toFixed(0) + ',' + verts[j].y.toFixed(0) +
+              ') 并入 #' + i + '(' + verts[i].x.toFixed(0) + ',' + verts[i].y.toFixed(0) + ')  距离 ' + dd.toFixed(2))
+          }
           verts[i].x = (verts[i].x + verts[j].x) / 2
           verts[i].y = (verts[i].y + verts[j].y) / 2
           for (const e of outEdges) {
