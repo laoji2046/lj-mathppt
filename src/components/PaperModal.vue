@@ -485,21 +485,24 @@ function imageHtml(html: string): string {
     const imgStyle = rotate ? 'style="' + rotate + '"' : ''
     const figWidth = width ? 'width:' + width.replace('max-width:', '') + ';' : 'width:fit-content;'
     const figImg = width ? 'width:100%;' : ''
+    // 【v1601】给**最外层元素**打 `data-fig="N"` ✓ —— 预览里**点图就能认出是哪一张** ✓
+    //   （用 `replace` 统一加 ✓ 不必改下面 4 个分支 ✓）
+    const tag = (s: string) => s.replace(/^<(\w+)/, '<$1 data-fig="' + n + '"')
     const mk = (mm: string) => '<figure class="paper-fig" style="' + figWidth + mm + '"><img class="paper-img" style="' + figImg + rotate + '" src="' + src + '" />' +
       (caption ? '<figcaption class="paper-figcap">' + esc(caption) + '</figcaption>' : '') + '</figure>'
     if (float) {
       const s = float === 'left' ? 'float:left;margin:0 10px 8px 0;' : 'float:right;margin:0 0 8px 10px;'
-      return '<figure class="paper-fig paper-float-fig" style="' + figWidth + s + '"><img class="paper-float-img" style="' + figImg + rotate + '" src="' + src + '" />' +
-        (caption ? '<figcaption class="paper-figcap">' + esc(caption) + '</figcaption>' : '') + '</figure>'
+      return tag('<figure class="paper-fig paper-float-fig" style="' + figWidth + s + '"><img class="paper-float-img" style="' + figImg + rotate + '" src="' + src + '" />' +
+        (caption ? '<figcaption class="paper-figcap">' + esc(caption) + '</figcaption>' : '') + '</figure>')
     }
     if (align) {
       let mm = 'margin-left:auto;margin-right:auto;'
       if (align === 'left') mm = 'margin-right:auto;margin-left:0;'
       else if (align === 'right') mm = 'margin-left:auto;margin-right:0;'
-      return '<div class="paper-imgbox">' + mk(mm) + '</div>'
+      return tag('<div class="paper-imgbox">' + mk(mm) + '</div>')
     }
-    if (caption) return '<div class="paper-imgbox">' + mk('margin-left:auto;margin-right:auto;') + '</div>'
-    return '<img class="paper-img-inline" ' + imgStyle + ' src="' + src + '" />'
+    if (caption) return tag('<div class="paper-imgbox">' + mk('margin-left:auto;margin-right:auto;') + '</div>')
+    return tag('<img class="paper-img-inline" ' + imgStyle + ' src="' + src + '" />')
   })
 }
 
@@ -1187,6 +1190,58 @@ const DEFAULTS_KEY = 'lj-paper-defaults-v1'
  *    **各写一遍字段名** ✗ → **漏一个就出诡异行为** ✓
  *    （v1585 的 `bodyCols` 就是这么丢的：`saveDraft` 存了 ✓ 但 `watch` / `restoreDraft` 漏了 ✓）
  *  ⇒ **新增字段只改这里** ✓ —— 别再往那五处各抄一遍 ✗ */
+// ---------------- 【v1601】选中图片 → 工具条改大小 / 对齐 / 文绕图 ----------------
+/** 当前选中的图号 ✓（0 = 没选 ✓） */
+const selFig = ref(0)
+/** 该图当前的参数 ✓（从 Markdown 里读出来 ✓ 工具条据此显示选中态 ✓） */
+const selFigP = ref<{ w: string; align: string; float: string; rotate: string; caption: string }>(
+  { w: '', align: '', float: '', rotate: '', caption: '' })
+
+/** 【v1601】从 Markdown 里读某张图的参数 ✓（跟 `imageHtml` 的解析保持一致 ✓） */
+function readFigParams(n: number) {
+  const p = { w: '', align: '', float: '', rotate: '', caption: '' }
+  const m = input.value.match(new RegExp('\\[图' + n + '((?::[^\\[\\]:=]+)*)\\]'))
+  if (!m) return p
+  ;(m[1] || '').split(':').forEach((s) => {
+    if (!s) return
+    if (s === 'center' || s === 'left' || s === 'right') p.align = s
+    else if (s === 'float') p.float = 'right'
+    else if (s === 'floatleft') p.float = 'left'
+    else if (/^\d+%$/.test(s)) p.w = s
+    else if (/^-?\d+$/.test(s)) p.rotate = s
+    else p.caption = s
+  })
+  return p
+}
+/** 【v1601】把参数写回 Markdown ✓（**保留图注** ✓ 参数顺序固定 ✓ 便于人读 ✓） */
+function writeFigParams(n: number, p: typeof selFigP.value) {
+  const parts: string[] = []
+  if (p.w) parts.push(p.w)
+  if (p.align) parts.push(p.align)
+  if (p.float === 'right') parts.push('float')
+  else if (p.float === 'left') parts.push('floatleft')
+  if (p.rotate) parts.push(p.rotate)
+  if (p.caption) parts.push(p.caption)
+  const next = '[图' + n + (parts.length ? ':' + parts.join(':') : '') + ']'
+  input.value = input.value.replace(new RegExp('\\[图' + n + '((?::[^\\[\\]:=]+)*)\\]'), next)
+  render()
+}
+/** 【v1601】改一项参数并写回 ✓ */
+function setFigParam(k: 'w' | 'align' | 'float' | 'rotate', v: string) {
+  const p = { ...selFigP.value, [k]: selFigP.value[k] === v ? '' : v }   // 再点一次 = 取消 ✓
+  selFigP.value = p
+  writeFigParams(selFig.value, p)
+}
+/** 【v1601】点预览里的图 → 选中 ✓（点别处 → 取消选中 ✓） */
+function onA4ClickFig(e: MouseEvent) {
+  const fig = (e.target as HTMLElement).closest<HTMLElement>('[data-fig]')
+  if (!fig) { selFig.value = 0; return }
+  const n = Number(fig.dataset.fig)
+  if (!n) return
+  selFig.value = n
+  selFigP.value = readFigParams(n)
+}
+
 // ---------------- 【v1600】公式符号面板 ----------------
 /** 面板是否展开 ✓（纯 UI 状态 ✗ 不进 `PF` ✓） */
 const texOpen = ref(false)
@@ -1618,7 +1673,30 @@ watch([headerText, footerText], () => render())
                 <button @click="zoomBy(0.1)"><AppIcon name="plus" :size="14" /></button>
                 <button @click="zoomReset">重置</button>
               </div>
-              <div ref="a4El" class="pm__a4"></div>
+              <!-- 【v1601】点图 → 选中 ✓（点别处取消 ✓） -->
+              <div ref="a4El" class="pm__a4" @click="onA4ClickFig"></div>
+              <!-- 【v1601】图片工具条 ✓ —— 选中图后出现 ✓ 点选代替手写参数 ✓
+                   ⚠ 浮在预览右上角（缩放栏**下方** ✓）不占高度 ✓ 所以不影响左右顶部对齐 ✓ -->
+              <div v-if="selFig" class="pm__figbar">
+                <b class="pm__figbar-t">图{{ selFig }}</b>
+                <span class="pm__figbar-l">宽</span>
+                <button v-for="w in ['', '25%', '50%', '75%', '100%']" :key="'w' + w"
+                  class="pm__figbar-b" :class="{ 'pm__figbar-b--on': selFigP.w === w }"
+                  @click="setFigParam('w', w)">{{ w || '原' }}</button>
+                <span class="pm__figbar-l">对齐</span>
+                <button v-for="a in [{ v: '', t: '默认' }, { v: 'left', t: '左' }, { v: 'center', t: '中' }, { v: 'right', t: '右' }]" :key="'a' + a.v"
+                  class="pm__figbar-b" :class="{ 'pm__figbar-b--on': selFigP.align === a.v }"
+                  @click="setFigParam('align', a.v)">{{ a.t }}</button>
+                <span class="pm__figbar-l">绕图</span>
+                <button v-for="f in [{ v: '', t: '关' }, { v: 'left', t: '左浮' }, { v: 'right', t: '右浮' }]" :key="'f' + f.v"
+                  class="pm__figbar-b" :class="{ 'pm__figbar-b--on': selFigP.float === f.v }"
+                  @click="setFigParam('float', f.v)">{{ f.t }}</button>
+                <span class="pm__figbar-l">旋转</span>
+                <button v-for="r in ['', '90', '-90', '180']" :key="'r' + r"
+                  class="pm__figbar-b" :class="{ 'pm__figbar-b--on': selFigP.rotate === r }"
+                  @click="setFigParam('rotate', r)">{{ r ? r + '°' : '正' }}</button>
+                <button class="pm__figbar-x" title="取消选中" @click="selFig = 0">×</button>
+              </div>
               <div ref="pageEl" class="paper-flow" style="position:absolute;left:-99999px;top:0;pointer-events:none;"></div>
             </div>
           </div>
@@ -1778,6 +1856,24 @@ watch([headerText, footerText], () => render())
 }
 .pm__zoom span { min-width: 48px; text-align: center; font-weight: 600; }
 .pm__a4 { flex: 1; min-height: 0; background: #525659; padding: 14px; overflow: auto; }
+/* 【v1601】图片工具条 ✓ —— 浮在预览右上角（缩放栏**下方** ✓）不占高度 ✓
+   所以**不影响** v1593 做的"左右两栏顶部对齐" ✓ */
+.pm__figbar {
+  position: absolute; top: 46px; right: 16px; z-index: 6;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 3px; max-width: 62%;
+  background: rgba(255, 255, 255, 0.97); border: 1px solid var(--border); border-radius: 8px;
+  padding: 4px 7px; box-shadow: 0 3px 12px rgba(0, 0, 0, 0.22); font-size: 11.5px;
+}
+.pm__figbar-t { color: var(--brand); margin-right: 2px; }
+.pm__figbar-l { color: var(--muted); margin: 0 1px 0 5px; }
+.pm__figbar-b {
+  min-width: 24px; height: 22px; padding: 0 6px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: #fff; color: var(--text);
+  border-radius: 5px; font-size: 11.5px; line-height: 1;
+}
+.pm__figbar-b:hover { border-color: var(--brand); color: var(--brand); }
+.pm__figbar-b--on { background: var(--brand); border-color: var(--brand); color: #fff; }
+.pm__figbar-x { border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 15px; padding: 0 3px; }
 .pm__help { position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }
 .pm__helpbox { width: min(760px, 92vw); max-height: 86vh; display: flex; flex-direction: column; background: #fff; border-radius: var(--radius-xl); box-shadow: 0 24px 64px rgba(0,0,0,0.4); overflow: hidden; }
 .pm__helphead { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; border-bottom: 1px solid var(--border); font-size: 15px; }
