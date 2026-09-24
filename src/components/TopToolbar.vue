@@ -699,9 +699,6 @@ onBeforeUnmount(() => {
           <button v-if="addonOn('auto-template')" class="dropdown__item" title="按内容识别页面角色（例题/定理/定义/练习/小结/探究），套用对应版式；含表格/图片的页、内容装不下的页一律保留原样 —— 可 Ctrl+Z 撤销" @click="autoTemplate">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.theme"></svg></span>按内容套用模板…
           </button>
-          <button class='dropdown__item' title='功能管理：开关各个 addon（关掉后入口隐藏、代码不加载；体积提示来自实测）' @click='openAddonMgr'>
-            <span class='dropdown__icon'><svg viewBox='0 0 24 24' class='dd__svg' v-html='I.theme'></svg></span>功能管理…
-          </button>
         </div>
       </div>
     </div>
