@@ -1812,6 +1812,16 @@ watch([headerText, footerText], () => render())
   overflow: hidden;   /* ⚠ 不能是 auto ✗ —— 公式比栏宽多几个像素就会**每条选项下面出一条灰滚动条** ✓（用户实测 ✓）；hidden 只裁掉溢出的一点点 ✓ 视觉上干净 ✓ */
   overflow-y: hidden;
 }
+
+/* 【v1582】多栏下「**长行跨栏**」的根治 ✓
+   ⚠ 这是 CSS 多栏的**固有行为** ✗：任何宽度超过栏宽的元素都会**溢出到相邻栏** ✓（不会自动裁 ✗）。
+   所以要在每个可能超宽的地方：① `max-width: 100%` ✓ ② 允许断词 ✓ ③ 拆掉 `nowrap` ✓ */
+.paper-cols .pp-block { min-width: 0; max-width: 100%; overflow-wrap: break-word; }
+.paper-cols p, .paper-cols div { overflow-wrap: break-word; }
+.paper-cols table { max-width: 100%; table-layout: fixed; }
+/* ⚠ `paper-opt-one` 的 `flex-wrap: nowrap` 是**跨栏主因**之一 ✗ —— 选项一长就顶出栏外 ✓ */
+.paper-cols .paper-opt-one { flex-wrap: wrap; }
+.paper-cols img, .paper-cols svg { max-width: 100%; }
 /* ⚠ 允许块拆栏/拆页 ✓（用户明确：长题截断即可 ✓ 不必整块原子搬运 ✗）。
    原来 break-inside:avoid 会让放不进剩余空间的长题**整块推到下一栏** ✓ →
    上一栏下方留出大空档 ✗（实测填充率仅 88% ✗）。放开后页面能填满 ✓。 */
