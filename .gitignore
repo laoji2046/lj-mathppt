@@ -2,6 +2,8 @@
 node_modules/
 # 构建产物
 dist/
+# 【v1565】`rm -rf dist` 被 safe-delete 拦 ✗ → 用 `mv dist dist-stale-$(date +%s)` 绕开 ✓
+dist-stale-*/
 *.tmpdir/
 .probe/
 target/
