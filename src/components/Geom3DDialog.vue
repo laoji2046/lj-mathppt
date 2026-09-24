@@ -402,6 +402,62 @@ function describeOn(on: NonNullable<Geom3D['onPoints']>[number]['on']): string {
   return w + ' θ=' + (+on.th).toFixed(2)
 }
 
+// ---------------- 【v1571】拖动受约束点（约束自动保持 ✓） ----------------
+/** 正在拖的受约束点下标（-1 = 没在拖） */
+const dragOnIdx = ref(-1)
+/** 屏幕事件 → 元素坐标（`W`×`H` 空间，与 `proj.points` **同一空间** ✓） */
+function evPos(e: PointerEvent): [number, number] {
+  const box = (e.currentTarget as Element).getBoundingClientRect()
+  return [((e.clientX - box.left) / box.width) * W.value, ((e.clientY - box.top) / box.height) * H]
+}
+/** 命中一个受约束点（15px 内取最近；点优先于转视角 ✓） */
+function pickOnPointAt(e: PointerEvent): number {
+  const p = proj.value
+  const ops = model.value?.onPoints
+  if (!p || !ops?.length) return -1
+  const [cx, cy] = evPos(e)
+  let best = -1, bd = 15
+  ops.forEach((op, i) => {
+    const k = order.value.indexOf(op.name)
+    if (k < 0) return
+    const d = Math.hypot(p.points[k * 2] * W.value - cx, p.points[k * 2 + 1] * H - cy)
+    if (d < bd) { bd = d; best = i }
+  })
+  return best
+}
+/** ★ 拖动：把鼠标位置**反解**成新的约束参数 ✓
+ *  关键：正交投影是**仿射变换** → **线段参数 / 重心坐标在投影前后不变** ✓
+ *  所以直接在 2D 投影空间上解就行 —— 不需要"屏幕 → 3D 射线"那一套 ✗ */
+function dragOnMove(e: PointerEvent) {
+  const i = dragOnIdx.value
+  const m = model.value
+  if (i < 0 || !m?.onPoints?.[i]) return
+  const on = m.onPoints[i].on
+  const p = proj.value
+  if (!p) return
+  const [cx, cy] = evPos(e)
+  const at2 = (name: string): [number, number] | null => {
+    const k = order.value.indexOf(name)
+    return k < 0 ? null : [p.points[k * 2] * W.value, p.points[k * 2 + 1] * H]
+  }
+  const next = JSON.parse(raw.value) as Geom3D
+  const tgt = next.onPoints?.[i]
+  if (!tgt) return
+  if (on.kind === 'edge') {
+    const a2 = at2(on.a), b2 = at2(on.b)
+    if (!a2 || !b2) return
+    const dx = b2[0] - a2[0], dy = b2[1] - a2[1]
+    const l2 = dx * dx + dy * dy
+    if (l2 < 1e-6) return
+    const t = ((cx - a2[0]) * dx + (cy - a2[1]) * dy) / l2
+    tgt.on = { kind: 'edge', a: on.a, b: on.b, t: Math.round(Math.max(0, Math.min(1, t)) * 1000) / 1000 }
+  } else {
+    return   // 面 / 圆的反解下一步做（面要用 2D 仿射坐标、圆要解椭圆逆映射 ✗）
+  }
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+
 // ---------------- 点在平面上的投影 ----------------
 const ppFrom = ref('')
 const ppPlane = ref(-1)
@@ -582,12 +638,24 @@ function onOrbitDown(e: PointerEvent) {
     try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
     return
   }
+  // 【v1571】先看是不是点在**受约束点**上 —— 是就进入拖动（不转视角 ✓）
+  const onHit = pickOnPointAt(e)
+  if (onHit >= 0) {
+    dragOnIdx.value = onHit
+    orbitMoved = true      // 别让这次按下被当成"点击选中"
+    orbiting.value = false
+    orbitLast = [e.clientX, e.clientY]
+    try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
+    return
+  }
   orbiting.value = true
   orbitMoved = false
   orbitLast = [e.clientX, e.clientY]
   try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
 }
 function onOrbitMove(e: PointerEvent) {
+  // 【v1571】正在拖受约束点 → 只改约束参数（视角不动 ✓）
+  if (dragOnIdx.value >= 0) { dragOnMove(e); return }
   // 拖字母：只在本地更新偏移，松手才写模型
   if (dragLabel.value) {
     const rect = (e.currentTarget as Element).getBoundingClientRect()
@@ -611,6 +679,8 @@ function onOrbitMove(e: PointerEvent) {
   elev.value = Math.max(-80, Math.min(80, Math.round(elev.value + dy * 0.45)))
 }
 function onOrbitUp(e: PointerEvent) {
+  // 【v1571】松手 → 结束拖动（新参数已经在 move 里写回模型了 ✓）
+  if (dragOnIdx.value >= 0) { dragOnIdx.value = -1; return }
   // 松手 → 把拖出来的偏移写进模型
   if (dragLabel.value) {
     const d = dragLabel.value
