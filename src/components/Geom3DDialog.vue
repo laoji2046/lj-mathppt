@@ -481,8 +481,20 @@ function dragOnMove(e: PointerEvent) {
     tgt.on = on.kind === 'face'
       ? { kind: 'face', face: on.face, u: rr(uv.u), v: rr(uv.v) }
       : { kind: 'plane', through: on.through, u: rr(uv.u), v: rr(uv.v) }
+  } else if (on.kind === 'circle') {
+    // 圆：`X2d = c + cos θ·u + sin θ·v` → 解 2×2 得 (cos θ, sin θ) → θ ✓
+    //   ⚠ `circles` 是**归一化空间**（0~1），鼠标要除以 W/H 才能对上 ✗
+    const cs = p.circles?.find((q) => q.which === on.which)
+    if (!cs) return
+    const nx = cx / W.value, ny = cy / H
+    const dx = nx - cs.c[0], dy = ny - cs.c[1]
+    const det = cs.u[0] * cs.v[1] - cs.u[1] * cs.v[0]
+    if (Math.abs(det) < 1e-9) return
+    const co = (dx * cs.v[1] - dy * cs.v[0]) / det
+    const si = (cs.u[0] * dy - cs.u[1] * dx) / det
+    tgt.on = { kind: 'circle', which: on.which, th: Math.round(Math.atan2(si, co) * 1000) / 1000 }
   } else {
-    return   // 圆的反解下一步做（投影把圆变成椭圆，要解椭圆的逆映射 ✗）
+    return
   }
   raw.value = JSON.stringify(next, null, 1)
   parse()

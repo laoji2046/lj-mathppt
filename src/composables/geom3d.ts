@@ -608,6 +608,9 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   faceStyles: ({ fill?: string; opacity?: number } | null)[]
   /** 与 mesh.edges 一一对应的线样式（颜色/线宽/虚实），编辑器改属性用 */
   edgeStyles: ({ color?: string; width?: number; dash?: 'solid' | 'dash' | 'dot' } | null)[]
+  /** 【v1571】参数化体的圆在**归一化屏幕空间**里的表达：`X2d = c + cos θ·u + sin θ·v` ✓
+   *  —— 拖动受约束点时反解 θ 用（`sc` 是线性的，圆的像也由两个向量决定 ✗） */
+  circles?: { which: 'base' | 'top' | 'equator'; c: [number, number]; u: [number, number]; v: [number, number] }[]
 } {
   const d = viewDir(view.azim, view.elev)
   const aDeg = (view.azim * Math.PI) / 180
@@ -841,10 +844,27 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
       if (!o) return null
       return { color: o.color, width: o.width, dash: o.dash === 1 ? 'dash' as const : o.dash === 0 ? 'solid' as const : undefined }
     })
+    // 【v1571】圆的**归一化屏幕表达**：`X2d = c + cos θ·u + sin θ·v` ✓ 拖动反解用
+    //   `sc` 是**线性**的 → 圆在屏幕上的像同样由两个向量决定 ✓
+    //   （所以**不用**去解椭圆参数 —— 那是 `ellipseFromConjugate` 那条路，只为了画弧 ✗）
+    const nz = (q: [number, number]): [number, number] => [ox + (q[0] - x0) * s, oy + (q[1] - y0) * s]
+    const circles: { which: 'base' | 'top' | 'equator'; c: [number, number]; u: [number, number]; v: [number, number] }[] = []
+    const pushC = (which: 'base' | 'top' | 'equator', z: number) => {
+      const c = scr3(0, 0, z), u = scr3(r, 0, z), v = scr3(0, r, z)
+      const cn = nz(c)
+      circles.push({
+        which, c: cn,
+        u: [(u[0] - c[0]) * s, (u[1] - c[1]) * s],
+        v: [(v[0] - c[0]) * s, (v[1] - c[1]) * s],
+      })
+    }
+    pushC('base', 0)   // 球在前面的分支就 return 了，走到这里只可能是圆柱 / 圆锥 ✓
+    if (type === 'cylinder') pushC('top', h)
     return {
       points, mesh: { edges, faces: axFace }, vlabels, arcs: arcsOut, aspect: bw / bh,
       faceStyles: axStyles as ({ fill?: string; opacity?: number } | null)[],
       edgeStyles: edgeStylesF,
+      circles,
     }
   }
 
