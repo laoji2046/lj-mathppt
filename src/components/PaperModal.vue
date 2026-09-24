@@ -1808,6 +1808,17 @@ watch([headerText, footerText], () => render())
   overflow-y: visible;
 }
 
+/* 【v1588】⚠ 分式**仍然被切**（用户又发了两张截图 ✓：**切的是分母** ✓ 而且是**横着一条线** ✓）
+   ⇒ `overflow` 不是（唯一的）原因 ✓。真正的机制是 **MathJax SVG 的基线偏移** ✓：
+   `mjx-container` 里的 SVG 带 `vertical-align: -0.xxx ex`（分母要往下沉 ✓），
+   而 `.paper-page` 的 `line-height: 1.7` 会**放大这个偏移** ✓ →
+   下沉的部分**超出容器盒子** ✓ → ① 屏幕行盒裁 ✓ ② html2canvas 按盒子截图也裁 ✓
+   ⇒ 对策：**给容器留上下余量** ✓ + **不让它继承 1.7 的行高** ✓ */
+.paper-page mjx-container, .paper-page .MathJax {
+  padding: 0.14em 0;
+  line-height: normal;
+}
+
 /* 【v1582】多栏下「**长行跨栏**」的根治 ✓
    ⚠ 这是 CSS 多栏的**固有行为** ✗：任何宽度超过栏宽的元素都会**溢出到相邻栏** ✓（不会自动裁 ✗）。
    所以要在每个可能超宽的地方：① `max-width: 100%` ✓ ② 允许断词 ✓ ③ 拆掉 `nowrap` ✓ */
