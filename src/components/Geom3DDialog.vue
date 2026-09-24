@@ -402,6 +402,28 @@ function describeOn(on: NonNullable<Geom3D['onPoints']>[number]['on']): string {
   return w + ' θ=' + (+on.th).toFixed(2)
 }
 
+// 【v1571】任意三点定平面 → 在这个平面上加受约束点 ✓（加完可在预览区拖 ✓）
+const plA = ref('')
+const plB = ref('')
+const plC = ref('')
+/** 三个点都选了且互不相同 ✓ */
+const threePlaneOK = computed(() => !!plA.value && !!plB.value && !!plC.value &&
+  plA.value !== plB.value && plB.value !== plC.value && plA.value !== plC.value)
+function addThreePlanePoint() {
+  if (!model.value || !threePlaneOK.value) return
+  const name = opName.value.trim() || nextMarkName()
+  const through = [plA.value, plB.value, plC.value]
+  // 默认落在 P₀ 处（u=v=0 ✓）—— 加完在预览区拖到想要的位置就行 ✓
+  const next = JSON.parse(raw.value) as Geom3D
+  next.onPoints = [
+    ...(next.onPoints || []).filter((x) => x.name !== name),
+    { name, on: { kind: 'plane', through, u: 0, v: 0 } },
+  ]
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+  opName.value = ''
+}
+
 // ---------------- 【v1571】拖动受约束点（约束自动保持 ✓） ----------------
 /** 正在拖的受约束点下标（-1 = 没在拖） */
 const dragOnIdx = ref(-1)
@@ -1266,6 +1288,23 @@ function insert() {
                 <label class="g3__num">v <input v-model.number="opV" type="number" step="0.1"></label>
               </template>
               <button class="g3__btn" :disabled="!opTarget" @click="addOnPoint()">加受约束点</button>
+            </div>
+            <!-- 【v1571】任意三点定平面：选三个点 → 在这个平面上加受约束点（加完可拖 ✓） -->
+            <div class="g3__sec g3__sec--draw g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">三点平面：</span>
+              <select v-model="plA" class="g3__sel g3__sel--sm">
+                <option value="">点 1…</option>
+                <option v-for="n in order" :key="'pa' + n" :value="n">{{ n }}</option>
+              </select>
+              <select v-model="plB" class="g3__sel g3__sel--sm">
+                <option value="">点 2…</option>
+                <option v-for="n in order" :key="'pb' + n" :value="n">{{ n }}</option>
+              </select>
+              <select v-model="plC" class="g3__sel g3__sel--sm">
+                <option value="">点 3…</option>
+                <option v-for="n in order" :key="'pc' + n" :value="n">{{ n }}</option>
+              </select>
+              <button class="g3__btn" :disabled="!threePlaneOK" @click="addThreePlanePoint()">在这平面上加点</button>
             </div>
             <div class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">定比分点 P = A + t(B−A)：</span>
