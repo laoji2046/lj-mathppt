@@ -1323,6 +1323,25 @@ function insert() {
                 <button class="g3__btn g3__btn--tiny" title="删掉这个预设" @click="delMy(p.name)">×</button>
               </span>
             </div>
+            <!-- 【v1576】两点连线段 —— 跟 ① 模型里的「加辅助线」是**同一份数据** ✓
+                 那边也有（高 PO、体对角线 AC₁ 这类），但 ② 作图 才是"作图"的地方，这里更好找 ✓ -->
+            <div class="g3__sec g3__sec--draw g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">两点连线段：</span>
+              <select v-model="auxFrom" class="g3__sel g3__sel--sm">
+                <option value="">从…</option>
+                <option v-for="n in order" :key="'lf' + n" :value="n">{{ n }}</option>
+              </select>
+              <select v-model="auxTo" class="g3__sel g3__sel--sm">
+                <option value="">到…</option>
+                <option v-for="n in order" :key="'lt' + n" :value="n">{{ n }}</option>
+              </select>
+              <select v-model="auxStyle" class="g3__sel g3__sel--sm" title="自动判 = 按可见性算虚实（凸体里属于某个正面朝向的面就可见）">
+                <option value="auto">自动判</option>
+                <option value="solid">实线</option>
+                <option value="dashed">虚线</option>
+              </select>
+              <button class="g3__btn" :disabled="!auxFrom || !auxTo || auxFrom === auxTo" @click="addAux()">添加线段</button>
+            </div>
             <div class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">自由点（给坐标）：</span>
               <input v-model="fpName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
