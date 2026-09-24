@@ -324,6 +324,84 @@ function delFreePoint(i: number) {
   parse()
 }
 
+// ---------------- 【v1571】受约束点（棱 / 面 / 圆周，可在预览区拖动） ----------------
+const opName = ref('')
+/** `edge:A|B` / `face:A|B|C` / `circle:base|top|equator` */
+const opTarget = ref('')
+const opT = ref(0.5)   // 棱的 t / 圆的 θ
+const opU = ref(0)     // 面内 u
+const opV = ref(0)     // 面内 v
+const opKind = computed(() => (opTarget.value.split(':')[0] || '') as '' | 'edge' | 'face' | 'circle')
+/** 可选的棱：模型自带的 `edges` + 从 `faces` 的相邻点对补全（多面体通常只给了面表 ✗） */
+const edgeOptions = computed(() => {
+  const m = model.value
+  if (!m) return [] as { v: string; label: string }[]
+  const seen = new Set<string>()
+  const out: { v: string; label: string }[] = []
+  const push = (a: string, b: string) => {
+    if (!a || !b || a === b) return
+    const key = a < b ? a + '|' + b : b + '|' + a
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push({ v: 'edge:' + key, label: a + '—' + b })
+  }
+  for (const e of m.edges || []) push(e[0], e[1])
+  for (const f of m.faces || []) for (let i = 0; i < f.length; i++) push(f[i], f[(i + 1) % f.length])
+  return out
+})
+const faceOptions = computed(() => {
+  const m = model.value
+  if (!m) return [] as { v: string; label: string }[]
+  return (m.faces || []).map((f) => ({ v: 'face:' + f.join('|'), label: f.join('') }))
+})
+/** 可选的圆：只有参数化体才有 ✓（圆锥没有顶面圆 ✗） */
+const circleOptions = computed(() => {
+  const pr = model.value?.primitive
+  if (!pr) return [] as { v: string; label: string }[]
+  const out: { v: string; label: string }[] = [{ v: 'circle:base', label: '底面圆' }]
+  if (pr.type === 'cylinder') out.push({ v: 'circle:top', label: '顶面圆' })
+  if (pr.type === 'sphere') out.push({ v: 'circle:equator', label: '赤道' })
+  return out
+})
+function addOnPoint() {
+  if (!model.value || !opTarget.value) return
+  const name = opName.value.trim() || nextMarkName()
+  const rest = opTarget.value.slice(opTarget.value.indexOf(':') + 1)
+  let on: NonNullable<Geom3D['onPoints']>[number]['on'] | null = null
+  if (opKind.value === 'edge') {
+    const [a, b] = rest.split('|')
+    if (a && b) on = { kind: 'edge', a, b, t: +opT.value }
+  } else if (opKind.value === 'face') {
+    const face = rest.split('|').filter(Boolean)
+    if (face.length >= 3) on = { kind: 'face', face, u: +opU.value, v: +opV.value }
+  } else if (opKind.value === 'circle') {
+    on = { kind: 'circle', which: rest as 'base' | 'top' | 'equator', th: +opT.value }
+  }
+  if (!on) return
+  const next = JSON.parse(raw.value) as Geom3D
+  next.onPoints = [...(next.onPoints || []).filter((x) => x.name !== name), { name, on }]
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+  opName.value = ''
+}
+const addedOn = computed(() => (model.value?.onPoints || []).map((x, i) => ({ i, name: x.name, on: x.on })))
+function delOnPoint(i: number) {
+  if (!model.value) return
+  const next = JSON.parse(raw.value) as Geom3D
+  next.onPoints?.splice(i, 1)
+  raw.value = JSON.stringify(next, null, 1)
+  parse()
+}
+/** 把约束描述成一行短文字（③ 图元 里显示 ✓） */
+function describeOn(on: NonNullable<Geom3D['onPoints']>[number]['on']): string {
+  if (!on) return ''
+  if (on.kind === 'edge') return on.a + '–' + on.b + ' t=' + (+on.t).toFixed(2)
+  if (on.kind === 'face') return on.face.join('') + ' u=' + (+on.u).toFixed(2) + ' v=' + (+on.v).toFixed(2)
+  if (on.kind === 'plane') return on.through.join('') + ' u=' + (+on.u).toFixed(2) + ' v=' + (+on.v).toFixed(2)
+  const w = ({ base: '底面圆', top: '顶面圆', equator: '赤道' } as Record<string, string>)[on.which] || '圆'
+  return w + ' θ=' + (+on.th).toFixed(2)
+}
+
 // ---------------- 点在平面上的投影 ----------------
 const ppFrom = ref('')
 const ppPlane = ref(-1)
@@ -1049,6 +1127,34 @@ function insert() {
               <label class="g3__num">z <input v-model.number="fpZ" type="number" step="0.1"></label>
               <button class="g3__btn" @click="addFreePoint()">加自由点</button>
             </div>
+            <!-- 【v1571】受约束点：在选中的棱 / 平面 / 圆周上加点，加完可以在预览区**拖着走** ✓ -->
+            <div class="g3__sec g3__sec--draw g3__row g3__row--top">
+              <span class="g3__tip g3__tip--inline">受约束点（可在预览区拖动）：</span>
+              <input v-model="opName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()" title="点名字，留空自动取">
+              <select v-model="opTarget" class="g3__sel g3__sel--sm" title="先选一个对象：棱 / 面 / 圆周">
+                <option value="">选对象…</option>
+                <optgroup v-if="edgeOptions.length" label="棱">
+                  <option v-for="e in edgeOptions" :key="'oe' + e.v" :value="e.v">{{ e.label }}</option>
+                </optgroup>
+                <optgroup v-if="faceOptions.length" label="面">
+                  <option v-for="f in faceOptions" :key="'of' + f.v" :value="f.v">{{ f.label }}</option>
+                </optgroup>
+                <optgroup v-if="circleOptions.length" label="圆周">
+                  <option v-for="c in circleOptions" :key="'oc' + c.v" :value="c.v">{{ c.label }}</option>
+                </optgroup>
+              </select>
+              <label v-if="opKind === 'edge'" class="g3__num" title="t=0 在起点、t=1 在终点">t
+                <input v-model.number="opT" type="number" step="0.05" min="0" max="1">
+              </label>
+              <label v-else-if="opKind === 'circle'" class="g3__num" title="角度（弧度）">θ
+                <input v-model.number="opT" type="number" step="0.2">
+              </label>
+              <template v-else-if="opKind === 'face'">
+                <label class="g3__num">u <input v-model.number="opU" type="number" step="0.1"></label>
+                <label class="g3__num">v <input v-model.number="opV" type="number" step="0.1"></label>
+              </template>
+              <button class="g3__btn" :disabled="!opTarget" @click="addOnPoint()">加受约束点</button>
+            </div>
             <div class="g3__sec g3__sec--draw g3__row g3__row--top">
               <span class="g3__tip g3__tip--inline">定比分点 P = A + t(B−A)：</span>
               <select v-model="mkFrom" class="g3__sel g3__sel--sm">
@@ -1065,7 +1171,7 @@ function insert() {
               <input v-model="mkName" class="g3__inp g3__inp--sm" :placeholder="nextMarkName()">
               <button class="g3__btn" @click="addMark()">加定比分点</button>
             </div>
-            <div v-if="addedMarks.length || addedAux.length || addedFree.length" class="g3__sec g3__sec--list g3__row g3__row--top g3__row--stack">
+            <div v-if="addedMarks.length || addedAux.length || addedFree.length || addedOn.length" class="g3__sec g3__sec--list g3__row g3__row--top g3__row--stack">
               <span class="g3__tip g3__tip--inline">已加的（可删）：</span>
               <span
                 v-for="mk in addedMarks" :key="'mk' + mk.i" class="g3__plane"
@@ -1079,6 +1185,11 @@ function insert() {
                 <b :class="{ 'g3__off': isHidden('p:' + fp.name) }">点 {{ fp.name }}</b><span class="g3__meet">{{ fp.at.join(',') }}</span>
                 <button class="g3__btn g3__btn--tiny" :title="isHidden('p:' + fp.name) ? '显示' : '隐藏'" @click="toggleHidden('p:' + fp.name)">{{ isHidden('p:' + fp.name) ? '○' : '●' }}</button>
                 <button class="g3__btn g3__btn--tiny" @click="delFreePoint(fp.i)">×</button>
+              </span>
+              <span v-for="op in addedOn" :key="'op' + op.i" class="g3__plane" :title="'受约束点 ' + describeOn(op.on)">
+                <b :class="{ 'g3__off': isHidden('p:' + op.name) }">点 {{ op.name }}</b><span class="g3__meet">{{ describeOn(op.on) }}</span>
+                <button class="g3__btn g3__btn--tiny" :title="isHidden('p:' + op.name) ? '显示' : '隐藏'" @click="toggleHidden('p:' + op.name)">{{ isHidden('p:' + op.name) ? '○' : '●' }}</button>
+                <button class="g3__btn g3__btn--tiny" title="删掉这个点" @click="delOnPoint(op.i)">×</button>
               </span>
               <span v-for="ax in addedAux" :key="'ax' + ax.i" class="g3__plane">
                 <b class="g3__link" title="在图上选中这条线" @click="selectAux(ax.from, ax.to)">线 {{ ax.from }}–{{ ax.to }}</b>
