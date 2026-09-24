@@ -1817,8 +1817,16 @@ watch([headerText, footerText], () => render())
    甚至顶出页面右边界 ✓（用户截图 ✓）。这里允许公式在必要时收缩/换行 ✓。 */
 .paper-cols mjx-container, .paper-cols .MathJax {
   max-width: 100% !important;
-  overflow: hidden;   /* ⚠ 不能是 auto ✗ —— 公式比栏宽多几个像素就会**每条选项下面出一条灰滚动条** ✓（用户实测 ✓）；hidden 只裁掉溢出的一点点 ✓ 视觉上干净 ✓ */
-  overflow-y: hidden;
+  /* 【v1586】⚠ 原来写的是 `overflow: hidden`（外加一行 `overflow-y: hidden`）✗ ——
+     它**连纵向一起裁** ✓，而 MathJax 容器的高度有时比实际渲染高度小几个像素 ✓
+     → **分式的分子顶部 / 分母底部被切掉** ✓
+     （用户实报："保存 PDF 时**带分式公式的行**上下被裁" ✓ —— 分式的特征正是上下都有内容 ✓）
+     ⇒ 改成 `overflow-x: clip` ✓：**只裁横向溢出、完全不影响纵向** ✓
+     ⚠ 不能用 `overflow-x:hidden` + `overflow-y:visible` ✗ —— 按 CSS 规范，
+       一个 `visible` 一个 `hidden` 时 `visible` 会被算成 `auto` ✓ → 灰滚动条又回来了 ✓
+       （`clip` 是唯一"只裁一个轴、不动另一个"的取值 ✓ Chrome 90+ ✓） */
+  overflow-x: clip;
+  overflow-y: visible;
 }
 
 /* 【v1582】多栏下「**长行跨栏**」的根治 ✓
