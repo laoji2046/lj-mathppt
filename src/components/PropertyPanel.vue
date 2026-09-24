@@ -20,7 +20,7 @@ import { openFormulaLibrary } from '@/ui/formulaLibrary'
 import { openShapeEdit } from '@/ui/shapeEditor'
 import { DEFAULT_PIECEWISE, compileExpr, conicLineIntersections, conicPointPos, figureParams, withParams, type PiecewiseLine, type PointLink } from '@/composables/mathPlot'
 import { isPlaneCtrlKind, planeNumbers, setPlaneNumber, type PlaneNum } from '@/composables/planeCtrl'
-import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type EdgeStyle, type FaceStyle } from '@/composables/solid3d'
+import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type EdgeStyle, type FaceStyle, type PointStyle } from '@/composables/solid3d'
 import { solidSel } from '@/composables/solidSel'
 import { openImageEditor } from '@/ui/imageEditor'
 import { openVectorize } from '@/ui/vectorize'
@@ -539,6 +539,45 @@ function setEdgeDash(i: number, v: string) { setEdgePatch(i, { dash: v as EdgeSt
 function setEdgeWidth(i: number, w: number) { setEdgePatch(i, { width: w }) }
 function setEdgeColor(i: number, c: string) { setEdgePatch(i, { color: c }) }
 function dashCn(v: string) { return v === 'dash' ? '虚线' : v === 'dot' ? '点线' : '实线' }
+
+// 【v1606】点样式 ✓ —— 照 `edgeStyleAt` 那套 ✓
+//   （用户要求："为选中的点添加圆点大小、颜色、点型属性" ✓）
+/** 6 种点型 ✓（用户选的清单 ✓） */
+const POINT_SHAPES = [
+  { v: 'dot', t: '实心圆', icon: '●' },
+  { v: 'ring', t: '空心圆', icon: '○' },
+  { v: 'square', t: '实心方', icon: '■' },
+  { v: 'squareRing', t: '空心方', icon: '□' },
+  { v: 'triangle', t: '三角', icon: '▲' },
+  { v: 'diamond', t: '菱形', icon: '◆' },
+]
+/** 四档大小 ✓（`size` 是**倍数** ✓ 1 = 默认半径 ✓） */
+const POINT_SIZES = [
+  { v: 0.6, t: '小' },
+  { v: 1, t: '中' },
+  { v: 1.5, t: '大' },
+  { v: 2, t: '特大' },
+]
+// ⚠ 名字要跟**圆锥曲线那套**（`pointColors` / `setPointColor`）区分开 ✗
+//   —— 那是二维标注点，这是三维顶点圆点，两套不同的东西 ✓
+//   且类型里 `pointStyles` 是 `{ shape?: string }`，这里断言成 `PointStyle` ✓
+function pointStyleAt(i: number): PointStyle | null {
+  return (mathfig.value?.pointStyles?.[i] || null) as PointStyle | null
+}
+function pointShapeAt(i: number): string { return pointStyleAt(i)?.shape || 'dot' }
+function pointSizeAt(i: number): number { return pointStyleAt(i)?.size || 1 }
+function pointColorAt(i: number): string { return pointStyleAt(i)?.color || '#333333' }
+function setPointPatch(i: number, o: Partial<PointStyle>) {
+  const m = mathfig.value; if (!m) return
+  const arr = [...(m.pointStyles || [])]
+  while (arr.length < vertCount.value) arr.push(null)
+  arr[i] = { ...(arr[i] || {}), ...o }
+  patch({ pointStyles: arr } as Partial<SlideElement>)
+}
+function setPointShape(i: number, v: string) { setPointPatch(i, { shape: v as PointStyle['shape'] }) }
+function setPointSize(i: number, v: number) { setPointPatch(i, { size: v }) }
+/** ⚠ 叫 `setDotColor` ✗ —— `setPointColor` 已被**圆锥曲线标注点**占用 ✓ */
+function setDotColor(i: number, c: string) { setPointPatch(i, { color: c }) }
 
 // ---- 面样式（填充色 / 透明度 / 隐藏）----
 const faceCount = computed(() => (mathfig.value && isSolid.value) ? solidFaces(mathfig.value.kind).length : 0)
@@ -1654,6 +1693,19 @@ function layerTypeLabel(type: string) {
                 <span class="solid-prop__name">{{ vLetter(i - 1) }}</span>
                 <input class="solid-prop__in" :ref="(el) => setVRef(i - 1, el)" :value="vLabelAt(i - 1)" @input="setVLabel(i - 1, ($event.target as HTMLInputElement).value)" :placeholder="vLetter(i - 1)" />
               </label>
+            </div>
+            <!-- 【v1606】点样式 ✓ —— 画布上点选顶点后改 ✓（点型 / 大小 / 颜色 ✓）
+                 用户要求："为选中的点添加圆点大小、颜色、点型属性" ✓ -->
+            <div class="solid-prop__title">点样式 <span class="solid-prop__sub">（点型 / 大小 / 颜色）</span></div>
+            <div v-for="i in vertCount" :key="'pt' + i" class="solid-prop__edge" :class="{ 'solid-prop__edge--sel': selVertex === i - 1 }">
+              <span class="solid-prop__ename">{{ vLetter(i - 1) }}</span>
+              <span class="solid-prop__dash">
+                <button v-for="sh in POINT_SHAPES" :key="sh.v" class="seg__btn" :class="{ 'seg__btn--on': pointShapeAt(i - 1) === sh.v }" :title="sh.t" @click="setPointShape(i - 1, sh.v)">{{ sh.icon }}</button>
+              </span>
+              <span class="solid-prop__dash">
+                <button v-for="sz in POINT_SIZES" :key="sz.v" class="seg__btn" :class="{ 'seg__btn--on': pointSizeAt(i - 1) === sz.v }" @click="setPointSize(i - 1, sz.v)">{{ sz.t }}</button>
+              </span>
+              <input type="color" :value="pointColorAt(i - 1)" @input="setDotColor(i - 1, ($event.target as HTMLInputElement).value)" />
             </div>
             <div class="solid-prop__title">边线样式 <span class="solid-prop__sub">（线型 / 粗细 / 颜色）</span></div>
             <div v-for="i in edgeCount" :key="'e' + i" class="solid-prop__edge" :class="{ 'solid-prop__edge--sel': selEdge === i - 1 }">

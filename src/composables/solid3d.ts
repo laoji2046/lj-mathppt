@@ -531,13 +531,46 @@ export function labelSvg(s: string, x: number, y: number, color: string, fs: num
  * 别各写一份：今天刚修过"两份实现迟早漂移"（数学图形在缩略图/演示里空白就是这么来的）。
  * 半径跟元素尺寸挂钩，缩放/改尺寸时比例不变。
  */
-export function vertexDotsSvg(pts: number[], w: number, h: number, stroke: string, scale = 0.013): string {
+/** 【v1606】点的样式 ✓（照 `EdgeStyle` 的模式 ✓）
+ *  `shape` 默认 `dot`（**实心圆** ✓）—— 不设就是原来的观感 ✓
+ *  `size` 是**倍数** ✓（1 = 默认半径 ✓ 0.6 = 小 ✓ 1.8 = 特大 ✓）
+ *    —— 存倍数而不是像素 ✗：元素被缩放后仍协调 ✓（存像素就会失调 ✓）
+ *  `color` 空则跟随整体 `stroke` ✓ */
+export type PointStyle = {
+  shape?: 'dot' | 'ring' | 'square' | 'squareRing' | 'triangle' | 'diamond'
+  size?: number
+  color?: string
+}
+/** 单个点 → SVG ✓（6 种形状 ✓） */
+function dotSvg(cx: number, cy: number, r: number, color: string, shape: string): string {
+  const X = cx.toFixed(1)
+  const Y = cy.toFixed(1)
+  const R = r.toFixed(1)
+  const sw = Math.max(1, r * 0.45).toFixed(1)
+  switch (shape) {
+    case 'ring':
+      return '<circle cx="' + X + '" cy="' + Y + '" r="' + R + '" fill="none" stroke="' + color + '" stroke-width="' + sw + '"/>'
+    case 'square':
+      return '<rect x="' + (cx - r).toFixed(1) + '" y="' + (cy - r).toFixed(1) + '" width="' + (r * 2).toFixed(1) + '" height="' + (r * 2).toFixed(1) + '" fill="' + color + '"/>'
+    case 'squareRing':
+      return '<rect x="' + (cx - r).toFixed(1) + '" y="' + (cy - r).toFixed(1) + '" width="' + (r * 2).toFixed(1) + '" height="' + (r * 2).toFixed(1) + '" fill="none" stroke="' + color + '" stroke-width="' + sw + '"/>'
+    case 'triangle':
+      return '<polygon points="' + X + ',' + (cy - r).toFixed(1) + ' ' + (cx + r * 0.92).toFixed(1) + ',' + (cy + r * 0.7).toFixed(1) + ' ' + (cx - r * 0.92).toFixed(1) + ',' + (cy + r * 0.7).toFixed(1) + '" fill="' + color + '"/>'
+    case 'diamond':
+      return '<polygon points="' + X + ',' + (cy - r).toFixed(1) + ' ' + (cx + r).toFixed(1) + ',' + Y + ' ' + X + ',' + (cy + r).toFixed(1) + ' ' + (cx - r).toFixed(1) + ',' + Y + '" fill="' + color + '"/>'
+    default:
+      return '<circle cx="' + X + '" cy="' + Y + '" r="' + R + '" fill="' + color + '"/>'
+  }
+}
+/** 【v1606】`styles` 是**逐点样式** ✓（可选 ✗ —— 不传就是老行为 ✓ 向后兼容 ✓） */
+export function vertexDotsSvg(pts: number[], w: number, h: number, stroke: string, scale = 0.013, styles?: (PointStyle | null)[]): string {
   if (!pts || pts.length < 2) return ''
-  const r = Math.max(2, Math.min(w, h) * scale)
+  const baseR = Math.max(2, Math.min(w, h) * scale)
   let out = ''
   for (let i = 0; i + 1 < pts.length; i += 2) {
-    out += '<circle cx="' + (pts[i] * w).toFixed(1) + '" cy="' + (pts[i + 1] * h).toFixed(1) +
-      '" r="' + r.toFixed(1) + '" fill="' + stroke + '"/>'
+    const st = styles?.[i / 2] || null
+    const r = st?.size ? baseR * st.size : baseR
+    out += dotSvg(pts[i] * w, pts[i + 1] * h, r, st?.color || stroke, st?.shape || 'dot')
   }
   return out
 }

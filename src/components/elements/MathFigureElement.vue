@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { MathFigureElement, SlideElement } from '@/types'
 import { lineDashCss } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
-import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg, vertexDotsSvg } from '@/composables/solid3d'
+import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg, vertexDotsSvg, type PointStyle } from '@/composables/solid3d'
 import { CONIC_KINDS, DEFAULT_PIECEWISE, FUNCTION_KINDS, conicFigure, conicLineDrag, conicLineHandles, conicPointDrag, conicPointHandles, customFigure, freqLineFigure, freqTableFigure, functionFigure, histogramFigure, piecewiseFigure, scatterFigure, setNumberlineFigure, vennFigure } from '@/composables/mathPlot'
 import { isPlaneCtrlKind, planeDrag, planeHandles, planeSvg } from '@/composables/planeCtrl'
 import { solidSel, selectSolidVertex, selectSolidEdge, selectSolidFace, clearSolidSel } from '@/composables/solidSel'
@@ -114,15 +114,19 @@ const innerHtml = computed(() => {
       const idx = props.el.dotIdx
       if (!idx?.length) return ''
       const coords: number[] = []
+      // 【v1606】⚠ `coords` 是**子集** ✗ → 样式必须按**原下标 `i`** 取 ✓
+      //   （直接传 `pointStyles` 会错位 —— 它是按 `points` 全表索引的 ✓）
+      const sty: (PointStyle | null)[] = []
       for (const i of idx) {
         if (i * 2 + 1 >= pts.value.length) continue
         coords.push(pts.value[i * 2], pts.value[i * 2 + 1])
+        sty.push((props.el.pointStyles?.[i] || null) as PointStyle | null)
       }
-      return coords.length ? vertexDotsSvg(coords, w, h, stroke) : ''
+      return coords.length ? vertexDotsSvg(coords, w, h, stroke, 0.013, sty) : ''
     })()
     if (props.el.showDots !== true) return solid + dots
     // 顶点小圆点：与三维弹窗预览共用 vertexDotsSvg（只此一份实现）
-    return solid + dots + vertexDotsSvg(pts.value, w, h, stroke)
+    return solid + dots + vertexDotsSvg(pts.value, w, h, stroke, 0.013, props.el.pointStyles as (PointStyle | null)[] | undefined)
   }
 
   switch (kind) {

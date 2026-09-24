@@ -667,6 +667,10 @@ export interface MathFigureElement extends ElementBase {
   vlabels?: (string | null)[]
   /** 每条边的样式覆盖（实线/虚线/点线、粗细、颜色），索引与立体边表一致 */
   edgeStyles?: ({ dash?: 'solid' | 'dash' | 'dot'; width?: number; color?: string; arrow?: boolean } | null)[]
+  /** 【v1606】每个**点**的样式覆盖（点型 / 大小 / 颜色），**索引与 `points` 一致** ✓
+   *  `size` 存的是**倍数**（1 = 默认半径）—— 元素被缩放后仍协调 ✓（存像素就会失调 ✗）
+   *  `shape`：dot 实心圆 | ring 空心圆 | square 实心方 | squareRing 空心方 | triangle 三角 | diamond 菱形 */
+  pointStyles?: ({ shape?: string; size?: number; color?: string } | null)[]
   /** 圆锥曲线**自己的颜色**（不填 = 用元素主色）—— 让"椭圆一个色、每条线另一个色"成为可能 */
   conicStroke?: string
   /** **坐标轴**的颜色（不填 = 用元素主色）；虚实由 params.axisd 控制 */
