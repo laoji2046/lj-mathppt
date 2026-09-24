@@ -542,14 +542,13 @@ function dashCn(v: string) { return v === 'dash' ? '虚线' : v === 'dot' ? '点
 
 // 【v1606】点样式 ✓ —— 照 `edgeStyleAt` 那套 ✓
 //   （用户要求："为选中的点添加圆点大小、颜色、点型属性" ✓）
-/** 6 种点型 ✓（用户选的清单 ✓） */
+/** 【v1607】点型**只留两种** ✓（用户要求："只留 圆点、正方形" ✓）
+ *  ⚠ `dotSvg` 里的 `ring` / `squareRing` / `triangle` / `diamond` 分支**保留** ✗ ——
+ *    老文档里若用过那些形状 ✓ 删了会退化成默认实心圆 ✓（不丢数据 ✓ 但会变样 ✓）
+ *    ⇒ UI 不再提供 ✓ 但渲染端认得 ✓ */
 const POINT_SHAPES = [
-  { v: 'dot', t: '实心圆', icon: '●' },
-  { v: 'ring', t: '空心圆', icon: '○' },
-  { v: 'square', t: '实心方', icon: '■' },
-  { v: 'squareRing', t: '空心方', icon: '□' },
-  { v: 'triangle', t: '三角', icon: '▲' },
-  { v: 'diamond', t: '菱形', icon: '◆' },
+  { v: 'dot', t: '圆点', icon: '●' },
+  { v: 'square', t: '正方形', icon: '■' },
 ]
 /** 四档大小 ✓（`size` 是**倍数** ✓ 1 = 默认半径 ✓） */
 const POINT_SIZES = [
