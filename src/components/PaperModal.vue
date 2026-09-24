@@ -1213,29 +1213,48 @@ function focusMdLine(line: number) {
   // ⚠ 滚动按**行高估算** ✓（13px × 1.5 ≈ 19.5px ✓ 跟 CSS 一致 ✓）—— 不必去测像素 ✓
   el.scrollTop = Math.max(0, line * 19.5 - el.clientHeight / 2)
 }
+/** 【v1604】比较用的**规范化** ✓：
+ *  ① **去掉行内 `$…$` 公式** ✗ —— DOM 里公式被 MathJax 渲染成 SVG ✓
+ *     `textContent` **取不到原文** ✓ ⇒ **两边都去掉公式才能对上** ✓
+ *  ② 压掉多余空白 ✓
+ *  ⇒ **带公式的行也能匹配** ✓（用户实报"带公式的行不行" ✓） */
+function normForMatch(s: string): string {
+  return s.replace(/\$[^$]*\$/g, '').replace(/\s+/g, ' ').trim()
+}
+/** 【v1604】从元素取**可比较的文本** ✓ —— **克隆后删掉 MathJax 的节点** ✗ 再取 ✓
+ *  ⚠ 不能直接用 `el.textContent` ✗：
+ *    MathJax 会插一个 `<mjx-assistive-mml>` ✓ 里面是**朗读用的文本** ✓
+ *    （把 `x^2` 读成 "x squared" 之类 ✓）混进来就**永远对不上** ✓
+ *  ⚠⚠ **必须跟源码那边走同一套规范化** ✗ ——
+ *    源码侧是 `normForMatch(stripMdMark(line))` ✓
+ *    这里**漏了 `stripMdMark`** ✓ → DOM 里的题号 `2.` 没被去掉 ✓
+ *    → **带题号的段落永远对不上** ✓（用户实报"带公式的行不行" ✓ 其实是**带题号**的行 ✓） */
+function matchText(el: HTMLElement): string {
+  const c = el.cloneNode(true) as HTMLElement
+  c.querySelectorAll('mjx-container, .MathJax, mjx-assistive-mml, script, style').forEach((n) => n.remove())
+  return normForMatch(stripMdMark(c.textContent || ''))
+}
 /** 【v1602】双击预览里的某块 → 源码光标跳到**对应行** ✓
  *  用途：预览里看到要改的地方，回源码**找不到** ✓（用户实报 ✓）
  *  【v1603】⚠ 原来限定了几种选择器（`h2` / `.paper-q` / `p` …）✗ 实测**匹配不到** ✓
- *    （块被包在 `.pp-block` 里 ✓ 公式又拆成多层 ✓ 选择器很难列全 ✗）
- *  ⇒ 改成**从点击处一直往上找** ✓ 不依赖选择器 ✓：
- *    谁的文本能对上源码，就跳那一行 ✓（`<span>` 对不上就继续往上 ✓ 到 `<p>` 通常就对上了 ✓）
- *  代价：**同一文本出现多次时跳第一个** ✓（可接受 ✓） */
+ *  ⇒ 改成**从点击处一直往上找** ✓ 不依赖选择器 ✓
+ *  【v1604】⚠ 带公式的行原来也匹配不到 ✗ ⇒ 加了 `normForMatch` 两边规范化 ✓ */
 function jumpToMdLine(e: MouseEvent) {
   const lines = input.value.split('\n')
   /** 在源码里找这段文字所在行 ✓（先整行精确 ✓ 再前 18 字前缀 ✓） */
   const findLine = (text: string): number => {
     if (!text) return -1
-    for (let i = 0; i < lines.length; i++) if (stripMdMark(lines[i]) === text) return i
+    for (let i = 0; i < lines.length; i++) if (normForMatch(stripMdMark(lines[i])) === text) return i
     const head = text.slice(0, 18)
     if (head) for (let i = 0; i < lines.length; i++) {
-      if (stripMdMark(lines[i]).startsWith(head)) return i
+      if (normForMatch(stripMdMark(lines[i])).startsWith(head)) return i
     }
     return -1
   }
   let el: HTMLElement | null = e.target as HTMLElement
   const root = a4El.value
   while (el && el !== root) {
-    const hit = findLine((el.textContent || '').trim())
+    const hit = findLine(matchText(el))
     if (hit >= 0) {
       focusMdLine(hit)
       paperMsg.value = '已跳到源码第 ' + (hit + 1) + ' 行'
