@@ -1668,7 +1668,9 @@ watch([headerText, footerText], () => render())
 .pm__grp > summary::before { content: '▸'; font-size: 10px; display: inline-block; transition: transform .15s; }
 .pm__grp[open] > summary::before { transform: rotate(90deg); }
 .pm__grp[open] > summary { margin-bottom: 2px; }
-.pm__input { flex: 0 1 auto; height: 30vh; min-height: 150px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; line-height: 1.5; overflow-y: auto; border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px; }
+/* 【v1581】编辑区改为**自适应撑满剩余高度** ✓（原来是 `height: 30vh` 固定 ✗）：
+   控件组折叠后腾出的空间直接变成编辑区高度 ✓；`min-height` 保证折叠全展开时也不至于太矮 ✓ */
+.pm__input { flex: 1 1 auto; min-height: 26vh; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; line-height: 1.5; overflow-y: auto; border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px; }
 .pm__actions { display: flex; gap: 8px; flex-wrap: wrap; position: relative; align-items: center; }
 .pm__btn {
   display: inline-flex; align-items: center; gap: 5px;
