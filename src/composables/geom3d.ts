@@ -611,6 +611,13 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   /** 【v1571】参数化体的圆在**归一化屏幕空间**里的表达：`X2d = c + cos θ·u + sin θ·v` ✓
    *  —— 拖动受约束点时反解 θ 用（`sc` 是线性的，圆的像也由两个向量决定 ✗） */
   circles?: { which: 'base' | 'top' | 'equator'; c: [number, number]; u: [number, number]; v: [number, number] }[]
+  /** 【v1574】`points` 里每个点对应的**名字**（`null` = 无名）✓
+   *  ⚠⚠ **不能用 `order`（= `resolveVertices` 的键）去索引 `points`** ✗：
+   *    `primitive` 分支（圆柱 / 圆锥 / 球）的 `points` 是**自己 push 的** ✗
+   *    （顶点 + 侧影切点 + 圆上采样点 …），跟 `resolveVertices` 的键**顺序完全不同** ✗
+   *    → 实测：圆锥底面圆上的受约束点被画到了**圆锥顶点**的位置 ✗
+   *  ⇒ 一切"按名字找 `points` 下标"的地方都得用它 ✓ */
+  pointNames?: string[]
 } {
   const d = viewDir(view.azim, view.elev)
   const aDeg = (view.azim * Math.PI) / 180
@@ -715,6 +722,17 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
       // 球：侧影是个**正圆**（正交投影下），另加一条赤道椭圆。
       // 赤道用上面那套共轭直径法；侧影圆直接给 rx = ry = r（视线方向是单位向量，屏幕半径就等于 r）。
       push('O', [0, 0, 0])
+      // 【v1574】受约束点 / 自由点也要进 `P3` ✗（跟圆锥那个坑同一个 ✗）
+      //   `primitive` 分支不经过 `resolveVertices` ✗ → 不补这段它们就不出现在预览里 ✓
+      {
+        const all = resolveVertices(m)
+        for (const fp of m.freePoints || []) {
+          if (fp?.name && all[fp.name] && !names.includes(fp.name)) push(fp.name, all[fp.name])
+        }
+        for (const op of m.onPoints || []) {
+          if (op?.name && all[op.name] && !names.includes(op.name)) push(op.name, all[op.name])
+        }
+      }
       const c0 = sc([0, 0, 0])
       // 赤道用跟底面圆**同一套**切点/虚实算法（3D 参数 ≠ 椭圆参数，别自己算一遍）
       const eqS = circleSplit(0)
@@ -739,7 +757,7 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
         rx: +(a.rx * s2).toFixed(4), ry: +(a.ry * s2).toFixed(4),
         rot: +a.rot.toFixed(4), a0: +a.a0.toFixed(4), a1: +a.a1.toFixed(4), dash: a.dash,
       }))
-      return { points: pts2, mesh: { edges: [], faces: [] }, vlabels, arcs: arcs2, aspect: bw2 / bh2, faceStyles: [], edgeStyles: [] }
+      return { points: pts2, mesh: { edges: [], faces: [] }, vlabels, arcs: arcs2, aspect: bw2 / bh2, faceStyles: [], edgeStyles: [], pointNames: names }
     }
     const axial = !!m.primitive.axial
     const iO = (): number => names.findIndex((n) => n === 'O')
@@ -797,6 +815,19 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
       // 顶面：从上方看整圈都可见（实线）
       const et = circleSplit(h)
       arcs.push({ cx: et.c2[0], cy: et.c2[1], ...et.e, a0: 0, a1: Math.PI * 2, dash: 0 })
+    }
+    // 【v1574】★ 受约束点 / 自由点也要进 `P3` ✗ —— 否则它们**根本不出现在预览里** ✓
+    //   病根：`primitive` 分支原本只 push 自己的东西（顶点 + 侧影切点 + 圆上采样点 ✗），
+    //   **完全不经过 `resolveVertices`** ✗ → 圆锥底面圆上加的点投影里没有 ✓
+    //   （实测：`circles: 0` ✗ 用户看到的是那个位置的**圆锥顶点** ✓）
+    {
+      const all = resolveVertices(m)
+      for (const fp of m.freePoints || []) {
+        if (fp?.name && all[fp.name] && !names.includes(fp.name)) push(fp.name, all[fp.name])
+      }
+      for (const op of m.onPoints || []) {
+        if (op?.name && all[op.name] && !names.includes(op.name)) push(op.name, all[op.name])
+      }
     }
     // 归一化：把顶点和椭圆包围盒一起算进去，整体居中
     const xs = P3.map((p) => sc(p)[0])
@@ -865,6 +896,7 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
       faceStyles: axStyles as ({ fill?: string; opacity?: number } | null)[],
       edgeStyles: edgeStylesF,
       circles,
+      pointNames: names,
     }
   }
 
@@ -1145,5 +1177,5 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
     if (!o) return null
     return { color: o.color, width: o.width, dash: o.dash === 1 ? 'dash' as const : o.dash === 0 ? 'solid' as const : undefined }
   })
-  return { points, mesh: { edges: edgesOut, faces }, vlabels, arcs: [], aspect: bw / bh, faceStyles, edgeStyles: edgeStylesOut }
+  return { points, mesh: { edges: edgesOut, faces }, vlabels, arcs: [], aspect: bw / bh, faceStyles, edgeStyles: edgeStylesOut, pointNames: names }
 }

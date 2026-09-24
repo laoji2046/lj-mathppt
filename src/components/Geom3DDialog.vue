@@ -146,6 +146,17 @@ const extraDotNames = computed(() => {
   for (const k of model.value?.onPoints || []) if (k?.name) s.add(k.name)
   return s
 })
+/** 【v1574】按名字查它在 `proj.points` 里的下标 ✓
+ *  ⚠⚠ **不能用 `order`** ✗（`order` = `resolveVertices` 的键 ✗）：
+ *    `primitive` 分支（圆柱 / 圆锥 / 球）的 `points` 是**自己 push 的** ✗
+ *    （顶点 + 侧影切点 + 圆上采样点 …），跟 `resolveVertices` 的键**顺序完全不同** ✗
+ *    → 实测：圆锥底面圆上的受约束点被画到了**圆锥顶点**的位置 ✗
+ *  ⇒ 一切"按名字找 `points` 下标"的地方都必须用它 ✓ */
+function projIndexOf(name: string): number {
+  const p = proj.value
+  if (!p?.pointNames) return -1
+  return p.pointNames.indexOf(name)
+}
 
 // 从画布上的三维图形回来 → 还原模型和视角（继续改）
 if (props.editId) {
@@ -201,10 +212,13 @@ const svg = computed(() => {
   // 【v1573】后加的点（自由点 / 受约束点）**始终**画成圆点 ✓ —— 与 `showDots` 无关 ✓
   if (extraDotNames.value.size) {
     const coords: number[] = []
-    order.value.forEach((n, i) => {
-      if (!extraDotNames.value.has(n)) return
-      coords.push(p.points[i * 2], p.points[i * 2 + 1])
-    })
+    const pn = p.pointNames
+    if (pn) {
+      pn.forEach((n, i) => {
+        if (!n || !extraDotNames.value.has(n)) return
+        coords.push(p.points[i * 2], p.points[i * 2 + 1])
+      })
+    }
     if (coords.length) out = vertexDotsSvg(coords, W.value, H, '#1a1a1a') + out
   }
   // 多选的点自己描一圈（renderSolid 只支持选中一个顶点）
@@ -483,7 +497,7 @@ function pickOnPointAt(e: PointerEvent): number {
   const [cx, cy] = evPos(e)
   let best = -1, bd = 15
   ops.forEach((op, i) => {
-    const k = order.value.indexOf(op.name)
+    const k = projIndexOf(op.name)
     if (k < 0) return
     const d = Math.hypot(p.points[k * 2] * W.value - cx, p.points[k * 2 + 1] * H - cy)
     if (d < bd) { bd = d; best = i }
@@ -502,7 +516,7 @@ function dragOnMove(e: PointerEvent) {
   if (!p) return
   const [cx, cy] = evPos(e)
   const at2 = (name: string): [number, number] | null => {
-    const k = order.value.indexOf(name)
+    const k = projIndexOf(name)
     return k < 0 ? null : [p.points[k * 2] * W.value, p.points[k * 2 + 1] * H]
   }
   const next = JSON.parse(raw.value) as Geom3D
@@ -1188,7 +1202,8 @@ function insert() {
       for (const k of m.onPoints || []) if (k?.name) names.add(k.name)
       if (!names.size) return undefined
       const idx: number[] = []
-      order.value.forEach((n, i) => { if (names.has(n)) idx.push(i) })
+      // ⚠ 这里也必须用 `pointNames`（不能用 `order` ✗）—— 它算的是**元素里 `points` 的下标** ✓
+      p.pointNames?.forEach((n, i) => { if (n && names.has(n)) idx.push(i) })
       return idx.length ? idx : undefined
     })(),
   }
