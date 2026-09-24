@@ -126,6 +126,10 @@ const RE_YEAR = /^\s*(?:【年份】|年份\s*[:：])\s*(.+?)\s*$/
 const RE_CHAPTER = /^\s*(?:【章节】|章节\s*[:：])\s*(.+?)\s*$/
 /** 「（本小题满分 15 分）」这类 —— 既是说明，也是**这道题的分值** */
 const RE_FULL_SCORE = /[（(]\s*本小题满分\s*(\d{1,3})\s*分\s*[)）]/
+/** 【v1613】题干**开头**的「（12分）」—— 也是这道题的分值 ✓（「4. （12分）已知…」这种最常见 ✓）
+ *  ⚠ 必须限定**开头** ✗：小问里的「（5分）」是**小问**分值 ✓ 全文乱找会误取 ✓
+ *    （用户实测：解答题分值抽不出来 ✓） */
+const RE_LEAD_SCORE = /^\s*[（(]\s*(\d{1,3})\s*分\s*[)）]/
 const RE_PAPER = /^\s*(?:【试卷】|【试卷名】|试卷\s*[:：]|试卷名\s*[:：])\s*(.+?)\s*$/
 
 /** 难度文字 → 1-5（易=2 / 中=3 / 难=5；也认 1-5 与「较难」这类说法） */
@@ -998,8 +1002,11 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
     }
     knowledge = Array.from(new Set(knowledge.filter(Boolean)))
 
+    // 【v1613】分值两个来源 ✓：① 题干**开头**的「（12分）」✓ ② 块内任意处的「（本小题满分 N 分）」✓
+    //   —— 原来只认 ② ✗ → 解答题的「（12分）」抽不出来 ✓（用户实测 ✓）
+    const leadScore = stem.trim().match(RE_LEAD_SCORE)
     const ms = t_all(block).match(RE_FULL_SCORE)
-    const scoreExplicit = ms ? Number(ms[1]) || 0 : 0
+    const scoreExplicit = leadScore ? Number(leadScore[1]) || 0 : ms ? Number(ms[1]) || 0 : 0
 
     if (!stem && !options.length) continue
     // 题型兜底：小节标题没给 → 按结构猜（有选项 = 选择；有下划线空 = 填空；否则解答）
