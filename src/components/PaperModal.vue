@@ -1200,11 +1200,21 @@ function markEditable() {
     el.title = '点一下可以直接改这段'
   })
 }
-/** 【v1598】把某个块**提交**（失焦时调 ✓ 也可以主动调 ✓）
- *  ⚠ 原来只有 `@blur.capture` ✗ —— **`blur` 不冒泡** ✓ 实测**根本没触发** ✓
- *    （用户报："能修改、但左边无变化、改动也不保存" ✓）
- *  ⇒ 改用 **`focusout`** ✓（它会冒泡 ✓） */
-function commitEl(el: HTMLElement) {
+/** 【v1597】点块 → 进入编辑 ✓（公式在 DOM 里是 SVG ✗ 取不回原文 ✓ → 这类块不标记 ✓） */
+function onA4Click(e: MouseEvent) {
+  const el = (e.target as HTMLElement).closest<HTMLElement>('.pm__editable')
+  if (!el || el.isContentEditable) return
+  el.dataset.mdOld = (el.textContent || '').trim()
+  el.contentEditable = 'true'
+  el.focus()
+  const r = document.createRange()
+  r.selectNodeContents(el)
+  const s = window.getSelection()
+  s?.removeAllRanges(); s?.addRange(r)
+}
+/** 【v1597】失焦 → 写回 Markdown ✓（找不到原文就**还原** ✓ 不猜 ✓） */
+function onA4Blur(e: FocusEvent) {
+  const el = e.target as HTMLElement
   if (!el || !el.isContentEditable) return
   el.contentEditable = 'false'
   const oldText = el.dataset.mdOld || ''
@@ -1218,30 +1228,6 @@ function commitEl(el: HTMLElement) {
     paperMsg.value = '没找到对应的原文（可能在别处改过）→ 已还原'
     render()
   }
-}
-/** 把当前正在编辑的块提交掉 ✓（点另一个块时 `focusout` 可能还没跑 ✓ 所以主动调一次 ✓） */
-function commitEditing() {
-  const el = document.querySelector<HTMLElement>('.pm__a4 .pm__editable[contenteditable="true"]')
-  if (el) commitEl(el)
-}
-/** 【v1597】点块 → 进入编辑 ✓（公式在 DOM 里是 SVG ✗ 取不回原文 ✓ → 这类块不标记 ✓） */
-function onA4Click(e: MouseEvent) {
-  // 【v1598】先提交上一个正在编辑的块 ✓（否则连点两块会丢掉前一个的改动 ✓）
-  commitEditing()
-  const el = (e.target as HTMLElement).closest<HTMLElement>('.pm__editable')
-  if (!el || el.isContentEditable) return
-  el.dataset.mdOld = (el.textContent || '').trim()
-  el.contentEditable = 'true'
-  el.focus()
-  const r = document.createRange()
-  r.selectNodeContents(el)
-  const s = window.getSelection()
-  s?.removeAllRanges(); s?.addRange(r)
-}
-/** 【v1598】失焦 → 写回 Markdown ✓（**`focusout` 会冒泡** ✓ 普通绑定就能收到 ✓） */
-function onA4Blur(e: FocusEvent) {
-  const el = e.target as HTMLElement
-  if (el?.isContentEditable) commitEl(el)
 }
 function insertMarker(marker: string) {
   const el = inputEl.value
@@ -1653,10 +1639,8 @@ watch([headerText, footerText], () => render())
                 <button @click="zoomBy(0.1)"><AppIcon name="plus" :size="14" /></button>
                 <button @click="zoomReset">重置</button>
               </div>
-              <!-- 【v1598】点块直接改 ✓：用 **`focusout`** 而不是 `blur` ✗
-                   —— `blur` **不冒泡** ✓（加了 `.capture` 实测也没触发 ✓，用户报"改了不保存" ✓）；
-                   `focusout` 会冒泡 ✓ 普通绑定就能收到 ✓ -->
-              <div ref="a4El" class="pm__a4" @click="onA4Click" @focusout="onA4Blur"></div>
+              <!-- 【v1597】点块直接改 ✓：blur 用**捕获** ✓ 否则 contenteditable 的失焦冒泡不到这里 ✓ -->
+              <div ref="a4El" class="pm__a4" @click="onA4Click" @blur.capture="onA4Blur"></div>
               <div ref="pageEl" class="paper-flow" style="position:absolute;left:-99999px;top:0;pointer-events:none;"></div>
             </div>
           </div>
