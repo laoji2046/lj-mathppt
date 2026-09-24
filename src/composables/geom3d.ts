@@ -626,12 +626,16 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
   // 【v1577】**斜二测**（教材画法 ✓）：x 轴水平、z 轴竖直、y 轴与 x 成 45° 且**长度取一半** ✓
   //   ★ `sc` 是**线性**的 ✗ → 换 `right` / `up` 这两个向量就够，
   //     虚实判定、圆 / 弧、截面 …… **全都不用改** ✓
-  //   视线方向取 `-y`（观察者在 y 负方向 ✓）—— 它决定"哪条棱画虚线" ✓
-  //   ⚠ 此时 `azim` / `elev` 不生效（斜二测视角固定 ✓）
+  //   视线方向 = **投影方向的反向** ✓（不是水平的 `(0,-1,0)` ✗ ——
+  //   那样只有"正前方"一个面可见 ✗ 而斜二测**本来就该看得见底面** ✓）：
+  //   `y` 轴在投影里指向 `(OBL·cos45°, OBL·sin45°)` → 投影方向 `(OBL·cos45°, 1, OBL·sin45°)`
+  //   → 视线取它的反向并归一化 ✓ 实测：前面 + 底面 + 左面 可见，后面 / 顶面 / 右面 不可见 ✓
   const oblique = view.oblique === 1
   const OBL = 0.5                                        // y 轴缩短一半 ✓
   const OBL_C = Math.cos(Math.PI / 4), OBL_S = Math.sin(Math.PI / 4)
-  const d: [number, number, number] = oblique ? [0, -1, 0] : viewDir(view.azim, view.elev)
+  const d: [number, number, number] = oblique
+    ? norm([-OBL * OBL_C, -1, -OBL * OBL_S])
+    : viewDir(view.azim, view.elev)
   const aDeg = (view.azim * Math.PI) / 180
   // y 轴与 x 成 45°：它的 x 分量进 `right`、z 分量进 `up`（屏幕 y 向上为正 ✗）
   const right: [number, number, number] = oblique ? [1, OBL * OBL_C, 0] : norm([-Math.sin(aDeg), Math.cos(aDeg), 0])
