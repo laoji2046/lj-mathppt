@@ -1452,6 +1452,11 @@ watch([headerText, footerText], () => render())
                   <input type="color" v-model="fontColor">
                   <label>行距</label>
                   <input type="number" v-model.number="lineHeight" min="1" max="3" step="0.1">
+                </div>
+                <!-- 【v1580】控件分组（原生 details，零 JS ✓）：默认只展开前两组，编辑区就腾出高度了 ✓ -->
+                <details class="pm__grp" open>
+                  <summary>段落与题号</summary>
+                  <div class="pm__ctlrow">
                   <label>段距</label>
                   <input type="number" v-model.number="para" min="0" max="20" step="1">
                   <label>缩进</label>
@@ -1482,13 +1487,17 @@ watch([headerText, footerText], () => render())
                     <option value="balance">等高</option>
                   </select>
                 </div>
-                <div class="pm__ctlrow">
+                </details>
+                <details class="pm__grp">
+                  <summary>页眉页脚</summary>
+                  <div class="pm__ctlrow">
                   <label>页眉</label><input class="pm__wide" v-model="headerText" placeholder="如：某中学高三期末试卷"><button class="pm__btn pm__btn--sm" title="在页眉插入图片（[图N]）" @click="insertHdrFooterImage('header')">插图</button>
                   <label>页脚</label><input class="pm__wide" v-model="footerText" placeholder="第 {page} 页 / 共 {total} 页"><button class="pm__btn pm__btn--sm" title="在页脚插入图片（[图N]）" @click="insertHdrFooterImage('footer')">插图</button>
                   <label>页眉顶距</label><input type="number" v-model.number="headerGap" min="0" max="40" step="1" title="页眉与顶部边界的距离(px)">
                   <label>页脚底距</label><input type="number" v-model.number="footerGap" min="0" max="40" step="1" title="页脚与底部边界的距离(px)">
                   <label>题间距</label><input type="number" v-model.number="gapQ" min="0" max="40" step="2">
-                </div>
+                  </div>
+                </details>
               </div>
               <textarea ref="inputEl" v-model="input" class="pm__input" rows="18" @input="onInput" placeholder="# 标题  ## 知识梳理  1. 已知 $f(x)=x^2$ 求 $f(2)$"></textarea>
               <div class="pm__actions">
@@ -1648,6 +1657,17 @@ watch([headerText, footerText], () => render())
 .pm__ctlrow input[type='number'] { width: 54px; }
 .pm__ctlrow input[type='color'] { width: 34px; height: 24px; padding: 1px; cursor: pointer; }
 .pm__ctlrow .pm__wide { min-width: 150px; }
+/* 【v1580】控件分组（原生 `details` 折叠 ✓ 零 JS）：
+   展开时跟以前一样；收起时省掉一整块高度 → 编辑区自然变高 ✓ */
+.pm__grp > summary {
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted);
+  padding: 2px 0; user-select: none; list-style: none;
+  display: flex; align-items: center; gap: 5px;
+}
+.pm__grp > summary::-webkit-details-marker { display: none; }
+.pm__grp > summary::before { content: '▸'; font-size: 10px; display: inline-block; transition: transform .15s; }
+.pm__grp[open] > summary::before { transform: rotate(90deg); }
+.pm__grp[open] > summary { margin-bottom: 2px; }
 .pm__input { flex: 0 1 auto; height: 30vh; min-height: 150px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; line-height: 1.5; overflow-y: auto; border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px; }
 .pm__actions { display: flex; gap: 8px; flex-wrap: wrap; position: relative; align-items: center; }
 .pm__btn {
