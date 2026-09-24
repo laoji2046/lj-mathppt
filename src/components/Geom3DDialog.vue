@@ -629,7 +629,7 @@ function delLineMeet(i: number) {
 function clearAdded() {
   if (!model.value) return
   const next = JSON.parse(raw.value) as Geom3D
-  for (const k of ['marks', 'freePoints', 'meetPoints', 'lineMeets', 'projectPoints', 'auxiliary', 'cutPlanes', 'planeCuts', 'intersectLines', 'hidden'] as const) {
+  for (const k of ['marks', 'freePoints', 'onPoints', 'meetPoints', 'lineMeets', 'projectPoints', 'auxiliary', 'cutPlanes', 'planeCuts', 'intersectLines', 'hidden'] as const) {
     delete (next as unknown as Record<string, unknown>)[k]
   }
   raw.value = JSON.stringify(next, null, 1)
@@ -719,6 +719,14 @@ const vertexRows = computed(() => {
   const rows: { name: string; at: [number, number, number]; kind: 'base' | 'free' | 'derived'; i: number }[] = []
   Object.entries(m.vertices || {}).forEach(([n, at]) => rows.push({ name: n, at, kind: 'base', i: -1 }))
   ;(m.freePoints || []).forEach((fp, i) => { if (!rows.some((r) => r.name === fp.name)) rows.push({ name: fp.name, at: fp.at, kind: 'free', i }) })
+  // 【v1571】受约束点：**只读展示**（位置由约束算出来 —— 直接改坐标没意义 ✗，要挪就在预览区拖 ✓）
+  if (m.onPoints?.length) {
+    const all = resolveVertices(m)
+    for (const op of m.onPoints) {
+      if (!op?.name || rows.some((r) => r.name === op.name)) continue
+      rows.push({ name: op.name, at: all[op.name] || [0, 0, 0], kind: 'derived', i: -1 })
+    }
+  }
   const known = new Set(rows.map((r) => r.name))
   for (const r of order.value) if (!known.has(r)) rows.push({ name: r, at: [0, 0, 0], kind: 'derived', i: -1 })
   return rows
@@ -812,6 +820,7 @@ const usedNames = computed(() => {
   for (const k of m.meetPoints || []) if (k?.name) s.add(k.name)
   for (const k of m.lineMeets || []) if (k?.name) s.add(k.name)
   for (const k of m.projectPoints || []) if (k?.name) s.add(k.name)
+  for (const k of m.onPoints || []) if (k?.name) s.add(k.name)   // 【v1571】受约束点 ✓
   return s
 })
 /** 默认给还没用过的字母（M、N、E、F…）—— 教材里中点常叫 M / N / E */

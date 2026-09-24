@@ -63,6 +63,21 @@ export interface Geom3D {
   hidden?: string[]
   /** **自由点**（直接给坐标）：不在任何棱上、纯粹是作图位置，比如外接球球心、投影点。 */
   freePoints?: { name: string; at: [number, number, number] }[]
+  /** 【v1571】**受约束点**：位置由"所在对象 + 一个参数"决定 ✓ 拖动时约束自动保持 ✓
+   *  · `edge`   —— 棱上，`t ∈ [0,1]`（t=0 在 `a` 端）
+   *  · `face`   —— 多面体的某个面上，面内局部坐标 `(u, v)`
+   *  · `plane`  —— 任意三点定的平面上，面内局部坐标 `(u, v)`
+   *  · `circle` —— 参数化体的圆上，角度 `th`（弧度）
+   *    底面圆在 z=0、顶面圆在 z=h（仅圆柱有）、球的赤道在 z=0 ✓
+   *  ⚠ 取值时**必须**把它算进"已用掉的点名"（见 `Geom3DDialog.vue` 的取名逻辑 ✗） */
+  onPoints?: {
+    name: string
+    on:
+      | { kind: 'edge'; a: string; b: string; t: number }
+      | { kind: 'face'; face: string[]; u: number; v: number }
+      | { kind: 'plane'; through: string[]; u: number; v: number }
+      | { kind: 'circle'; which: 'base' | 'top' | 'equator'; th: number }
+  }[]
   /** **直线与平面的交点**（构造点）：line 是直线上的两点、plane 是定平面的三点。
    *  解析时算出来当普通顶点用 —— 后续连线、定平面都能拿它当端点。 */
   meetPoints?: { name: string; line: [string, string]; plane: string[] }[]
@@ -261,6 +276,13 @@ export function resolveVertices(m: Geom3D): Record<string, [number, number, numb
       out[fp.name] = [+fp.at[0], +fp.at[1], +fp.at[2]]
     }
   }
+  // 【v1571】受约束点：位置 = 所在对象 + 一个参数 ✓
+  //   拖动的本质就是改这个参数 —— 约束**天然保持**（不需要每次重新投影纠偏 ✗）
+  for (const op of m.onPoints || []) {
+    if (!op?.name || out[op.name]) continue
+    const p = resolveOnPoint(m, out, op.on)
+    if (p) out[op.name] = p
+  }
   // 直线与平面的交点（构造点）：跟定比分点一样，解析出来当普通顶点用
   for (const mp of m.meetPoints || []) {
     if (!mp?.name || out[mp.name]) continue
@@ -282,6 +304,55 @@ export function resolveVertices(m: Geom3D): Record<string, [number, number, numb
     ]
   }
   return out
+}
+
+/** 【v1571】把「受约束点」的约束解析成三维坐标 ✓
+ *  · `edge`   —— `A + t·(B−A)`，t 夹到 [0,1]
+ *  · `face` / `plane` —— `P₀ + u·e₁ + v·e₂`，`e₁/e₂` 是**面内的正交基** ✓
+ *    （不能直接拿 `P₁−P₀`、`P₂−P₀` 当基 ✗：它们不正交，点会沿斜方向漂 ✗）
+ *  · `circle` —— `(r·cos θ, r·sin θ, z)`，z 由 `which` 定（底面 0 / 顶面 h / 赤道 0）✓
+ *  解析不出来（引用的点还没算出来 / 三点共线 / 圆锥要顶面圆 …）→ `null` ✓ */
+export function resolveOnPoint(
+  m: Geom3D,
+  out: Record<string, [number, number, number]>,
+  on: NonNullable<Geom3D['onPoints']>[number]['on'],
+): [number, number, number] | null {
+  if (!on) return null
+  const r4 = (v: number) => +v.toFixed(4)
+  if (on.kind === 'edge') {
+    const A = out[on.a], B = out[on.b]
+    if (!A || !B) return null
+    const t = Math.max(0, Math.min(1, on.t))
+    return [r4(A[0] + (B[0] - A[0]) * t), r4(A[1] + (B[1] - A[1]) * t), r4(A[2] + (B[2] - A[2]) * t)]
+  }
+  if (on.kind === 'face' || on.kind === 'plane') {
+    const names = (on.kind === 'face' ? on.face : on.through) || []
+    const P = names.map((n) => out[n]).filter(Boolean) as [number, number, number][]
+    if (P.length < 3) return null
+    const e1 = sub(P[1], P[0])
+    const l1 = Math.hypot(e1[0], e1[1], e1[2])
+    if (l1 < 1e-9) return null
+    const u1: [number, number, number] = [e1[0] / l1, e1[1] / l1, e1[2] / l1]
+    const nrm = cross(u1, sub(P[2], P[0]))
+    const ln = Math.hypot(nrm[0], nrm[1], nrm[2])
+    if (ln < 1e-9) return null          // 三点共线 → 定不出平面
+    const n1: [number, number, number] = [nrm[0] / ln, nrm[1] / ln, nrm[2] / ln]
+    const u2 = cross(n1, u1)            // 与 u1 正交且仍在面内 ✓
+    return [
+      r4(P[0][0] + u1[0] * on.u + u2[0] * on.v),
+      r4(P[0][1] + u1[1] * on.u + u2[1] * on.v),
+      r4(P[0][2] + u1[2] * on.u + u2[2] * on.v),
+    ]
+  }
+  if (on.kind === 'circle') {
+    const pr = m.primitive
+    if (!pr) return null
+    if (on.which === 'equator' && pr.type !== 'sphere') return null
+    if (on.which === 'top' && pr.type !== 'cylinder') return null   // 圆锥没有顶面圆 ✓
+    const z = on.which === 'top' ? pr.h : 0
+    return [r4(pr.r * Math.cos(on.th)), r4(pr.r * Math.sin(on.th)), r4(z)]
+  }
+  return null
 }
 
 /** 直线（o + t·dir）在共面多边形环内的参数区间（环是这个平面截多面体得到的截面）。
