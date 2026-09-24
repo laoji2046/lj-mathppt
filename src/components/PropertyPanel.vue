@@ -510,7 +510,16 @@ function openAsy() {
 }
 
 const isSolid = computed(() => !!mathfig.value && !!SOLID_VCOUNT[mathfig.value.kind])
-const vertCount = computed(() => mathfig.value ? (SOLID_VCOUNT[mathfig.value.kind] || 0) : 0)
+/** 【v1610】顶点数 ✓
+ *  ⚠ 原来只查 `SOLID_VCOUNT` ✗ —— **圆柱 / 圆锥 / 球没有条目** ✓
+ *    → 属性面板里**列不出它们的点** ✓ 也就**改不了点样式** ✓
+ *    （用户实报："可显示圆点、可改变颜色" ✓）
+ *  ⇒ 兜底用**投影后的点数** ✓（`points` 存在元素上 ✓） */
+const vertCount = computed(() => {
+  const m = mathfig.value
+  if (!m) return 0
+  return SOLID_VCOUNT[m.kind] || Math.floor((m.points?.length || 0) / 2) || 0
+})
 const edgeCount = computed(() => mathfig.value && isSolid.value ? solidEdges(mathfig.value.kind).length : 0)
 function vLetter(i: number) { return String.fromCharCode(65 + i) }
 function vLabelAt(i: number) { return (mathfig.value?.vlabels?.[i]) || '' }

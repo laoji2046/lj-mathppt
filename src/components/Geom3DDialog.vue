@@ -41,7 +41,16 @@ const selEdge = ref<number | null>(null)
 /** 当前选择类型：点可以多选，线单选 */
 const selKind = ref<'point' | 'line' | null>(null)
 /** 选中项的点名（点选择用） */
-const selNames = computed(() => selPoints.value.map((i) => order.value[i]).filter(Boolean))
+/** 【v1610】选中的**点名** ✓
+ *  ⚠ 必须优先用 **`pointNames`** ✗（不能用 `order` ✓）——
+ *    `primitive` 分支（圆柱 / 圆锥 / 球）的 `points` 是**自己 push 的** ✓
+ *    `order`（= `resolveVertices` 的键）里**根本没有它们** ✓
+ *    → 结果：**点选永远选不中** ✓（用户实报："无法选取顶点和其他点画直线" ✓）
+ *  （这个坑代码注释里写过 ✓ 见 `dotIdx` 那段 ✓） */
+const selNames = computed(() => {
+  const pn = proj.value?.pointNames
+  return selPoints.value.map((i) => pn?.[i] || order.value[i] || '').filter(Boolean)
+})
 /** 选中点的当前标签（单选时用于输入框回显） */
 const selLabel = computed(() => {
   const m = model.value
@@ -266,7 +275,9 @@ function pickAt(cx: number, cy: number) {
     const d = Math.hypot(px(i) - cx, py(i) - cy)
     if (d < bestD) { bestD = d; bestP = i }
   }
-  if (bestP >= 0 && order.value[bestP]) {
+  // 【v1610】判 `pointNames` ✗ —— `primitive` 的点（顶点 P / 圆心 O / 圆周上的点 ✓）
+  //   **不在 `order` 里** ✓ 用 `order` 判就永远选不中 ✓
+  if (bestP >= 0 && (p.pointNames?.[bestP] || order.value[bestP])) {
     selKind.value = 'point'
     selEdge.value = null
     const cur = selPoints.value

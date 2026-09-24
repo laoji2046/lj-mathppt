@@ -859,33 +859,33 @@ export function projectGeom(m: Geom3D, view: Geom3DView): {
         if (op?.name && all[op.name] && !names.includes(op.name)) push(op.name, all[op.name])
       }
     }
-    // 【v1609】★ 从**圆周上的新增点**也画母线 ✓（用户要求 ✓）
-    //   圆锥：**顶点 → 该点** ✓
-    //   圆柱：底圆上的点 → 顶圆**同 (x, y)** 的点 ✓（母线是**竖直的** ✓ 跟现有两条一致 ✓）
-    //   ⚠ 虚实：该点在圆的**前侧**（看得见）→ 实线 ✓ **后侧**（被本体挡）→ 虚线 ✓
-    //     判据跟底面圆"近半实、远半虚"**同一套** ✓（复用 `circleSplit` 的 `depthAt` ✓）
-    for (const op of m.onPoints || []) {
-      if (!op?.name) continue
-      const on = op.on
-      // ⚠ `which` 在 `op.on` 里 ✗（不在 `op` 上 ✓）；
-      //   且**只有「圆上的点」**才画母线 ✓（别的约束——边 / 面 / 平面——不该连 ✓）
-      if (!on || on.kind !== 'circle') continue
-      const idx = names.indexOf(op.name)
-      if (idx < 0) continue                                   // 没进 `P3` 就跳过 ✓
-      const P = P3[idx]
-      const isBottom = on.which !== 'top'
-      const z0 = isBottom ? 0 : h
-      const cs = circleSplit(z0)
-      const th = cs.paramOf(...scr3(P[0], P[1], z0))
-      const dash: 0 | 1 = cs.depthAt(th) > 0 ? 0 : 1
-      if (type === 'cone') {
-        edges.push([apex, idx, dash])                          // 顶点 → 该点 ✓
-      } else if (type === 'cylinder') {
-        // 圆柱：连到**另一个底面**的同 (x, y) 点 ✓
-        //   `push(null, ...)` → 只进 `points` 用于画线 ✓ 不画字母 ✓（圆点受 `showDots` 控制 ✓）
-        const i2 = push(null, [P[0], P[1], isBottom ? h : 0])
-        edges.push([idx, i2, dash])
+    // 【v1610】⚠ 这里**不再自动连母线** ✗ ——
+    //   v1609 曾"圆周上一加点就自动连母线" ✓ 用户明确否掉："不是生成点自动添加母线，是可以添加母线" ✓
+    //   ⇒ 改成**手动**：在对话框里**选中两个点**（如顶点 P + 圆周上的点 ✓）
+    //     再点「连成线」✓（`connectSel` ✓ 写进 `auxiliary` ✓ 虚实自动判 ✓）
+    //   ⚠ 前提是**点要能选中** ✗ —— 病根在 `selNames` / 点选判定用了 `order` ✓
+    //     （`primitive` 的点不在 `order` 里 ✓）已在 `Geom3DDialog` 里改用 `pointNames` ✓
+    //
+    // 【v1610】★ 辅助线（"选中两点 → 连成线"的结果 ✓）也要在**圆柱 / 圆锥**里画出来 ✓
+    //   病根：`auxiliary` 的处理在**多面体**那条路（1107 行 ✓），
+    //   而 `primitive` 分支在它**之前**就 `return` 了 ✗ → **连了线也看不见** ✓
+    //   ⇒ 在这里补一份 ✓ 判据跟多面体那边**同一个意思** ✓（用深度判前后 ✓）
+    for (const a of m.auxiliary || []) {
+      const i = names.indexOf(a.from)
+      const j = names.indexOf(a.to)
+      if (i < 0 || j < 0) continue
+      let dash: 0 | 1 = 0
+      if (a.style === 'dashed') dash = 1
+      else if (a.style === 'solid') dash = 0
+      else {
+        // `auto`：取**中点**看它在前侧还是后侧 ✓
+        //   深度 = 位置向量 · 视线方向 ✓（> 0 = 靠观察者 ✓）
+        //   —— 跟底面圆"近半实、远半虚"**同一套判据** ✓（`depthAt` 里就是这么算的 ✓）
+        const mx = (P3[i][0] + P3[j][0]) / 2
+        const my = (P3[i][1] + P3[j][1]) / 2
+        dash = (mx * d[0] + my * d[1]) > 0 ? 0 : 1
       }
+      edges.push([i, j, dash])
     }
     // 归一化：把顶点和椭圆包围盒一起算进去，整体居中
     const xs = P3.map((p) => sc(p)[0])
