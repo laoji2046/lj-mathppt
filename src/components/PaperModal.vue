@@ -91,6 +91,9 @@ const totalPages = ref(1)
 
 const headerText = ref('')
 const footerText = ref('')
+/** 【v1591】导出 PDF 的**文件名** —— 空则**回落到页眉文字** ✓（页眉本来就是"试卷名"语义 ✓）
+ *  ⚠ 只影响**文件名** ✓ 不印在纸上 ✓（浏览器打印的默认文件名 = `document.title` ✓） */
+const pdfName = ref('')
 const gapQ = ref(6)
 const headerGap = ref(0)   // 页眉与顶部边界的距离(px)
 const footerGap = ref(0)   // 页脚与底部边界的距离(px)
@@ -1100,9 +1103,10 @@ function printPdf() {
   // 【v1590】⚠ 浏览器「打印为 PDF」的**默认文件名 = `document.title`** ✗ ——
   //   原来印出来是「LJ-MathSlides v2026.09.1588 — 幻灯片编辑器」✓（用户实报 ✓）
   //   ⇒ 打印前**临时把标题换成试卷名** ✓ 打完（或取消）再还原 ✓
-  //   名字优先取**页眉文字** ✓（页眉本来就是"试卷名"语义 ✓），空则用「试卷讲义」✓
+  //   名字优先「**文件名**」输入框 ✓ → 其次**页眉文字** ✓（页眉本来就是"试卷名"语义 ✓）
+  //   → 最后兜底「试卷讲义」✓（v1591 加的独立文件名框 ✓）
   const prev = document.title
-  document.title = (headerText.value || '试卷讲义').replace(/[\\/:*?"<>|]/g, '_')
+  document.title = (pdfName.value || headerText.value || '试卷讲义').replace(/[\\/:*?"<>|]/g, '_')
   const restore = () => {
     document.title = prev
     window.removeEventListener('afterprint', restore)
@@ -1151,7 +1155,7 @@ const DEFAULTS_KEY = 'lj-paper-defaults-v1'
  *  ⇒ **新增字段只改这里** ✓ —— 别再往那五处各抄一遍 ✗ */
 const PF = {
   template, fontFamily, fontSize, fontColor, lineHeight, para, indent, h2size, numStyle,
-  optLayout, headerText, footerText, gapQ, headerGap, footerGap, autoNum, bodyCols,
+  optLayout, headerText, footerText, pdfName, gapQ, headerGap, footerGap, autoNum, bodyCols,
 }
 type PFRef = { value: unknown }
 /** 当前值 → 普通对象 ✓（草稿 / 默认设置共用 ✓） */
@@ -1406,6 +1410,7 @@ watch([headerText, footerText], () => render())
                 <details class="pm__grp">
                   <summary>页眉页脚</summary>
                   <div class="pm__ctlrow">
+                  <label title="导出 PDF 时的文件名；留空就用页眉文字">文件名</label><input class="pm__wide" v-model="pdfName" placeholder="留空 = 用页眉文字">
                   <label>页眉</label><input class="pm__wide" v-model="headerText" placeholder="如：某中学高三期末试卷"><button class="pm__btn pm__btn--sm" title="在页眉插入图片（[图N]）" @click="insertHdrFooterImage('header')">插图</button>
                   <label>页脚</label><input class="pm__wide" v-model="footerText" placeholder="第 {page} 页 / 共 {total} 页"><button class="pm__btn pm__btn--sm" title="在页脚插入图片（[图N]）" @click="insertHdrFooterImage('footer')">插图</button>
                   <label>页眉顶距</label><input type="number" v-model.number="headerGap" min="0" max="40" step="1" title="页眉与顶部边界的距离(px)">
