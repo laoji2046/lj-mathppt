@@ -518,6 +518,8 @@ async function render() {
     }
   } catch { /* 不阻塞 */ }
   refreshLayout()
+  // 【v1597】排好版后给可编辑的块打标记 ✓（必须在 refreshLayout **之后** ✗ 那时块才生成完 ✓）
+  markEditable()
 }
 
 function applyFont(el: HTMLElement | null = pageEl.value) {
@@ -1158,6 +1160,75 @@ function wrapSel(before: string, after = before) {
   }
   render()
 }
+// ---------------- 【v1597】预览里"点一下就改" ----------------
+/** 去掉行首的 Markdown 标记 ✓（用于跟预览里块的**纯文本**比较 ✓） */
+function stripMdMark(s: string): string {
+  return s
+    .replace(/^\s*#{1,6}\s+/, '')        // # 标题
+    .replace(/^\s*\d+[.、．]\s*/, '')     // 1. 大题号
+    .replace(/^\s*\([0-9]+\)\s*/, '')     // (1) 小题号
+    .replace(/^\s*\{[^}]*\}\s*/, '')      // {b} {i} {c:#c00} 等段落前缀
+    .trim()
+}
+/** 【v1597】把 Markdown 里**匹配 oldText 的那一行**换成 newText ✓（**保留行首标记** ✓）
+ *  ⚠ 用**文本匹配**而不是行号 ✗ —— 分页后 DOM 块与 Markdown 行不是一一对应 ✓
+ *    （一个段落可能是一行 ✓ 也可能被折成多行 ✓；块也可能被分页拆开 ✓）
+ *  ⚠ 同一个文本出现多次时只换**第一个** ✓（够用 ✓ 想改后面那个就去源码改 ✗） */
+function patchMdBlock(oldText: string, newText: string): boolean {
+  const lines = input.value.split('\n')
+  const target = oldText.trim()
+  if (!target) return false
+  for (let i = 0; i < lines.length; i++) {
+    if (stripMdMark(lines[i]) !== target) continue
+    const lead = lines[i].match(/^(\s*(?:#{1,6}\s+|\d+[.、．]\s*|\([0-9]+\)\s*|\{[^}]*\}\s*)*)/)?.[1] ?? ''
+    lines[i] = lead + newText
+    input.value = lines.join('\n')
+    return true
+  }
+  return false
+}
+/** 【v1597】给预览里**可编辑的块**打标记 ✓
+ *  只开给**标题 / 段落** ✓；题目块、选项、表格、图片**先不动** ✗（结构复杂 ✓ 容易改坏 ✓） */
+function markEditable() {
+  const a4 = a4El.value
+  if (!a4) return
+  const sel = '.paper-page h2, .paper-page .paper-sec-title, .paper-page .paper-sub, .paper-page .paper-q, .paper-page > p'
+  a4.querySelectorAll<HTMLElement>(sel).forEach((el) => {
+    if (el.querySelector('img, table, .paper-fig')) return      // 含图/表的块不动 ✗
+    if (el.querySelector('mjx-container') && !el.dataset.allowTex) return  // 公式块也不动 ✗（点开只能看到 SVG ✓ 改不了 ✓）
+    el.classList.add('pm__editable')
+    el.title = '点一下可以直接改这段'
+  })
+}
+/** 【v1597】点块 → 进入编辑 ✓（公式在 DOM 里是 SVG ✗ 取不回原文 ✓ → 这类块不标记 ✓） */
+function onA4Click(e: MouseEvent) {
+  const el = (e.target as HTMLElement).closest<HTMLElement>('.pm__editable')
+  if (!el || el.isContentEditable) return
+  el.dataset.mdOld = (el.textContent || '').trim()
+  el.contentEditable = 'true'
+  el.focus()
+  const r = document.createRange()
+  r.selectNodeContents(el)
+  const s = window.getSelection()
+  s?.removeAllRanges(); s?.addRange(r)
+}
+/** 【v1597】失焦 → 写回 Markdown ✓（找不到原文就**还原** ✓ 不猜 ✓） */
+function onA4Blur(e: FocusEvent) {
+  const el = e.target as HTMLElement
+  if (!el || !el.isContentEditable) return
+  el.contentEditable = 'false'
+  const oldText = el.dataset.mdOld || ''
+  const newText = (el.textContent || '').trim()
+  delete el.dataset.mdOld
+  if (!oldText || oldText === newText) return
+  if (patchMdBlock(oldText, newText)) {
+    paperMsg.value = '已改：' + newText.slice(0, 24)
+    render()
+  } else {
+    paperMsg.value = '没找到对应的原文（可能在别处改过）→ 已还原'
+    render()
+  }
+}
 function insertMarker(marker: string) {
   const el = inputEl.value
   const cur = input.value
@@ -1568,7 +1639,8 @@ watch([headerText, footerText], () => render())
                 <button @click="zoomBy(0.1)"><AppIcon name="plus" :size="14" /></button>
                 <button @click="zoomReset">重置</button>
               </div>
-              <div ref="a4El" class="pm__a4"></div>
+              <!-- 【v1597】点块直接改 ✓：blur 用**捕获** ✓ 否则 contenteditable 的失焦冒泡不到这里 ✓ -->
+              <div ref="a4El" class="pm__a4" @click="onA4Click" @blur.capture="onA4Blur"></div>
               <div ref="pageEl" class="paper-flow" style="position:absolute;left:-99999px;top:0;pointer-events:none;"></div>
             </div>
           </div>
@@ -1711,6 +1783,12 @@ watch([headerText, footerText], () => render())
 }
 .pm__zoom span { min-width: 48px; text-align: center; font-weight: 600; }
 .pm__a4 { flex: 1; min-height: 0; background: #525659; padding: 14px; overflow: auto; }
+/* 【v1597】预览里**点一下就改** ✓ —— 可点的块鼠标移上去有提示、编辑时高亮 ✓
+   ⚠ 打印时必须**去掉**这些视觉 ✗（否则 PDF 里会印出蓝框 ✓） */
+.pm__editable { cursor: text; border-radius: 3px; transition: background .12s, box-shadow .12s; }
+.pm__editable:hover { background: rgba(22, 104, 224, 0.07); box-shadow: inset 0 0 0 1px rgba(22, 104, 224, 0.25); }
+.pm__editable:focus { outline: none; background: #fff; box-shadow: inset 0 0 0 2px var(--brand); }
+@media print { .pm__editable:hover, .pm__editable:focus { background: none !important; box-shadow: none !important; } }
 .pm__help { position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }
 .pm__helpbox { width: min(760px, 92vw); max-height: 86vh; display: flex; flex-direction: column; background: #fff; border-radius: var(--radius-xl); box-shadow: 0 24px 64px rgba(0,0,0,0.4); overflow: hidden; }
 .pm__helphead { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; border-bottom: 1px solid var(--border); font-size: 15px; }
