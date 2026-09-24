@@ -381,6 +381,25 @@ const circleOptions = computed(() => {
   if (pr.type === 'sphere') out.push({ v: 'circle:equator', label: '赤道' })
   return out
 })
+/** 【v1574】一组点的**质心**在该平面内正交基下的 `(u,v)` ✓
+ *  用途：面 / 平面上的点若不给 `u,v`，默认落在质心 ✓
+ *  （`u=v=0` 会落在 `P₀` = 面的第一个顶点上，跟顶点完全重合、看着像没加 ✗） */
+function centerUVOf(names: string[]): { u: number; v: number } | null {
+  const m = model.value
+  if (!m) return null
+  const all = resolveVertices(m)
+  const Q = names.map((n) => all[n]).filter(Boolean) as [number, number, number][]
+  if (Q.length < 3) return null
+  const ct: [number, number, number] = [
+    Q.reduce((s, q) => s + q[0], 0) / Q.length,
+    Q.reduce((s, q) => s + q[1], 0) / Q.length,
+    Q.reduce((s, q) => s + q[2], 0) / Q.length,
+  ]
+  const uv = faceUV(Q, ct)
+  if (!uv) return null
+  const rr = (v: number) => Math.round(v * 1000) / 1000
+  return { u: rr(uv.u), v: rr(uv.v) }
+}
 function addOnPoint() {
   if (!model.value || !opTarget.value) return
   const name = opName.value.trim() || nextMarkName()
@@ -391,7 +410,12 @@ function addOnPoint() {
     if (a && b) on = { kind: 'edge', a, b, t: +opT.value }
   } else if (opKind.value === 'face') {
     const face = rest.split('|').filter(Boolean)
-    if (face.length >= 3) on = { kind: 'face', face, u: +opU.value, v: +opV.value }
+    if (face.length >= 3) {
+      // 【v1574】`u=v=0` 会落在 `P₀`（= 面的**第一个顶点**）上 ✗ —— 跟顶点完全重合，
+      //   看起来就像"没加上" ✓ ⇒ 没给 u/v 时默认用**面的质心** ✓
+      const uv = (+opU.value === 0 && +opV.value === 0) ? centerUVOf(face) : null
+      on = uv ? { kind: 'face', face, u: uv.u, v: uv.v } : { kind: 'face', face, u: +opU.value, v: +opV.value }
+    }
   } else if (opKind.value === 'circle') {
     on = { kind: 'circle', which: rest as 'base' | 'top' | 'equator', th: +opT.value }
   }
@@ -431,11 +455,12 @@ function addThreePlanePoint() {
   if (!model.value || !threePlaneOK.value) return
   const name = opName.value.trim() || nextMarkName()
   const through = [plA.value, plB.value, plC.value]
-  // 默认落在 P₀ 处（u=v=0 ✓）—— 加完在预览区拖到想要的位置就行 ✓
+  // 【v1574】默认落在**三点质心** —— `u=v=0` 会跟第一个点完全重合、看着像没加 ✗
+  const uv = centerUVOf(through)
   const next = JSON.parse(raw.value) as Geom3D
   next.onPoints = [
     ...(next.onPoints || []).filter((x) => x.name !== name),
-    { name, on: { kind: 'plane', through, u: 0, v: 0 } },
+    { name, on: { kind: 'plane', through, u: uv?.u ?? 0, v: uv?.v ?? 0 } },
   ]
   raw.value = JSON.stringify(next, null, 1)
   parse()
