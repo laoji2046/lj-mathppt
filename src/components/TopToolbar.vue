@@ -671,13 +671,16 @@ onBeforeUnmount(() => {
           <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.file"></svg></span>文件<span class="caret">▾</span>
         </button>
         <div v-if="fileOpen" class="dropdown__menu">
+          <div class="dropdown__group">文件</div>
           <button class="dropdown__item" @click="newDeck"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.new"></svg></span>新建演示</button>
           <button class="dropdown__item" @click="saveDeck"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.save"></svg></span>保存</button>
               <button class="dropdown__item" title="把当前演示另存为 JSON 文件（可自选目录、自定义文件名；用「导入演示 JSON」可再次打开）" @click="saveDeckAs"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.save"></svg></span>另存为…（JSON）</button>
+          <div class="dropdown__group">导出</div>
           <button class="dropdown__item" title="导出独立 HTML" @click="exportHtml"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.html"></svg></span>导出 HTML</button>
           <button class="dropdown__item" title="全部页面 → 打印对话框 → 另存为 PDF（矢量文字）" @click="exportPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导出 PDF</button>
           <button class="dropdown__item" title="当前页截图为 PNG（2 倍分辨率）" @click="exportPng"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.png"></svg></span>导出 PNG（当前页）</button>
           <button class="dropdown__item" title="Markdown 源码：导出或导入（--- 横向 / -- 垂直 / Note: 备注）" @click="setViewMode('split')"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>MD 源码（导出/导入 Markdown）</button>
+          <div class="dropdown__group">导入与库</div>
           <button class="dropdown__item" title="导入之前导出的演示 JSON（.json）" @click="pickDeckJson"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>导入演示 JSON</button>
           <button class="dropdown__item" title="课件库：管理存过的整份课件（打开会替换当前内容，可用 Ctrl+Z 撤销）" @click="deckLibOpen = true"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>课件库</button>
           <button class="dropdown__item" title="试题库：按章节/知识点/题型/难度/年份筛选，看题干与答案，并能就地补全（新）" @click="qbOpen = true"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>试题库</button>
@@ -685,6 +688,8 @@ onBeforeUnmount(() => {
           <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.file"></svg></span>导入 PPT(.pptx)
         </button>
         <button v-if="addonOn('docx-import')" class="dropdown__item" title="导入 Word 文档（.docx）：本地解析、图片内嵌，一题一页" @click="pickDocx"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>导入 Word 文档（.docx）</button>
+        <button v-if="addonOn('pdf-import')" class="dropdown__item" title="导入 PDF（.pdf）：自动判断有没有文本层 —— 有就抽成可编辑文字，没有就每页一张图" @click="pickPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导入 PDF（.pdf）</button>
+          <div class="dropdown__group">样式与管理</div>
           <button v-if="addonOn('house-style')" class="dropdown__item" title="轻度：字号吸附 TypeScale 档位、字体换主题字体、背景换主题底色、文字色只做可读性夹取（保留原课件配色语义）——只改样式，不碰内容，可 Ctrl+Z 撤销" @click="houseStyle('soft')">
             <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.theme"></svg></span>统一风格（轻度）
           </button>
@@ -697,7 +702,6 @@ onBeforeUnmount(() => {
           <button class='dropdown__item' title='功能管理：开关各个 addon（关掉后入口隐藏、代码不加载；体积提示来自实测）' @click='openAddonMgr'>
             <span class='dropdown__icon'><svg viewBox='0 0 24 24' class='dd__svg' v-html='I.theme'></svg></span>功能管理…
           </button>
-        <button v-if="addonOn('pdf-import')" class="dropdown__item" title="导入 PDF（.pdf）：自动判断有没有文本层 —— 有就抽成可编辑文字，没有就每页一张图" @click="pickPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导入 PDF（.pdf）</button>
         </div>
       </div>
     </div>
@@ -1079,6 +1083,15 @@ onBeforeUnmount(() => {
   padding: 5px;
   z-index: 100;
   animation: fx-pop var(--dur-1) var(--ease);
+}
+/* 【v1568】文件菜单的分组标题 —— 只用「插入」加 4 行，不动原行 ✓ */
+.dropdown__group {
+  padding: 6px 9px 3px;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: .04em;
+  color: var(--muted);
+  user-select: none;
 }
 .dropdown__item {
   display: flex;
