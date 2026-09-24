@@ -98,6 +98,19 @@ export interface Geom3DView {
 }
 
 /** 顶点名 → 应用里的标注写法：A1 → A_1（应用里 _ 是下标） */
+/** 【v1605】圆柱 / 圆锥的**底面圆心** —— 它们也该画小圆点 ✓
+ *  （用户实报："有字母、无圆点" ✓）
+ *  病根：圆点属于**顶点** ✓ 而顶点**默认不画** ✓（只有勾了 `showDots` 才画 ✓）；
+ *    只有"后加的点"（自由点 / 受约束点）才**始终**画 ✓ → **圆心被漏掉了** ✓
+ *  ⇒ 把圆心名一并算进"始终画"的集合 ✓
+ *  ⚠ 只对**带圆的立体**生效 ✗ —— 棱柱 / 棱锥里的 `O` 不受影响 ✓ */
+export function centerDotNames(m?: { primitive?: { type?: string } } | null): string[] {
+  const t = m?.primitive?.type
+  if (t === 'cylinder') return ['O', 'O1']
+  if (t === 'cone' || t === 'sphere') return ['O']
+  return []
+}
+
 export function toLabelText(name: string): string {
   return name.replace(/^(.*?)(\d+)$/, '$1_$2')
 }

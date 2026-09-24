@@ -13,7 +13,7 @@
 import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
-import { buildSolid, faceUV, labelOffsetsFrom, LABEL_DIR_VEC, projectGeom, resolveVertices, solveView, type Geom3D, type LabelDir } from '@/composables/geom3d'
+import { buildSolid, centerDotNames, faceUV, labelOffsetsFrom, LABEL_DIR_VEC, projectGeom, resolveVertices, solveView, type Geom3D, type LabelDir } from '@/composables/geom3d'
 import { GEOM3D_PRESETS, GEOM3D_PROMPT } from '@/composables/geom3dPrompt'
 import { renderSolid, arcsSvg, vertexDotsSvg } from '@/composables/solid3d'
 import { closeGeom3D, geom3dSink } from '@/ui/geom3d'
@@ -149,6 +149,8 @@ const extraDotNames = computed(() => {
   const s = new Set<string>()
   for (const k of model.value?.freePoints || []) if (k?.name) s.add(k.name)
   for (const k of model.value?.onPoints || []) if (k?.name) s.add(k.name)
+  // 【v1605】圆柱 / 圆锥的**底面圆心**也**始终**画圆点 ✓（用户实报"有字母、无圆点" ✓）
+  for (const n of centerDotNames(model.value)) s.add(n)
   return s
 })
 /** 【v1574】按名字查它在 `proj.points` 里的下标 ✓
@@ -1206,6 +1208,8 @@ function insert() {
       const names = new Set<string>()
       for (const k of m.freePoints || []) if (k?.name) names.add(k.name)
       for (const k of m.onPoints || []) if (k?.name) names.add(k.name)
+      // 【v1605】圆柱 / 圆锥的底面圆心也要画圆点 ✓（否则插进画布又变回"只有字母" ✓）
+      for (const n of centerDotNames(m)) names.add(n)
       if (!names.size) return undefined
       const idx: number[] = []
       // ⚠ 这里也必须用 `pointNames`（不能用 `order` ✗）—— 它算的是**元素里 `points` 的下标** ✓
