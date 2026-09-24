@@ -861,6 +861,33 @@ async function insertToSlide() {
   }
 }
 
+/** 【v1612】把一道题包成**题目块** ✓（试卷的 `[题]…[选项]…[解析]…[/题]` 语法 ✓）
+ *
+ *  ⚠ 为什么**不**在 `questionTextOf` 里做 ✗：那个是**幻灯片与试卷共用**的纯文本排版 ✓
+ *    （幻灯片放不下"折叠解析"这种结构 ✓）⇒ 只在「加入试卷」这一处包装 ✓
+ *
+ *  ★ 好处 ✓：① 解析**默认收起** ✓ 点一下展开 ✓
+ *    ② 整块**不会被分页拆开** ✓（题干/选项/解析永远同页 ✓）
+ *    ③ **打印时解析自动展开** ✓（否则答案印不出来 ✓）
+ *    ④ 答案与解析都进 `[解析]` 段 ✓（试卷没有单独的"答案"段 ✓）
+ */
+function questionBlockOf(it: QItem, withAnswer: boolean, no = 0): string {
+  const m = metaOf(it)
+  const stem = String(m.stem || it.body || it.title || '').trim()
+  if (!stem) return ''
+  const opts = Array.isArray(m.options) ? (m.options as unknown[]).map((x) => String(x)) : []
+  const lines = ['[题]', (no ? no + '. ' : '') + stem]
+  if (opts.length) lines.push('[选项]', opts.map((o, i) => 'ABCDEFGH'[i] + '．' + o).join('\n'))
+  if (withAnswer) {
+    const ans = String(m.answer || '').trim()
+    const sol = String(m.solution || '').trim()
+    const body = [ans ? '【答案】' + ans : '', sol].filter(Boolean).join('\n')
+    if (body) lines.push('[解析]', body)
+  }
+  lines.push('[/题]')
+  return lines.join('\n')
+}
+
 /** 加入试卷：交给接收口（试卷没开 → App 会把它打开，PaperModal 挂载时消费 ✓） */
 async function addToPaper() {
   const list = targets.value
@@ -871,9 +898,12 @@ async function addToPaper() {
     const imgs: { n: number; src: string; caption?: string }[] = []
     let no = 1
     for (const it of list) {
-      const text = questionTextOf(it, withAnswer.value).trim()
+      // 【v1612】改成**题目块** ✓ —— 原来走 `questionTextOf`（纯文本 ✓ 而试卷**不认** `【答案】`/`【解析】` ✗）
+      //   后果曾是：插进去的不是题目块 ✓ → 没有解析折叠 ✓ 可能被分页拆开 ✓
+      const text = questionBlockOf(it, withAnswer.value, list.length > 1 ? no : 0)
       if (!text) continue
-      parts.push(list.length > 1 ? no++ + '. ' + text : text)
+      if (list.length > 1) no++
+      parts.push(text)
       for (const im of await pickImages(it)) imgs.push({ n: im.n, src: im.src, caption: im.caption })
     }
     if (!parts.length) { flash('这几道题没有可插入的文字'); return }
