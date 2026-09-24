@@ -1242,6 +1242,8 @@ function applySettings(s: any) {
   if (s.gapQ !== undefined) gapQ.value = s.gapQ
   if (s.headerGap !== undefined) headerGap.value = s.headerGap
   if (s.footerGap !== undefined) footerGap.value = s.footerGap
+  // 【v1585】跟草稿那个是**同一个毛病** ✗ —— `settingsSnapshot` 存了 `bodyCols` ✓ 但这里没读 ✓
+  if (s.bodyCols !== undefined) bodyCols.value = Math.max(1, Math.min(3, Number(s.bodyCols) || 1))
   if (s.autoNum !== undefined) autoNum.value = s.autoNum
   if (s.bodyCols) bodyCols.value = Number(s.bodyCols) || 1
   render()
@@ -1334,6 +1336,9 @@ function restoreDraft(): boolean {
     if (typeof d.headerGap === 'number') headerGap.value = d.headerGap
     if (typeof d.footerGap === 'number') footerGap.value = d.footerGap
     if (typeof d.optLayout === 'string') optLayout.value = d.optLayout
+    // 【v1585】原来漏了这行 ✗ —— `saveDraft` 存了 `bodyCols` 但**这里没读** ✓，
+    //   所以分栏设置存得进草稿、**恢复不回来** ✗（实测 `draftCols:2` 但重开还是 1 ✓）
+    if (typeof d.bodyCols === 'number') bodyCols.value = Math.max(1, Math.min(3, d.bodyCols))
     return true
   } catch { return false }
 }
@@ -1372,7 +1377,10 @@ function onQuestionInsert(p: PaperInsertPayload) {
 
 let draftTimer: number | undefined
 function saveDraftSoon() { clearTimeout(draftTimer); draftTimer = window.setTimeout(saveDraft, 300) }
-watch([input, template, fontFamily, fontSize, fontColor, lineHeight, para, indent, numStyle, headerText, footerText, autoNum, h2size, gapQ, headerGap, footerGap, optLayout], saveDraftSoon)
+// 【v1585】⚠ 这个列表**必须跟 `saveDraft` 里保存的字段一一对应** ✗ ——
+//   原来漏了 `bodyCols`：改完分栏**不碰别的** → 草稿里还是旧值 ✗
+//   （改分栏后再动别的控件反而会保住 ✓ 因为 `saveDraft` 里有它 ✓）—— 典型漏字段 bug ✓
+watch([input, template, fontFamily, fontSize, fontColor, lineHeight, para, indent, numStyle, headerText, footerText, autoNum, h2size, gapQ, headerGap, footerGap, optLayout, bodyCols], saveDraftSoon)
 
 onMounted(() => {
   if (!restoreDraft() && !input.value.trim()) input.value = DEFAULT
