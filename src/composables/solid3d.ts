@@ -345,6 +345,16 @@ function planeQuad(x0: number, y0: number, w2: number, d2: number): [number, num
   const dx = d2 * Math.SQRT1_2, dy = -d2 * Math.SQRT1_2
   return [[x0, y0], [x0 + w2, y0], [x0 + w2 + dx, y0 + dy], [x0 + dx, y0 + dy]]
 }
+/**
+ * 【v1634】定理图上"平面内一点"：用**平面坐标** (u, v) 取（u 沿前边 0~1，v 沿进深 0~1）。
+ *   以前是直接拍屏幕坐标 → 直线常常戳出平面外、两条"平行"线在斜二测下还不平行 ✗（用户：画的比较粗糙）。
+ *   用平面坐标取值，落在平面内是**算出来的**，平行关系也跟着仿射变换走 ✓
+ *   v 可以 >1（平面外的同一方向）✓ —— 用来画"平面外的平行线"正好。
+ */
+function planePoint(x0: number, y0: number, w2: number, d2: number, u: number, v: number): [number, number] {
+  const dx = d2 * Math.SQRT1_2, dy = -d2 * Math.SQRT1_2
+  return [x0 + u * w2 + v * dx, y0 + v * dy]
+}
 
 /** 必修二立体几何**定理图形的默认字母**（插进来就带着，可再改）。
  *  索引 = 顶点序号；null = 不标。α / β 标在平面角上，a / b / l / m 标在直线的端点。 */
@@ -408,29 +418,46 @@ export function solidVerts(kind: string, w: number, h: number, depth?: number): 
     const at = obliqPlacer(plane, HH, w, h)
     c = [...plane.map(([x, y]) => at(x, y, HH)), ...plane.map(([x, y]) => at(x, y))]
   } else if (kind === 'thmLinePlanePara') {
-    // ① 线面平行判定：平面 α(0-3)、α 内的直线 a(4,5)、α 外的直线 b(6,7)；a ∥ b ∥ AB
-    const q = planeQuad(w * 0.06, h * 0.84, w * 0.60, h * 0.34)
-    c = [...q, [w * 0.24, h * 0.70], [w * 0.56, h * 0.70], [w * 0.30, h * 0.24], [w * 0.62, h * 0.24]]
+    // ① 线面平行判定（a∥b，b⊂α → a∥α）：α 用平面坐标画，a 在 α 内( v=0.30 )，b 在 α 外同一方向( v=1.35 )
+    const x0 = w * 0.10, y0 = h * 0.82, aw = w * 0.56, ad = h * 0.30
+    const q = planeQuad(x0, y0, aw, ad)
+    c = [...q,
+      planePoint(x0, y0, aw, ad, 0.06, 0.28), planePoint(x0, y0, aw, ad, 0.94, 0.28),
+      planePoint(x0, y0, aw, ad, 0.06, 1.30), planePoint(x0, y0, aw, ad, 0.94, 1.30)]
   } else if (kind === 'thmLinePlaneProp') {
-    // ② 线面平行性质：α(0-3)、交线 b(4,5)、过 b 的平面 β(4,5,6,7)、β 内与 b 平行的 a(8,9)
-    const q = planeQuad(w * 0.04, h * 0.86, w * 0.60, h * 0.30)
-    const bx0 = w * 0.34, bx1 = w * 0.66, by = h * 0.70, ty = h * 0.18
-    // a 与 b **同向平行**、整条落在 β 内（平行四边形的上边与下边等长，所以 a 只能比 b 略短）
-    c = [...q, [bx0, by], [bx1, by], [bx1, ty], [bx0, ty], [bx0 + w * 0.05, h * 0.34], [bx1 - w * 0.05, h * 0.34]]
+    // ② 线面平行性质（a∥α，a⊂β，α∩β=b → a∥b）：α 与"立起来的墙面" β 共用交线 b
+    const x0 = w * 0.08, y0 = h * 0.86, aw = w * 0.52, ad = h * 0.28
+    const q = planeQuad(x0, y0, aw, ad)
+    const b0 = planePoint(x0, y0, aw, ad, 0.18, 0.55), b1 = planePoint(x0, y0, aw, ad, 0.92, 0.55)
+    const H = h * 0.52
+    // β 是立在 b 上的竖直墙面：b0→b1→b1↑→b0↑（4,5,6,7）；a 是 β 内与 b 平行的一条线 ✓
+    const t0 = b0[1] - H * 0.38
+    c = [...q, b0, b1, [b1[0], b1[1] - H], [b0[0], b0[1] - H],
+      [b0[0], t0], [b1[0], t0]]
   } else if (kind === 'thmPlanePlanePerp') {
-    // ③ 面面垂直判定：α(0-3)、α 的垂线 l(4→5)、过 l 的平面 β(4,6,7,5)
-    const q = planeQuad(w * 0.04, h * 0.86, w * 0.58, h * 0.30)
-    const ox = w * 0.38, oy = h * 0.72, rx = w * 0.64, uy = h * 0.62
-    const ly = h * 0.16
-    c = [...q, [ox, oy], [ox, ly], [rx, uy], [rx, uy - (oy - ly)]]
+    // ③ 面面垂直判定（l⊥α，l⊂β → β⊥α）：α 上一个垂足 O，l 竖直立起，β 是过 l 的竖直墙面（沿 α 的进深方向）
+    const x0 = w * 0.06, y0 = h * 0.86, aw = w * 0.56, ad = h * 0.30
+    const q = planeQuad(x0, y0, aw, ad)
+    //   β 的底边沿 AB 方向（水平）取一段 —— 竖起来就是个规规矩矩的竖直平面，比"窄板"好看 ✓
+    const O = planePoint(x0, y0, aw, ad, 0.30, 0.42)
+    const E = planePoint(x0, y0, aw, ad, 1.00, 0.42)
+    const H = h * 0.66
+    c = [...q, O, [O[0], O[1] - H], E, [E[0], E[1] - H]]
   } else if (kind === 'thmPlanePlaneProp') {
-    // ④ 面面垂直性质：α(0-3)、交线 m(4,5)、平面 β(4,5,6,7)、β 内垂直 m 的 a(8,9)、直角记号(10,11)
-    const q = planeQuad(w * 0.04, h * 0.88, w * 0.56, h * 0.28)
-    const mx0 = w * 0.32, mx1 = w * 0.62, my = h * 0.72, ty = h * 0.16
-    const ax = w * 0.44
-    c = [...q, [mx0, my], [mx1, my], [mx1, ty], [mx0, ty],
-      [ax, my], [ax, h * 0.30],
-      [ax + w * 0.03, my], [ax + w * 0.03, my - h * 0.04]]
+    // ④ 面面垂直性质（α⊥β，a⊂β，a⊥m → a⊥α）：m = α∩β，β 是立在 m 上的竖直墙面，a 在 β 内竖直向上
+    const x0 = w * 0.06, y0 = h * 0.88, aw = w * 0.54, ad = h * 0.26
+    const q = planeQuad(x0, y0, aw, ad)
+    const m0 = planePoint(x0, y0, aw, ad, 0.22, 0.60), m1 = planePoint(x0, y0, aw, ad, 0.88, 0.60)
+    const H = h * 0.50
+    const mid: [number, number] = [(m0[0] + m1[0]) / 2, (m0[1] + m1[1]) / 2]
+    const top: [number, number] = [mid[0], mid[1] - H]
+    // 直角记号：沿 m 取一小段 + 沿 a 取一小段（10 是拐点 ✓）
+    const ex = m1[0] - m0[0], ey = m1[1] - m0[1]
+    const el = Math.hypot(ex, ey) || 1
+    const k2 = Math.min(w, h) * 0.07
+    const p10: [number, number] = [mid[0] + (ex / el) * k2, mid[1] + (ey / el) * k2]
+    const p11: [number, number] = [p10[0], p10[1] - k2]
+    c = [...q, m0, m1, [m1[0], m1[1] - H], [m0[0], m0[1] - H], mid, top, p10, p11]
   } else if (kind === 'cube' || kind === 'cuboid') {
     const d = (depth ?? 0.4) * Math.min(w, h) * 0.4, dx = d, dy = -d * 0.8
     const side = kind === 'cube' ? Math.min(w, h) * 0.62 : 0
