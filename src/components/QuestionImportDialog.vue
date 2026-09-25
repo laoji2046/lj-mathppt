@@ -48,6 +48,9 @@ const text = ref('')
 const rows = ref<Row[]>([])
 const busy = ref(false)
 const msg = ref('')
+/** 【v1531】常驻提示：解析失败的原因要**留在屏幕上**（flash 只闪 3 秒，用户根本看不到 ✗）——
+ *  用户报「json 导入后解析不出来」「不知道提示在哪里」都是这个原因 ✓ */
+const note = ref('')
 const report = ref('')
 const detected = ref({ year: '', paperName: '', from: '' })
 const batchYear = ref('')
@@ -88,6 +91,11 @@ const noOptsCount = computed(() => rows.value.filter((r) => r.on && (r.q.qtype =
 function flash(t: string, ms = 3200) {
   msg.value = t
   window.setTimeout(() => { if (msg.value === t) msg.value = '' }, ms)
+}
+/** 失败 / 需要用户知道的事：**常驻**在右侧面板，直到下一次成功解析 ✓ */
+function fail(t: string) {
+  note.value = t
+  flash('✗ ' + t, 8000)
 }
 function errText(e: unknown): string {
   if (typeof e === 'string') return e
@@ -193,6 +201,7 @@ async function loadRows(list: ParsedQuestion[], tip: string) {
   }
   rows.value = list.map((q) => ({ on: true, q }))
   report.value = ''
+  note.value = ''   // 【v1531】解析成功 → 常驻提示清掉 ✓
   const bound = list.filter((q) => (q.images || []).length).length
   const imgNote = pendingImages.value.length
     ? '，图 ' + pendingImages.value.length + ' 张（绑到 ' + bound + ' 道' + (orphans.length ? '，其中 ' + orphans.length + ' 张没找到所属题、已按位置兜底请核对' : '') + '）'
@@ -279,7 +288,7 @@ function parseMd(raw: string, prefix = '') {
   try {
     const r = parseAnyMarkdown(raw)
     detected.value = r.detected
-    if (!r.list.length) { flash('没切出题目 —— 通用格式要「1. 2. 3.」题号；题库单题格式要有 YAML front-matter + ## 题目'); return }
+    if (!r.list.length) { fail('没切出题目 —— 通用格式要「1. 2. 3.」题号；题库单题格式要有 YAML front-matter + ## 题目'); return }
     if (r.detected.year || r.detected.paperName) {
       batchYear.value = r.detected.year || ''
       // 【优化】多卷合一的 PDF：每题已经带了自己那份卷的卷名 →
@@ -295,10 +304,31 @@ function parseMd(raw: string, prefix = '') {
 }
 
 function parseJson(raw: string, prefix = '') {
-  if (!raw.trim()) { flash('没有可解析的内容'); return }
+  if (!raw.trim()) { fail('没有可解析的内容'); return }
   pendingImages.value = []
+  // 【v1531】先自己判一次「这到底是不是完整 JSON」——用户看到的提示要能指路 ✓
+  const head = raw.trim().slice(0, 40).replace(/\s+/g, ' ')
+  let parsed: unknown = null
+  try { parsed = JSON.parse(raw) } catch {
+    const cut = !/^\s*[[{]/.test(raw)
+    fail(cut
+      ? '这段不是完整的 JSON —— 看着像是从中间截出来的（开头是「' + head + '…」）。请粘贴完整内容，或用「导入 .json 文件」直接选文件。'
+      : '这段不是合法的 JSON（开头是「' + head + '…」）—— 检查括号是否配对，或用「导入 .json 文件」直接选文件。')
+    return
+  }
+  // OCR 版面数据（PaddleOCR / PP-Structure 之类）：type + lines/bbox，里面没有题干/答案字段 ✗
+  const isLayout = (v: unknown): boolean => {
+    const arr = Array.isArray(v) ? v : (v && typeof v === 'object' ? [v] : [])
+    if (!arr.length) return false
+    const o = arr[0] as Record<string, unknown>
+    return !!o && typeof o === 'object' && (Array.isArray(o.lines) || Array.isArray(o.bbox) || (typeof o.type === 'string' && (o.angle !== undefined || o.lines !== undefined)))
+  }
+  if (isLayout(parsed)) {
+    fail('这是 OCR 的版面数据（type / lines / bbox），里面只有坐标和文字块，没有题干/答案字段 —— 要先转成题目 JSON（可以让 AI 按「高中数学试题录入解析提示词」转），或者直接用「导入 .pdf（MinerU）」识别 PDF。')
+    return
+  }
   const r = parseAnyJson(raw)
-  if (r.error) { flash('导入 JSON 失败：' + r.error); return }
+  if (r.error) { fail('导入 JSON 失败：' + r.error); return }
   const first = r.list[0]
   detected.value = { year: String(first.year || ''), paperName: first.paperName || '', from: r.mode }
   loadRows(r.list, (prefix ? prefix + '；' : '') + (r.mode === 'ai' ? 'AI 结构化 JSON' : '题库 JSON') + '解析完成')
@@ -584,6 +614,7 @@ function optsText(o: string[]): string {
 
         <section class="qi__review">
           <div class="qi__t1">② 核对（可直接改题型 / 板块 / 年份 / 试卷名 / 答案）</div>
+          <div v-if="note" class="qi__note">{{ note }}</div>
           <div v-if="!rows.length" class="qi__empty">左边导入或粘贴 → 识别结果出现在这里</div>
           <template v-else>
             <div class="qi__bar">
@@ -674,6 +705,8 @@ function optsText(o: string[]): string {
 .qi__hint--warn { color: #8a6a12; background: #fdf6e3; border: 1px solid #e0cf9a; border-radius: 6px; padding: 6px 8px; }
 .qi__hint b { color: var(--text); }
 .qi__empty { padding: 24px 10px; color: var(--muted); font-size: 12.5px; }
+/* 【v1531】解析失败 / 需要用户知道的说明：常驻（别只闪 3 秒）✓ */
+.qi__note { margin: 8px 0 10px; padding: 9px 11px; border: 1px solid #e6b980; background: #fff7e8; color: #8a5a12; border-radius: 8px; font-size: 12.5px; line-height: 1.7; white-space: pre-wrap; }
 .qi__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 2px 0 8px; }
 .qi__chk { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
 .qi__picked { font-size: 12px; color: var(--muted); }
