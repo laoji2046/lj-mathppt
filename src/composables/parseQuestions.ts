@@ -114,8 +114,10 @@ export interface ParsedQuestion {
 const RE_NUM = /^\s*\d{1,3}\s*[.、．)）]\s*/
 const RE_SEP = /^\s*-{3,}\s*$/
 const RE_OPT = /^\s*[（(]?\s*[A-Ha-h]\s*[.、．)）]\s*(.*)$/
-const RE_ANSWER = /^\s*(?:【答案】|答案\s*[:：]?)\s*(.*)$/
-const RE_SOLUTION = /^\s*(?:【解析】|【详解】|解析\s*[:：]|解\s*[:：])\s*(.*)$/
+// 【v1531】答案 / 解析的标签要认**变体**：真实卷子写「【参考答案】」「【锤子数学解析】」「【答案与解析】」
+//   （「锤子解析」这类教辅满篇都是 `【答案】C` + `【锤子数学解析】…`，旧正则只认【解析】✗）
+const RE_ANSWER = /^\s*(?:【\s*参考答案\s*】|【\s*答案\s*】|答案\s*[:：]?)\s*(.*)$/
+const RE_SOLUTION = /^\s*(?:【[^】]{0,12}(?:解析|详解|解答|分析)[^】]{0,6}】|【解析】|【详解】|解析\s*[:：]|解\s*[:：])\s*(.*)$/
 const RE_KNOW = /^\s*(?:【知识点】|知识点\s*[:：])\s*(.*)$/
 const RE_DIFF = /^\s*(?:【难度】|难度\s*[:：])\s*(.+?)\s*$/
 const RE_SOURCE = /^\s*(?:【来源】|来源\s*[:：])\s*(.*)$/
@@ -330,9 +332,19 @@ export function getContentListLen(): number { return currentContentList.length }
  *  这里改成**结构判断**：一直跳到第一个"像题开始"的行（题号行 或 小节标题行）为止 ✓ */
 export function stripLeadingMatter(text: string): string {
   const ls = text.split('\n')
+  /** 【v1531】是否在「注意事项 / 考生须知」块里：块内的编号条目**都不是题** ✓
+   *  以前只认带关键词的行，`5. 保持卷面清洁，不折叠、不破损。` 就从这里漏出去变成「第 1 道题」✗ */
+  let inNotes = false
   for (let i = 0; i < ls.length; i++) {
     const t = ls[i].trim()
     if (!t) continue
+    if (RE_NOTE_HEAD.test(t) || /注意事项|考生须知|答题须知|考试说明|答题说明/.test(t)) { inNotes = true; continue }
+    if (inNotes) {
+      // 段落标题 = 须知块结束，正文从这一行开始 ✓
+      if (isSegmentHead(t)) return ls.slice(i).join('\n')
+      if (isNoteItem(t)) continue
+      inNotes = false
+    }
     // ⚠ 考生须知也长成 `1. 本卷满分…` 的样子 ✗ → 带须知词的先跳过（否则会把须知当成第一道题）
     if (noteHits(t) >= 1) continue
     if (/^\d{1,3}\s*[.、．)）]\s*\S/.test(t) || isSegmentHead(t) || /^[（(]\s*\d{1,3}\s*分/.test(t)) {
@@ -341,6 +353,16 @@ export function stripLeadingMatter(text: string): string {
   }
   return text
 }
+/** 【v1531】须知条目（卷首「注意事项」块里的条目）—— 编号 + 考场用语 ✓
+ *  实测：`5. 保持卷面清洁，不折叠、不破损。` 一个须知关键词都没有（noteHits=0）→
+ *  以前 stripLeadingMatter 从这里开始返回 → 它被当成**第 1 道题**，还占了题号 5 ✗
+ *  （`3. 选择题答案使用 2B 铅笔填涂…` 同理） */
+function isNoteItem(t: string): boolean {
+  if (!/^\s*[(（]?\s*\d{1,3}\s*[.、．)）]/.test(t)) return false
+  if (hasQuestionFeature(t)) return false
+  return /卷面|答题卡|答题纸|答题区|考生|监考|准考证|条形码|铅笔|签字笔|中性笔|涂改|违纪|开考|交卷|无效|姓名|填涂|作答|考试|满分|分钟|页/.test(t)
+}
+
 
 export function typeOfSegmentHead(t: string): string {
   const s = t.replace(/[#*`_\s]/g, '')
@@ -717,30 +739,93 @@ function answersFromTable(html: string, into: Map<number, AnsEntry>): void {
   }
 }
 
+/** 【v1531】答案区里的小节标题（`一、选择题` `二、填空题：…`）—— 先剥掉再解析 ✓
+ *  真实写法：`一、选择题1--4CDCA 5--8BDBC`（标题和答案串**粘在一行**）✗ 老规则整行不认 */
+const RE_ANS_SECHEAD = /^[\s（(]*[一二三四五六七八九十]+\s*[、.．)）]?\s*(选择题|多选题|单选题|填空题|解答题|判断题|计算题|证明题|应用题)[^0-9A-Ha-h]*/
+
+/** 紧凑答案行：剥掉小节标题后**只剩题号 / 字母 / 分隔符** ✓
+ *  真实写法：`1--4CDCA 5--8BDBC`、`9.ABC 10. AC 11. ACD.`、`1-5 ACBDA`
+ *  ⚠ 判据必须严：`2B 铅笔`、`故选 A.` 这类正文不能当答案串 ✗（所以要求整行只有题号+字母+分隔符） */
+function compactAnswerGroups(line: string): { no: number; letters: string }[] {
+  const s = line.replace(RE_ANS_SECHEAD, '').trim()
+  if (!s || !/\d/.test(s)) return []
+  if (!/^[0-9A-Ha-h\s.、．,，:：;；()（）\-~—–－]+$/.test(s)) return []
+  const out: { no: number; letters: string }[] = []
+  const re = /(\d{1,3})\s*(?:[-~—–－]{1,2}\s*(\d{1,3}))?\s*[.、．)）:：]?\s*([A-H]{1,8})(?![A-Za-z0-9])/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(s))) {
+    const a = Number(m[1])
+    const b = m[2] ? Number(m[2]) : a
+    const letters = m[3]
+    if (b > a) {
+      // 区间写法（`1--4CDCA`）：字母数必须正好等于题数，否则**不猜** ✓
+      if (letters.length !== b - a + 1) continue
+      for (let i = 0; i < letters.length; i++) out.push({ no: a + i, letters: letters[i] })
+    } else {
+      out.push({ no: a, letters })
+    }
+  }
+  return out
+}
+
+/** 【v1531】一行里有多个「题号 + 内容」条目 → 拆开分别处理 ✓
+ *  真实写法：`12. 2 13. $\frac{\sqrt{3}}{2}$ 14. 240`（填空答案挤在一行）✗ 老规则只认第一个 */
+function splitNumberedLine(line: string): string[] {
+  if (line.length > 200) return [line]
+  const ms = Array.from(line.matchAll(/(?:^|[\s；;，,])(\d{1,3})\s*[.、．)）]\s+\S/g))
+  if (ms.length < 2) return [line]
+  // 题号必须**连号**（12、13、14…）：只判「递增」不够 ——
+  //   实测踩坑：正文里「中位数为 4. 故选 B.」的 4. 被当成第二个条目，硬拆成两段 → 答案/解析全错位 ✗
+  const nums = ms.map((m) => Number(m[1]))
+  for (let i = 1; i < nums.length; i++) if (nums[i] !== nums[i - 1] + 1) return [line]
+  const cuts = ms.map((m) => m.index! + (m[0].length - m[0].replace(/^[\s；;，,]*/, '').length))
+  const parts: string[] = []
+  if (cuts[0] > 0) parts.push(line.slice(0, cuts[0]))
+  for (let i = 0; i < cuts.length; i++) parts.push(line.slice(cuts[i], i + 1 < cuts.length ? cuts[i + 1] : undefined))
+  const clean = parts.map((p) => p.trim()).filter(Boolean)
+  // 每一条都要**短**（填空答案那种）；段落长句里的编号不该走这条路 ✓
+  if (clean.some((p) => p.length > 80)) return [line]
+  return clean
+}
+
+/** 【v1531】没写题号的解答块头（`解：(1)…` / `证明：…`）—— 解答题在答案区常这么排 ✓
+ *  ⚠ 必须排除「有题号的」（`15、解：`）：那种走常规的按题号配 ✓ */
+function isSolBlockHead(line: string): boolean {
+  if (!/^[(（]?\s*\d{1,3}\s*[)）.、．]/.test(line)) return false
+  return /^(?:解|证明|分析|解答)\s*[:：]/.test(line)
+}
+
 /** 逐题 / 串式答案 —— 真实写法：`1. B 将样本数据…故选B.`、`1-5 ACBDA`、`【答案】…【解析】…` ✓ */
-function answersFromLines(ans: string, into: Map<number, AnsEntry>): void {
+function answersFromLines(ans: string, into: Map<number, AnsEntry>, blocks: string[]): void {
   const ls = ans.replace(/<table[\s\S]*?<\/table>/gi, '').split('\n')
   let curNo = 0
-  for (const rawLine of ls) {
-    const line = rawLine.trim()
-    if (!line || isAnswerHead(line)) continue
+  /** 【v1531】正在累积的「没写题号的解答块」（`解：(1)…`）—— 见 isSolBlockHead ✓ */
+  let curBlock: string[] | null = null
+  /** 收尾：把正在累积的解答块推进 blocks[] ✓ */
+  const flushBlock = () => { if (curBlock && curBlock.length) blocks.push(curBlock.join('\n')); curBlock = null }
+  /** 处理一行（返回 true = 这行已经消费掉了）。拆行后要对每一段都跑一遍 ✓ */
+  const consume = (line: string): boolean => {
     // ① 答案串：`1-5 ACBDA` / `9~10：BC`
     const mRun = line.match(/^[(（]?\s*(\d{1,3})\s*[-~—]\s*(\d{1,3})\s*[)）]?\s*[:：.、]?\s*([A-H]{2,})\s*$/)
     if (mRun) {
       const a = Number(mRun[1])
       mRun[3].split('').forEach((v, i) => { const no = a + i; if (!into.has(no)) into.set(no, { answer: v, solution: '' }) })
-      continue
+      return true
     }
     // ② 一行多组：`1.A 2.B 3.C`
     const pairs = Array.from(line.matchAll(/(\d{1,3})\s*[.、．)）]\s*([A-H])(?![A-Za-z0-9])/g))
     if (pairs.length >= 2) {
       for (const p of pairs) { const no = Number(p[1]); if (!into.has(no)) into.set(no, { answer: p[2], solution: '' }) }
-      continue
+      return true
     }
     const m = line.match(/^[(（]?\s*(\d{1,3})\s*[)）.、．]\s*([\s\S]*)$/)
     if (m) {
       curNo = Number(m[1])
-      const rest = m[2].trim()
+      let rest = m[2].trim()
+      // 【v1531】答案区里解答题常写成 `18.（17分）解：(1)…` —— 分值**不是答案**，先剥掉 ✓
+      //   （实测：「（17 分）」被当成答案填进了题库 ✗）
+      const mScore = rest.match(/^[(（]\s*\d{1,3}\s*分\s*[)）]\s*/)
+      if (mScore) rest = rest.slice(mScore[0].length)
       const tagged = rest.match(/^【答案】\s*([\s\S]*?)(?:【解析】|【详解】|$)([\s\S]*)$/)
       const coloned = rest.match(/^答案\s*[:：]\s*([\s\S]*?)(?:解析\s*[:：]|$)([\s\S]*)$/)
       const g = tagged || coloned
@@ -748,24 +833,49 @@ function answersFromLines(ans: string, into: Map<number, AnsEntry>): void {
         // 解析正文里别再带「【解析】」标签（存进库的应该是纯解析 ✓）
         const sol = String(g[2] || '').replace(/^\s*(【解析】|【详解】|解析\s*[:：])\s*/, '').trim()
         if (!into.has(curNo)) into.set(curNo, { answer: g[1].trim(), solution: sol })
-        continue
+        return true
       }
       const mA = rest.match(/^([A-H])(?:\s|$|[.、．)）])([\s\S]*)$/)
-      if (mA) { if (!into.has(curNo)) into.set(curNo, { answer: mA[1], solution: mA[2].trim() }); continue }
+      if (mA) { if (!into.has(curNo)) into.set(curNo, { answer: mA[1], solution: mA[2].trim() }); return true }
       // 填空/解答：第一句短、**且不像解释**才当答案；否则整段当解析（不硬塞 ✓）
       //   ⚠ 实测坑：答案区写成「Q7 这是说明文字」时，整句被当成答案 → 答案字段塞进一段话 ✗
       const first = (rest.split(/[。．.;；]/)[0] || '').trim()
-      const explain = /因为|所以|故选|由题|解得|可得|证明|析|解:/.test(first)
+      // 【v1531】`解：` 全角冒号也要算「这是解析不是答案」—— 解答题答案区写的就是 `15.（13分）解：…`
+      //   （旧正则只写了半角 `解:` → 整段被当答案塞进 answer ✗）
+      const explain = /因为|所以|故选|由题|解得|可得|证明|析|解\s*[:：]/.test(first)
       const short = first.length > 0 && first.length <= 24 && !explain && !/^[(（]\s*[1-9]\s*[)）]/.test(first)
       if (!into.has(curNo)) into.set(curNo, short ? { answer: first, solution: rest.slice(first.length).trim() } : { answer: '', solution: rest })
+      return true
+    }
+    return false
+  }
+  for (const rawLine of ls) {
+    const line = rawLine.trim()
+    if (!line || isAnswerHead(line)) continue
+    // ⓪ 【v1531】紧凑答案行：`一、选择题1--4CDCA 5--8BDBC`（区间）/ `9.ABC 10. AC 11. ACD.`（多组字母）
+    const groups = compactAnswerGroups(line)
+    if (groups.length) {
+      flushBlock()
+      for (const g of groups) if (!into.has(g.no)) into.set(g.no, { answer: g.letters, solution: '' })
+      // ⚠ 必须把 curNo 停在最后一个题号上：真实写法是「`1. C` 一行、`【解析】…` 下一行」——
+      //   不设 curNo 的话，下一行的解析就挂不上去了 ✗（实测：11 份样本的解析会整段丢）
+      curNo = groups[groups.length - 1].no
       continue
     }
+    // ⓪b 【v1531】一行多条目：`12. 2 13. $\frac{\sqrt{3}}{2}$ 14. 240` → 拆开逐条吃 ✓
+    const parts = splitNumberedLine(line)
+    if (parts.length > 1) { flushBlock(); for (const p of parts) consume(p); continue }
+    // ⓪c 【v1531】没写题号的解答块：`解：(1)…`（表格给完 1~11，后面 15~19 直接写「解：」）✓
+    if (isSolBlockHead(line)) { flushBlock(); curBlock = [line]; curNo = 0; continue }
+    if (curBlock) { curBlock.push(line); continue }
+    if (consume(line)) continue
     // ③ 续行 → 挂到当前题号的解析上
     if (curNo && into.has(curNo)) {
       const e = into.get(curNo) as AnsEntry
       e.solution = (e.solution ? e.solution + '\n' : '') + line
     }
   }
+  flushBlock()
 }
 
 /** 清掉一条具体的告警（配到答案后「没有识别到答案」就不该再挂着 ✓） */
@@ -785,9 +895,11 @@ function clearWarn(q: ParsedQuestion, kw: string): void {
 function applyAnswers(out: ParsedQuestion[], ans: string): void {
   if (!out.length || !ans.trim()) return
   const map = new Map<number, AnsEntry>()
+  /** 【v1531】答案区里**没写题号**的解答块（`解：(1)…`），按出现顺序收着 —— 见下面第 ④ 条 ✓ */
+  const blocks: string[] = []
   answersFromTable(ans, map)
-  answersFromLines(ans, map)
-  if (!map.size) return
+  answersFromLines(ans, map, blocks)
+  if (!map.size && !blocks.length) return
   // 多卷合一：答案区**紧跟在最后一份卷的题目后面** → 只配「最后一份卷」的题
   //   （这是排版上的确定事实，不是猜 ✓；实测 3 套真题因为「假卷名」触发了旧的全禁规则，答案白丢）
   const order: string[] = []
@@ -801,8 +913,10 @@ function applyAnswers(out: ParsedQuestion[], ans: string): void {
   const put = (q: ParsedQuestion, e: AnsEntry | undefined, note?: string) => {
     if (!e) return false
     let did = false
-    if (!q.answer && e.answer) { q.answer = e.answer; did = true }
-    if (!q.solution && e.solution) { q.solution = e.solution; did = true }
+    // 【v1531】只由标点组成的「解析」是噪声（实测解答块会收进孤零零的 `。`）→ 不写库 ✓
+    const solid = (x: string) => !!x && !/^[\s。．.，,；;：:、·\-—…（）()【】\[\]]*$/.test(x)
+    if (!q.answer && solid(e.answer)) { q.answer = e.answer; did = true }
+    if (!q.solution && solid(e.solution)) { q.solution = e.solution; did = true }
     if (did) {
       clearWarn(q, '没有识别到答案')
       if (note) q.warn = [q.warn, note].filter(Boolean).join('；')
@@ -821,6 +935,19 @@ function applyAnswers(out: ParsedQuestion[], ans: string): void {
   if (!hit && !multi && map.size === out.length) {
     const keys = Array.from(map.keys())
     out.forEach((q, i) => { if (put(q, map.get(keys[i]), '答案按**顺序**从卷尾答案区配来（题号对不上），请核对')) hit++ })
+  }
+  // ④ 【v1531】答案区里没写题号的解答块：**只配「答案和解析都还是空」的那几道**，
+  //    且块数与这些题的条数**完全相等**才配（能对上才配，对不上就留空 + 说明 ✓）
+  if (!multi && blocks.length) {
+    const need = out.filter((q) => mine(q) && !(q.answer || '').trim() && !(q.solution || '').trim())
+    if (need.length === blocks.length) {
+      need.forEach((q, i) => {
+        q.solution = blocks[i]
+        clearWarn(q, '没有识别到答案')
+        q.warn = [q.warn, '卷尾答案区里这道题没写题号，解析按**顺序**配来，请核对'].filter(Boolean).join('；')
+        hit++
+      })
+    }
   }
   if (multi && hit) {
     // 别的卷说明一句（它们没被配，别让人以为漏了 ✓）
