@@ -9,7 +9,6 @@ import type { ImageElement, MathFigureCat, MathFigureElement, MathFigureKind, Sl
 import { createElement, MATH_FIGURE_CATS, MATH_FIGURE_OPTIONS } from '@/types'
 import { DEFAULT_PIECEWISE, figureBox, viewAspect } from '@/composables/mathPlot'
 import { THM_LABELS } from '@/composables/solid3d'
-import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
 import { openVectorize } from '@/ui/vectorize'
 import { openGeom3D } from '@/ui/geom3d'
 import { closeFigPalette, figPaletteSink } from '@/ui/figPalette'
@@ -107,11 +106,6 @@ function realElOfKind(kind: MathFigureKind): SlideElement {
   Object.assign(el, { kind, ...(figureBox(kind) || {}), ...extra })
   return el
 }
-function realElOfPreset(p: (typeof SOLID_FIGURE_PRESETS)[number]): SlideElement {
-  const el = createElement('mathfig', { x: 0, y: 0 })
-  Object.assign(el, { ...p.el, w: p.w, h: p.h, fill: 'transparent', stroke: '#1a1a1a', strokeWidth: 2.8 })
-  return el
-}
 
 async function onPick(kind: MathFigureKind) {
   const sink = figPaletteSink.value
@@ -138,41 +132,10 @@ function insert(kind: MathFigureKind) {
 }
 
 /** 复刻图：连同顶点 / 边拓扑 / 字母一起插入，并按原图宽高比给尺寸 */
-/** 图形重建的卡片走同一条"交给 sink"的路（原来只会在画布上插入 ✗ —— 文档里点它没反应） */
-async function onPickPreset(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
-  const sink = figPaletteSink.value
-  if (!sink) {
-    insertPreset(p)
-    return
-  }
-  const svg = await grabByRealRender(realElOfPreset(p))
-  if (svg) sink(svg, p.name, p.name)
-  else insertPreset(p)
-  closeFigPalette()
-  emit('close')
-}
+/** 【v1629】原来这里还有 onPickPreset（预制图形卡片的插入口）—— 卡片按要求去掉了，
+ *   连同它用到的 realElOfPreset / insertPreset / 缩略图常量一起删 ✓ */
 
-function insertPreset(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
-  store.addElement('mathfig', {
-    ...p.el,
-    w: p.w,
-    h: p.h,
-    fill: 'transparent',
-    stroke: '#1a1a1a',
-    strokeWidth: 2.8,
-  } as any)
-  emit('close')
-}
 
-/** 复刻图缩略图用的"假元素"（按卡片等比缩放，不拉变形） */
-function presetPreview(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
-  return {
-    id: 'pv_' + p.id, type: 'mathfig', x: 0, y: 0, rot: 0,
-    ...p.el,
-    w: p.w, h: p.h,
-    fill: 'transparent', stroke: '#3b3b46', strokeWidth: 2.6,
-  } as any
-}
 /** ---- 我的图形（第三期图形库）：存下的「种类 + 参数」，一键插回；插进去仍然可调参数 ---- */
 const myFigures = ref<FigureEntry[]>([])
 async function loadMyFigures() {
@@ -190,9 +153,6 @@ async function delSaved(f: FigureEntry) {
   await loadMyFigures()
 }
 
-const THUMB_W = 108
-const THUMB_H = 108
-
 /** 自图片重建：选一张线稿，转到「图片转图形」弹窗里识别 + 改 */
 const fileInput = ref<HTMLInputElement | null>(null)
 function pickImage() { fileInput.value?.click() }
@@ -204,10 +164,6 @@ function onPicked(e: Event) {
   const r = new FileReader()
   r.onload = () => { openVectorize(String(r.result || '')); emit('close') }
   r.readAsDataURL(f)
-}
-/** 缩略图里把原始尺寸等比缩到卡片内 */
-function recastScale(p: (typeof SOLID_FIGURE_PRESETS)[number]) {
-  return Math.min(THUMB_W / p.w, THUMB_H / p.h)
 }
 
 /**
@@ -253,7 +209,7 @@ function pickCanvasImage(el: ImageElement) {
           :class="{ 'tab--on': current && current.cat === g.cat }"
           @click="cat = g.cat"
         >
-          {{ g.cat }}<em>{{ g.cat === RECAST ? SOLID_FIGURE_PRESETS.length : g.list.length }}</em>
+          {{ g.cat }}<em>{{ g.cat === RECAST ? 3 : g.list.length }}</em>
         </button>
       </div>
 
@@ -286,23 +242,8 @@ function pickCanvasImage(el: ImageElement) {
             <span class="card__thumb"><span class="recast__plus">▣</span></span>
             <span class="card__name">自画布重建…</span>
           </button>
-          <button
-            v-for="p in SOLID_FIGURE_PRESETS"
-            :key="p.id"
-            class="card card--recast"
-            :title="p.note ? p.name + ' ｜ ' + p.note : p.name"
-            @click="onPickPreset(p)"
-          >
-            <span class="card__thumb">
-              <span
-                class="recast"
-                :style="{ width: p.w + 'px', height: p.h + 'px', transform: 'translate(-50%, -50%) scale(' + recastScale(p) + ')' }"
-              >
-                <FigurePreview :el="presetPreview(p)" fit="stretch" />
-              </span>
-            </span>
-            <span class="card__name">{{ p.name }}</span>
-          </button>
+          <!-- 【v1629】按要求去掉「预制图形」卡片（原来这里列 7 套人工描好的立体图）——
+               数据**不删**：自图片重建 / 模板匹配（figMatch、vectorize）还用这批标准图做识别 ✓ -->
         </template>
         <button
           v-for="f in (current && current.cat === RECAST ? [] : current?.list ?? [])"
