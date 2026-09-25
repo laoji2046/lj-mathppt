@@ -288,7 +288,17 @@ function setFigParamSoft(key: string, raw: string) {
 // ── 圆锥曲线 + 多条直线：**椭圆与每条线可以各自设颜色** ──
 /** 有几条线（0 表示这个图元没开"多条线"，颜色行就都不显示） */
 const lineN = computed(() => Math.max(0, Math.min(4, Math.round(figParamVal('n', 0)))))
-const hasLineParams = computed(() => figParams.value.some((p) => p.key === 'n'))
+/**
+ * 【v1635】曲线专属工具（加动点 / 作切线 / 求交点）只给**函数图像**与**圆锥曲线**用 ✓
+ *   ⚠ 以前的判据是「这个图形有没有 n 参数」（hasLineParams）—— 而**频率分布直方图的 n 是组数** ✗，
+ *   于是直方图、频率分布表这些也会冒出一排「过标注点作切线」「求交点」按钮（用户实报）✓
+ *   改成看**分类**：曲线类的图形才显示 ✓
+ */
+const isCurveFig = computed(() => {
+  const k = String(mathfig.value?.kind || '')
+  const opt = MATH_FIGURE_OPTIONS.find((o) => o.v === k)
+  return !!opt && (opt.cat === '圆锥曲线' || opt.cat === '函数图像')
+})
 const conicColorVal = computed(() => mathfig.value?.conicStroke || mathfig.value?.stroke || '#1a1a1a')
 const axisColorVal = computed(() => mathfig.value?.axisColor || mathfig.value?.stroke || '#1a1a1a')
 function lineColorVal(i: number) {
@@ -1639,15 +1649,15 @@ function layerTypeLabel(type: string) {
           <p class="cfn__hint">区间端点写很大（如 ±50）就等于 ±∞；**贴着取景框边**的端点不画圆点。改完在画布上直接拖缩放即可调整大小。</p>
         </template>
         <!-- 可调参数（正弦型 A/ω/φ、含参二次的 a…） -->
-        <button v-if="hasLineParams" class="figlib__btn" title="在曲线上加一个动点：拖动它只会沿曲线滑动（不会跑出曲线）" @click="addMovingPoint">＋ 在曲线上加动点</button>
-        <button v-if="hasLineParams" class="figlib__btn" title="给最近的标注点作切线：切线会随该点自动转动（动点一滑、切线跟着转）" @click="addTangent">＋ 过标注点作切线</button>
-        <span v-if="hasLineParams" class="tangfrom" title="把第 n 个标注点当定点，一次加两条过它的切线（定点在曲线外才有两条）">
+        <button v-if="isCurveFig" class="figlib__btn" title="在曲线上加一个动点：拖动它只会沿曲线滑动（不会跑出曲线）" @click="addMovingPoint">＋ 在曲线上加动点</button>
+        <button v-if="isCurveFig" class="figlib__btn" title="给最近的标注点作切线：切线会随该点自动转动（动点一滑、切线跟着转）" @click="addTangent">＋ 过标注点作切线</button>
+        <span v-if="isCurveFig" class="tangfrom" title="把第 n 个标注点当定点，一次加两条过它的切线（定点在曲线外才有两条）">
           过第
           <input v-model.number="tangentFromPt" class="tangfrom__n" type="number" min="1" max="6" step="1" />
           个点作切线
           <button class="figlib__btn" @click="addTangentFromPoint">＋ 加两条</button>
         </span>
-        <button v-if="hasLineParams" class="figlib__btn" title="算出每条直线/线段与这条圆锥曲线的交点，直接生成标注点（之后可用橙色手柄拖动微调）" @click="calcIntersections">求交点 → 生成标注点</button>
+        <button v-if="isCurveFig" class="figlib__btn" title="算出每条直线/线段与这条圆锥曲线的交点，直接生成标注点（之后可用橙色手柄拖动微调）" @click="calcIntersections">求交点 → 生成标注点</button>
         <p v-if="ixMsg" class="panel__hint">{{ ixMsg }}</p>
         <p v-if="linkedN" class="panel__hint">其中 <b>{{ linkedN }}</b> 个点钉在「直线与曲线的交点」上：<b>直线一改它们就跟着动</b>；拖它 = 平移那条线；手动改它的 x/y 则解除绑定。</p>
         <button class="figlib__btn" title="把这个图形的种类与参数存进图形库，之后在「数学图形」面板里一键插回" @click="saveFigToLibrary">存入图形库</button>
@@ -1744,7 +1754,7 @@ function layerTypeLabel(type: string) {
           </label>
           <!-- 点N 的颜色同上，已进框 -->
         </template>
-        <template v-if="hasLineParams">
+        <template v-if="isCurveFig">
           <!-- 曲线颜色 / 坐标轴颜色已经放进各自的矩形框里了（曲线框、坐标轴框） -->
           <!-- 线N / 点N 的颜色已经放进各自的矩形框里了（见上面的 .fbox） -->
         </template>
