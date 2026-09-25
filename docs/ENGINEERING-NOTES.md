@@ -149,3 +149,19 @@ $0<a<1$ 里的 < 会被当标签开头，整段烂掉。normalizeMixed 刻意不
 
 graphicFrame 分支"发现不是表格就 return"，导致藏在里面的 OLE 统计一直是 0。
 凡是"这个节点我处理不了"的地方，都要问一句：里面还有没有别人要的东西？
+
+
+## 十、浮窗的东西：`pointer-events: none` 会**继承**，子弹窗必须写回 auto ★
+
+**踩过的坑（v1472 埋、v1616 才发现）**：题库"浮窗化"给面板根写了 `.qb { pointer-events: none }`（目的：不挡后面的画布 ✓）
++ `.qb__box { pointer-events: auto }`（面板本体可点 ✓）。但这个属性**会被所有后代继承** ✗ ——
+而 `QuestionImportDialog`（试题录入）和 `DraftBox`（草稿箱）是 `.qb` 的**直接子元素**
+（`QuestionBankPanel.vue:1200/1201`），它们从没写回 `auto` ✗ → **整个弹窗点不动** ✗
+（用户报："试题录入 → 导入 md / json / pdf 都无反应" ✗）。
+
+**为什么这么难发现**：JS 的 `element.click()` **绕过命中测试** ✓ —— 自动化探针里点得动 ✗✗，
+只有真人用鼠标才复现 ✓。**定位手法**（这次用的 ✓）：真机 CDP 里
+`document.elementFromPoint(按钮中心x, y)` → 返回的是**背后的面板元素** ✗ 而不是按钮 ✓，一眼就是它。
+
+**现行做法**：任何挂在 `.qb` 下的模态层，自己那条根规则里**显式写** `pointer-events: auto` ✓
+（`.qi` / `.dbx` 已加 ✓）。以后再加"浮窗的子弹窗"，先看一眼它是不是 `pointer-events: none` 的后代 ✓。
