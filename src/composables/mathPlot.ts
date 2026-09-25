@@ -269,7 +269,7 @@ export function histogramParams(): ParamSpec[] {
   return out
 }
 /** 频率分布直方图：自己算坐标（不依赖其它图元的助手 ✓，改起来不怕碰坏别人 ✓） */
-export function histogramFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>, labels?: { x?: string; y?: string }): string {
+export function histogramFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>, labels?: { x?: string; y?: string; bars?: string }): string {
   const p = withParams('histogram', params)
   const n = Math.max(1, Math.min(HIST_MAX, Math.round(p.n || 8)))
   const bw = p.bw > 0 ? p.bw : 10
@@ -316,11 +316,36 @@ export function histogramFigure(w: number, h: number, stroke: string, sw: number
     if (a === 0) return '0'
     return String(Number(v.toFixed(4)))
   }
+  // 【v1633】每组填充（用户要求：可对所有组 / 指定组设阴影、颜色）——
+  //   编码放在 labels.bars：`图案:颜色|图案:颜色|…`（空 = 不填）✓
+  const barSpec = String(labels?.bars || "")
+  const barArr = barSpec ? barSpec.split("|") : []
+  const defs: string[] = []
+  const patIds = new Set<string>()
+  const uid = Math.random().toString(36).slice(2, 7)
+  const patternDef = (id: string, kind: string, color: string): string => {
+    const head = '<pattern id="' + id + '" width="8" height="8" patternUnits="userSpaceOnUse">'
+    if (kind === "h") return head + '<path d="M-2 2 L2 -2 M0 8 L8 0 M6 10 L10 6" stroke="' + color + '" stroke-width="1.1"/></pattern>'
+    if (kind === "x") return head + '<path d="M0 8 L8 0 M0 0 L8 8" stroke="' + color + '" stroke-width="1.1"/></pattern>'
+    if (kind === "d") return head + '<circle cx="2" cy="2" r="0.9" fill="' + color + '"/></pattern>'
+    return head + '<path d="M0 0 L8 0 M0 0 L0 8" stroke="' + color + '" stroke-width="0.9"/></pattern>'
+  }
+  const barFill = (i: number): string => {
+    const spec = barArr[i]
+    if (!spec) return "none"
+    const parts = spec.split(":")
+    const pat = parts[0] || "", col = parts[1] || ink
+    if (!pat) return "none"
+    if (pat === "s") return col
+    const id = "hp" + uid + "_" + i
+    if (!patIds.has(id)) { patIds.add(id); defs.push(patternDef(id, pat, col)) }
+    return "url(#" + id + ")"
+  }
   for (let i = 0; i < n; i++) {
     const v = vals[i]
     if (v <= 0) continue
     const xa = X(start + i * bw), xb = X(start + (i + 1) * bw), yv = Y(v)
-    L.push('<rect x="' + n1(xa) + '" y="' + n1(yv) + '" width="' + n1(xb - xa) + '" height="' + n1(y0 - yv) + '" fill="none" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+    L.push('<rect x="' + n1(xa) + '" y="' + n1(yv) + '" width="' + n1(xb - xa) + '" height="' + n1(y0 - yv) + '" fill="' + barFill(i) + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
   }
   // 刻度线画到**最上面一档之下** ✓（最顶那格留给「频率 / 组距」✓）
   for (let k = 1; stepY * k < ymax - stepY * 1e-6; k++) {
@@ -346,7 +371,8 @@ export function histogramFigure(w: number, h: number, stroke: string, sw: number
     L.push('<text x="' + n1(labX) + '" y="' + n1(yTop + fs * 1.05) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">组距</text>')
   }
   L.push('<text x="' + n1(X(start + n * bw) + 12) + '" y="' + n1(y0 - fs * 0.35) + '" font-size="' + fs + '" fill="' + ink + '">' + String(labels?.x || '分组') + '</text>')
-  return L.join('')
+  // 【v1633】图案定义（<defs>）要跟着图形一起出去，且必须在使用它的 <rect> 之前/同一 svg 内 ✓
+  return (defs.length ? '<defs>' + defs.join('') + '</defs>' : '') + L.join('')
 }
 
 
@@ -373,7 +399,7 @@ export function freqTableParams(): ParamSpec[] {
   for (let i = 1; i <= HIST_MAX; i++) out.push({ key: 'f' + i, label: '第 ' + i + ' 组 频数', def: sample[i - 1] || 0, min: 0, max: 100000, step: 1, showIf: (q: Record<string, number>) => Number(q.n || 8) >= i })
   return out
 }
-export function freqTableFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>, labels?: { x?: string; y?: string }): string {
+export function freqTableFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>, labels?: { x?: string; y?: string; bars?: string }): string {
   const p = withParams('freqTable', params)
   const n = Math.max(1, Math.min(HIST_MAX, Math.round(p.n || 8)))
   const bw = p.bw > 0 ? p.bw : 10
@@ -421,7 +447,7 @@ export function freqLineParams(): ParamSpec[] {
   out.push({ key: 'bars', label: '叠加直方图底稿', def: 1, min: 0, max: 1, step: 1, bool: true })
   return out
 }
-export function freqLineFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>, labels?: { x?: string; y?: string }): string {
+export function freqLineFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>, labels?: { x?: string; y?: string; bars?: string }): string {
   const p = withParams('freqLine', params)
   const n = Math.max(2, Math.min(HIST_MAX, Math.round(p.n || 8)))
   const bw = p.bw > 0 ? p.bw : 10
@@ -480,7 +506,7 @@ export function scatterParams(): ParamSpec[] {
   }
   return out
 }
-export function scatterFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>, labels?: { x?: string; y?: string }): string {
+export function scatterFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>, labels?: { x?: string; y?: string; bars?: string }): string {
   const p = withParams('scatter', params)
   const n = Math.max(1, Math.min(SCATTER_MAX, Math.round(p.n || 6)))
   const pts: { x: number; y: number }[] = []

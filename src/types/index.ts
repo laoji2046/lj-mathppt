@@ -652,7 +652,7 @@ export interface MathFigureElement extends ElementBase {
   /** 可调参数（如 y=Asin(ωx+φ) 的 A/ω/φ、含参二次的 a），属性面板可改 */
   params?: Record<string, number>
   /** 【M2.13】统计图的**坐标轴文字标注**（params 只收数字 ✗，这两个是字符串 ✓）—— 如 x: '年龄'、y: '频率/组距' ✓ */
-  figLabels?: { x?: string; y?: string }
+  figLabels?: { x?: string; y?: string; /** 【v1633】频率分布直方图每组填充：`图案:颜色|图案:颜色|…`（h 斜线 / x 交叉 / d 点阵 / s 实心）✓ */ bars?: string }
   /** 3D 立体的投影深度(0~1) */
   depth?: number
   /** 每个顶点的字母标注（下标/上标用 _ 和 ^，如 "A_1" "B^2"、\' 加撇），长度与顶点数一致 */

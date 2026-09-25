@@ -162,6 +162,39 @@ function setFigLabel(axis: 'x' | 'y', v: string) {
   cur[axis] = v
   patch({ figLabels: cur } as Partial<SlideElement>)
 }
+/* ---- 【v1633】频率分布直方图：每组填充（图案 / 颜色）---- */
+const BAR_PATTERNS: { v: string; icon: string; t: string }[] = [
+  { v: '', icon: '无', t: '不填充' },
+  { v: 'h', icon: '╱', t: '斜线阴影' },
+  { v: 'x', icon: '╳', t: '交叉网格' },
+  { v: 'd', icon: '⣿', t: '点阵' },
+  { v: 's', icon: '■', t: '实心' },
+]
+/** 组数（跟当前 n 走，最多 10） */
+const barN = computed(() => Math.max(0, Math.min(10, Math.round(figParamVal('n', 0)))))
+function barArr(): string[] {
+  const s = String(mathfig.value?.figLabels?.bars || '')
+  const a = s ? s.split('|') : []
+  while (a.length < 10) a.push('')
+  return a.slice(0, 10)
+}
+function barPatAt(i: number): string { return (barArr()[i] || '').split(':')[0] || '' }
+function barColorAt(i: number): string { const p = (barArr()[i] || '').split(':'); return p[1] || '#8a8aa0' }
+function setBarAt(i: number, pat: string, color: string) {
+  const a = barArr()
+  a[i] = pat ? pat + ':' + color : ''
+  patch({ figLabels: { ...(mathfig.value?.figLabels || {}), bars: a.join('|') } } as Partial<SlideElement>)
+}
+function setBarPat(i: number, pat: string) { setBarAt(i, pat, barColorAt(i)) }
+function setBarColor(i: number, c: string) { const p = barPatAt(i); setBarAt(i, p || 'h', c) }
+/** 把第 1 组的填充套到所有组（最常见的用法：整张图一种阴影）✓ */
+function applyBarsAll() {
+  const a = barArr()
+  const first = a[0] || 'h:#8a8aa0'
+  for (let i = 0; i < 10; i++) a[i] = i < barN.value ? first : ''
+  patch({ figLabels: { ...(mathfig.value?.figLabels || {}), bars: a.join('|') } } as Partial<SlideElement>)
+}
+
 const histRaw = ref('')
 const histMsg = ref('')
 /** 【v1631】原始数据按元素 id 存一份 —— 改组距 / 起始边界时要拿它重算柱高 ✓（用户要求）*/
@@ -1691,6 +1724,18 @@ function layerTypeLabel(type: string) {
               </div>
               <div v-if="histMsg" class="hist__msg">{{ histMsg }}</div>
               <div class="hist__hint">分箱用面板里的「组距」与「起始边界」✓；结果写进下面 h1…h10（还能手改单根柱高 ✓）</div>
+              <!-- 【v1633】每组填充（图案 / 颜色）—— 可逐组设，也可一键套到所有组 ✓ -->
+              <div class="solid-prop__title">组填充 <span class="solid-prop__sub">（图案 / 颜色，可逐组设）</span></div>
+              <div v-for="i in barN" :key="'bf' + i" class="solid-prop__edge">
+                <span class="solid-prop__ename">组{{ i }}</span>
+                <span class="solid-prop__dash">
+                  <button v-for="p in BAR_PATTERNS" :key="p.v" class="seg__btn" :class="{ 'seg__btn--on': barPatAt(i - 1) === p.v }" :title="p.t" @click="setBarPat(i - 1, p.v)">{{ p.icon }}</button>
+                </span>
+                <ColorSwatches dot :model-value="barColorAt(i - 1)" @update:model-value="(v) => setBarColor(i - 1, v)" />
+              </div>
+              <div class="hist__row" v-if="barN > 1">
+                <button class="hist__btn" title="把「组1」的图案与颜色套到所有组（整张图一种阴影时最省事）" @click="applyBarsAll">把组1的填充套到所有组</button>
+              </div>
             </div>
         <template v-if="pointN > 0">
           <label v-for="i in pointN" :key="'pl' + i" class="field">
