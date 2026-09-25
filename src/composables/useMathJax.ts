@@ -8,7 +8,12 @@
 import { normalizeMixed } from '@/types'
 
 // public/mathjax/tex-svg.js（本地，离线可用）
-const MATHJAX_SRC = 'mathjax/tex-svg.js'
+// 【v1615】⚠ 必须用 `BASE_URL` 拼**绝对**路径 ✗（不能写相对路径 `mathjax/...` ✓）
+//   Tauri 窗口加载的是 `app/index.html` ✓（见 tauri.conf.json 的 `url` ✓
+//   原因：Tauri 打包会漏掉 frontendDist 根级文件 ✓ 所以入口放进 `app/` ✓）
+//   ⇒ 相对路径会被解析成 `/app/mathjax/...` ✓ **404** ✓
+//   ⇒ 症状：**桌面版公式全不渲染** ✓（浏览器 dev 下正常 ✓ 所以一直没发现 ✓）
+const MATHJAX_SRC = import.meta.env.BASE_URL + 'mathjax/tex-svg.js'
 
 let loader: Promise<any> | null = null
 

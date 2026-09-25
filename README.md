@@ -218,9 +218,15 @@ node clean-dist.cjs
 
 # 2. 编译 + 打包（需要 Rust 工具链；本机 cargo 在 ~/.cargo/bin，需先加进 PATH）
 export PATH="/c/Users/老冀/.cargo/bin:$PATH"
-cd src-tauri && cargo build --release      # 编译 Rust 后端
-node ../node_modules/@tauri-apps/cli/tauri.js build   # 生成 NSIS 安装包
+cd src-tauri && cargo tauri build          # 一步到位：编译后端 + 打包（含 NSIS 安装包）
 ```
+
+> **【v1615 更正】**：原来这里写的是 `node ../node_modules/@tauri-apps/cli/tauri.js build` ——
+> **那条已经不可用**（本机**没装** `@tauri-apps/cli`）。实际用的是
+> **`~/.cargo/bin/cargo-tauri.exe`**，即 **`cargo tauri build`**。
+>
+> ⚠ **`cargo build --release` 单独跑不够**：它产出的 exe 内嵌的是**当时的 `dist/`**，
+> **前端改过就必须用 `cargo tauri build` 重新嵌入**。
 
 产物：
 - `src-tauri/target/release/lj-mathslides.exe`（裸程序，可单独拷贝运行）
@@ -472,6 +478,37 @@ label("$A$", (2.399, 2.306));
 > 共 **12 个标签** ✓（均为轻量标签，与既有标签一致）。若哪天再漏，按
 > `git log --format='%ad %s' --date=short | grep v1522` 找到该版本的**最新一条**提交再补 ✓。
 > **1348 / 1415 / 1431 / 1486 是跳号**（历史上没有任何提交用过），补不了属正常 ✓。
+
+### 2026-09-25（v2026.09.1615）
+
+**1615 · ★ 修「桌面版无法导入 PDF」—— 根因是路径基准** ✓
+
+**用户报**："好像无法从 pdf 导入了"
+
+**根因**：**Tauri 窗口加载的是 `app/index.html`**（见 `tauri.conf.json` 的 `url`）
+
+- 原因：**Tauri 打包会漏掉 `dist/` 根级文件** ⇒ 入口放进 `dist/app/index.html`（见 `clean-dist.cjs`）
+- **⇒ 代码里手写的「相对路径」会被解析成 `/app/xxx/...` → 404**
+
+**受影响的不止 PDF** —— **MathJax / GeoGebra / Desmos 也全是相对路径**，
+**桌面版全都加载不了**（用户只发现 PDF，因为其他几个可能没用到）
+
+| 文件 | 改前 | 改后 |
+|---|---|---|
+| `usePdf.ts` ×2 | `pdfjs/pdf.min.js` | `BASE_URL + 'pdfjs/…'` |
+| `EmbedElement.vue` ×2 | 同上 | 同上 |
+| `useMathJax.ts` | `mathjax/tex-svg.js` | `BASE_URL + 'mathjax/…'` |
+| `useGeoGebra.ts` ×2 | `geogebra/deployggb.js`、`geogebra/5.0/web3d/` | `BASE_URL + …` |
+| `GgbSuite.vue` | `geogebra/5.0/web3d/` | `BASE_URL + …` |
+| `useDesmos.ts` | `desmos/index.js` | `BASE_URL + …` |
+
+**⇒ 为什么浏览器 dev 下正常**：dev server 的根就是 `/`，相对路径恰好对；
+**Tauri 的入口在 `/app/`，就 404 了**。这就是「浏览器能导、桌面版不能」的原因。
+
+**已验证**：构建产物里全是**绝对路径** ✓、`tsc` 0 ✓
+
+**★ 教训**：**"dev 下正常、打包后异常"** —— 第一个要查的就是**资源路径基准**
+（`import.meta.env.BASE_URL` 是 vite 的标准做法，从一开始就该用）
 
 ### 2026-09-25（v2026.09.1613）
 

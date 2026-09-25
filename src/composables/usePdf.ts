@@ -10,12 +10,17 @@ export function loadPdfJs(): Promise<any> {
   if (loader) return loader
   loader = new Promise((resolve, reject) => {
     const s = document.createElement('script')
-    s.src = 'pdfjs/pdf.min.js'
+    // ⚠⚠ 必须用 `BASE_URL` 拼**绝对**路径 ✗（不能写相对路径 `pdfjs/...` ✓）
+    //   Tauri 窗口加载的是 `app/index.html` ✓（见 tauri.conf.json 的 `url` ✓
+    //   原因：Tauri 打包会漏掉 frontendDist 根级文件 ✓ 所以入口放进 `app/` ✓）
+    //   ⇒ 相对路径会被解析成 `/app/pdfjs/...` ✓ **404** ✓
+    //   ⇒ 症状：**桌面版无法导入 PDF** ✓（用户实报 ✓ 而浏览器 dev 下正常 ✓）
+    s.src = import.meta.env.BASE_URL + 'pdfjs/pdf.min.js'
     s.async = true
     s.onload = () => {
       const lib = w.pdfjsLib
       if (lib) {
-        lib.GlobalWorkerOptions.workerSrc = 'pdfjs/pdf.worker.min.js'
+        lib.GlobalWorkerOptions.workerSrc = import.meta.env.BASE_URL + 'pdfjs/pdf.worker.min.js'
         resolve(lib)
       } else { loader = null; reject(new Error('pdf.js 加载失败')) }
     }

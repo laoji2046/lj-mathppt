@@ -29,7 +29,7 @@ const error = ref('')
 let applet: any = null
 let ggbId = ''
 let noticeTimer: number | undefined
-const GGB_CODEBASE = 'geogebra/5.0/web3d/'
+const GGB_CODEBASE = import.meta.env.BASE_URL + 'geogebra/5.0/web3d/'
 
 function toaster(msg: string) {
   notice.value = msg

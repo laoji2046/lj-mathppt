@@ -6,10 +6,11 @@
  * 2. 离线引擎要先探测再启用 —— 本地没有 web3d 运行时时不能强设 codebase，否则加载失败。
  */
 
-const GGB_LOCAL = 'geogebra/deployggb.js'
+// 【v1615】绝对路径 ✗ —— Tauri 加载 `app/index.html` ✓ 相对路径会变 `/app/geogebra/...` ✓ 404 ✓
+const GGB_LOCAL = import.meta.env.BASE_URL + 'geogebra/deployggb.js'
 const GGB_CDN = 'https://www.geogebra.org/apps/deployggb.js'
 /** 引擎运行时目录；把原应用的 dist/geogebra/5.0 拷到 public/geogebra/5.0 即可离线 */
-const GGB_CODEBASE = 'geogebra/5.0/web3d/'
+const GGB_CODEBASE = import.meta.env.BASE_URL + 'geogebra/5.0/web3d/'
 
 type GgbConstructor = new (params: Record<string, unknown>, html5?: boolean) => any
 

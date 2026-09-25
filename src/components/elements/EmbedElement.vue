@@ -56,11 +56,13 @@ function loadPdfJs(): Promise<any> {
   if (pdfjsP) return pdfjsP
   pdfjsP = new Promise((resolve, reject) => {
     const s = document.createElement('script')
-    s.src = 'pdfjs/pdf.min.js'
+    // ⚠ 绝对路径 ✗ —— Tauri 加载的是 `app/index.html` ✓
+    //   相对路径会被解析成 `/app/pdfjs/...` ✓ **404** ✓（桌面版无法导入 PDF ✓）
+    s.src = import.meta.env.BASE_URL + 'pdfjs/pdf.min.js'
     s.async = true
     s.onload = () => {
       const lib = w.pdfjsLib
-      if (lib) { lib.GlobalWorkerOptions.workerSrc = 'pdfjs/pdf.worker.min.js'; resolve(lib) }
+      if (lib) { lib.GlobalWorkerOptions.workerSrc = import.meta.env.BASE_URL + 'pdfjs/pdf.worker.min.js'; resolve(lib) }
       else { pdfjsP = null; reject(new Error('pdf.js 加载失败')) }
     }
     s.onerror = () => { pdfjsP = null; reject(new Error('pdf.js 加载失败')) }

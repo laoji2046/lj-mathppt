@@ -6,7 +6,8 @@
  * 2. 本地球以本地引擎优先（public/desmos/index.js 已随应用打包，离线可用），CDN 兜底。
  */
 
-const DESMOS_LOCAL = 'desmos/index.js'
+// 【v1615】绝对路径 ✗ —— Tauri 加载 `app/index.html` ✓ 相对路径会变 `/app/desmos/...` ✓ 404 ✓
+const DESMOS_LOCAL = import.meta.env.BASE_URL + 'desmos/index.js'
 const DESMOS_CDN = 'https://www.desmos.com/api/v1.13/calculator.js?apiKey=dcb31709b452b1cf9dc26972add0fda6'
 
 export interface DesmosApi {
