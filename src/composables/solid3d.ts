@@ -589,17 +589,23 @@ export function renderSolid(kind: string, pts: number[], w: number, h: number, s
   faces.forEach((face, fi) => {
     const ov = faceStyles ? faceStyles[fi] : null
     if (ov && ov.hidden) return
+    // 【v1628 加固】面里出现**越界顶点下标**就跳过这个面 ——
+    //   自由建模删点后 mesh 可能残留旧下标，以前直接 P[i][0] 会抛异常 →
+    //   整张图（画布 / 缩略图 / 导出 / 演示）全渲染不出来 ✗。跳过比崩掉强 ✓
+    if (face.some((i) => !P[i])) return
     const pp = face.map(i => P[i][0].toFixed(1) + ',' + P[i][1].toFixed(1)).join(' ')
     const col = (ov && ov.fill) || fc
     if (!col || col === 'none' || col === 'transparent') return
     const op = (ov && typeof ov.opacity === 'number') ? ov.opacity : (fop[fi] ?? 0.8)
     out += '<polygon points="' + pp + '" fill="' + col + '" stroke="none" opacity="' + op + '"/>'
   })
-  if (selFace != null && selFace >= 0 && selFace < faces.length) {
+  if (selFace != null && selFace >= 0 && selFace < faces.length && !faces[selFace].some((i) => !P[i])) {
     const pp = faces[selFace].map(i => P[i][0].toFixed(1) + ',' + P[i][1].toFixed(1)).join(' ')
     out += '<polygon points="' + pp + '" fill="#ff8f1f" fill-opacity="0.18" stroke="#ff8f1f" stroke-width="2"/>'
   }
   edges.forEach(([a, b, hid], ei) => {
+    // 【v1628 加固】同上面：边的端点越界就跳过（理由见上）✓
+    if (!P[a] || !P[b]) return
     const ov = edgeStyles ? edgeStyles[ei] : null
     const col = (ov && ov.color) || stroke
     const wd = (ov && ov.width) || s
