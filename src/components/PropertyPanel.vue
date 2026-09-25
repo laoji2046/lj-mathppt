@@ -1001,7 +1001,7 @@ function layerTypeLabel(type: string) {
         </div>
       </label>
       <label v-if="slideBgKind === 'solid'" class="field"><span>背景色</span>
-        <input type="color" :value="store.currentSlide?.bg ?? '#ffffff'" @input="store.setSlideBg(($event.target as HTMLInputElement).value)" />
+        <ColorSwatches :model-value="store.currentSlide?.bg ?? '#ffffff'" @update:model-value="(v) => store.setSlideBg(v)" />
       </label>
       <template v-if="slideBgKind === 'gradient'">
         <label class="field"><span>渐变角度</span>
@@ -1261,7 +1261,7 @@ function layerTypeLabel(type: string) {
         </label>
         <label class="field"><span>背景色</span>
           <div class="field__row">
-            <input type="color" :value="bgColorValue" @input="patch({ bgColor: ($event.target as HTMLInputElement).value } as Partial<SlideElement>)" />
+            <ColorSwatches :model-value="bgColorValue" @update:model-value="(v) => patch({ bgColor: v } as Partial<SlideElement>)" />
             <button class="panel__mini" @click="patch({ bgColor: 'transparent' } as Partial<SlideElement>)">无背景</button>
           </div>
         </label>
@@ -1417,10 +1417,10 @@ function layerTypeLabel(type: string) {
                 placeholder="如 x^2-2x+1、2sin(x)、1/x"
                 @change="setLine(i, { expr: ($event.target as HTMLInputElement).value })"
               />
-              <input
-                class="cfn__color" type="color" :value="ln.color || mathfig?.stroke || '#1a1a1a'"
-                title="这条曲线的颜色"
-                @input="setLine(i, { color: ($event.target as HTMLInputElement).value })"
+              <ColorSwatches
+                dot
+                :model-value="ln.color || mathfig?.stroke || '#1a1a1a'"
+                @update:model-value="(v) => setLine(i, { color: v })"
               />
               <select class="cfn__dash" :value="ln.dash || 'solid'" title="虚实"
                 @change="setLine(i, { dash: ($event.target as HTMLSelectElement).value })">
@@ -1512,9 +1512,10 @@ function layerTypeLabel(type: string) {
                   placeholder="如 x^2、x+1、2x-1、1/x"
                   @change="setPwLine(i, { expr: ($event.target as HTMLInputElement).value })"
                 />
-                <input
-                  class="cfn__color" type="color" :value="ln.color || mathfig?.stroke || '#1a1a1a'" title="这一段的颜色"
-                  @input="setPwLine(i, { color: ($event.target as HTMLInputElement).value })"
+                <ColorSwatches
+                  dot
+                  :model-value="ln.color || mathfig?.stroke || '#1a1a1a'"
+                  @update:model-value="(v) => setPwLine(i, { color: v })"
                 />
                 <select
                   class="cfn__dash" :value="ln.dash || 'solid'" title="虚实"
@@ -1721,13 +1722,13 @@ function layerTypeLabel(type: string) {
                 <button v-for="dv in ['solid','dash','dot']" :key="dv" class="seg__btn" :class="{ 'seg__btn--on': edgeDashAt(i - 1) === dv }" @click="setEdgeDash(i - 1, dv)">{{ dashCn(dv) }}</button>
               </span>
               <input type="number" min="1" max="12" class="solid-prop__w" :value="edgeStyleAt(i - 1)?.width || 2" @input="setEdgeWidth(i - 1, num(($event.target as HTMLInputElement).value, 2))" />
-              <input type="color" :value="edgeStyleAt(i - 1)?.color || '#333333'" @input="setEdgeColor(i - 1, ($event.target as HTMLInputElement).value)" />
+              <ColorSwatches dot :model-value="edgeStyleAt(i - 1)?.color || '#333333'" @update:model-value="(v) => setEdgeColor(i - 1, v)" />
             </div>
             <template v-if="faceCount">
               <div class="solid-prop__title">面样式 <span class="solid-prop__sub">（填充 / 透明度 / 隐藏该面看内部）</span></div>
               <div v-for="i in faceCount" :key="'f' + i" class="solid-prop__face" :class="{ 'solid-prop__edge--sel': selFace === i - 1 }">
                 <span class="solid-prop__ename">面{{ i }}</span>
-                <input type="color" :value="faceFillAt(i - 1)" @input="setFaceFill(i - 1, ($event.target as HTMLInputElement).value)" />
+                <ColorSwatches dot :model-value="faceFillAt(i - 1)" @update:model-value="(v) => setFaceFill(i - 1, v)" />
                 <input type="range" min="0" max="100" step="5" class="solid-prop__op" :value="faceOpacityAt(i - 1)" @input="setFaceOpacity(i - 1, num(($event.target as HTMLInputElement).value, 80))" />
                 <span class="solid-prop__num">{{ faceOpacityAt(i - 1) }}%</span>
                 <button class="seg__btn" :class="{ 'seg__btn--on': isFaceHidden(i - 1) }" @click="toggleFaceHidden(i - 1)">{{ isFaceHidden(i - 1) ? '显示' : '隐藏' }}</button>
@@ -1768,7 +1769,7 @@ function layerTypeLabel(type: string) {
           </select>
         </label>
         <label class="field"><span>颜色</span>
-          <input type="color" :value="chart?.color" @input="patch({ color: ($event.target as HTMLInputElement).value } as Partial<SlideElement>)" />
+          <ColorSwatches :model-value="chart?.color" @update:model-value="(v) => patch({ color: v } as Partial<SlideElement>)" />
         </label>
         <label class="field"><span>数据标签（逗号/换行分隔）</span>
           <textarea class="prop-textarea" rows="2"
@@ -1878,7 +1879,7 @@ function layerTypeLabel(type: string) {
           >{{ ic }}</button>
         </div>
         <label class="field" style="margin-top:8px"><span>颜色</span>
-          <input type="color" :value="iconEl?.color" @input="patch({ color: ($event.target as HTMLInputElement).value } as Partial<SlideElement>)" />
+          <ColorSwatches :model-value="iconEl?.color" @update:model-value="(v) => patch({ color: v } as Partial<SlideElement>)" />
         </label>
       </div>
 
@@ -1938,7 +1939,7 @@ function layerTypeLabel(type: string) {
         <label class="prop-check"><input type="checkbox" :checked="(richtex?.fitMode ?? 'fill') === 'fill'"
           @change="patch({ fitMode: ($event.target as HTMLInputElement).checked ? 'fill' : 'shrink' } as Partial<SlideElement>)"><span>充满外框（拖动外框时整块跟着无级放大）</span></label>
         <label class="field"><span>颜色</span>
-          <input type="color" :value="richtex?.color" @input="patch({ color: ($event.target as HTMLInputElement).value } as Partial<SlideElement>)" />
+          <ColorSwatches :model-value="richtex?.color" @update:model-value="(v) => patch({ color: v } as Partial<SlideElement>)" />
         </label>
         <label class="field"><span>换行</span>
           <label class="chk"><input type="checkbox" :checked="richtex?.wrap !== false" @change="patch({ wrap: ($event.target as HTMLInputElement).checked } as Partial<SlideElement>)" /> 自动换行</label>
@@ -1947,7 +1948,7 @@ function layerTypeLabel(type: string) {
           <div style="display:flex;flex-direction:column;gap:4px;width:100%">
             <div v-for="(_, i) in (richtex?.text || '').split('\n')" :key="i" style="display:flex;align-items:center;gap:6px">
               <span style="width:16px;font-size:11px;color:#999;flex:none">{{ i + 1 }}</span>
-              <input type="color" style="width:26px;height:26px;border:none;padding:0;background:none;flex:none" :value="richtex?.lineStyles?.[i]?.color || '#1a1a1a'" @input="setLineStyle(i, 'color', ($event.target as HTMLInputElement).value)" />
+              <ColorSwatches dot :model-value="richtex?.lineStyles?.[i]?.color || '#1a1a1a'" @update:model-value="(v) => setLineStyle(i, 'color', v)" />
               <select style="flex:1" :value="richtex?.lineStyles?.[i]?.fontFamily || 'default'" @change="setLineStyle(i, 'fontFamily', ($event.target as HTMLSelectElement).value)">
                 <option v-for="f in FONT_OPTIONS" :key="f.v" :value="f.v">{{ f.label }}</option>
               </select>
@@ -1956,7 +1957,7 @@ function layerTypeLabel(type: string) {
         </div>
         <label class="field"><span>背景色</span>
           <div class="field__row">
-            <input type="color" :value="richtex?.bgColor && richtex.bgColor !== 'transparent' ? richtex.bgColor : '#ffffff'" @input="patch({ bgColor: ($event.target as HTMLInputElement).value } as Partial<SlideElement>)" />
+            <ColorSwatches :model-value="richtex?.bgColor && richtex.bgColor !== 'transparent' ? richtex.bgColor : '#ffffff'" @update:model-value="(v) => patch({ bgColor: v } as Partial<SlideElement>)" />
             <button class="panel__mini" @click="patch({ bgColor: 'transparent' } as Partial<SlideElement>)">无背景</button>
           </div>
         </label>
@@ -2028,8 +2029,8 @@ function layerTypeLabel(type: string) {
         </label>
         <template v-if="(image?.shadowPreset || 'none') !== 'none'">
           <label class="field"><span>阴影颜色</span>
-            <input type="color" :value="image?.shadowColor || '#000000'"
-              @input="patch({ shadowColor: ($event.target as HTMLInputElement).value } as Partial<SlideElement>)" />
+            <ColorSwatches :model-value="image?.shadowColor || '#000000'"
+              @update:model-value="(v) => patch({ shadowColor: v } as Partial<SlideElement>)" />
           </label>
           <label class="field"><span>透明度 {{ Math.round((image?.shadowAlpha ?? 0.4) * 100) }}%</span>
             <input type="range" :value="image?.shadowAlpha ?? 0.4" min="0" max="1" step="0.05"
@@ -2161,8 +2162,7 @@ function layerTypeLabel(type: string) {
             @input="patch({ fontSize: num(($event.target as HTMLInputElement).value, 40) } as Partial<SlideElement>)" />
         </label>
         <label class="field"><span>颜色</span>
-          <input type="color" :value="math?.color"
-            @input="patch({ color: ($event.target as HTMLInputElement).value } as Partial<SlideElement>)" />
+          <ColorSwatches :model-value="math?.color" @update:model-value="(v) => patch({ color: v } as Partial<SlideElement>)" />
         </label>
         <label class="prop-check"><input type="checkbox" :checked="(math?.fitMode ?? 'fill') === 'fill'"
           @change="patch({ fitMode: ($event.target as HTMLInputElement).checked ? 'fill' : 'shrink' } as Partial<SlideElement>)"><span>充满外框（拖动外框时公式跟着无级放大）</span></label>
@@ -2226,8 +2226,7 @@ function layerTypeLabel(type: string) {
         <label class="field" style="margin-top:10px">
           <span>表达式颜色（留空 = Desmos 自动配色）</span>
           <div style="display:flex;gap:6px;align-items:center">
-            <input type="color" :value="dsmColorValue"
-              @input="patch({ color: ($event.target as HTMLInputElement).value } as Partial<SlideElement>)" />
+            <ColorSwatches :model-value="dsmColorValue" @update:model-value="(v) => patch({ color: v } as Partial<SlideElement>)" />
             <button class="quick__btn" @click="patch({ color: '' } as Partial<SlideElement>)">自动</button>
           </div>
         </label>

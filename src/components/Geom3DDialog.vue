@@ -18,6 +18,7 @@ import { GEOM3D_PRESETS, GEOM3D_PROMPT } from '@/composables/geom3dPrompt'
 import { renderSolid, arcsSvg, vertexDotsSvg } from '@/composables/solid3d'
 import { closeGeom3D, geom3dSink } from '@/ui/geom3d'
 import type { MathFigureElement } from '@/types'
+import ColorSwatches from './ColorSwatches.vue'
 
 const props = defineProps<{ editId?: string | null }>()
 const store = useDeckStore()
@@ -1547,11 +1548,11 @@ function insert() {
               <span v-for="pl in planes" :key="pl.kind + pl.i" class="g3__plane">
                 <b :class="{ 'g3__off': isHidden((pl.kind === 'cut' ? 'cut:' : 'plane:') + pl.i) }">{{ pl.label }}</b>
                 <button class="g3__btn g3__btn--tiny" :title="isHidden((pl.kind === 'cut' ? 'cut:' : 'plane:') + pl.i) ? '显示这个平面' : '隐藏这个平面'" @click="toggleHidden((pl.kind === 'cut' ? 'cut:' : 'plane:') + pl.i)">{{ isHidden((pl.kind === 'cut' ? 'cut:' : 'plane:') + pl.i) ? '○' : '●' }}</button>
-                <input
-                  type="color" class="g3__col" :value="pl.fill || '#f0c674'"
-                  title="填充色"
-                  @input="setPlaneFill(pl.kind, pl.i, ($event.target as HTMLInputElement).value)"
-                >
+                <ColorSwatches
+                  dot
+                  :model-value="pl.fill || '#f0c674'"
+                  @update:model-value="(v) => setPlaneFill(pl.kind, pl.i, v)"
+                />
                 <button class="g3__btn g3__btn--tiny" title="只描边，不填充" @click="setPlaneFill(pl.kind, pl.i, null)">不填充</button>
                 <button class="g3__btn g3__btn--tiny" title="删掉这个平面" @click="delPlane(pl.kind, pl.i)">×</button>
               </span>
@@ -1658,11 +1659,7 @@ function insert() {
             </template>
             <template v-else-if="selKind === 'line' && selEdgeNames">
               <span class="g3__propslab">线 <b>{{ selEdgeNames[0] }}–{{ selEdgeNames[1] }}</b></span>
-              <label class="g3__num">颜色 <input
-                type="color" class="g3__col"
-                :value="selEdgeStyle.color"
-                @input="setEdgeStyle({ color: ($event.target as HTMLInputElement).value })"
-              ></label>
+              <label class="g3__num">颜色 <ColorSwatches dot :model-value="selEdgeStyle.color" @update:model-value="(v) => setEdgeStyle({ color: v })" /></label>
               <label class="g3__num">线宽 <input
                 type="range" min="1" max="6" step="0.5" style="width:80px"
                 :value="selEdgeStyle.width"

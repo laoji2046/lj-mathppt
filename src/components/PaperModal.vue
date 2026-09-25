@@ -12,6 +12,7 @@ import { geom3dSink, openGeom3D } from '@/ui/geom3d'
 import { vectorizeSink, openVectorize } from '@/ui/vectorize'
 import { paperInsertSink, paperPending } from '@/ui/paper'
 import type { PaperInsertPayload } from '@/ui/paper'
+import ColorSwatches from './ColorSwatches.vue'
 
 /**
  * 试卷编辑（A4 分页 + 题号识别），移植自参考版 LJ-PPT 的 PaperMode。
@@ -1569,7 +1570,7 @@ watch([headerText, footerText], () => render())
                   </select>
                   <input type="number" v-model.number="fontSize" min="5" max="42" step="0.5" title="或直接输入 pt 字号">
                   <label>颜色</label>
-                  <input type="color" v-model="fontColor">
+                  <ColorSwatches :model-value="fontColor" @update:model-value="(v) => (fontColor = v)" />
                   <label>行距</label>
                   <input type="number" v-model.number="lineHeight" min="1" max="3" step="0.1">
                 </div>

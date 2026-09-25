@@ -27,6 +27,7 @@ import { mathFigureElOfKind, renderFigureSvg } from '@/composables/figureRender'
 import { svgEditorEditKey } from '@/ui/svgEditor'
 import { useContextMenu } from '@/composables/useContextMenu'
 import type { MenuItem } from '@/composables/useContextMenu'
+import ColorSwatches from './ColorSwatches.vue'
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 const store = useDeckStore()
@@ -970,7 +971,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
           </button>
           <span class="svgx__sep"></span>
           <label class="svgx__lab">线色
-            <input :value="shownStroke" type="color" class="svgx__color" @input="applyStroke(($event.target as HTMLInputElement).value)" />
+            <ColorSwatches :model-value="shownStroke" @update:model-value="(v) => applyStroke(v)" />
           </label>
           <span class="svgx__swatches">
             <button v-for="c in SWATCHES" :key="c" class="svgx__sw" :class="{ 'svgx__sw--on': shownStroke === c }" :style="{ background: c }" :title="'线色 ' + c" @click="applyStroke(c)" />
@@ -992,7 +993,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); unbindDrag
               >{{ c === 'none' ? '无' : '' }}</button>
             </span>
           </label>
-          <input :value="shownFill === 'none' ? '#ffffff' : shownFill" type="color" class="svgx__color" title="自定义填充色" @input="applyFill(($event.target as HTMLInputElement).value)" />
+          <ColorSwatches :model-value="shownFill === 'none' ? '#ffffff' : shownFill" @update:model-value="(v) => applyFill(v)" />
           <span class="svgx__sep"></span>
           <label v-if="tool === 'arrow' || (sel && sel.kind === 'arrow')" class="svgx__lab">箭头
             <select v-model="arrowHead" class="svgx__sel" @change="sel && sel.kind === 'arrow' && (snapshot(), sel.arrowHead = arrowHead)">
