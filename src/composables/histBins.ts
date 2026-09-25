@@ -48,6 +48,30 @@ function fmt(v: number): string {
   return String(r)
 }
 
+/**
+ * 【v1631】按**指定的**组距与左边界重算频数（用户手改组距 / 起始边界时用）✓
+ *   返回 null = 参数不可用（组距非正、左边界比最小值还大）—— 调用方据此给提示，别硬算 ✓
+ *   组数上限仍是 10（图只有 10 个格子）；超出就把组数截到 10 并如实返回，让调用方提示 ✓
+ */
+export function binFixed(xs: number[], start: number, width: number): { bins: number; width: number; start: number; counts: number[]; clipped: boolean } | null {
+  const data = (xs || []).filter((x) => Number.isFinite(x))
+  if (data.length < 2 || !Number.isFinite(start) || !Number.isFinite(width) || width <= 0) return null
+  const min = Math.min(...data)
+  const max = Math.max(...data)
+  if (start > min) return null
+  const need = Math.ceil(Number(((max - start) / width).toPrecision(12)))
+  const clipped = need > MAX_BINS
+  const bins = Math.max(1, Math.min(MAX_BINS, need))
+  const counts = new Array(bins).fill(0)
+  for (const v of data) {
+    let i = Math.floor(Number(((v - start) / width).toPrecision(12)))
+    if (i < 0) i = 0
+    if (i > bins - 1) i = bins - 1
+    counts[i]++
+  }
+  return { bins, width, start, counts, clipped }
+}
+
 export function planHistogram(xs: number[]): HistPlan {
   const data = (xs || []).filter((x) => Number.isFinite(x))
   const empty: HistPlan = { ok: false, count: data.length, min: 0, max: 0, range: 0, bins: 0, width: 0, start: 0, counts: [], msg: "", error: "没解析出数据（粘贴一列数就行）" }

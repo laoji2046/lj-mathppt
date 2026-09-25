@@ -19,7 +19,7 @@ import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
 import { openShapeEdit } from '@/ui/shapeEditor'
 import { DEFAULT_PIECEWISE, compileExpr, conicLineIntersections, conicPointPos, figureParams, withParams, type PiecewiseLine, type PointLink } from '@/composables/mathPlot'
-import { planHistogram } from '@/composables/histBins'
+import { binFixed, planHistogram } from '@/composables/histBins'
 import { isPlaneCtrlKind, planeNumbers, setPlaneNumber, type PlaneNum } from '@/composables/planeCtrl'
 import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type EdgeStyle, type FaceStyle, type PointStyle } from '@/composables/solid3d'
 import { solidSel } from '@/composables/solidSel'
@@ -164,6 +164,32 @@ function setFigLabel(axis: 'x' | 'y', v: string) {
 }
 const histRaw = ref('')
 const histMsg = ref('')
+/** 【v1631】原始数据按元素 id 存一份 —— 改组距 / 起始边界时要拿它重算柱高 ✓（用户要求）*/
+const histRawById = ref<Record<string, string>>({})
+/** 把频数写进 h1…h10（图）/ f1…f10（表）✓ */
+function writeHistCounts(counts: number[], width: number, total: number) {
+  const isTable = String(mathfig.value?.kind || '') === 'freqTable'
+  for (let i = 1; i <= 10; i++) {
+    if (isTable) setFigParam('f' + i, i <= counts.length ? counts[i - 1] : 0)
+    else setFigParam('h' + i, i <= counts.length ? counts[i - 1] / total / width : 0)
+  }
+}
+/** 【v1631】手改组距 / 起始边界 → 立刻按新分箱重算柱高（频率/组距）与组数 ✓ */
+function rebinHist(nextWidth?: number, nextStart?: number) {
+  const id = String(mathfig.value?.id ?? '')
+  const raw = (histRaw.value || '').trim() || histRawById.value[id] || ''
+  if (!raw) return false
+  const xs = histParse(raw)
+  const w = nextWidth != null ? nextWidth : Number(mathfig.value?.params?.bw ?? 10)
+  const s = nextStart != null ? nextStart : Number(mathfig.value?.params?.start ?? 0)
+  const r = binFixed(xs, s, w)
+  if (!r) { histMsg.value = '✗ 这组参数算不出来（组距要大于 0，起始边界不能大于最小值）'; return false }
+  setFigParam('n', r.bins)
+  writeHistCounts(r.counts, r.width, xs.length)
+  histMsg.value = '✓ 按组距 ' + r.width + '、左边界 ' + r.start + ' 重算：' + xs.length + ' 个数据 → ' + r.bins + ' 组' + (r.clipped ? '（超出 10 组的部分被并进最后一组，建议加大组距）' : '')
+  window.setTimeout(() => { histMsg.value = '' }, 6000)
+  return true
+}
 /** 支持 空格 / 逗号 / 顿号 / 分号 / 换行 / 制表符 分隔（从 Word、Excel 直接复制都行 ✓） */
 function histParse(s: string): number[] {
   return String(s || '').split(/[\s,，、;；]+/).map((x) => Number(x)).filter((x) => Number.isFinite(x))
@@ -179,6 +205,7 @@ function applyHistRaw() {
   const n = plan.bins
   const bw0 = plan.width
   const c = plan.counts
+  histRawById.value[String(mathfig.value?.id ?? '')] = histRaw.value
   setFigParam('start', start)
   setFigParam('bw', bw0)
   setFigParam('n', n)
@@ -191,6 +218,12 @@ function applyHistRaw() {
   window.setTimeout(() => { histMsg.value = '' }, 6000)
 }
 function setFigParam(key: string, v: number) {
+  // 【v1631】用户手改「组距 / 起始边界」→ 立刻重算柱高（用户要求：改组距自动重算）✓
+  //   ⚠ 必须在这里读**当前**参数值配新值，patch 之后 store 还是旧的 ✓
+  if ((key === 'bw' || key === 'start') && isHistogram.value) {
+    const other = key === 'bw' ? Number(mathfig.value?.params?.start ?? 0) : Number(mathfig.value?.params?.bw ?? 10)
+    void rebinHist(key === 'bw' ? v : other, key === 'start' ? v : other)
+  }
   const p: Partial<SlideElement> & { pointLinks?: (PointLink | null)[] } = {
     params: { ...(mathfig.value?.params || {}), [key]: v },
   }
