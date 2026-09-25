@@ -992,7 +992,7 @@ async function batchDelete() {
         <span class="qb__sub">共 {{ facets.total }} 道 · 当前筛出 {{ total }} 道</span>
         <span
           v-if="isPreview" class="qb__badge"
-          title="浏览器预览库：题存在浏览器 localStorage 里（桌面端才有 %APPDATA%\lj-mathslides\library.db 那份真库）。清缓存 / 换浏览器就没了 ✓"
+          title="浏览器预览库：题存在浏览器 localStorage 里（桌面端才有 %APPDATA%\lj-mathslides\library.db 那份真库），清缓存 / 换浏览器就没了。要桌面端内核的还有：PDF 识别（MinerU）、草稿箱、来源报告、补答案、AI 打标 —— 预览里这些是空的或灰的 ✓"
         >浏览器预览库</span>
         <span v-if="msg" class="qb__msg">{{ msg }}</span>
         <span class="qb__headrt">

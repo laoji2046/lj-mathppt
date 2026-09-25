@@ -96,7 +96,7 @@ function errText(e: unknown): string {
 /* ---------------- ① 选来源 ---------------- */
 
 function pickFile(mode: 'md' | 'json' | 'pdf') {
-  if (mode === 'pdf' && !isDesktop) { flash('导入 PDF（MinerU）只在桌面端可用'); return }
+  if (mode === 'pdf' && !isDesktop) { flash('PDF 识别要桌面端内核（MinerU 接口 + 落盘）：请打开桌面端 LJ-MathSlides'); return }
   fileMode.value = mode
   const el = fileInput.value
   if (!el) return
@@ -402,7 +402,7 @@ async function doPatchImages() {
 /* ---------------- PDF：MinerU（HTTP 在 Rust 侧发；网页端直连被 CORS 挡） ---------------- */
 
 async function importPdfToBatch(f: File) {
-  if (!isDesktop) { flash('导入 PDF（MinerU）只在桌面端可用'); return }
+  if (!isDesktop) { flash('PDF 识别要桌面端内核（MinerU 接口 + 落盘）：请打开桌面端 LJ-MathSlides'); return }
   if (mineruBusy.value) { flash('上一次识别还没结束，请稍候…'); return }
   mineruBusy.value = true
   mineruProg.value = '正在暂存 PDF…'
@@ -492,18 +492,24 @@ function optsText(o: string[]): string {
         <button class="qi__close" title="关闭 (Esc)" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </header>
 
+      <!-- 【v1531】浏览器预览的边界，一次说清：PDF 识别 / 草稿箱 / 真实题库三样都要桌面端内核 -->
+      <div v-if="!isDesktop" class="qi__preview">
+        <b>浏览器预览</b>：PDF 识别走的是桌面端内核里的 MinerU 接口（网页端直连被 CORS 挡），草稿箱、真实题库同样要内核 ——
+        所以这三样在预览里是灰的。这里入库的题只进浏览器<b>预览库</b>（localStorage，刷新还在，清缓存 / 换浏览器就没了）。
+        要试完整功能请打开桌面端 <b>LJ-MathSlides</b>；预览里可以用「粘贴 MD / JSON」，解析逻辑跟桌面端是同一份代码。
+      </div>
+
       <div class="qi__body">
         <section class="qi__src">
           <div class="qi__t1">① 选来源</div>
           <div class="qi__btnrow">
             <button class="qi__btn qi__btn--main" @click="pickFile('md')">导入 .md 文件</button>
             <button class="qi__btn" @click="pickFile('json')">导入 .json 文件</button>
-            <button class="qi__btn" :disabled="!isDesktop" @click="pickFile('pdf')">导入 .pdf（MinerU）</button>
-          </div>
-          <div v-if="!isDesktop" class="qi__hint">PDF 识别（MinerU）只在桌面端可用；浏览器里可直接粘贴 MD / JSON。</div>
-          <div v-if="!isDesktop" class="qi__hint qi__hint--warn">
-            浏览器预览：没有本地题库（SQLite 只在桌面端 exe 里）—— 入库的题只进浏览器的<b>预览库</b>（localStorage，
-            刷新还在，清缓存 / 换浏览器就没了）。要看真实题库请打开桌面端 ✓
+            <button
+              class="qi__btn" :disabled="!isDesktop"
+              :title="isDesktop ? '选一个 PDF，走 MinerU 识别成 Markdown + 图，再核对入库' : 'PDF 识别要桌面端内核（MinerU 接口在 Rust 侧发，网页端直连会被 CORS 挡）—— 请打开桌面端 LJ-MathSlides；预览里可以粘贴 MD / JSON'"
+              @click="pickFile('pdf')"
+            >{{ isDesktop ? '导入 .pdf（MinerU）' : '导入 .pdf（需桌面端）' }}</button>
           </div>
           <label class="qi__lab">MinerU token（可选，只存本机）
             <input v-model="mineruToken" class="qi__inp" type="password" autocomplete="off" spellcheck="false" placeholder="不填 → 免登录轻量接口（只出 Markdown）" />
@@ -595,6 +601,8 @@ function optsText(o: string[]): string {
 .qi__msg { font-size: 12px; color: var(--brand-600, #534AB7); }
 .qi__close { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; cursor: pointer; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--gray-600); }
 .qi__body { flex: 1; min-height: 0; display: grid; grid-template-columns: 400px 1fr; }
+.qi__preview { font-size: 12px; line-height: 1.7; color: #8a6a12; background: #fdf6e3; border-bottom: 1px solid #e0cf9a; padding: 7px 16px; }
+.qi__preview b { color: #6d5309; }
 .qi__src { border-right: 1px solid var(--border); padding: 10px 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 .qi__review { padding: 10px 12px; overflow-y: auto; }
 .qi__t1 { font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: .04em; margin: 4px 0 2px; }
