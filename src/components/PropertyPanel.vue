@@ -195,6 +195,22 @@ function applyBarsAll() {
   patch({ figLabels: { ...(mathfig.value?.figLabels || {}), bars: a.join('|') } } as Partial<SlideElement>)
 }
 
+/* ---- 【v1637】韦恩图：区域填充（2 集 4 区 / 3 集 8 区）---- */
+const isVenn = computed(() => String(mathfig.value?.kind || '') === 'vennFigure')
+const venn3 = computed(() => Math.round(figParamVal('mode', 0)) === 5)
+const VENN_REGIONS_2 = ['A', 'B', 'A∩B', '两圆外']
+const VENN_REGIONS_3 = ['A', 'B', 'C', 'A∩B', 'A∩C', 'B∩C', 'A∩B∩C', '三圆外']
+const vennRegions = computed(() => (venn3.value ? VENN_REGIONS_3 : VENN_REGIONS_2))
+const vennMask = computed(() => Math.round(figParamVal('rmask', 0)))
+function toggleVennRegion(i: number) {
+  const m = vennMask.value ^ (1 << i)
+  setFigParam('rmask', m)
+}
+const vennFill = computed(() => String(mathfig.value?.figLabels?.fill || ''))
+function setVennFill(c: string) {
+  patch({ figLabels: { ...(mathfig.value?.figLabels || {}), fill: c } } as Partial<SlideElement>)
+}
+
 const histRaw = ref('')
 const histMsg = ref('')
 /** 【v1631】原始数据按元素 id 存一份 —— 改组距 / 起始边界时要拿它重算柱高 ✓（用户要求）*/
@@ -1727,7 +1743,23 @@ function layerTypeLabel(type: string) {
               <div class="hist__hint">纵轴留空就还是「频率/组距」两行 ✓；横轴默认「分组」✓</div>
             </div>
             <!-- 【M2.11】频率分布直方图：粘贴原始数据 → 自动分箱 ✓ -->
-            <div v-if="isHistogram" class="hist">
+            <!-- 【v1637】韦恩图：区域填充（用户要求：能对特定区域填充）✓ -->
+            <div v-if="isVenn" class="hist">
+              <div class="hist__t">区域填充（点一下开/关该区域）</div>
+              <div class="hist__row" style="flex-wrap:wrap">
+                <button
+                  v-for="(name, i) in vennRegions" :key="'vr' + i" class="hist__btn"
+                  :style="(vennMask & (1 << i)) ? 'background:#efeaff;border-color:#9a8cd8;color:#4a3b8f;font-weight:600' : ''"
+                  @click="toggleVennRegion(i)"
+                >{{ name }}</button>
+              </div>
+              <div class="hist__row">
+                <span class="solid-prop__ename">填充色</span>
+                <ColorSwatches :model-value="vennFill || '#8a8aa0'" @update:model-value="setVennFill" />
+              </div>
+              <div class="hist__hint">A / B / C = 整圆填色（A、B 一起选就是并集）；A∩B 等只填交集；两圆外 / 三圆外 = 全集里圆外的部分（补集）。一个都不选 = 不填充，退回原来的预设阴影 ✓</div>
+            </div>
+                        <div v-if="isHistogram" class="hist">
               <div class="hist__t">粘贴原始数据 → 自动分组</div>
               <textarea v-model="histRaw" class="hist__ta" rows="3" placeholder="把一列数粘进来（空格 / 逗号 / 换行都认）"></textarea>
               <div class="hist__row">

@@ -238,6 +238,9 @@ export function figureParams(kind: string): ParamSpec[] {
     { key: 'mode', label: '类型（0交 1并 2补 3子集 4相离 5三集）', def: 0, min: 0, max: 5, step: 1 },
     { key: 'shade', label: '打阴影', def: 1, min: 0, max: 1, step: 1, bool: true },
     { key: 'gap', label: '两圆间距', def: 1, min: 0.2, max: 3, step: 0.1 },
+    // 【v1637】区域填充掩码：两位集合 bit0=A bit1=B bit2=A∩B bit3=两圆外；三位 bit0..6 七个区域 bit7=三圆外 ✓
+    //   =0 时退回老的「打阴影」预设行为（向后兼容 ✓）
+    { key: 'rmask', label: '区域填充掩码（0=用上面预设）', def: 0, min: 0, max: 255, step: 1 },
   ]
   if (kind === 'setNumberline') return [
     { key: 'a', label: '左端点 a', def: -1, min: -1000, max: 1000, step: 0.5 },
@@ -575,7 +578,7 @@ function lensPath(cx1: number, cy: number, r: number, d: number): string {
  *   mode: 0=交集 1=并集 2=补集 3=子集 4=相离 5=三集合 ✓（参数是数字 ✓ 面板能直接选 ✓）
  *   阴影用"白底抠洞"的稳妥办法 ✓（讲义/幻灯片都是白底 ✓ 不依赖 clip ✓）
  */
-export function vennFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>): string {
+export function vennFigure(w: number, h: number, stroke: string, sw: number, params?: Record<string, number>, labels?: { x?: string; y?: string; fill?: string }): string {
   const p = withParams('vennFigure', params)
   const mode = Math.round(p.mode || 0)
   const shade = p.shade > 0.5
@@ -589,13 +592,52 @@ export function vennFigure(w: number, h: number, stroke: string, sw: number, par
   const circle = (cx: number, fill: string) => '<circle cx="' + n1(cx) + '" cy="' + n1(cy) + '" r="' + n1(r) + '" fill="' + fill + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>'
   const lbl = (x: number, y: number, t: string) => '<text x="' + n1(x) + '" y="' + n1(y) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">' + t + '</text>'
   const L: string[] = []
-  const S = 'rgba(0,0,0,0.22)'        // 阴影色 ✓（浅灰 ✓ 黑白打印也看得见 ✓）
+  const S = 'rgba(0,0,0,0.22)'
+  // 【v1637】区域填充（用户要求：能对特定区域填充）——
+  //   用**嵌套 clipPath** 精确切出每个区域：区域 = 属于 S 中每个圆、且不属于 T 中每个圆 ✓
+  //   ├ 先铺要填的几何（U 矩形或最内层圆），再用白圆把不属于本区域的集合挖掉 ✓
+  //   └ 填充层画在最前面，所以白色挖洞不会盖到后面的圆边与字母 ✓
+  const rmask = Math.round(p.rmask || 0)
+  const fillColor = String(labels?.fill || '') || S
+  if (rmask > 0) {
+    const uid = Math.random().toString(36).slice(2, 7)
+    const three = mode === 5
+    const rr = Math.min(h * 0.26, w * 0.17)
+    const cs = three
+      ? [{ x: w / 2 - rr * 0.7, y: cy - rr * 0.62 }, { x: w / 2 + rr * 0.7, y: cy - rr * 0.62 }, { x: w / 2, y: cy + rr * 0.66 }]
+      : [{ x: cx1, y: cy }, { x: cx2, y: cy }]
+    const rad = three ? rr : r
+    const rect = { x: w * 0.07, y: h * 0.10, rw: w * 0.86, rh: h * 0.80 }
+    const cid = (i: number) => 'vc' + uid + i
+    const defs = cs.map((c, i) => '<clipPath id="' + cid(i) + '"><circle cx="' + n1(c.x) + '" cy="' + n1(c.y) + '" r="' + n1(rad) + '"/></clipPath>').join('')
+    const cs_ = (i: number, fill: string) => '<circle cx="' + n1(cs[i].x) + '" cy="' + n1(cs[i].y) + '" r="' + n1(rad) + '" fill="' + fill + '"/>'
+    // 【v1637】区域语义按老师习惯来：**A 就代表整个圆 A**（含与别人重叠的部分）✓
+    //   所以 A+B 一起选 = 并集（重叠处被两次填充，仍是同色 ✓）；A∩B 单独一档可再点 ✓
+    //   「两圆外 / 三圆外」用 fill-rule=evenodd 的大路径挖掉所有圆 —— 不用白漆，避免把别的区域蹭花 ✓
+    const rectPath = (extra: string) =>
+      '<path fill-rule="evenodd" d="M' + n1(rect.x) + ' ' + n1(rect.y) + 'H' + n1(rect.x + rect.rw) + 'V' + n1(rect.y + rect.rh) + 'H' + n1(rect.x) + 'Z' + extra + '" fill="' + fillColor + '"/>'
+    const circlePath = (i: number) =>
+      'M' + n1(cs[i].x - rad) + ' ' + n1(cs[i].y) + 'a' + n1(rad) + ' ' + n1(rad) + ' 0 1 0 ' + n1(rad * 2) + ' 0a' + n1(rad) + ' ' + n1(rad) + ' 0 1 0 ' + n1(-rad * 2) + ' 0'
+    const allCircles = cs.map((_, i) => circlePath(i)).join('')
+    const one = (i: number) => cs_(i, fillColor)
+    const both = (i: number, j: number) => '<g clip-path="url(#' + cid(i) + ')">' + cs_(j, fillColor) + '</g>'
+    // ⚠ 必须写成函数：两集合时 cs 只有两个圆，直接求值会 cs[2] 越界 ✗（实测踩到）
+    const triple = () => '<g clip-path="url(#' + cid(0) + ')"><g clip-path="url(#' + cid(1) + ')">' + cs_(2, fillColor) + '</g></g>'
+    const outside = rectPath(allCircles)
+    const regions = three
+      ? [one(0), one(1), one(2), both(0, 1), both(0, 2), both(1, 2), triple(), outside]
+      : [one(0), one(1), both(0, 1), rectPath(circlePath(0) + circlePath(1))]
+    let fills = ''
+    regions.forEach((svg, k) => { if (rmask & (1 << k)) fills += svg })
+    if (fills) L.push('<defs>' + defs + '</defs>' + fills)
+    if (rmask & (three ? 128 : 8)) L.push('<rect x="' + n1(rect.x) + '" y="' + n1(rect.y) + '" width="' + n1(rect.rw) + '" height="' + n1(rect.rh) + '" fill="none" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>')
+  }        // 阴影色 ✓（浅灰 ✓ 黑白打印也看得见 ✓）
   if (mode === 0) {                   // A ∩ B
     if (shade) L.push('<path d="' + lensPath(cx1, cy, r, gap) + '" fill="' + S + '"/>')
     L.push(circle(cx1, 'none'), circle(cx2, 'none'))
     // 字母贴近各自圆心 ✓、只往外让开一点（别压到中间那块阴影 ✓）
     L.push(lbl(cx1 - r * 0.42, cy + fs * 0.35, 'A'), lbl(cx2 + r * 0.42, cy + fs * 0.35, 'B'))
-    if (shade) L.push(lbl(w / 2, cy + r * 1.45, 'A∩B'))
+    if (shade && !(p.rmask > 0)) L.push(lbl(w / 2, cy + r * 1.45, 'A∩B'))
   } else if (mode === 1) {            // A ∪ B
     if (shade) L.push('<g fill="' + S + '">' + circle(cx1, S) + circle(cx2, S) + '</g>')
     L.push(circle(cx1, 'none'), circle(cx2, 'none'))
