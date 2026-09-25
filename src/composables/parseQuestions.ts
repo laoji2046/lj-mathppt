@@ -641,37 +641,72 @@ function splitOptionsLine(line: string): string[] {
   return (seq.length > 1 ? seq : all).map((x) => x.text)
 }
 
-/** 把一段文本切成若干题块 */
+/** 行首题号（`12.` / `12、` / `12)`）；不是题号返回 0 ✓ */
+function lineNoOf(l: string): number {
+  const m = l.match(/^\s*(\d{1,3})\s*[.、．)）]/)
+  return m ? Number(m[1]) : 0
+}
+
+/**
+ * 把一段文本切成若干题块。
+ *
+ * 【v1531】加「解析区里的编号不算新题」的判据 —— 教辅式卷子（解析紧跟每题）以前会被切坏：
+ *   题干 → 【答案】C → 【锤子数学解析】… 里面写着「1、单调性…2、支撑线…」——
+ *   这些 `1、2、` 被当成了新题，19 题的卷切出 37/47/35 题 ✗（实测南京/南通/金陵中学那几份）。
+ * 判据：一旦本块里出现过【答案】/【解析】这类标记，后面的编号只有**大于当前题号**才算新题 ✓
+ *   （真实卷的题号是往大走的；解答里的列表总是从 1 重新数 ✓）
+ * 例外：小节标题（一、选择题）之后的第一条编号一律算新题 —— 有的卷按小节重新编号 ✓
+ */
 function splitBlocks(text: string): string[] {
   const ls = text.replace(/\r\n?/g, '\n').split('\n')
   const hasSep = ls.some((l) => RE_SEP.test(l))
   const blocks: string[] = []
   let cur: string[] = []
+  /** 当前题块的题号 / 是否已进入解析 / 是否刚过小节标题 ✓ */
+  let lastNo = 0
+  let inSolution = false
+  let afterHead = false
+  const flush = () => {
+    if (cur.some((x) => x.trim())) blocks.push(cur.join('\n'))
+    cur = []
+  }
   for (const l of ls) {
     if (hasSep) {
       if (RE_SEP.test(l)) {
-        if (cur.some((x) => x.trim())) blocks.push(cur.join('\n'))
-        cur = []
+        flush()
+        lastNo = 0
+        inSolution = false
+        afterHead = false
       } else {
         cur.push(l)
+        if (RE_ANSWER.test(l) || RE_SOLUTION.test(l)) inSolution = true
       }
       continue
     }
     // 小节标题（一、选择题）也是分块边界：它必须成为**新块的第一行** ——
     // 这样块内循环先读到它、把 qtype 定好，再处理这道题 ✓（顺序错了题型就会张冠李戴）
     if (isSegmentHead(l)) {
-      if (cur.some((x) => x.trim())) blocks.push(cur.join('\n'))
+      flush()
       cur = [l]
+      afterHead = true
+      inSolution = false
       continue
     }
-    if (RE_NUM.test(l) && cur.some((x) => x.trim())) {
-      blocks.push(cur.join('\n'))
+    const n = lineNoOf(l)
+    const isNewQ = n > 0 && cur.some((x) => x.trim()) && (!inSolution || afterHead || n > lastNo)
+    if (isNewQ) {
+      flush()
       cur = [l]
-    } else {
-      cur.push(l)
+      lastNo = n
+      inSolution = false
+      afterHead = false
+      continue
     }
+    cur.push(l)
+    if (n > 0 && cur.length === 1) { lastNo = n; afterHead = false }
+    if (RE_ANSWER.test(l) || RE_SOLUTION.test(l)) inSolution = true
   }
-  if (cur.some((x) => x.trim())) blocks.push(cur.join('\n'))
+  flush()
   return blocks.map((b) => b.trim()).filter(Boolean)
 }
 
@@ -960,6 +995,49 @@ function applyAnswers(out: ParsedQuestion[], ans: string): void {
   }
 }
 
+/** 归一化题干：只留「字」（用于判重）—— 去空白、标点、$ 与 LaTeX 括号 ✓ */
+function normStem(s: string | undefined): string {
+  return String(s || '')
+    .replace(/[\s\u3000]/g, '')
+    .replace(/[，,。.、；;：:！!？?（）()【】\[\]{}<>《》"'“”‘’·\-—_/\\|~^]/g, '')
+    .replace(/\$/g, '')
+}
+
+/**
+ * 【v1531】同一份卷里题面出现两遍 → 合并成一道。
+ *
+ * 实测：「试卷 + 解析版」合在一个 PDF 里时，19 题的卷会被切成 37 题 ✗
+ *   （第 20~37 题是同一批题的第二份题面，几乎逐字相同）。
+ * 判据（两条都要满足，**宁可不合** ✗）：
+ *   ① 归一化后**前 60 字**完全相同（越短越容易误合，宁可不合）；
+ *   ② 两边归一化长度相差 ≤ 25%（防「开头一样、其实不同题」被误合）。
+ * 合并方向：保留**先出现**的那道，缺的答案/解析/图从后一道补过来，并在题上说明 ✓
+ */
+function mergeDuplicates(list: ParsedQuestion[]): ParsedQuestion[] {
+  const out: ParsedQuestion[] = []
+  const seen = new Map<string, ParsedQuestion>()
+  for (const q of list) {
+    const key = normStem(q.stem)
+    const k = key.slice(0, 60)
+    const hit = k.length >= 12 ? seen.get(k) : undefined
+    if (hit) {
+      const a = normStem(hit.stem).length
+      const b = key.length
+      if (a > 0 && b > 0 && Math.abs(a - b) / Math.max(a, b) <= 0.25) {
+        if (!hit.answer && q.answer) hit.answer = q.answer
+        if (!hit.solution && q.solution) hit.solution = q.solution
+        if ((!hit.images || !hit.images.length) && q.images && q.images.length) hit.images = q.images
+        if (!hit.no && q.no) hit.no = q.no
+        hit.warn = [hit.warn, '这份卷里这道题出现了两遍（试卷 + 解析版），已合并成一道'].filter(Boolean).join('；')
+        continue
+      }
+    }
+    if (k.length >= 12 && !seen.has(k)) seen.set(k, q)
+    out.push(q)
+  }
+  return out
+}
+
 export function parseQuestions(raw: string): ParsedQuestion[] {
   // ⚠⚠ 顺序很关键：**先整篇剥掉"非题目行"（其中「参考答案」要整段截断），再按小节切段**。
   //   反过来（先切段再剥）会踩一个大坑：答案区里也有「## 四、解答题」这种小节标题 →
@@ -1192,7 +1270,8 @@ function parseSegment(raw: string, segType: string): ParsedQuestion[] {
           : undefined,
     })
   }
-  return out
+  // 【v1531】同一份卷里题面出现两遍 → 合并（见 mergeDuplicates）✓
+  return mergeDuplicates(out)
 }
 
 /* ---------------- 从试卷正文里自动识别「年份」与「试卷名」 ---------------- */
