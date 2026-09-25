@@ -93,7 +93,12 @@ const innerHtml = computed(() => {
   if (kind === 'freqLine') return freqLineFigure(w, h, stroke, s, props.el.params, props.el.figLabels)   // 【M2.12】统计图 ✓
   if (kind === 'scatter') return scatterFigure(w, h, stroke, s, props.el.params, props.el.figLabels)
   if (kind === 'freqTable') return freqTableFigure(w, h, stroke, s, props.el.params, props.el.figLabels)  // 【M2.13】 ✓
-  if (kind === 'vennFigure') return vennFigure(w, h, stroke, s, props.el.params)                        // 【M2.14】集合 ✓
+  // 【v1638】交/并/补 三个独立类型 → 固定 mode；figLabels 必须传（填充色在里面）✓
+  if (kind === 'vennFigure' || kind === 'vennIntersect' || kind === 'vennUnion' || kind === 'vennComplement') {
+    const mode = kind === 'vennIntersect' ? 0 : kind === 'vennUnion' ? 1 : kind === 'vennComplement' ? 2 : undefined
+    const pr = mode == null ? props.el.params : { ...(props.el.params || {}), mode }
+    return vennFigure(w, h, stroke, s, pr, props.el.figLabels)
+  }
   if (kind === 'setNumberline') return setNumberlineFigure(w, h, stroke, s, props.el.params)
   if (FUNCTION_KINDS.includes(kind)) return functionFigure(kind, w, h, stroke, s, props.el.params)
   if (CONIC_KINDS.includes(kind)) {

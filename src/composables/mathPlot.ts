@@ -234,6 +234,11 @@ export function figureParams(kind: string): ParamSpec[] {
   if (kind === 'freqLine') return freqLineParams()            // 【M2.12】
   if (kind === 'scatter') return scatterParams()
   if (kind === 'freqTable') return freqTableParams()
+  if (kind === 'vennIntersect' || kind === 'vennUnion' || kind === 'vennComplement') {
+    // 【v1638】交/并/补 是独立类型（模式已定）→ 不给「类型」下拉，其余参数同韦恩图 ✓
+    return [{ key: 'gap', label: '两圆间距', def: 1, min: 0.2, max: 3, step: 0.1 },
+      { key: 'rmask', label: '区域填充掩码（0=用上面预设）', def: 4, min: 0, max: 255, step: 1 }]
+  }
   if (kind === 'vennFigure') return [
     { key: 'mode', label: '类型（0交 1并 2补 3子集 4相离 5三集）', def: 0, min: 0, max: 5, step: 1 },
     { key: 'shade', label: '打阴影', def: 1, min: 0, max: 1, step: 1, bool: true },

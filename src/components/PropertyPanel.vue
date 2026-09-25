@@ -196,8 +196,8 @@ function applyBarsAll() {
 }
 
 /* ---- 【v1637】韦恩图：区域填充（2 集 4 区 / 3 集 8 区）---- */
-const isVenn = computed(() => String(mathfig.value?.kind || '') === 'vennFigure')
-const venn3 = computed(() => Math.round(figParamVal('mode', 0)) === 5)
+const isVenn = computed(() => ['vennFigure', 'vennIntersect', 'vennUnion', 'vennComplement'].indexOf(String(mathfig.value?.kind || '')) >= 0)
+const venn3 = computed(() => String(mathfig.value?.kind || '') === 'vennFigure' && Math.round(figParamVal('mode', 0)) === 5)
 const VENN_REGIONS_2 = ['A', 'B', 'A∩B', '两圆外']
 const VENN_REGIONS_3 = ['A', 'B', 'C', 'A∩B', 'A∩C', 'B∩C', 'A∩B∩C', '三圆外']
 const vennRegions = computed(() => (venn3.value ? VENN_REGIONS_3 : VENN_REGIONS_2))
