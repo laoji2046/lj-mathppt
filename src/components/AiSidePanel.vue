@@ -8,7 +8,7 @@
  *
  * 收起时只留一条 40px 竖条；Key 复用「设置 → AI Key」那一份 ✓
  */
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { invoke, isTauri } from '@/composables/useTauri'
 import AppIcon from './AppIcon.vue'
 
@@ -62,30 +62,6 @@ async function scrollDown() {
   const el = listEl.value
   if (el) el.scrollTop = el.scrollHeight
 }
-/* ---- 【v1643】DeepSeek 网页版：开一个贴在右侧的**真窗口**（方案①）---- */
-const webOpen = ref(false)
-let timer: number | null = null
-const WEB_W = 420
-async function toggleWeb() {
-  if (!isTauri()) { err.value = '网页版窗口只在桌面端能开（浏览器预览没有窗口能力）'; return }
-  try {
-    const r = await invoke<{ ok?: boolean; open?: boolean; error?: string }>('ds_webview_open', { width: WEB_W })
-    if (r && r.ok === false) { err.value = String(r.error || '打开失败'); return }
-    webOpen.value = !!(r && r.open)
-  err.value = ''
-    if (webOpen.value && timer == null) {
-      // 同步位置；万一窗口被手动关掉（或被系统关掉）→ 结果里 open=false，UI 自动复位 ✓
-      timer = window.setInterval(async () => {
-        try {
-          const s = await invoke<{ open?: boolean }>('ds_webview_sync', { width: WEB_W })
-          if (s && s.open === false) { webOpen.value = false; if (timer != null) { window.clearInterval(timer); timer = null } }
-        } catch { /* 单次失败不管，下次再试 */ }
-      }, 500)
-    }
-    if (!webOpen.value && timer != null) { window.clearInterval(timer); timer = null }
-  } catch (e) { err.value = String((e as Error)?.message || e) }
-}
-onBeforeUnmount(() => { if (timer != null) window.clearInterval(timer) })
 
 function clearAll() { msgs.value = []; err.value = '' }
 async function copyOne(t: string) { try { await navigator.clipboard.writeText(t) } catch { /* 忽略 */ } }
@@ -101,7 +77,6 @@ async function copyOne(t: string) { try { await navigator.clipboard.writeText(t)
       <header class="ds__head">
         <span class="ds__title">DeepSeek 助手</span>
         <span class="ds__sub">{{ hasKey ? '已接 AI Key' : '未填 Key' }}</span>
-        <button class="ds__btn" :title="webOpen ? '关掉 DeepSeek 网页版窗口' : '开一个贴在右侧的 DeepSeek 网页版窗口（真网页，登录态与浏览器一致）'" @click="toggleWeb">{{ webOpen ? '关网页版' : '网页版' }}</button>
         <button class="ds__btn" title="清空对话" @click="clearAll">清空</button>
         <button class="ds__btn" title="收起" @click="open = false">✕</button>
       </header>

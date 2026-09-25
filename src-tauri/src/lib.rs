@@ -3458,59 +3458,6 @@ fn lib_cache_clean(keep_mineru: i64, keep_backups: i64) -> serde_json::Value {
     }
     serde_json::json!({ "ok": true, "freed": freed, "mineru": dm, "backups": db })
 }
-use tauri::Manager;
-
-/// 【v1643】DeepSeek 网页版：开一个**真浏览器窗口**贴在主窗口右侧（用户选方案①）✓
-///   ⚠ 不用 iframe（站点发 X-Frame-Options: DENY，浏览器直接拒绝渲染 ✗）；
-///     这里建的是 Tauri 的**子 WebviewWindow**，加载真网页，登录态/功能与浏览器一致 ✓
-#[tauri::command]
-async fn ds_webview_open(app: tauri::AppHandle, width: f64) -> serde_json::Value {
-    // 已经开着 → 再点就是关掉
-    if let Some(w) = app.get_webview_window("deepseek") {
-        let _ = w.close();
-        return serde_json::json!({ "ok": true, "open": false });
-    }
-    let url = match tauri::Url::parse("https://chat.deepseek.com/") {
-        Ok(u) => u,
-        Err(e) => return serde_json::json!({ "ok": false, "error": format!("网址不对: {}", e) }),
-    };
-    let (px, py, pw, ph) = match app.get_webview_window("main") {
-        Some(m) => {
-            let p = m.outer_position().unwrap_or(tauri::PhysicalPosition::new(80, 80));
-            let s = m.outer_size().unwrap_or(tauri::PhysicalSize::new(1280, 800));
-            (p.x, p.y, s.width as i32, s.height as i32)
-        }
-        None => (80, 80, 1280, 800),
-    };
-    let w = width.max(280.0);
-    let win = tauri::WebviewWindowBuilder::new(&app, "deepseek", tauri::WebviewUrl::External(url))
-        .title("DeepSeek 网页版")
-        .inner_size(w, ph as f64)
-        .position((px + pw) as f64 - w, py as f64)
-        .build();
-    match win {
-        Ok(_) => serde_json::json!({ "ok": true, "open": true }),
-        Err(e) => serde_json::json!({ "ok": false, "error": format!("打开失败: {}", e) }),
-    }
-}
-
-/// 【v1643】把网页版窗口"贴"回主窗口右侧（主窗口移动/缩放时由前端定时调一次 ✓）
-#[tauri::command]
-async fn ds_webview_sync(app: tauri::AppHandle, width: f64) -> serde_json::Value {
-    let child = match app.get_webview_window("deepseek") { Some(w) => w, None => return serde_json::json!({ "ok": true, "open": false }) };
-    let (px, py, pw, ph) = match app.get_webview_window("main") {
-        Some(m) => {
-            let p = m.outer_position().unwrap_or(tauri::PhysicalPosition::new(80, 80));
-            let s = m.outer_size().unwrap_or(tauri::PhysicalSize::new(1280, 800));
-            (p.x, p.y, s.width as i32, s.height as i32)
-        }
-        None => return serde_json::json!({ "ok": true, "open": true }),
-    };
-    let w = width.max(280.0);
-    let _ = child.set_position(tauri::PhysicalPosition::new((px + pw) as f64 - w, py as f64));
-    let _ = child.set_size(tauri::PhysicalSize::new(w as u32, ph as u32));
-    serde_json::json!({ "ok": true, "open": true })
-}
 
 
 
@@ -5162,8 +5109,6 @@ pub fn run() {
             mineru_parse,
             lib_cache_stats,
             lib_cache_clean,
-            ds_webview_open,
-            ds_webview_sync,
             lib_mineru_contract,
             lib_mineru_caches,
             lib_mineru_cache_text,
