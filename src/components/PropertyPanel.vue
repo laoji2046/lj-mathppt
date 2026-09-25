@@ -19,6 +19,7 @@ import { openGgbSuite } from '@/ui/ggbEditor'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
 import { openShapeEdit } from '@/ui/shapeEditor'
 import { DEFAULT_PIECEWISE, compileExpr, conicLineIntersections, conicPointPos, figureParams, withParams, type PiecewiseLine, type PointLink } from '@/composables/mathPlot'
+import { planHistogram } from '@/composables/histBins'
 import { isPlaneCtrlKind, planeNumbers, setPlaneNumber, type PlaneNum } from '@/composables/planeCtrl'
 import { SOLID_VCOUNT, solidEdges, solidFaces, solidFacesAll, solidVerts, type EdgeStyle, type FaceStyle, type PointStyle } from '@/composables/solid3d'
 import { solidSel } from '@/composables/solidSel'
@@ -170,29 +171,23 @@ function histParse(s: string): number[] {
 /** 按当前 组距 分箱，把结果写进参数 ✓（左闭右开 ✓ 最后一组右闭 ✓） */
 function applyHistRaw() {
   const xs = histParse(histRaw.value)
-  if (xs.length < 2) { histMsg.value = '✗ 没解析出数据（粘贴一列数就行 ✓）'; return }
-  const bw0 = figParamVal('bw', 10) || 10
-  const lo = Math.min(...xs), hi = Math.max(...xs)
-  // 起始边界：优先用面板里填的 ✓；没填过（默认值）就取"向下取整到组距" ✓
-  let start = figParamVal('start', 0)
-  if (!Number.isFinite(start) || start > lo) start = Math.floor(lo / bw0) * bw0
-  let n = Math.ceil((hi - start) / bw0)
-  if (n > 10) { histMsg.value = '✗ 需要 ' + n + ' 组，最多 10 组 —— 把「组距」调大一点 ✓'; return }
-  const c = new Array(n).fill(0)
-  for (const v of xs) {
-    let k = Math.floor((v - start) / bw0)
-    if (k < 0) k = 0
-    if (k > n - 1) k = n - 1
-    c[k]++
-  }
+  // 【v1631】自动分箱：最大值 / 最小值 / 极差 → 组数（√n 夹 5~10）→ 组距取「整」→ 左边界对齐 ✓
+  //   以前是拿面板里的组距硬算，组数超 10 就报错让人自己调 ✗（用户要的是"粘完就好看"）✓
+  const plan = planHistogram(xs)
+  if (!plan.ok) { histMsg.value = '✗ ' + (plan.error || '数据不够（至少要 2 个数）'); return }
+  const start = plan.start
+  const n = plan.bins
+  const bw0 = plan.width
+  const c = plan.counts
   setFigParam('start', start)
+  setFigParam('bw', bw0)
   setFigParam('n', n)
   const isTable = String(mathfig.value?.kind || '') === 'freqTable'
   for (let i = 1; i <= 10; i++) {
     if (isTable) setFigParam('f' + i, i <= n ? c[i - 1] : 0)                       // 频率分布表：填**频数** ✓
     else setFigParam('h' + i, i <= n ? c[i - 1] / xs.length / bw0 : 0)             // 图：填频率/组距 ✓
   }
-  histMsg.value = '✓ ' + xs.length + ' 个数据 → ' + n + ' 组（起始 ' + start + '，组距 ' + bw0 + '）已填进 ' + (isTable ? 'f1…f' : 'h1…h') + n + ' ✓'
+  histMsg.value = '✓ ' + plan.msg + ' —— 已填进 ' + (isTable ? 'f1…f' : 'h1…h') + n + ' ✓'
   window.setTimeout(() => { histMsg.value = '' }, 6000)
 }
 function setFigParam(key: string, v: number) {
