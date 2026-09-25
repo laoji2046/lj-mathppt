@@ -109,6 +109,46 @@ export function assembleContentDoc(rawJson: string): string {
   }
   return out
 }
+/**
+ * 【v1531】MinerU 的**版面 JSON**（middle.json / `*_model.json`：`pdf_info[].para_blocks[]` → lines → spans）→ 纯文本。
+ *
+ * 为什么需要：老师手上常有这个文件（识别产物目录里就在），但它**不是题目 JSON** ——
+ *   直接丢给题目解析器只会得到「解析出 0 道，看到的第一条键是 para_blocks…」✗（用户实报）。
+ * 这里把文字按阅读顺序抽出来，再走「按 Markdown 解析」那条成熟的路 ✓
+ *   · 兼容 `pdf_info[]`（多页）与顶层直接给 `para_blocks` 两种写法；每页优先 para_blocks，退回 preproc_blocks；
+ *   · span 里的文字取 `content`（新版）或 `text`（老版）；
+ *   · 抽不到就返回空串（调用方据此走别的判据）✓
+ */
+export function assembleLayoutDoc(rawJson: string): string {
+  let v: unknown = null
+  try { v = JSON.parse(rawJson) } catch { return '' }
+  const roots: Record<string, unknown>[] = []
+  if (Array.isArray(v)) roots.push(...(v as Record<string, unknown>[]))
+  else if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    if (Array.isArray(o.pdf_info)) roots.push(...(o.pdf_info as Record<string, unknown>[]))
+    else roots.push(o)
+  }
+  const lineText = (line: Record<string, unknown>): string => {
+    const spans = Array.isArray(line.spans) ? (line.spans as Record<string, unknown>[]) : []
+    const parts = spans.map((s) => String((s && (s.content ?? s.text)) ?? '').trim()).filter(Boolean)
+    if (parts.length) return parts.join('')
+    return String((line && (line.content ?? line.text)) ?? '').trim()
+  }
+  const out: string[] = []
+  for (const page of roots) {
+    const blocks = (Array.isArray(page.para_blocks) ? page.para_blocks
+      : (Array.isArray(page.preproc_blocks) ? page.preproc_blocks : [])) as Record<string, unknown>[]
+    for (const b of blocks) {
+      const lines = Array.isArray(b.lines) ? (b.lines as Record<string, unknown>[]) : []
+      const txt = lines.map(lineText).filter(Boolean).join('\n').trim()
+      if (txt) out.push(txt)
+      else if (b.type === 'image' && typeof b.img_path === 'string' && b.img_path) out.push('![](' + b.img_path + ')')
+    }
+  }
+  return out.join('\n')
+}
+
 /** 【v1453】图片在原文里的几何位置：path → { page, y }（按「同页 + y」归属到题，比字符偏移稳 ✓） */
 export function imagePositions(rawJson: string): Record<string, { page: number; y: number }> {
   const out: Record<string, { page: number; y: number }> = {}

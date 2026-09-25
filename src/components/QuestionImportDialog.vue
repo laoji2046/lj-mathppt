@@ -17,7 +17,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { isTauri, listenTauri, mineruParse, mineruStagePdf } from '@/composables/useTauri'
 import type { MineruProgress } from '@/composables/useTauri'
-import { assembleContentDoc, blockGeometry, imagePositions } from '@/composables/contentDoc'
+import { assembleContentDoc, assembleLayoutDoc, blockGeometry, imagePositions } from '@/composables/contentDoc'
 import {
   attachOrphans,
   dispNoOf,
@@ -314,6 +314,18 @@ function parseJson(raw: string, prefix = '') {
     fail(cut
       ? '这段不是完整的 JSON —— 看着像是从中间截出来的（开头是「' + head + '…」）。请粘贴完整内容，或用「导入 .json 文件」直接选文件。'
       : '这段不是合法的 JSON（开头是「' + head + '…」）—— 检查括号是否配对，或用「导入 .json 文件」直接选文件。')
+    return
+  }
+  // 【v1531】MinerU 产物 JSON 也能直接吃：content_list.json / layout.json（版面 middle.json）→
+  //   抽成正文再走「按 Markdown 解析」那条成熟的路 ✓（用户报的正是这个文件：
+  //   「看到的第一条键是 preproc_blocks / discarded_blocks / page_size / page_idx / para_blocks」）
+  const fromContent = assembleContentDoc(raw).trim()
+  const fromLayout = fromContent ? '' : assembleLayoutDoc(raw).trim()
+  const doc = fromContent || fromLayout
+  if (doc) {
+    text.value = doc
+    const kind = fromContent ? 'content_list.json' : '版面 JSON（middle/layout）'
+    parseMd(doc, '已读入 MinerU ' + kind + '：抽出 ' + Math.round(doc.length / 1024) + 'KB 文字')
     return
   }
   // OCR 版面数据（PaddleOCR / PP-Structure 之类）：type + lines/bbox，里面没有题干/答案字段 ✗
