@@ -102,6 +102,31 @@ export function fbRemove(ids: number[]): number {
   return before - d.items.length
 }
 
+/* ---------------- 【v1641】设置里的「清理」：识别缓存 / 整库备份 ---------------- */
+export interface CacheStats {
+  dir: string
+  mineru: { count: number; bytes: number }
+  backups: { count: number; bytes: number }
+}
+/** 读占用（浏览器预览里没有本地目录 → 返回 null）✓ */
+export async function cacheStats(): Promise<CacheStats | null> {
+  if (!isTauri()) return null
+  try {
+    const r = await invoke<{ ok?: boolean } & CacheStats>('lib_cache_stats', {})
+    if (r && r.ok !== false) return { dir: String(r.dir || ''), mineru: r.mineru || { count: 0, bytes: 0 }, backups: r.backups || { count: 0, bytes: 0 } }
+  } catch { /* 读不到就当没有 */ }
+  return null
+}
+/** 按「保留最近 N 份」清理，返回释放的字节数与删掉的份数 ✓ */
+export async function cacheClean(keepMineru: number, keepBackups: number): Promise<{ freed: number; mineru: number; backups: number } | null> {
+  if (!isTauri()) return null
+  try {
+    const r = await invoke<{ ok?: boolean; freed?: number; mineru?: number; backups?: number }>('lib_cache_clean', { keepMineru, keepBackups })
+    if (r && r.ok !== false) return { freed: r.freed || 0, mineru: r.mineru || 0, backups: r.backups || 0 }
+  } catch { /* 同上 */ }
+  return null
+}
+
 /* ---------------- 统一接口 ---------------- */
 
 /** 库信息（路径 + 条目数）；浏览器降级时不报错，只说明来源 */

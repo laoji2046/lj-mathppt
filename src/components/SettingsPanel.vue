@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { cacheClean, cacheStats, type CacheStats } from '@/composables/useLibrary'
 import { useDeckStore } from '@/stores/deck'
 import AppIcon from './AppIcon.vue'
 import { APP_NAME, APP_VERSION, COPYRIGHT, COPYRIGHT_NOTE } from '@/ui/appInfo'
@@ -38,6 +39,25 @@ function saveMineruKey(v: string) {
 // ── 【v1501】「启动时显示开始向导」开关 —— 关掉后打开应用直接进文稿 ✓
 //    NewDeckWizard 读的就是这个键 ✓（'off' = 不再自动弹 ✓）
 const WIZ_KEY = 'lj-mathslides-vue:newdeck-wizard'
+/* 【v1641】清理：读占用 / 按保留份数清理 ✓ */
+const cache = ref<CacheStats | null>(null)
+const keepMineru = ref(10)
+const keepBackups = ref(5)
+const busy = ref(false)
+const msg = ref('')
+const mb = (n: number) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB')
+async function loadCache() { cache.value = await cacheStats() }
+async function doClean() {
+  busy.value = true
+  msg.value = '正在清理…'
+  try {
+    const r = await cacheClean(keepMineru.value, keepBackups.value)
+    msg.value = r ? ('已删 ' + r.mineru + ' 份缓存、' + r.backups + ' 份备份，释放 ' + mb(r.freed)) : '清理失败（桌面端才有本地目录）'
+    await loadCache()
+  } finally { busy.value = false }
+}
+onMounted(loadCache)
+
 const wizardOn = ref(true)
 onMounted(() => { try { wizardOn.value = localStorage.getItem(WIZ_KEY) !== 'off' } catch { /* 忽略 */ } })
 function setWizardOn(v: boolean) {
@@ -127,6 +147,32 @@ function setWizardOn(v: boolean) {
           <input type="checkbox" :checked="mineruShow" @change="mineruShow = ($event.target as HTMLInputElement).checked" />
         </label>
         <p class="hint">只保存在本机；**试题录入里选 .pdf 时**用它做云端识别（识别产物缓存本机 ✓）。与上面的 AI Key 是两回事 ✓ 都不填也能用 MD / JSON / 粘贴录入 ✓。</p>
+      </div>
+
+      <!-- 【v1641】清理：识别缓存与整库备份都只留最近 N 份（用户要求：设置里给个清理入口）✓ -->
+      <div class="ai">
+        <div class="ai__title">清理 <span class="hint" style="font-weight:400">（只删"缓存/备份"，不碰题库 ✓）</span></div>
+        <p class="hint" v-if="cache">
+          识别缓存：<b>{{ cache.mineru.count }}</b> 份 · <b>{{ mb(cache.mineru.bytes) }}</b>　|　整库备份：<b>{{ cache.backups.count }}</b> 份 · <b>{{ mb(cache.backups.bytes) }}</b><br />
+          目录：{{ cache.dir }}
+        </p>
+        <p class="hint" v-else>读不到缓存信息（浏览器预览里没有本地目录 ✓）</p>
+        <label class="field field--row"><span>识别缓存保留</span>
+          <input type="number" min="0" max="200" step="1" style="width:70px" :value="keepMineru" @change="keepMineru = Number(($event.target as HTMLInputElement).value) || 0" />
+          <span class="hint" style="margin-left:6px">份（0 = 全清）</span>
+        </label>
+        <label class="field field--row"><span>整库备份保留</span>
+          <input type="number" min="0" max="200" step="1" style="width:70px" :value="keepBackups" @change="keepBackups = Number(($event.target as HTMLInputElement).value) || 0" />
+          <span class="hint" style="margin-left:6px">份（建议留 5 份，删题/迁移能回退）</span>
+        </label>
+        <div class="field field--row">
+          <button class="btn" :disabled="busy || !cache" @click="doClean">清理</button>
+          <button class="btn" :disabled="busy || !cache" @click="loadCache" style="margin-left:6px">刷新占用</button>
+          <span class="hint" style="margin-left:8px">{{ msg }}</span>
+        </div>
+        <p class="hint">说明：识别缓存删掉后，那些卷子要重新识别才能再「补答案」；已经入库的题目不受影响 ✓</p>
+      </div>
+      <div style="display:none">
       </div>
 
       <!-- 【v1501】启动时显示开始向导 -->
