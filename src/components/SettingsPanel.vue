@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { cacheClean, cacheStats, type CacheStats } from '@/composables/useLibrary'
 import { useDeckStore } from '@/stores/deck'
 import AppIcon from './AppIcon.vue'

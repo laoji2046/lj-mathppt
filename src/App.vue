@@ -48,6 +48,7 @@ import { initShotMode, shotRequest } from '@/ui/shot'
 import { paperPending } from '@/ui/paper'
 import ContextMenu from '@/components/ContextMenu.vue'
 import StatusBar from '@/components/StatusBar.vue'
+import AiSidePanel from '@/components/AiSidePanel.vue'
 
 const store = useDeckStore()
 const presenting = ref(false)
@@ -224,6 +225,8 @@ function onPresent() {
       <EditorCanvas v-if="viewMode !== 'source'" :presenting="presenting" />
       <MarkdownSourcePanel v-if="viewMode === 'split' || viewMode === 'source'" />
       <PropertyPanel v-if="viewMode === 'canvas'" />
+      <!-- 【v1642】右侧 DeepSeek 助手：收起时只留 40px 竖条 ✓ -->
+      <AiSidePanel v-if="!presenting" />
     </div>
     <!-- 底部状态栏（footbar）：演示时不渲染 —— 演示是给学生看的内容，不该出现操作条与软件署名 -->
     <StatusBar v-if="!presenting" />
