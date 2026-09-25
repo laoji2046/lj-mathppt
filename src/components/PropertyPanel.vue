@@ -289,7 +289,8 @@ function setFigParamSoft(key: string, raw: string) {
 /** 有几条线（0 表示这个图元没开"多条线"，颜色行就都不显示） */
 const lineN = computed(() => Math.max(0, Math.min(4, Math.round(figParamVal('n', 0)))))
 /**
- * 【v1635】曲线专属工具（加动点 / 作切线 / 求交点）只给**函数图像**与**圆锥曲线**用 ✓
+ * 【v1635】曲线专属工具（加动点 / 作切线 / 求交点）**只给「圆锥曲线」用** ✓
+ *   （用户澄清：函数图像也要屏蔽 —— 那套动点/切线是给椭圆双曲线抛物线准备的 ✓）
  *   ⚠ 以前的判据是「这个图形有没有 n 参数」（hasLineParams）—— 而**频率分布直方图的 n 是组数** ✗，
  *   于是直方图、频率分布表这些也会冒出一排「过标注点作切线」「求交点」按钮（用户实报）✓
  *   改成看**分类**：曲线类的图形才显示 ✓
@@ -297,7 +298,7 @@ const lineN = computed(() => Math.max(0, Math.min(4, Math.round(figParamVal('n',
 const isCurveFig = computed(() => {
   const k = String(mathfig.value?.kind || '')
   const opt = MATH_FIGURE_OPTIONS.find((o) => o.v === k)
-  return !!opt && (opt.cat === '圆锥曲线' || opt.cat === '函数图像')
+  return !!opt && opt.cat === '圆锥曲线'
 })
 const conicColorVal = computed(() => mathfig.value?.conicStroke || mathfig.value?.stroke || '#1a1a1a')
 const axisColorVal = computed(() => mathfig.value?.axisColor || mathfig.value?.stroke || '#1a1a1a')
