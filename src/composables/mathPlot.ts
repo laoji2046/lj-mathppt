@@ -236,13 +236,13 @@ export function figureParams(kind: string): ParamSpec[] {
   if (kind === 'freqTable') return freqTableParams()
   if (kind === 'vennIntersect' || kind === 'vennUnion' || kind === 'vennComplement') {
     // 【v1638】交/并/补 是独立类型（模式已定）→ 不给「类型」下拉，其余参数同韦恩图 ✓
-    return [{ key: 'gap', label: '两圆间距', def: 1, min: 0.2, max: 3, step: 0.1 },
+    return [{ key: 'gap', label: '两圆间距（0=几乎重合，2.2 以上相离）', def: 1, min: 0, max: 3, step: 0.05 },
       { key: 'rmask', label: '区域填充掩码（0=用上面预设）', def: 4, min: 0, max: 255, step: 1 }]
   }
   if (kind === 'vennFigure') return [
     { key: 'mode', label: '类型（0交 1并 2补 3子集 4相离 5三集）', def: 0, min: 0, max: 5, step: 1 },
     { key: 'shade', label: '打阴影', def: 1, min: 0, max: 1, step: 1, bool: true },
-    { key: 'gap', label: '两圆间距', def: 1, min: 0.2, max: 3, step: 0.1 },
+    { key: 'gap', label: '两圆间距（0=几乎重合，2.2 以上相离）', def: 1, min: 0, max: 3, step: 0.05 },
     // 【v1637】区域填充掩码：两位集合 bit0=A bit1=B bit2=A∩B bit3=两圆外；三位 bit0..6 七个区域 bit7=三圆外 ✓
     //   =0 时退回老的「打阴影」预设行为（向后兼容 ✓）
     { key: 'rmask', label: '区域填充掩码（0=用上面预设）', def: 0, min: 0, max: 255, step: 1 },
@@ -592,7 +592,9 @@ export function vennFigure(w: number, h: number, stroke: string, sw: number, par
   const r = Math.min(h * 0.3, w * 0.2)
   // 【M2.15】集合字母**按圆半径定字号**（原来按整幅宽算 ✗ 偏小 ✓）—— 老师要求：字母更大、位置接近圆心 ✓
   const fs = Math.max(13, Math.min(34, Math.round(r * 0.72)))
-  const gap = r * (0.55 + (Number.isFinite(p.gap) ? p.gap : 1) * 0.25)   // 圆心距系数 ✓（可调 ✓）
+  // 【v1639】圆心距系数：以前是 r*(0.55+gap*0.25) → gap 拉到 3 也只有 1.3r，两个圆**永远重叠** ✗
+  //   现在 0 → 0.2r（几乎重合）、1 → 1.1r、2.2 → 2.18r（刚好相离）、3 → 2.9r（离得很开）✓ 用户要能任意调 ✓
+  const gap = r * (0.2 + (Number.isFinite(p.gap) ? p.gap : 1) * 0.9)
   const cx1 = w / 2 - gap / 2, cx2 = w / 2 + gap / 2
   const circle = (cx: number, fill: string) => '<circle cx="' + n1(cx) + '" cy="' + n1(cy) + '" r="' + n1(r) + '" fill="' + fill + '" stroke="' + ink + '" stroke-width="' + n1(sw) + '"/>'
   const lbl = (x: number, y: number, t: string) => '<text x="' + n1(x) + '" y="' + n1(y) + '" font-size="' + fs + '" fill="' + ink + '" text-anchor="middle">' + t + '</text>'
