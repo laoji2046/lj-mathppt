@@ -339,8 +339,75 @@ function readImages(v: unknown): QuestionImage[] {
   return out.sort((a, b) => a.n - b.n)
 }
 
-/**
- * 解析题库 JSON。**容忍三种写法**（都是别的工具/我们自己导出时常见的）：
+/* ---------------- 【v1531 · JSON 导入容错】真实世界里的 JSON 长得五花八门 ----------------
+ * 用户报「json 导入后解析不出来」：实测这些写法以前**全部 0 道** ✗
+ *   · 中文键：{ 试卷: "…", 题目: [{ 题干, 选项, 答案, 解析, 知识点, 难度, 题型, 年份 }] }
+ *   · content / question 当题干；选项写成字典 { A: "…" } 或一整行字符串
+ *   · 单题对象（不是数组）；嵌套 paper.questions；data.list；试卷/试题 这些中文容器键
+ * 现在统一按「别名表 + 递归找数组」处理，并且**报错要说清看到了什么键**（别只说解析不出来）✓
+ */
+const STEM_KEYS = ['stem', 'body', 'text', 'content', 'question', '题干', '题目', '内容', '问题', 'title']
+const ANS_KEYS = ['answer', '答案', 'ans', 'key', '参考答案', 'correct']
+const SOL_KEYS = ['solution', 'analysis', '解析', '解答', '分析', '详解', 'explain', 'explanation']
+const OPT_KEYS = ['options', '选项', 'choices', 'choice', '备选项', 'option']
+const KP_KEYS = ['knowledge', 'tags', '知识点', 'kp', '考点', 'knowledgePoints']
+const TYPE_KEYS = ['qtype', 'questionType', 'type', '题型', '类型']
+const SEC_KEYS = ['section', '板块', 'module', '部分']
+const PAPER_KEYS = ['paperName', 'paper', '试卷', '试卷名', '来源试卷', 'examName']
+const YEAR_KEYS = ['year', '年份', '学年']
+const DIFF_KEYS = ['difficulty', '难度', 'level']
+const SCORE_KEYS = ['score', '分值', 'points', 'fullScore']
+const NO_KEYS = ['no', 'num', 'number', '题号', 'index']
+
+/** 从对象里按别名表取第一个非空值 ✓ */
+function pick(o: Record<string, unknown>, keys: string[]): unknown {
+  for (const k of keys) {
+    const v = o[k]
+    if (v === undefined || v === null) continue
+    if (typeof v === 'string' && !v.trim()) continue
+    return v
+  }
+  return undefined
+}
+
+/** 选项归一：字符串 / 字典 / [{label|key|text|content}] / 字符串数组 都能吃 ✓ */
+function normOptions(v: unknown): string[] {
+  if (v === undefined || v === null) return []
+  if (typeof v === 'string') return parseOptionLines(v)
+  if (Array.isArray(v)) {
+    return v.map((x) => (x && typeof x === 'object'
+      ? String((x as Record<string, unknown>).text ?? (x as Record<string, unknown>).content ?? (x as Record<string, unknown>).label ?? (x as Record<string, unknown>).key ?? '')
+      : String(x))).map((s) => s.trim()).filter(Boolean)
+  }
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    return Object.keys(o).sort().map((k) => String(o[k] ?? '').trim()).filter(Boolean)
+  }
+  return []
+}
+
+/** 递归找题目数组（兼容 questions / items / list / data / 题目 / 试题 与 paper.questions 这类嵌套）✓ */
+const ARR_KEYS = ['questions', 'items', 'list', 'data', '题目', '试题', '问题', 'questionList', 'question_list', 'results']
+function findQuestionArray(v: unknown, depth = 0): unknown[] | null {
+  if (Array.isArray(v)) return v
+  if (!v || typeof v !== 'object' || depth > 4) return null
+  const o = v as Record<string, unknown>
+  for (const k of ARR_KEYS) if (Array.isArray(o[k])) return o[k] as unknown[]
+  for (const k of Object.keys(o)) {
+    const hit = findQuestionArray(o[k], depth + 1)
+    if (hit && hit.length) return hit
+  }
+  return null
+}
+
+/** 顶层键摘要（报错时告诉用户「你到底给了什么」）✓ */
+function keyHint(v: unknown): string {
+  if (!v || typeof v !== 'object') return typeof v
+  const ks = Object.keys(v as Record<string, unknown>)
+  return ks.length ? ks.slice(0, 8).join(' / ') : '(空对象)'
+}
+
+/** * 解析题库 JSON。**容忍三种写法**（都是别的工具/我们自己导出时常见的）：
  *   ① { questions: [...] }（本项目导出的）  ② { items: [...] }  ③ 直接一个数组 [...]
  * 每条只要有题干（stem / body / text 任一）即可，其余缺了就补默认 ✓
  */
@@ -351,17 +418,11 @@ export function parseQuestionsJson(text: string): { list: ParsedQuestion[]; erro
   } catch {
     return { list: [], error: '不是合法的 JSON（可能选错了文件）' }
   }
-  let arr: unknown[] = []
-  if (Array.isArray(raw)) {
-    arr = raw
-  } else if (raw && typeof raw === 'object') {
-    const o = raw as Record<string, unknown>
-    if (Array.isArray(o.questions)) arr = o.questions
-    else if (Array.isArray(o.items)) arr = o.items
-    else return { list: [], error: 'JSON 里找不到 questions 或 items 数组' }
-  } else {
-    return { list: [], error: 'JSON 结构不认识（既不是数组也不是对象）' }
-  }
+  // 【v1531】容器兼容：数组 / {questions|items|list|data|题目|试题} / paper.questions / 单题对象 ✓
+  // 【v1531】单题对象（不是数组）也算一种写法：`{ "题干": "…", "答案": "A" }` ✓
+  let arr = findQuestionArray(raw)
+  if (!arr && raw && typeof raw === 'object' && pick(raw as Record<string, unknown>, STEM_KEYS) !== undefined) arr = [raw]
+  if (!arr) return { list: [], error: '没找到题目数组 —— 顶层键是：' + keyHint(raw) + '（支持 questions / items / list / data / 题目 / 试题，也支持 paper.questions 这种嵌套）' }
   const arrOf = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => (x && typeof x === 'object'
     ? String((x as { text?: unknown; label?: unknown }).text ?? (x as { label?: unknown }).label ?? '')
     : String(x))) : [])
@@ -369,41 +430,52 @@ export function parseQuestionsJson(text: string): { list: ParsedQuestion[]; erro
   for (const it of arr) {
     if (!it || typeof it !== 'object') continue
     const o = it as Record<string, unknown>
-    const stem = String(o.stem || o.body || o.text || '').trim()
+    // 【v1531】题干 / 答案 / 解析 / 选项 / 知识点 全按别名表取（含中文键）✓
+    const stemRaw = pick(o, STEM_KEYS)
+    const stem = String(stemRaw === undefined ? '' : stemRaw).trim()
     if (!stem) continue
-    const title = String(o.title || '').trim()
+    const title = String(pick(o, ['title', '标题', 'name']) || '').trim()
     const p: ParsedQuestion = {
       title: title || (stem.length > 20 ? stem.slice(0, 20) + '…' : stem),
       stem,
-      options: arrOf(o.options),
-      answer: String(o.answer || '').trim(),
-      solution: String(o.solution || o.analysis || '').trim(),
-      knowledge: arrOf(o.knowledge || o.tags),
-      difficulty: Number(o.difficulty) || 3,
-      qtype: o.qtype ? String(o.qtype) : undefined,
-      section: o.section ? String(o.section) : undefined,
-      chapter: o.chapter ? String(o.chapter) : undefined,
+      options: normOptions(pick(o, OPT_KEYS)),
+      answer: String(pick(o, ANS_KEYS) ?? '').trim(),
+      solution: String(pick(o, SOL_KEYS) ?? '').trim(),
+      knowledge: arrOf(pick(o, KP_KEYS)),
+      difficulty: Number(pick(o, DIFF_KEYS)) || 3,
+      qtype: String(pick(o, TYPE_KEYS) ?? '') || undefined,
+      section: String(pick(o, SEC_KEYS) ?? '') || undefined,
+      chapter: String(pick(o, ['chapter', '章节']) ?? '') || undefined,
       date: o.date ? String(o.date) : undefined,
-      year: String(o.year || ''),
-      yearExplicit: o.year ? String(o.year) : undefined,
+      year: String(pick(o, YEAR_KEYS) ?? ''),
+      yearExplicit: pick(o, YEAR_KEYS) ? String(pick(o, YEAR_KEYS)) : undefined,
       // 【v1531】`paper` 也是常见写法（AI Schema 用的就是 paper）✓
-      paperName: (o.paperName || o.paper) ? String(o.paperName || o.paper) : undefined,
-      region: String(o.region || o.source || ''),
+      paperName: pick(o, PAPER_KEYS) ? String(pick(o, PAPER_KEYS)) : undefined,
+      region: String(pick(o, ['region', 'source', '来源', '地区']) ?? ''),
       // 【v1531】这四项以前**导入 JSON 时会丢**（题内序号 / 难度档 / 告警）：
       //   题内序号丢了，按试卷排序和「卷尾答案区按题号配」就没有锚 ✓
-      no: Number(o.no ?? o.num ?? o.index) || undefined,
-      level: o.level ? String(o.level) : undefined,
-      warn: o.warn ? String(o.warn) : (Array.isArray(o.warnings) ? arrOf(o.warnings).join('；') : undefined),
+      no: Number(pick(o, NO_KEYS)) || undefined,
+      level: typeof o.level === 'string' ? o.level : undefined,
+      warn: o.warn ? String(o.warn) : (Array.isArray(o.warnings) ? arrOf(o.warnings).join('；') : (o.告警 ? String(o.告警) : undefined)),
     }
-    const imgs = readImages(o.images)
+    // 【v1531】卷尾「answers: { "1": "A", "2": "B" }」这种题号 → 答案的表，按题号补 ✓
+    if (!p.answer && o.answers && typeof o.answers === 'object' && p.no) {
+      const m = (o.answers as Record<string, unknown>)[String(p.no)]
+      if (m !== undefined) p.answer = String(m).trim()
+    }
+    const imgs = readImages(pick(o, ['images', '图', 'figures']))
     if (imgs.length) p.images = imgs
-    const sc = Number(o.score)
+    const sc = Number(pick(o, SCORE_KEYS))
     if (Number.isFinite(sc) && sc > 0) p.scoreExplicit = sc
     const af = String(o.answerFrom || '')
     if (af === 'auto' || af === 'manual' || af === 'ai') p.answerFrom = af
     list.push(p)
   }
-  if (!list.length) return { list: [], error: '没有解析出任何试题（每条至少要有题干）' }
+  if (!list.length) {
+    const first = arr[0]
+    const hint = first && typeof first === 'object' ? keyHint(first) : String(first)
+    return { list: [], error: '解析出 0 道 —— 每条至少要有一个题干字段（stem / content / 题干 / 题目）。看到的第一条键是：' + hint }
+  }
   return { list }
 }
 
@@ -703,6 +775,11 @@ export function parseAnyJson(raw: string): { list: ParsedQuestion[]; error?: str
   try { v = JSON.parse(raw) } catch { return { list: [], error: '不是合法的 JSON（可能选错了文件）', mode: 'bank' } }
   if (looksLikeAiJson(v)) {
     const r = parseAiJson(raw)
+    if (r.list.length) return { ...r, mode: 'ai' }
+    // 【v1531】AI 那条路认不出来时**退回题库解析**再试一次 ——
+    //   实测 `{ paper: { questions: [...] } }` 会被误判成 AI JSON，然后 0 道 ✗
+    const rb = parseQuestionsJson(raw)
+    if (rb.list.length) return { ...rb, mode: 'bank' }
     return { ...r, mode: 'ai' }
   }
   const r = parseQuestionsJson(raw)
