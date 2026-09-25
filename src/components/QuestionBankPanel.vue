@@ -32,11 +32,16 @@ import type { AnsScan } from '@/composables/useAnswerBackfill'
 const QuestionImportDialog = defineAsyncComponent(() => import('./QuestionImportDialog.vue'))
 /** 草稿箱（v5 · P1b）：AI / OCR 的产出先落这里，人工确认后才进正式库 ✓ */
 const DraftBox = defineAsyncComponent(() => import('./DraftBox.vue'))
+import { isTauri } from '@/composables/useTauri'
 import { useDeckStore } from '@/stores/deck'
 import { sendToPaper } from '@/ui/paper'
 import type { SlideElement } from '@/types'
 
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+/** 【v1530】浏览器预览里没有 SQLite 真库（题只落在 localStorage 的降级库）
+ *  —— 面板上明说一句，别让人把预览库的数当真库的数 ✓ */
+const isPreview = !isTauri()
 
 const facets = ref<QFacets>({ total: 0, bySection: {}, byQtype: {}, byLevel: {}, byYear: {}, byPaper: {}, byKp: {}, byStatus: {}, bySourceKind: {}, warned: 0, missing: { section: 0, answer: 0, kp: 0, year: 0, paper: 0, code: 0 } })
 const items = ref<QItem[]>([])
@@ -985,6 +990,10 @@ async function batchDelete() {
         <button class="qb__btn qb__btn--mini" title="位置复位到屏幕中央并展开" @click="resetWin">⟳</button>
         <span class="qb__title">试题库</span>
         <span class="qb__sub">共 {{ facets.total }} 道 · 当前筛出 {{ total }} 道</span>
+        <span
+          v-if="isPreview" class="qb__badge"
+          title="浏览器预览库：题存在浏览器 localStorage 里（桌面端才有 %APPDATA%\lj-mathslides\library.db 那份真库）。清缓存 / 换浏览器就没了 ✓"
+        >浏览器预览库</span>
         <span v-if="msg" class="qb__msg">{{ msg }}</span>
         <span class="qb__headrt">
           <button class="qb__btn" title="导出成一道题一个 .md 的 Markdown 题库（Obsidian 可开、能再导入回来）" @click="exportVaultMd">导出 Markdown</button>
@@ -1412,6 +1421,7 @@ async function batchDelete() {
 .qb__btn--mini { height: 24px; padding: 0 8px; font-size: 12px; }
 .qb__title { font-size: 15px; font-weight: 700; color: var(--text); }
 .qb__sub { font-size: 12px; color: var(--muted); }
+.qb__badge { font-size: 11px; line-height: 16px; padding: 0 7px; border-radius: 999px; border: 1px solid #e0cf9a; background: #fdf6e3; color: #8a6a12; white-space: nowrap; }
 .qb__msg { font-size: 12px; color: var(--brand-600, #534AB7); }
 .qb__headrt { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .qb__close { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; cursor: pointer; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--gray-600); }

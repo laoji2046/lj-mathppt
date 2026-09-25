@@ -60,6 +60,48 @@ function fbSave(d: FallbackShape) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(d)) } catch { /* 容量满就放弃，不打断使用 */ }
 }
 
+/* ---- 【v1530】降级库的读写口子 ----
+ * 起因（老师实测）：dev 预览里导入 2 道题，弹窗报「已入库 2 道」，题库面板却一直「共 0 道」✗。
+ * 真相：题**已经写进这份降级库了** ✓（lib_save_many 的降级分支），只是题库的读侧
+ * （qFacets / qSearch）只走 Rust，浏览器里 invoke 一抛错就返回空 —— 写进去了，没人读 ✓
+ * 所以这里把降级库开三个口子给题库面板用（浏览器专用；桌面端一律走 SQLite ✗不走这儿）。 */
+
+/** 取降级库里某一类的全部条目（原样返回，不做排序 —— 排序口径由调用方定 ✓） */
+export function fbItems(kind: LibKind): LibItem[] {
+  return fbLoad().items.filter((x) => (x as { type?: string }).type === kind)
+}
+
+/** 把 patch 合进某条的 meta（值为 null/undefined = 删键），口径与 Rust 的 lib_q_patch 一致 ✓
+ *  （键就是 meta 里的键：section / qtype / year / paperName / answer / knowledge…）
+ *  返回合并后的 meta；条目不存在返回 null ✓ */
+export function fbMergeMeta(id: number, patch: Record<string, unknown>): Record<string, unknown> | null {
+  const d = fbLoad()
+  const it = d.items.find((x) => x.id === Number(id))
+  if (!it) return null
+  const m: Record<string, unknown> = { ...(it.meta || {}) }
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (v === null || v === undefined) delete m[k]
+    else m[k] = v
+  }
+  it.meta = m
+  it.updatedAt = String(Math.floor(Date.now() / 1000))
+  // 降级库里没有真列 —— tags 跟着 meta 走，列表上的板块/知识点才不脱节 ✓
+  const kp = Array.isArray(m.knowledge) ? (m.knowledge as unknown[]).map((x) => String(x)) : []
+  it.tags = [String(m.section || ''), ...kp].filter(Boolean).join(',')
+  fbSave(d)
+  return m
+}
+
+/** 从降级库删条目（批量），返回删掉几条 ✓ */
+export function fbRemove(ids: number[]): number {
+  const d = fbLoad()
+  const set = new Set((ids || []).map(Number))
+  const before = d.items.length
+  d.items = d.items.filter((x) => !set.has(x.id))
+  fbSave(d)
+  return before - d.items.length
+}
+
 /* ---------------- 统一接口 ---------------- */
 
 /** 库信息（路径 + 条目数）；浏览器降级时不报错，只说明来源 */

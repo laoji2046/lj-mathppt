@@ -501,6 +501,10 @@ function optsText(o: string[]): string {
             <button class="qi__btn" :disabled="!isDesktop" @click="pickFile('pdf')">导入 .pdf（MinerU）</button>
           </div>
           <div v-if="!isDesktop" class="qi__hint">PDF 识别（MinerU）只在桌面端可用；浏览器里可直接粘贴 MD / JSON。</div>
+          <div v-if="!isDesktop" class="qi__hint qi__hint--warn">
+            浏览器预览：没有本地题库（SQLite 只在桌面端 exe 里）—— 入库的题只进浏览器的<b>预览库</b>（localStorage，
+            刷新还在，清缓存 / 换浏览器就没了）。要看真实题库请打开桌面端 ✓
+          </div>
           <label class="qi__lab">MinerU token（可选，只存本机）
             <input v-model="mineruToken" class="qi__inp" type="password" autocomplete="off" spellcheck="false" placeholder="不填 → 免登录轻量接口（只出 Markdown）" />
           </label>
@@ -608,6 +612,7 @@ function optsText(o: string[]): string {
 .qi__mini--wide { min-width: 150px; }
 .qi__prog { font-size: 12px; color: var(--brand-600, #534AB7); word-break: break-all; }
 .qi__hint { font-size: 11.5px; color: var(--muted); line-height: 1.6; }
+.qi__hint--warn { color: #8a6a12; background: #fdf6e3; border: 1px solid #e0cf9a; border-radius: 6px; padding: 6px 8px; }
 .qi__hint b { color: var(--text); }
 .qi__empty { padding: 24px 10px; color: var(--muted); font-size: 12.5px; }
 .qi__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 2px 0 8px; }

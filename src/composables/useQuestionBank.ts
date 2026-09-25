@@ -5,8 +5,10 @@
  *  - **库是空的也能跑**：任何调用失败都返回安全默认值，绝不让界面崩 ✓
  *  - 筛选/计数交给 SQL（lib_q_facets / lib_q_search）：题量上去也不会拖慢界面 ✓
  */
-import { invoke } from './useTauri'
+import { invoke, isTauri } from './useTauri'
 import { assetSrc, loadAssets } from './useAssets'
+import { fbItems, fbMergeMeta, fbRemove } from './useLibrary'
+import type { LibItem } from './useLibrary'
 import type { QuestionImage } from './parseQuestions'
 import { dispNoOf, figLabelOf, placeFigures } from './mineruImages'
 
@@ -104,7 +106,108 @@ const EMPTY_FACETS: QFacets = {
   missing: { section: 0, answer: 0, kp: 0, year: 0, paper: 0, code: 0 },
 }
 
+/* ---------------- 【v1530】浏览器预览库：没有 Rust 也要读得到自己导进去的题 ----------------
+ * 起因（老师实测）：dev 预览（localhost:5173）里导入 2 道题 → 弹窗报「已入库 2 道」✓，
+ *   题库面板却一直「共 0 道」✗。真相是**题没丢**：libSaveMany 的降级分支已经写进 localStorage
+ *   的降级库了 ✓，只是题库的读侧（qFacets / qSearch）只走 Rust —— 浏览器里 invoke 一抛错就返回空，
+ *   于是「写进去了、没人读」，界面上就成了「导入成功但题库 0 道」✗
+ * 现在：浏览器里改读同一份降级库（语义照抄 lib_q_facets / lib_q_search：(未归类)/(空) 口径、
+ *   缺项口径、limit/offset、paper 排序…），并在面板上挂「浏览器预览库」标签 ——
+ *   它是**浏览器里的预览库**，与桌面端 %APPDATA% 的 SQLite 真库互不影响 ✓ */
+
+/** 行投影：降级条目 → 与 lib_q_search 同一形状（meta 仍是 JSON 字符串 —— metaOf() 要 parse ✓） */
+function pvRow(it: LibItem): QItem {
+  const m = it.meta || {}
+  const s = (k: string) => { const v = m[k]; return v === null || v === undefined ? '' : String(v) }
+  const kp = Array.isArray(m.knowledge) ? (m.knowledge as unknown[]).map((x) => String(x)).filter(Boolean) : []
+  return {
+    id: it.id, title: it.title, body: it.body || '', meta: JSON.stringify(m),
+    section: s('section'), qtype: s('qtype'), level: s('level'),
+    difficulty: Number(m.difficulty) || 0, year: Number(m.year) || 0, paper: s('paperName'),
+    kp, updatedAt: it.updatedAt || '',
+    code: s('code'), status: s('status'), sourceKind: s('sourceKind'), warn: s('warn'),
+  }
+}
+/** 预览库里的全部题（新导入的在前面由调用方排序决定 ✓） */
+function pvAll(): QItem[] { return fbItems('question').map(pvRow) }
+/** 与 Rust 侧一致的「行真列」子集（patch / batch 回给界面就更新这些 ✓） */
+function pvCols(r: QItem) {
+  return { section: r.section, qtype: r.qtype, level: r.level, difficulty: r.difficulty, year: r.year, paper: r.paper, code: r.code, status: r.status, sourceKind: r.sourceKind, warn: r.warn }
+}
+/** 计数对（名 → 数）：SQL 是 ORDER BY c DESC，这里也按数量降序，左树顺序才一致 ✓ */
+function pvSortPairs(o: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const [k, c] of Object.entries(o).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh'))) out[k] = c
+  return out
+}
+function pvFacets(): QFacets {
+  const rows = pvAll()
+  const bySection: Record<string, number> = {}; const byQtype: Record<string, number> = {}
+  const byLevel: Record<string, number> = {}; const byYear: Record<string, number> = {}
+  const byPaper: Record<string, number> = {}; const byKp: Record<string, number> = {}
+  const byStatus: Record<string, number> = {}; const bySourceKind: Record<string, number> = {}
+  const bump = (o: Record<string, number>, k: string) => { o[k] = (o[k] || 0) + 1 }
+  const missing = { section: 0, answer: 0, kp: 0, year: 0, paper: 0, code: 0 }
+  let warned = 0
+  for (const r of rows) {
+    bump(bySection, r.section || '(未归类)')
+    bump(byQtype, r.qtype || '(空)')
+    bump(byLevel, r.level || '(空)')
+    bump(byYear, r.year ? String(r.year) : '(空)')
+    bump(byPaper, r.paper || '(空)')
+    bump(byStatus, r.status || '(空)')
+    bump(bySourceKind, r.sourceKind || '(空)')
+    for (const k of r.kp) bump(byKp, k)
+    if (r.warn) warned++
+    if (!r.section) missing.section++
+    if (!String(metaOf(r).answer || '').trim()) missing.answer++
+    if (!r.kp.length) missing.kp++
+    if (!r.year) missing.year++
+    if (!r.paper) missing.paper++
+    if (!r.code) missing.code++
+  }
+  const top = (o: Record<string, number>, n = 30) => Object.fromEntries(Object.entries(pvSortPairs(o)).slice(0, n))
+  return {
+    ok: true, total: rows.length,
+    bySection: pvSortPairs(bySection), byQtype: pvSortPairs(byQtype), byLevel: pvSortPairs(byLevel),
+    byYear: pvSortPairs(byYear), byPaper: top(byPaper), byKp: pvSortPairs(byKp),
+    byStatus: pvSortPairs(byStatus), bySourceKind: pvSortPairs(bySourceKind),
+    warned, missing,
+  }
+}
+/** 与 lib_q_search 同一套筛选 / 排序 / 分页 ✓ */
+function pvSearch(f: QFilter): { total: number; items: QItem[] } {
+  const q = f || {}
+  const has = (v?: string) => !!(v && String(v).trim())
+  let rows = pvAll()
+  if (has(q.section)) rows = rows.filter((r) => (q.section === '(未归类)' ? !r.section : r.section === q.section))
+  if (has(q.qtype)) rows = rows.filter((r) => r.qtype === q.qtype)
+  if (has(q.level)) rows = rows.filter((r) => r.level === q.level)
+  if (has(q.status)) rows = rows.filter((r) => (q.status === '(空)' ? !r.status : r.status === q.status))
+  if (has(q.sourceKind)) rows = rows.filter((r) => (q.sourceKind === '(空)' ? !r.sourceKind : r.sourceKind === q.sourceKind))
+  if (Number(q.year) > 0) rows = rows.filter((r) => r.year === Number(q.year))
+  if (has(q.paper)) rows = rows.filter((r) => r.paper.indexOf(String(q.paper)) >= 0)
+  if (has(q.kp)) rows = rows.filter((r) => r.kp.indexOf(String(q.kp)) >= 0)
+  if (has(q.q)) { const t = String(q.q); rows = rows.filter((r) => r.body.indexOf(t) >= 0 || r.title.indexOf(t) >= 0) }
+  if (q.missingSection) rows = rows.filter((r) => !r.section)
+  if (q.missingAnswer) rows = rows.filter((r) => !String(metaOf(r).answer || '').trim())
+  if (q.missingKp) rows = rows.filter((r) => !r.kp.length)
+  if (q.missingYear) rows = rows.filter((r) => !r.year)
+  const total = rows.length
+  if (q.sort === 'paper') {
+    const noOf = (r: QItem) => Number(metaOf(r).no) || 0
+    rows = rows.slice().sort((a, b) => (a.paper ? 0 : 1) - (b.paper ? 0 : 1)
+      || a.paper.localeCompare(b.paper, 'zh') || noOf(a) - noOf(b) || a.id - b.id)
+  } else {
+    rows = rows.slice().sort((a, b) => b.id - a.id)
+  }
+  const limit = Math.min(Math.max(Number(q.limit) || 200, 1), 500)
+  const offset = Math.max(Number(q.offset) || 0, 0)
+  return { total, items: rows.slice(offset, offset + limit) }
+}
+
 export async function qFacets(): Promise<QFacets> {
+  if (!isTauri()) return pvFacets()
   try {
     const r = await invoke<QFacets>('lib_q_facets', {})
     if (r && r.ok !== false) return { ...EMPTY_FACETS, ...r, missing: { ...EMPTY_FACETS.missing, ...(r.missing || {}) } }
@@ -151,6 +254,12 @@ export interface KpCatalogItem { kp: string; kind: string; aliases: string; pare
 
 /** 受控词表（板块级）：kind = 'knowledge'（板块）/ 'method'（方法） */
 export async function kpCatalog(): Promise<KpCatalogItem[]> {
+  if (!isTauri()) {
+    // 预览库的受控词表：直接从题上出现过的知识点凑（够筛选用 ✓）
+    const set = new Set<string>()
+    for (const r of pvAll()) for (const k of r.kp) set.add(k)
+    return [...set].sort((a, b) => a.localeCompare(b, 'zh')).map((kp) => ({ kp, kind: 'knowledge', aliases: '', parent: '' }))
+  }
   try {
     const r = await invoke<{ ok?: boolean; items?: KpCatalogItem[] }>('lib_kp_catalog', {})
     if (r && r.ok !== false) return r.items || []
@@ -159,6 +268,7 @@ export async function kpCatalog(): Promise<KpCatalogItem[]> {
 }
 
 export async function qSearch(f: QFilter): Promise<{ total: number; items: QItem[] }> {
+  if (!isTauri()) return pvSearch(f)
   try {
     const r = await invoke<{ ok?: boolean; total?: number; items?: QItem[] }>('lib_q_search', { filter: f })
     if (r && r.ok !== false) return { total: r.total || 0, items: r.items || [] }
@@ -167,6 +277,15 @@ export async function qSearch(f: QFilter): Promise<{ total: number; items: QItem
 }
 
 export async function qPatch(id: number, patch: Record<string, unknown>): Promise<{ ok: boolean; row?: Partial<QItem>; error?: string }> {
+  if (!isTauri()) {
+    // status 给空串 = 保持原状态（Rust 侧是 CASE WHEN '' THEN status ✓，这里同口径）
+    const p2: Record<string, unknown> = { ...(patch || {}) }
+    if (!p2.status) delete p2.status
+    const m = fbMergeMeta(Number(id), p2)
+    if (!m) return { ok: false, error: '预览库里没有这道题 #' + id }
+    const it = fbItems('question').find((x) => x.id === Number(id))
+    return { ok: true, row: it ? pvCols(pvRow(it)) : {} }
+  }
   try {
     const r = await invoke<{ ok?: boolean; row?: Partial<QItem>; error?: string }>('lib_q_patch', { id, patch })
     if (r && r.ok) return { ok: true, row: r.row }
@@ -254,6 +373,21 @@ export interface QBatchOp { id: number; patch?: Record<string, unknown>; delete?
 export interface QBatchResult { ok: boolean; updated: number; deleted: number; /** 批量删除时 Rust 侧自动留下的整库备份路径 ✓ */ backup: string; rows: Record<string, unknown>[]; error?: string }
 
 export async function qBatch(ops: QBatchOp[]): Promise<QBatchResult> {
+  if (!isTauri()) {
+    let updated = 0; let deleted = 0
+    const rows: Record<string, unknown>[] = []
+    for (const op of ops || []) {
+      const id = Number(op.id) || 0
+      if (op.delete) { deleted += fbRemove([id]); continue }
+      const p2: Record<string, unknown> = { ...(op.patch || {}) }
+      if (!p2.status) delete p2.status
+      if (!fbMergeMeta(id, p2)) continue
+      updated++
+      const it = fbItems('question').find((x) => x.id === id)
+      if (it) rows.push({ id, ...pvCols(pvRow(it)) })
+    }
+    return { ok: true, updated, deleted, backup: '', rows }
+  }
   try {
     const r = await invoke<{ ok?: boolean; updated?: number; deleted?: number; backup?: string; rows?: Record<string, unknown>[]; error?: string }>('lib_q_batch', { ops })
     if (r && r.ok) return { ok: true, updated: r.updated || 0, deleted: r.deleted || 0, backup: r.backup || '', rows: r.rows || [] }
