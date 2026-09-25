@@ -3376,6 +3376,89 @@ fn lib_mineru_cache_text(ms: String) -> serde_json::Value {
     }
     serde_json::json!({ "ok": true, "contentJson": content_json, "md": md })
 }
+/// 目录占用（递归；读不到就当 0，不报错）
+fn dir_bytes(p: &std::path::Path) -> u64 {
+    let mut n = 0u64;
+    if let Ok(rd) = std::fs::read_dir(p) {
+        for e in rd.flatten() {
+            let path = e.path();
+            if path.is_dir() { n += dir_bytes(&path); } else { n += e.metadata().map(|m| m.len()).unwrap_or(0); }
+        }
+    }
+    n
+}
+
+/// 【v1641】设置面板的「清理」：先报占用（MinerU 识别缓存 / 整库备份）—— 只读，不删东西 ✓
+#[tauri::command]
+fn lib_cache_stats() -> serde_json::Value {
+    let base = library_path().parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+    let mut mc = 0i64;
+    let mut mb = 0u64;
+    let mineru = base.join("mineru");
+    if let Ok(rd) = std::fs::read_dir(&mineru) {
+        for e in rd.flatten() {
+            if e.path().is_dir() { mc += 1; mb += dir_bytes(&e.path()); }
+        }
+    }
+    let mut bc = 0i64;
+    let mut bb = 0u64;
+    if let Ok(rd) = std::fs::read_dir(&base) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with("library.db.bak") && e.path().is_file() {
+                bc += 1;
+                bb += e.metadata().map(|m| m.len()).unwrap_or(0);
+            }
+        }
+    }
+    serde_json::json!({
+        "ok": true,
+        "dir": base.to_string_lossy(),
+        "mineru": { "count": mc, "bytes": mb },
+        "backups": { "count": bc, "bytes": bb }
+    })
+}
+
+/// 【v1641】按「保留最近 N 份」清理：MinerU 缓存目录名是毫秒时间戳，备份名尾部是时间戳 ✓
+#[tauri::command]
+fn lib_cache_clean(keep_mineru: i64, keep_backups: i64) -> serde_json::Value {
+    let base = library_path().parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+    let mut freed = 0u64;
+    let mut dm = 0i64;
+    let mut db = 0i64;
+    let mineru = base.join("mineru");
+    if let Ok(rd) = std::fs::read_dir(&mineru) {
+        let mut dirs: Vec<(i64, std::path::PathBuf)> = rd.flatten()
+            .filter(|e| e.path().is_dir())
+            .map(|e| (e.file_name().to_string_lossy().parse::<i64>().unwrap_or(0), e.path()))
+            .collect();
+        dirs.sort_by_key(|x| x.0);
+        let cut = dirs.len().saturating_sub(keep_mineru.max(0) as usize);
+        for (_, path) in dirs.into_iter().take(cut) {
+            let sz = dir_bytes(&path);
+            if std::fs::remove_dir_all(&path).is_ok() { freed += sz; dm += 1; }
+        }
+    }
+    if let Ok(rd) = std::fs::read_dir(&base) {
+        let mut baks: Vec<(i64, std::path::PathBuf)> = rd.flatten()
+            .filter(|e| e.path().is_file())
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                if !name.starts_with("library.db.bak") { return None; }
+                let ts = name.rsplit(|c: char| !c.is_ascii_digit()).next().unwrap_or("0").parse::<i64>().unwrap_or(0);
+                Some((ts, e.path()))
+            })
+            .collect();
+        baks.sort_by_key(|x| x.0);
+        let cut = baks.len().saturating_sub(keep_backups.max(0) as usize);
+        for (_, path) in baks.into_iter().take(cut) {
+            let sz = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            if std::fs::remove_file(&path).is_ok() { freed += sz; db += 1; }
+        }
+    }
+    serde_json::json!({ "ok": true, "freed": freed, "mineru": dm, "backups": db })
+}
+
 
 /// 【优化】把从产物缓存重新拆出的答案补到缺答案的题上。
 ///   ⚠ **只补不覆盖**：题目里已有 answer/solution 的一律跳过 —— 这条在 Rust 侧强制（前端绕不过去 ✓）
@@ -5023,6 +5106,8 @@ pub fn run() {
             lib_tags,
             lib_save_many,
             mineru_parse,
+            lib_cache_stats,
+            lib_cache_clean,
             lib_mineru_contract,
             lib_mineru_caches,
             lib_mineru_cache_text,
