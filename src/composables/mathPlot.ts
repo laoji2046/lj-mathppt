@@ -589,7 +589,10 @@ export function vennFigure(w: number, h: number, stroke: string, sw: number, par
   const shade = p.shade > 0.5
   const ink = stroke || '#111'
   const cy = h * 0.52
-  const r = Math.min(h * 0.3, w * 0.2)
+  // 【v1640】半径要跟间距联动：圆心距 = r*k，两圆总宽 = r*(k+2) + 边距 ——
+  //   不联动的话间距一大，圆就戳出画布、全集矩形反而装不下 ✗（用户报"矩形有点儿小了"）
+  const kGap = 0.2 + (Number.isFinite(p.gap) ? p.gap : 1) * 0.9
+  const r = Math.min(h * 0.3, w * 0.2, (w * 0.94) / (kGap + 2.5), (h * 0.9) / 2.5)
   // 【M2.15】集合字母**按圆半径定字号**（原来按整幅宽算 ✗ 偏小 ✓）—— 老师要求：字母更大、位置接近圆心 ✓
   const fs = Math.max(13, Math.min(34, Math.round(r * 0.72)))
   // 【v1639】圆心距系数：以前是 r*(0.55+gap*0.25) → gap 拉到 3 也只有 1.3r，两个圆**永远重叠** ✗
@@ -614,7 +617,19 @@ export function vennFigure(w: number, h: number, stroke: string, sw: number, par
       ? [{ x: w / 2 - rr * 0.7, y: cy - rr * 0.62 }, { x: w / 2 + rr * 0.7, y: cy - rr * 0.62 }, { x: w / 2, y: cy + rr * 0.66 }]
       : [{ x: cx1, y: cy }, { x: cx2, y: cy }]
     const rad = three ? rr : r
-    const rect = { x: w * 0.07, y: h * 0.10, rw: w * 0.86, rh: h * 0.80 }
+    // 【v1640】全集矩形按**圆的真实范围**算（用户报：矩形太小、相离时两圆戳出去了 ✗）——
+    //   以前写死 86%×80%，间距一大圆就出框；现在取所有圆的包围盒 + 边距，再夹回画布内 ✓
+    const pad = rad * 0.24
+    const bx0 = Math.min(...cs.map((c) => c.x)) - rad - pad
+    const bx1 = Math.max(...cs.map((c) => c.x)) + rad + pad
+    const by0 = Math.min(...cs.map((c) => c.y)) - rad - pad
+    const by1 = Math.max(...cs.map((c) => c.y)) + rad + pad
+    const rect = {
+      x: Math.max(w * 0.02, bx0),
+      y: Math.max(h * 0.03, by0),
+      rw: Math.min(w * 0.96, bx1) - Math.max(w * 0.02, bx0),
+      rh: Math.min(h * 0.94, by1) - Math.max(h * 0.03, by0),
+    }
     const cid = (i: number) => 'vc' + uid + i
     const defs = cs.map((c, i) => '<clipPath id="' + cid(i) + '"><circle cx="' + n1(c.x) + '" cy="' + n1(c.y) + '" r="' + n1(rad) + '"/></clipPath>').join('')
     const cs_ = (i: number, fill: string) => '<circle cx="' + n1(cs[i].x) + '" cy="' + n1(cs[i].y) + '" r="' + n1(rad) + '" fill="' + fill + '"/>'
