@@ -74,7 +74,13 @@ async function toggleWeb() {
     webOpen.value = !!(r && r.open)
   err.value = ''
     if (webOpen.value && timer == null) {
-      timer = window.setInterval(() => { void invoke('ds_webview_sync', { width: WEB_W }) }, 500)
+      // 同步位置；万一窗口被手动关掉（或被系统关掉）→ 结果里 open=false，UI 自动复位 ✓
+      timer = window.setInterval(async () => {
+        try {
+          const s = await invoke<{ open?: boolean }>('ds_webview_sync', { width: WEB_W })
+          if (s && s.open === false) { webOpen.value = false; if (timer != null) { window.clearInterval(timer); timer = null } }
+        } catch { /* 单次失败不管，下次再试 */ }
+      }, 500)
     }
     if (!webOpen.value && timer != null) { window.clearInterval(timer); timer = null }
   } catch (e) { err.value = String((e as Error)?.message || e) }

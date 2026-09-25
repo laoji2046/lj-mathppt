@@ -3464,7 +3464,7 @@ use tauri::Manager;
 ///   ⚠ 不用 iframe（站点发 X-Frame-Options: DENY，浏览器直接拒绝渲染 ✗）；
 ///     这里建的是 Tauri 的**子 WebviewWindow**，加载真网页，登录态/功能与浏览器一致 ✓
 #[tauri::command]
-fn ds_webview_open(app: tauri::AppHandle, width: f64) -> serde_json::Value {
+async fn ds_webview_open(app: tauri::AppHandle, width: f64) -> serde_json::Value {
     // 已经开着 → 再点就是关掉
     if let Some(w) = app.get_webview_window("deepseek") {
         let _ = w.close();
@@ -3496,7 +3496,7 @@ fn ds_webview_open(app: tauri::AppHandle, width: f64) -> serde_json::Value {
 
 /// 【v1643】把网页版窗口"贴"回主窗口右侧（主窗口移动/缩放时由前端定时调一次 ✓）
 #[tauri::command]
-fn ds_webview_sync(app: tauri::AppHandle, width: f64) -> serde_json::Value {
+async fn ds_webview_sync(app: tauri::AppHandle, width: f64) -> serde_json::Value {
     let child = match app.get_webview_window("deepseek") { Some(w) => w, None => return serde_json::json!({ "ok": true, "open": false }) };
     let (px, py, pw, ph) = match app.get_webview_window("main") {
         Some(m) => {
