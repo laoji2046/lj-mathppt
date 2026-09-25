@@ -577,7 +577,13 @@ function optsText(o: string[]): string {
 </template>
 
 <style scoped>
-.qi { position: fixed; inset: 0; z-index: 420; background: rgba(20, 24, 34, 0.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; }
+/* ★ v1616 修：**整个弹窗点不动**（用户报「导入 md/json/pdf 都无反应」✗）。
+   根因：本弹窗是题库浮窗 .qb 的**直接子元素**（QuestionBankPanel.vue:1200 ✓），而 .qb 从 v1472 起是
+   `pointer-events: none`（为了"不挡画布"✓）—— 这个属性**会被子元素继承** ✗，而这里从没写回 auto ✗
+   → 弹窗里所有按钮/输入框都点不到 ✗（真机实测：elementFromPoint 落在背后的 .qb__filters 上 ✓，
+   而 JS 的 element.click() 能触发、真鼠标点不到 ✓ —— 所以只有"真人点"才复现 ✓）。
+   本弹窗带全屏遮罩、本来就是**模态** ✓ → 明确吃掉点击 ✓（顺带：打开时也不会误点到底下的画布 ✓）。 */
+.qi { pointer-events: auto; position: fixed; inset: 0; z-index: 420; background: rgba(20, 24, 34, 0.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; }
 .qi__box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: 96vw; max-width: 1320px; height: 90vh; display: flex; flex-direction: column; overflow: hidden; }
 .qi__head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
 .qi__title { font-size: 15px; font-weight: 700; color: var(--text); }

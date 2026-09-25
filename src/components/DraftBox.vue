@@ -313,7 +313,9 @@ onMounted(loadBatches)
 </template>
 
 <style scoped>
-.dbx { position: fixed; inset: 0; z-index: 420; background: rgba(20, 24, 34, 0.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; }
+/* ★ v1616：与 QuestionImportDialog 同一个坑 —— 草稿箱也是题库浮窗 .qb 的**直接子元素**（QuestionBankPanel.vue:1201 ✗），
+   会继承 .qb 的 `pointer-events: none`（v1472 为"不挡画布"加的 ✗）→ 整个窗口点不动 ✗。模态窗明确写回 auto ✓。 */
+.dbx { pointer-events: auto; position: fixed; inset: 0; z-index: 420; background: rgba(20, 24, 34, 0.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; }
 .dbx__box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: 96vw; max-width: 1320px; height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
 .dbx__head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
 .dbx__title { font-size: 15px; font-weight: 700; color: var(--text); }
