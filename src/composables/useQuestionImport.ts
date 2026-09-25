@@ -222,7 +222,10 @@ function draftOf(q: QMeta, title: string, id = 0): LibDraft {
 /** ParsedQuestion → 题目 meta（年份/分值/答案来源都按**显式字段优先** ✓） */
 export function metaOfParsed(p: ParsedQuestion): QMeta {
   let answer = p.answer || ''
-  let answerFrom: QMeta['answerFrom'] = answer ? 'manual' : ''
+  // 【v1531】JSON 里写了 answerFrom（auto/ai/manual）就用它 —— 以前一律按「有答案 = manual」覆盖 ✗
+  //   （结果是「自动提取」的标注在导出→导入后全变成「手动」）
+  const afIn = String(p.answerFrom || '')
+  let answerFrom: QMeta['answerFrom'] = (afIn === 'auto' || afIn === 'ai' || afIn === 'manual') ? afIn : (answer ? 'manual' : '')
   // 答案自我完善：没写答案但解析里说了「故选B」→ 提出来，并标 auto（界面按「自动提取」显示 ✓）
   if (!answer && p.solution) {
     const auto = extractAnswerFromSolution(p.solution, p.options)
@@ -241,6 +244,7 @@ export function metaOfParsed(p: ParsedQuestion): QMeta {
     date: p.date || '',
     year: Number(p.yearExplicit || p.year) || 0,
     paperName: p.paperName || '',
+    level: p.level || '',
     region: p.region || '',
     score: Number(p.scoreExplicit) || 0,
     no: Number(p.no) || 0,
@@ -382,15 +386,21 @@ export function parseQuestionsJson(text: string): { list: ParsedQuestion[]; erro
       date: o.date ? String(o.date) : undefined,
       year: String(o.year || ''),
       yearExplicit: o.year ? String(o.year) : undefined,
-      paperName: o.paperName ? String(o.paperName) : undefined,
+      // 【v1531】`paper` 也是常见写法（AI Schema 用的就是 paper）✓
+      paperName: (o.paperName || o.paper) ? String(o.paperName || o.paper) : undefined,
       region: String(o.region || o.source || ''),
+      // 【v1531】这四项以前**导入 JSON 时会丢**（题内序号 / 难度档 / 告警）：
+      //   题内序号丢了，按试卷排序和「卷尾答案区按题号配」就没有锚 ✓
+      no: Number(o.no ?? o.num ?? o.index) || undefined,
+      level: o.level ? String(o.level) : undefined,
+      warn: o.warn ? String(o.warn) : (Array.isArray(o.warnings) ? arrOf(o.warnings).join('；') : undefined),
     }
     const imgs = readImages(o.images)
     if (imgs.length) p.images = imgs
     const sc = Number(o.score)
     if (Number.isFinite(sc) && sc > 0) p.scoreExplicit = sc
     const af = String(o.answerFrom || '')
-    if (af === 'auto' || af === 'manual' || af === 'ai') (p as { answerFrom?: string }).answerFrom = af
+    if (af === 'auto' || af === 'manual' || af === 'ai') p.answerFrom = af
     list.push(p)
   }
   if (!list.length) return { list: [], error: '没有解析出任何试题（每条至少要有题干）' }

@@ -26,6 +26,7 @@ import {
   linkMineruImages,
   questionTextOf,
 } from '@/composables/mineruImages'
+import { assetSrc, loadAssets } from '@/composables/useAssets'
 import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
 import type { MineruRawImage } from '@/composables/mineruImages'
 import type { QuestionImage } from '@/composables/parseQuestions'
@@ -171,7 +172,15 @@ async function onFilePicked(e: Event) {
 
 /* ---------------- ② 解析 ---------------- */
 
-function loadRows(list: ParsedQuestion[], tip: string) {
+async function loadRows(list: ParsedQuestion[], tip: string) {
+  // 【v1531】JSON 里的图常常只有 assetId（题库导出的就是这种）→ 先 hydrate 成 data URL，
+  //   否则校对表上「图绑上了却显示不出来」✗（这一条是「JSON 试卷导入」要补的）
+  const ids = new Set<number>()
+  for (const q of list) for (const im of q.images || []) if (!im.src && im.assetId) ids.add(im.assetId)
+  if (ids.size) {
+    try { await loadAssets(Array.from(ids)) } catch { /* 读不到就空着，不挡导入 */ }
+    for (const q of list) for (const im of q.images || []) if (!im.src && im.assetId) im.src = assetSrc(im.assetId)
+  }
   // MinerU 的插图：整卷共用一个表，**按题拆**（不能让第 3 题背上整卷的图 ✗）
   let orphans: number[] = []
   if (pendingImages.value.length) {

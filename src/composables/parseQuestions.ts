@@ -101,6 +101,10 @@ export interface ParsedQuestion {
   yearExplicit?: string
   /** 试卷名（如 2024届某市一模） */
   paperName?: string
+  /** 【v1531】难度档（基础 / 中档 / 拔高）；JSON 里写了就用它，没写由难度系数推 ✓ */
+  level?: string
+  /** 【v1531】答案来源（JSON 导入时可能带）—— 以前这条路上是 as 断言的，类型里补上 ✓ */
+  answerFrom?: '' | 'manual' | 'auto' | 'ai'
   year: string
   region: string
   /** 【优化】题面上的**原始题号**（1..N；多卷时每卷各自从 1 开始）——
