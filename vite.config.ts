@@ -21,7 +21,9 @@ export default defineConfig({
     // **文档也要忽略**：实测改 README.md 时 watcher 抢不到句柄会抛 EBUSY 把 dev server 打挂
     // （文档不被 app import，忽略它不影响 HMR）
     // （tools/ 下的量图工具会在跑的过程中不停生成又删掉 html，watcher 抢不到句柄会直接把 dev server 打挂）
-    watch: { ignored: ['**/node_modules/**', '**/_backup/**', '**/dist/**', '**/.probe/**', '**/参考/**', '**/*.zip', '**/*.7z', '**/*.rar', '**/lj-mathslides-demo/**', '**/.*.tmpdir/**', '**/src-tauri/target/**', '**/tools/**', '**/_docx-out/**', '**/*.md'] },
+    // 【v1623】发布/ 也要忽略：发货时替换 LJ-MathSlides.exe（应用正在运行 → 句柄被占），
+    //   watcher 抢不到句柄抛 EBUSY，**直接把 dev server 打挂** ✗（实测踩到，见日志第二十二节之后）
+    watch: { ignored: ['**/node_modules/**', '**/_backup/**', '**/dist/**', '**/.probe/**', '**/参考/**', '**/*.zip', '**/*.7z', '**/*.rar', '**/lj-mathslides-demo/**', '**/发布/**', '**/.*.tmpdir/**', '**/src-tauri/target/**', '**/tools/**', '**/_docx-out/**', '**/*.md'] },
   },
   // Tauri 环境变量以 TAURI_ 为前缀，默认已含 VITE_，无需额外配置
   envPrefix: ['VITE_', 'TAURI_'],
