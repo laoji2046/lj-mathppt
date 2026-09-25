@@ -56,9 +56,14 @@ export function linkMineruImages(
 ): { text: string; images: QuestionImage[]; marks: Record<number, number>; paths: Record<number, string> } {
   const text0 = String(md || '')
   const byPath = new Map<string, MineruRawImage>()
+  /** 【v1531】再按**文件名**兜一层：老师手动「导入 .md」时选中的是图片文件本身，
+   *  拿不到 `images/xxx.jpg` 这种相对路径（浏览器只给 File.name / webkitRelativePath）✓ */
+  const byBase = new Map<string, MineruRawImage>()
   for (const r of raw || []) {
     const k = normPath(r && r.path)
     if (k && r && r.dataBase64) byPath.set(k, r)
+    const b = k.split('/').pop() || ''
+    if (b && r && r.dataBase64 && !byBase.has(b)) byBase.set(b, r)
   }
   if (!byPath.size) return { text: text0, images: [], marks: {}, paths: {} }
 
@@ -80,7 +85,7 @@ export function linkMineruImages(
   const numOf = new Map<string, number>() // 地址 → 已编的号
   const text = text0.replace(MD_IMG, (whole: string, cap: string, url: string, offset: number) => {
     const key = normPath(url)
-    const hit = byPath.get(key)
+    const hit = byPath.get(key) || byBase.get(key.split('/').pop() || '')
     if (!hit) return whole
     let n = numOf.get(key)
     if (!n) {

@@ -27,6 +27,7 @@ import {
   questionTextOf,
 } from '@/composables/mineruImages'
 import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
+import type { MineruRawImage } from '@/composables/mineruImages'
 import type { QuestionImage } from '@/composables/parseQuestions'
 import { setContentList } from '@/composables/parseQuestions'
 import type { ParsedQuestion } from '@/composables/parseQuestions'
@@ -95,6 +96,16 @@ function errText(e: unknown): string {
 
 /* ---------------- ① 选来源 ---------------- */
 
+/** File → 纯 base64（去掉 data URL 前缀）—— 给「.md + 图」那条路用 ✓ */
+function fileB64(f: File): Promise<string> {
+  return new Promise((res, rej) => {
+    const r = new FileReader()
+    r.onload = () => res(String(r.result).replace(/^data:[^,]*,/, ''))
+    r.onerror = () => rej(new Error('读图失败'))
+    r.readAsDataURL(f)
+  })
+}
+
 function pickFile(mode: 'md' | 'json' | 'pdf') {
   if (mode === 'pdf' && !isDesktop) { flash('PDF 识别要桌面端内核（MinerU 接口 + 落盘）：请打开桌面端 LJ-MathSlides'); return }
   fileMode.value = mode
@@ -114,21 +125,48 @@ async function onFilePicked(e: Event) {
   if (!files.length) return
   if (fileMode.value === 'pdf') { await importPdfToBatch(files[0]); return }
   pendingImages.value = []   // 选文件/粘贴：不带上一批 MinerU 的图
-  // 一次选了一批 .md（题库目录：一道题一个文件）→ 逐个解析后合并 ✓
-  if (fileMode.value === 'md' && files.length > 1) {
+  // 【v1531】MinerU 导出的是一份 .md + 同级 images/ 目录 —— 两种选法要分清：
+  //   ① 只选 .md            → 图带不进来（要**明说**，别留一堆 ![](images/…) 在题干里 ✗）
+  //   ② .md + images 里的图 → 走 MinerU 那条同一套「图号」机制，图能绑到题上 ✓
+  const IMG_RE = /\.(jpe?g|png|webp|gif|bmp)$/i
+  const imgFiles = files.filter((f) => IMG_RE.test(f.name))
+  const docFiles = files.filter((f) => !IMG_RE.test(f.name))
+  if (fileMode.value === 'md' && imgFiles.length) {
+    const raw: MineruRawImage[] = []
+    for (const f of imgFiles) {
+      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
+      try { raw.push({ path: rel, mime: f.type || undefined, dataBase64: await fileB64(f) }) } catch { /* 单张读失败不影响其它 */ }
+    }
     const texts: string[] = []
-    for (const f of files) { try { texts.push(await f.text()) } catch { /* 单个读失败不影响其它 */ } }
+    for (const f of docFiles) { try { texts.push(await f.text()) } catch { /* 同上 */ } }
+    const linked = linkMineruImages(texts.join('\n\n'), raw)
+    pendingImages.value = linked.images
+    pendingMarks.value = linked.marks
+    pendingText.value = linked.text
+    if (!linked.text.trim()) { flash('这批文件里没有能读的 .md'); return }
+    parseMd(linked.text, '已读入 ' + docFiles.length + ' 个 .md + ' + raw.length + ' 张图（认领 ' + linked.images.length + ' 处引用）')
+    return
+  }
+  // 一次选了一批 .md（题库目录：一道题一个文件）→ 逐个解析后合并 ✓
+  if (fileMode.value === 'md' && docFiles.length > 1) {
+    const texts: string[] = []
+    for (const f of docFiles) { try { texts.push(await f.text()) } catch { /* 单个读失败不影响其它 */ } }
     text.value = texts.join('\n\n')
     const r = parseVaultMarkdownMany(texts)
-    if (!r.list.length) { flash('这 ' + files.length + ' 个文件里没解析出题目（需要 YAML front-matter + ## 题目）'); return }
-    loadRows(r.list, '已读入 ' + files.length + ' 个 .md 文件' + (r.failed ? '（' + r.failed + ' 个没认出来）' : ''))
+    if (!r.list.length) { flash('这 ' + docFiles.length + ' 个文件里没解析出题目（需要 YAML front-matter + ## 题目）'); return }
+    loadRows(r.list, '已读入 ' + docFiles.length + ' 个 .md 文件' + (r.failed ? '（' + r.failed + ' 个没认出来）' : ''))
     return
   }
   let t = ''
   try { t = await files[0].text() } catch { flash('读文件失败'); return }
   text.value = t
   if (fileMode.value === 'json') parseJson(t, '已读入 ' + files[0].name + '（JSON）')
-  else parseMd(t, '已读入 ' + files[0].name + '（' + t.length + ' 字）')
+  else {
+    parseMd(t, '已读入 ' + files[0].name + '（' + t.length + ' 字）')
+    // 【v1531】只有 .md、没带图：明说缺了几处图（把 images 里的图一起选中就能进来）✓
+    const miss = (t.match(/!\[[^\]]*\]\(/g) || []).length
+    if (miss) setTimeout(() => flash('提示：正文里还有 ' + miss + ' 处图片引用没带图 —— 把同级 images 文件夹里的图**一起选中**再导入即可'), 80)
+  }
 }
 
 /* ---------------- ② 解析 ---------------- */
@@ -171,7 +209,11 @@ function onFigClick(e: MouseEvent) {
   if (fig) fig.classList.toggle('qi__fig--zoom')
 }
 
-function renderCardFigures() {
+async function renderCardFigures() {
+  // 【v1531】必须等 Vue 把卡片渲染出来 —— 少了这一行，`loadRows` 紧接着调用时
+  //   `.qi__figs` 还一个都不存在 → 图**绑上了却不显示**（实测：提示写着「图 11 张（绑到 9 道）」，
+  //   卡片里却一张也看不见 ✗）。renderCardStems 一直有 nextTick，这里以前漏了。
+  await nextTick()
   const hosts = Array.from(document.querySelectorAll<HTMLElement>('.qi__figs'))
   const list = rows.value
   const e = (t: unknown) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
