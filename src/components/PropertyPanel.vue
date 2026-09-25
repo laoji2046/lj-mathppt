@@ -2759,17 +2759,27 @@ function layerTypeLabel(type: string) {
 .solid-prop__cell { display: flex; flex-direction: column; gap: 3px; }
 .solid-prop__name { font-size: 12px; font-weight: 600; color: #5b43ad; }
 .solid-prop__in { width: 100%; box-sizing: border-box; border: 1px solid #ddd; border-radius: 6px; padding: 4px 6px; font-size: 13px; }
-.solid-prop__edge { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
-.solid-prop__ename { min-width: 34px; font-size: 12px; color: #666; }
-.solid-prop__dash { display: inline-flex; gap: 3px; }
-.solid-prop__dash .seg__btn { flex: 1; white-space: nowrap; }
-.solid-prop__w { width: 52px; border: 1px solid #ddd; border-radius: 6px; padding: 3px 4px; font-size: 12px; }
+/* 【v1627】立体几何的属性行改成**网格对齐**：以前 flex + min-width，行号一到「边10」整列就错位 ✗ */
+.solid-prop__edge { display: grid; grid-template-columns: 42px minmax(0, 1fr) 44px 26px; align-items: center; gap: 6px; margin-top: 3px; padding: 2px 4px; border-radius: 7px; }
+.solid-prop__edge:hover { background: #faf9ff; }
+.solid-prop__ename { font-size: 12px; color: #666; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 线型做成**一体式分段控件**（三个小按钮共用外框）—— 以前每个按钮各自描边，12 行就是 36 个框，看着乱 ✗ */
+.solid-prop__dash { display: inline-flex; border: 1px solid #e5e3ef; border-radius: 7px; overflow: hidden; background: #fff; }
+.solid-prop__dash .seg__btn { flex: 1; white-space: nowrap; border: none; border-radius: 0; background: transparent; padding: 3px 6px; font-size: 12px; color: #555; }
+.solid-prop__dash .seg__btn + .seg__btn { border-left: 1px solid #efedf7; }
+.solid-prop__dash .seg__btn:hover { background: #f5f3fc; }
+.solid-prop__dash .seg__btn--on { background: #efeaff; color: #5b43ad; font-weight: 600; }
+.solid-prop__w { width: 44px; border: 1px solid #e5e3ef; border-radius: 6px; padding: 3px 4px; font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
 .solid-prop__edge input[type=color] { width: 26px; height: 22px; border: none; padding: 0; cursor: pointer; }
 .solid-prop__hint { margin: 8px 0 0; font-size: 11px; color: #8a8aa0; line-height: 1.55; }
 .solid-prop__sel { background: #fff8ec; border: 1px solid #ffd9a0; color: #b26a00; border-radius: 6px; padding: 5px 8px; font-size: 12px; margin-bottom: 6px; }
 .solid-prop__cell--sel { outline: 2px solid #ff8f1f; outline-offset: 1px; border-radius: 6px; }
 .solid-prop__edge--sel { background: #fff8ec; border: 1px solid #ffd9a0; border-radius: 6px; padding: 3px 5px; }
-.solid-prop__face { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+/* 面样式同理：面号 | 填充色 | 透明度 | 百分比 | 隐藏（网格对齐）*/
+.solid-prop__face { display: grid; grid-template-columns: 42px 26px minmax(0, 1fr) 40px auto; align-items: center; gap: 6px; margin-top: 3px; padding: 2px 4px; border-radius: 7px; }
+.solid-prop__face:hover { background: #faf9ff; }
+.solid-prop__op { accent-color: #5b43ad; height: 18px; }
+.solid-prop__num { font-size: 11px; color: #888; text-align: right; font-variant-numeric: tabular-nums; }
 .solid-prop__face input[type=color] { width: 26px; height: 22px; border: none; padding: 0; cursor: pointer; }
 .solid-prop__op { flex: 1; min-width: 40px; }
 .solid-prop__num { min-width: 30px; font-size: 11px; color: #666; }
