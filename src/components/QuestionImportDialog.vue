@@ -140,7 +140,9 @@ async function onFilePicked(e: Event) {
   const IMG_RE = /\.(jpe?g|png|webp|gif|bmp)$/i
   const imgFiles = files.filter((f) => IMG_RE.test(f.name))
   const docFiles = files.filter((f) => !IMG_RE.test(f.name))
-  if (fileMode.value === 'md' && imgFiles.length) {
+  // 【v1531】JSON 也一样：MinerU 的 layout/content_list JSON 里图片写的是 `![](images/xxx.jpg)`，
+  //   把同级 images 里的图**一起选中**就能像 md 那样绑到题上 ✓（用户报：题目进来了、图没进来）
+  if ((fileMode.value === 'md' || fileMode.value === 'json') && imgFiles.length) {
     const raw: MineruRawImage[] = []
     for (const f of imgFiles) {
       const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
@@ -148,7 +150,14 @@ async function onFilePicked(e: Event) {
     }
     const texts: string[] = []
     for (const f of docFiles) { try { texts.push(await f.text()) } catch { /* 同上 */ } }
-    const linked = linkMineruImages(texts.join('\n\n'), raw)
+    // JSON：先按 MinerU 产物抽正文（带 `![](images/…)` 的），抽不出来再按题目 JSON 解析 ✓
+    let body = texts.join('\n\n')
+    if (fileMode.value === 'json' && texts.length) {
+      const t0 = texts[0]
+      const doc = assembleContentDoc(t0).trim() || assembleLayoutDoc(t0).trim()
+      if (doc) body = doc
+    }
+    const linked = linkMineruImages(body, raw)
     pendingImages.value = linked.images
     pendingMarks.value = linked.marks
     pendingText.value = linked.text
@@ -324,6 +333,9 @@ function parseJson(raw: string, prefix = '') {
   const doc = fromContent || fromLayout
   if (doc) {
     text.value = doc
+    // 【v1531】正文里有图但没带图文件 → 明说怎么把图带进来（用户报「题目进来了、图没进来」）✓
+    const miss = (doc.match(/!\[[^\]]*\]\(/g) || []).length
+    if (miss) setTimeout(() => flash('提示：这份 JSON 里有 ' + miss + ' 处图片引用没带图 —— 把同级 images 文件夹里的图**和它一起选中**再导入即可', 8000), 80)
     const kind = fromContent ? 'content_list.json' : '版面 JSON（middle/layout）'
     parseMd(doc, '已读入 MinerU ' + kind + '：抽出 ' + Math.round(doc.length / 1024) + 'KB 文字')
     return

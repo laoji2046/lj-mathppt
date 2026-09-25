@@ -136,15 +136,30 @@ export function assembleLayoutDoc(rawJson: string): string {
     return String((line && (line.content ?? line.text)) ?? '').trim()
   }
   const out: string[] = []
-  for (const page of roots) {
-    const blocks = (Array.isArray(page.para_blocks) ? page.para_blocks
-      : (Array.isArray(page.preproc_blocks) ? page.preproc_blocks : [])) as Record<string, unknown>[]
+  /** ⚠ 版面块是**可以嵌套**的（实测 `type:"image"` 的块里还有一层 `blocks[]`，
+   *  真正的图片路径在里层 span 的 `image_path` 上）—— 不递归就会**一张图都抽不到** ✗ */
+  const walk = (blocks: Record<string, unknown>[]) => {
     for (const b of blocks) {
+      if (!b || typeof b !== 'object') continue
+      if (Array.isArray(b.blocks) && b.blocks.length) walk(b.blocks as Record<string, unknown>[])
       const lines = Array.isArray(b.lines) ? (b.lines as Record<string, unknown>[]) : []
       const txt = lines.map(lineText).filter(Boolean).join('\n').trim()
       if (txt) out.push(txt)
-      else if (b.type === 'image' && typeof b.img_path === 'string' && b.img_path) out.push('![](' + b.img_path + ')')
+      // 图片路径可能在块上 / 行上 / 片段上，三处都收 ✓
+      const paths: string[] = []
+      if (typeof b.img_path === 'string' && b.img_path) paths.push(b.img_path)
+      for (const l of lines) {
+        if (typeof l.image_path === 'string' && l.image_path) paths.push(l.image_path)
+        const spans = Array.isArray(l.spans) ? (l.spans as Record<string, unknown>[]) : []
+        for (const s of spans) if (typeof s.image_path === 'string' && s.image_path) paths.push(s.image_path)
+      }
+      for (const p of paths) out.push('![](' + p + ')')
     }
+  }
+  for (const page of roots) {
+    const blocks = (Array.isArray(page.para_blocks) ? page.para_blocks
+      : (Array.isArray(page.preproc_blocks) ? page.preproc_blocks : [])) as Record<string, unknown>[]
+    walk(blocks)
   }
   return out.join('\n')
 }
