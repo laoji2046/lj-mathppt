@@ -12,6 +12,7 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
+import { isTauri } from '@/composables/useTauri'
 import {
   SECTIONS, QTYPE_LABEL,
   importBatches, importDrafts, importDraftPatch, importCommit, importDiscard, importRebuild,
@@ -20,6 +21,9 @@ import {
 import type { ImportBatch, ImportDraft } from '@/composables/useQuestionBank'
 
 const emit = defineEmits<{ (e: 'close'): void; (e: 'committed', n: number): void }>()
+
+/** 【v1530】草稿箱只在桌面端有（批次表在 Rust 里）—— 浏览器预览里直说，别让人对着空列表猜 ✓ */
+const isPreview = !isTauri()
 
 const batches = ref<ImportBatch[]>([])
 const curBatch = ref('')
@@ -213,6 +217,9 @@ onMounted(loadBatches)
       <div class="dbx__body">
         <aside class="dbx__batches">
           <div class="dbx__t1">批次 / 识别历史</div>
+          <div v-if="isPreview" class="dbx__hint dbx__hint--warn">
+            浏览器预览：草稿箱要走 Rust 的批次表，只在桌面端可用。「录入试题」里的<b>入库</b>在预览里能用（落浏览器预览库）。
+          </div>
           <div v-if="!batches.length" class="dbx__hint">还没有导入批次 —— 到「录入试题」里点「先存草稿」就会长出来 ✓</div>
           <button
             v-for="b in batches" :key="b.id" class="dbx__b"
@@ -373,6 +380,7 @@ onMounted(loadBatches)
 .dbx__chk { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); white-space: nowrap; font-size: 12px; }
 .dbx__empty { padding: 20px 10px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
 .dbx__hint { padding: 4px 8px; font-size: 11.5px; color: var(--muted); line-height: 1.6; }
+.dbx__hint--warn { color: #8a6a12; background: #fdf6e3; border: 1px solid #e0cf9a; border-radius: 6px; margin-bottom: 4px; }
 .dbx__hint2 { font-size: 11px; color: var(--brand-600, #534AB7); }
 .dbx__picked { color: var(--muted); font-size: 12px; }
 .dbx__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 16px; border-top: 1px solid var(--border); background: var(--panel-2, #faf9f6); font-size: 12px; }
