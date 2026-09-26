@@ -279,3 +279,15 @@ export function firstBlockerOf(items: AiQuestion[], withAnswer: boolean): { inde
   }
   return null
 }
+
+/* ---------------- 【v1688】原文够不够 AI 读（扫描件 / 空原文的判定 ✓） ---------------- */
+
+/** 原文里「AI 真读得到」的字数：PDF 解析器会塞 <!--font:22--> 这类标记，注释与空白都不算 ✓ */
+export function readableChars(raw: string): number {
+  return String(raw || '').replace(/<!--[\s\S]*?-->/g, '').replace(/\s+/g, '').length
+}
+
+/** 原文太空（扫描件 / 只拖进来一个文件名 ✓）→ 别去问模型，也别把锅甩给模型 ✗ */
+export function tooThinForAi(raw: string, min = 20): boolean {
+  return readableChars(raw) < min
+}

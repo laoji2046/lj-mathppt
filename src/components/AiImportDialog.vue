@@ -12,7 +12,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
-import { extractQuestions, firstBlockerOf, softenIssues, validateQuestion } from '@/composables/aiImport'
+import { extractQuestions, firstBlockerOf, readableChars, softenIssues, tooThinForAi, validateQuestion } from '@/composables/aiImport'
 import type { AiQuestion, FieldIssue } from '@/composables/aiImport'
 import { LEVELS, QTYPE_LABEL, SECTIONS, idemKeyOf, importAddDrafts, importBegin } from '@/composables/useQuestionBank'
 import { invoke } from '@/composables/useTauri'
@@ -81,34 +81,56 @@ async function callModel(system: string, userText: string): Promise<string> {
 
 /* ---------------- ① 来源：贴原文 / 拖文件 ---------------- */
 
-/** 拖进来 / 选进来的文件 → 纯文本（.txt .md .json 直接读；.pdf .pptx 复用应用自己的解析器 ✓） */
-async function fileToText(f: File): Promise<string> {
+/** 拖进来 / 选进来的文件 → 纯文本 + 一句说明（.txt .md .json 直接读；.pdf .pptx 复用应用自己的解析器 ✓） */
+async function fileToText(f: File): Promise<{ text: string; note: string }> {
   if (/\.pdf$/i.test(f.name)) {
-    const { pdfToMarkdown } = await import('@/pdf/pdfImport')
-    const r = await pdfToMarkdown(new Uint8Array(await f.arrayBuffer()), {})
-    return String((r as { markdown?: string })?.markdown || '')
+    const { probePdf, pdfToMarkdown } = await import('@/pdf/pdfImport')
+    const buf = new Uint8Array(await f.arrayBuffer())
+    // 【v1688 修】先 probePdf 看一眼有没有文字层：扫描件（整页都是图）文本模型**一个字也读不到** ✗。
+    //   以前不问青红皂白就送去抽题 → 模型回一句「没找到题目」，等于把锅甩给模型 ✗（用户实报 ✓）。
+    const p = await probePdf(buf)
+    if (p.textPages === 0) {
+      return {
+        text: '',
+        note: '这份 PDF 是扫描件（共 ' + p.pages + ' 页，整页都是图片、没有文字层）—— AI 只读文字，读不到它 ✗。'
+          + '两条能走的路：① 试题库 →「录入试题」→ 导入 .pdf（走 MinerU 识别，token 不填也能用轻量接口）；'
+          + '② 把试卷文字复制粘贴到左边的框里，再点「AI 抽题」',
+      }
+    }
+    const r = await pdfToMarkdown(buf, {})
+    const md = String((r as { markdown?: string })?.markdown || '')
+    return { text: md, note: 'PDF 共 ' + p.pages + ' 页，其中有文字层的 ' + p.textPages + ' 页' }
   }
   if (/\.pptx$/i.test(f.name)) {
     const { pptxToDeck } = await import('@/pptx/pptxToDeck')
     const { deckToPlainText } = await import('@/composables/deckToText')
     const { deck } = await pptxToDeck(new Uint8Array(await f.arrayBuffer()))
-    return deckToPlainText(deck)
+    return { text: deckToPlainText(deck), note: '' }
   }
   if (/\.docx?$/i.test(f.name)) {
     throw new Error('Word 文件先在 Word 里全选复制，再贴到左边的框里（.docx 的排版与公式解析不了）')
   }
-  return f.text()
+  return { text: await f.text(), note: '' }
 }
 
 async function takeFiles(files: File[]) {
   msg.value = ''
   for (const f of files) {
     try {
-      const t = String(await fileToText(f)).trim()
-      if (!t) { msg.value = f.name + ' 里没读到文字（可能是扫描件 / 纯图片）'; continue }
+      const r = await fileToText(f)
+      const t = String(r.text || '').trim()
+      // 【v1688】没读出可读文字时**别**说成"模型没抽出来" ✗ —— 这是原文这一侧的问题，说清并给两条路 ✓
+      if (tooThinForAi(t)) {
+        // 顶部那行窄，只放一句话 ✗ —— 完整说明放到底部的报告区（本来就是多行文本 ✓）
+        fileName.value = ''
+        text.value = ''
+        msg.value = f.name + '：没读出可读文字，AI 读不了它'
+        report.value = r.note || (f.name + ' 里没读到文字（可能是扫描件 / 纯图片）—— AI 读不了它')
+        return
+      }
       fileName.value = f.name
       text.value = t
-      msg.value = '已读入 ' + f.name + '（' + t.length + ' 字）—— 点「AI 抽题」开始'
+      msg.value = '已读入 ' + f.name + '（' + readableChars(t) + ' 个可读字符' + (r.note ? '；' + r.note : '') + '）—— 点「AI 抽题」开始'
       return
     } catch (e) {
       msg.value = '读 ' + f.name + ' 失败：' + String((e as Error)?.message || e)
@@ -141,6 +163,11 @@ async function doExtract() {
   report.value = ''
   const raw = text.value.trim()
   if (!raw) { msg.value = '先把试卷原文贴进来（或把文件拖进来）'; return }
+  // 【v1688】原文太空（只拖进来个文件名 / 扫描件）→ 直接说清楚，别浪费一次调用 ✗
+  if (tooThinForAi(raw)) {
+    msg.value = '左边只有 ' + readableChars(raw) + ' 个可读字符，AI 读不到内容 ✗ —— 把题干文字贴进来；扫描件请走「录入试题 → 导入 .pdf（MinerU）」'
+    return
+  }
   if (!licensed('ai-assistant')) { msg.value = 'AI 抽题要先激活：工具栏「激活 / 序列号」，把本机机器码发我换一个号'; return }
   if (!aiKey()) { msg.value = '还没填 AI Key：设置 → AI 助手 里填一个（只存本机，不进仓库 ✓）'; return }
   busy.value = true
@@ -466,7 +493,7 @@ onBeforeUnmount(() => {
 
           <div class="aiq__hint">
             抽出来只是<b>草稿</b>：正式库一个字不动，到「草稿箱」复核后才入库。<br />
-            模型只读文字：扫描件 / 截图里的题，先用「AI 助手」带图提问，或把文字打出来。<br />
+            模型只读文字：<b>扫描件 PDF</b>（整页是图、没有文字层）本地解析不出字 —— 走「录入试题 → 导入 .pdf（MinerU）」，或把文字贴进来。<br />
             抽题用的 key 与「AI 助手」是同一个（设置 → AI 助手）。
           </div>
         </section>
