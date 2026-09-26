@@ -728,9 +728,12 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- 【v1679】用户要求：课件库 / 试题库 从「文件」菜单挪到工具条（「文件」右侧）✓ -->
-<button class="btn" title="课件库：管理存过的整份课件（打开会替换当前内容，可用 Ctrl+Z 撤销）" @click="deckLibOpen = true"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.folder"></svg>课件库</button>
-<button class="btn" title="试题库：按章节/知识点/题型/难度/年份筛选，看题干与答案，并能就地补全（新）" @click="qbOpen = true"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.folder"></svg>试题库</button>
-<button class="btn" :class="{ 'btn--open': viewMode !== 'canvas' }" title="MD 源码：分屏实时预览"> @click="setViewMode(viewMode === 'canvas' ? 'split' : 'canvas')">
+    <button class="btn" title="课件库：管理存过的整份课件（打开会替换当前内容，可用 Ctrl+Z 撤销）" @click="deckLibOpen = true"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.folder"></svg>课件库</button>
+    <button class="btn" title="试题库：按章节/知识点/题型/难度/年份筛选，看题干与答案，并能就地补全（新）" @click="qbOpen = true"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.folder"></svg>试题库</button>
+    <!-- ⚠【v1685 修】这一行的 title 后面被多写了一个 `>`（v1679 那次改动留下的）——
+       `>` 一写就把标签闭合了，后面的 @click 变成**正文文本**、整串显示在工具条上 ✗
+       （typecheck 抓不到：对编译器来说那只是一段文字 ✓ —— 所以补了探针用例 24 静态扫这种写法 ✓） -->
+    <button class="btn" :class="{ 'btn--open': viewMode !== 'canvas' }" title="MD 源码：分屏实时预览" @click="setViewMode(viewMode === 'canvas' ? 'split' : 'canvas')">
       <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.md"></svg></span>MD 源码
     </button>
     <div class="group">
