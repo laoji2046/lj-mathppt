@@ -9,7 +9,9 @@ export function registerBuiltinAddons() {
   registerAddon({ id: 'pdf-gen', name: '试卷编辑', desc: 'A4 文档编辑器：正文写公式与插图，再交给打印对话框另存 PDF（矢量文字）', icon: 'paper', category: '导入导出', sizeHint: 39 })
   registerAddon({ id: 'pptx-import', name: 'PPT 导入', desc: '解析 .pptx：文字/公式(OMML→LaTeX)/图片/表格/矢量图形一并搬入，可再按内容套用模板', icon: 'file', category: '导入导出', sizeHint: 16 })
   registerAddon({ id: 'docx-import', name: 'Word 导入', desc: '解析 .docx：一题一页、图片内嵌；MathType 公式会明确报数', icon: 'file', category: '导入导出', sizeHint: 11 })
-  registerAddon({ id: 'pdf-import', name: 'PDF 导入', desc: '自动判断有无文本层：有就抽成可编辑文字，没有就每页一张图', icon: 'file', category: '导入导出', sizeHint: 12, runtime: { key: 'pdfjs', mb: 1.3, note: 'pdfjs 解析引擎（仅导入时用）' } })
+  // 【v1676】用户要求「去除 文件 → 导入 PDF」→ 这里 **defaultOn: false** 默认关闭 ✓
+  //   （关掉后入口隐藏、代码永不加载 ✓；设置里的「插件」里随时能再打开 ✓ 可逆）
+  registerAddon({ defaultOn: false, id: 'pdf-import', name: 'PDF 导入', desc: '自动判断有无文本层：有就抽成可编辑文字，没有就每页一张图', icon: 'file', category: '导入导出', sizeHint: 12, runtime: { key: 'pdfjs', mb: 1.3, note: 'pdfjs 解析引擎（仅导入时用）' } })
   // ── 编辑器 ────────────────────────────────────────────────
   registerAddon({ id: 'vectorize', name: '矢量描摹', desc: '把位图转成 SVG（彩色分层或灰度海报化），本地 potrace 流水线', icon: 'image', category: '编辑器', sizeHint: 36 })
   registerAddon({ id: 'geom3d', name: '三维立体图', desc: '可拖顶点的三维几何体编辑，支持显示/隐藏顶点圆点', icon: 'chart', category: '编辑器', sizeHint: 72 })
