@@ -29,10 +29,6 @@ export interface CropBox { x: number; y: number; w: number; h: number }
 export interface CropOpt {
   /** 一行至少几段墨迹才算"文字行"（默认 5：图形边线通常只有 1~2 段 ✓） */
   minRuns?: number
-  /** 文字行要占"最宽那一带"的比例（默认 0.5，内容自适应 ✓） */
-  rowSpan?: number
-  /** 文字行的高度上限 = 行高的几倍（默认 2.2） */
-  lineMax?: number
   /** 图形区域面积占整图的下限 / 上限（默认 0.02 / 0.92） */
   minArea?: number
   maxArea?: number
@@ -77,8 +73,6 @@ interface Band { y0: number; y1: number; x0: number; x1: number; bw: number; ink
  */
 export function figureBoxFromInk(ink: Uint8Array, w: number, h: number, opt: CropOpt = {}): CropBox | null {
   const minRuns = opt.minRuns ?? 5
-  const rowSpan = opt.rowSpan ?? 0.5
-  const lineMax = opt.lineMax ?? 2.2
   const minArea = opt.minArea ?? 0.02
   const maxArea = opt.maxArea ?? 0.92
   const pad = opt.pad ?? 0.04
@@ -125,11 +119,17 @@ export function figureBoxFromInk(ink: Uint8Array, w: number, h: number, opt: Cro
     return { y0: b.y0, y1: b.y1, x0, x1, bw, inkN, runs: runsAt(ink, w, bestY), hh: b.y1 - b.y0 + 1 }
   })
   const center = (b: Band) => (b.y0 + b.y1) / 2
-  const inLineHeight = (b: Band) => b.hh >= lineH * 0.5 && b.hh <= lineH * lineMax
+  // ⚠ 高度只做**宽松**上下限：真截图里
+  //   · 带根号/分数的**公式行**可以高到 3~4 倍行高（用户真样本实测 h=92 / 行高 36 ✗ 老上限 2.2 倍会漏 ✗）
+  //   · 有些**纯文字行**又只有 0.3~0.5 倍行高（h=16 ✗ 老下限 0.5 倍会漏 ✗）
+  //   所以"是不是文字"主要看**段数 + 宽度**，高度只管把"很薄的一条（虚线/长划线）"和"很高的一条（图形）"排除 ✓
+  //   下限 0.35 倍：真样本里那条薄文字行 h=16 / 行高 36 ✓ 收进来；图里的虚线 h=3 / 行高 10 ✗ 挡在外面
+  const inLineHeight = (b: Band) => b.hh >= Math.max(4, lineH * 0.35) && b.hh <= lineH * 4
   // 宽度基准 = **行高像文字的带**里最宽的那条
   //   ⚠ 不能拿"所有带里最宽的"当基准：图比文字宽时，文字行反而不够宽 → 一条都不算文字 ✗（真截图常见）
-  const maxTextW = info.reduce((m, b) => (inLineHeight(b) ? Math.max(m, b.bw) : m), 0)
-  const wideEnough = Math.max(maxTextW * rowSpan, w * 0.15)
+  // "文字行"的宽度样本 = 段数够多、高度又在宽松范围内那些带（图形那些段数极少 ✓ 不会污染基准）
+  const maxTextW = info.reduce((m, b) => (inLineHeight(b) && b.runs >= 8 ? Math.max(m, b.bw) : m), 0)
+  const wideEnough = Math.max(maxTextW * 0.25, w * 0.1)
   const dense = (b: Band) => b.inkN / Math.max(1, b.hh * b.bw) >= 0.05
   // ④ "像一行字"的带：高度像一行 + 铺得不窄 + 不是几乎空白 + 段数够多
   /** 高度像一行 + 铺得不窄 + 不是几乎空白（"是不是文字"再看段数/成组 ✓） */
@@ -144,7 +144,9 @@ export function figureBoxFromInk(ink: Uint8Array, w: number, h: number, opt: Cro
   //   ⚠ 后者不能要求邻带"段数够多"：整段汉字都粘连时，没有一条带段数多 ✗（实测用例 ④ 就漏了）
   const isText = info.map((b, i) => {
     if (!lineLike[i]) return false
+    // 主判据：段数够多（一行字十几段；图形边线只有一两段 ✓）
     if (b.runs >= minRuns) return true
+    // 兜底：整段汉字都粘连成一条时段数会掉到 1~2 ✗ —— 那就看"是不是成段排下来的一行"✓
     return (i > 0 && lineLike[i - 1] && looksStacked(b, info[i - 1])) || (i + 1 < info.length && lineLike[i + 1] && looksStacked(b, info[i + 1]))
   })
   // 把"两边都像文字、而且挨得近"的相邻带并成一段（汉字被空行劈成上下两半的情形 ✓）
