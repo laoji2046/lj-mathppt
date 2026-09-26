@@ -400,6 +400,8 @@ function aiCtx(): AiToolCtx {
     updateElement: (id, patch) => store.updateElement(id, patch as never),
     removeElement: (id) => store.removeElement(id),
     undo: () => store.undo(),
+    // 改/删前先存撤销快照（store.updateElement / removeElement 自己不存 ✗）
+    pushHistory: () => store.pushHistory(),
     bank: {
       // 搜到的题记在闭包里：insert_bank_question 直接用，不再多查一次库 ✓
       search: async (query, limit) => {

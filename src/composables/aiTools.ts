@@ -29,6 +29,8 @@ export interface AiToolCtx {
   updateElement(id: string, patch: Partial<SlideElement>): void
   removeElement(id: string): void
   undo(): void
+  /** 改/删之前先存一份撤销快照（store.updateElement/removeElement 自己**不存** ✗ —— 上一版说错了 ✓） */
+  pushHistory?(): void
   /** 题库（可缺：探针/没装库时不影响别的工具 ✓） */
   bank?: {
     search(query: string, limit: number): Promise<{ id: number; label: string }[]>
@@ -39,11 +41,27 @@ export interface AiToolCtx {
 export interface AiToolResult { ok: boolean; result?: unknown; error?: string }
 
 /** 允许 AI 改的字段白名单（其余一律忽略 ✗ —— id/type 改了就乱套 ✓） */
+/** 允许 AI 改的字段白名单（其余一律忽略 ✗ —— id/type 改了就乱套 ✓）
+ *  ⚠ 数学图形的**线条颜色**不叫 stroke ✗：它自己的字段是 conicStroke / axisColor / lineColors / pointColors ✓
+ *    （用户实报「图形线条颜色不能通过对话改变」就是这么来的 ✓ —— 白名单里没有这几个字段 ✗） */
 export const EDITABLE_FIELDS = [
   'x', 'y', 'w', 'h', 'rot', 'opacity',
   'fontSize', 'fontWeight', 'fontFamily', 'color', 'bgColor', 'align', 'text',
   'stroke', 'strokeWidth', 'fill',
+  'conicStroke', 'axisColor', 'lineColors', 'pointColors', 'pointLabels',
 ] as const
+
+/** 模型经常换名字（font_size / lineColor…）→ 常见别名一律翻译成应用真正的字段 ✓ */
+export const FIELD_ALIASES: Record<string, string> = {
+  font_size: 'fontSize', fontsize: 'fontSize', size: 'fontSize', textSize: 'fontSize', text_size: 'fontSize',
+  fontSizePx: 'fontSize', font_size_px: 'fontSize',
+  textColor: 'color', fontColor: 'color', font_color: 'color',
+  lineColor: 'conicStroke', line_color: 'conicStroke', strokeColor: 'conicStroke', figureColor: 'conicStroke',
+  curveColor: 'conicStroke', conic_color: 'conicStroke',
+  axisLineColor: 'axisColor', axis_line_color: 'axisColor', axis_color: 'axisColor',
+  line_colors: 'lineColors', point_colors: 'pointColors', pointLabel: 'pointLabels', point_labels: 'pointLabels',
+  lineWidth: 'strokeWidth', line_width: 'strokeWidth', stroke_width: 'strokeWidth',
+}
 
 /** 数学图形的合法 kind（从应用自己的 CONICS 里取，别手抄一份 ✗） */
 export function figureKinds(): string[] {
@@ -161,8 +179,30 @@ export const AI_TOOLS: unknown[] = [
   {
     type: 'function',
     function: {
+      name: 'set_figure_style',
+      description: '改数学图形/线条的**颜色**（不用记字段名）：曲线颜色、坐标轴颜色、逐条线颜色、各个点颜色、线宽。',
+      parameters: {
+        type: 'object',
+        properties: {
+          ids: { type: 'array', items: { type: 'string' }, description: '要改的图形元素 id（get_deck_state 里拿）' },
+          curveColor: { type: 'string', description: '曲线/图形线条颜色，如 #c0392b' },
+          axisColor: { type: 'string', description: '坐标轴颜色' },
+          lineColors: { type: 'array', items: { type: 'string' }, description: '逐条直线的颜色（按第 1、2…条的次序）' },
+          pointColors: { type: 'array', items: { type: 'string' }, description: '各个点的颜色（按点 1、2…的次序）' },
+          lineWidth: { type: 'number', description: '线宽，如 3' },
+        },
+        required: ['ids'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'update_elements',
-      description: '改当前页上已有元素（用 get_deck_state 拿 id）：移动、改大小、改字号/颜色/文字等。只认白名单字段。',
+      description: '改当前页上已有元素（先用 get_deck_state 拿 id）。可用字段：' +
+        'x/y/w/h（位置大小）、fontSize（**字号**，如 36）、color（文字颜色）、align、text（改文字）、' +
+        'bgColor、opacity、rot；数学图形的线条颜色用 conicStroke（曲线）、axisColor（坐标轴）、' +
+        'lineColors（逐条线的颜色数组）、pointColors（各个点的颜色数组）。',
       parameters: {
         type: 'object',
         properties: {
@@ -199,6 +239,8 @@ export function aiToolGuide(): string {
     '要引用老师题库里的题：先 search_bank 拿 id，再 insert_bank_question。',
     '改已有元素前也先 get_deck_state 拿 id；改完/插完用一句中文说明你做了什么，别把工具的 JSON 原样倒给老师。',
     '数学图形一律用 insert_math_figure（kind + params），不要用 TikZ 画图、也不要只给 LaTeX 让老师自己画。',
+    '老师说「字太小、放大一点」就用 update_elements 传 fontSize（例如 {"fontSize":36}）；',
+    '说「图形线条换个颜色、坐标轴变灰」就用 set_figure_style（curveColor / axisColor / lineColors / pointColors）。',
   ].join('\n')
 }
 
@@ -231,17 +273,30 @@ function buildText(args: Record<string, unknown>): AiToolResult {
   return { ok: true, result: el }
 }
 
-/** 白名单过滤：只留允许改的字段，顺便把数字型字段转成数字 ✓ */
+const STR_FIELDS = ['text', 'color', 'bgColor', 'align', 'fontFamily', 'stroke', 'fill', 'conicStroke', 'axisColor']
+const ARR_FIELDS = ['lineColors', 'pointColors', 'pointLabels']
+
+/** 白名单过滤 + 别名翻译：只留允许改的字段，数字转数字、颜色转字符串、颜色数组按数组收 ✓
+ *  别名表见 FIELD_ALIASES —— 模型写 font_size / lineColor 这类也认 ✓
+ *  （用户实报「字号改不动」就是字段名对不上 ✗ + 「图形线条色改不动」是白名单缺字段 ✗，两边一起修 ✓） */
 export function sanitizePatch(raw: unknown): Partial<SlideElement> {
   const out: Record<string, unknown> = {}
   if (!raw || typeof raw !== 'object') return out as Partial<SlideElement>
-  for (const k of EDITABLE_FIELDS) {
-    if (!(k in (raw as Record<string, unknown>))) continue
-    const v = (raw as Record<string, unknown>)[k]
-    if (k === 'text' || k === 'color' || k === 'bgColor' || k === 'align' || k === 'fontFamily' || k === 'stroke' || k === 'fill') {
-      if (typeof v === 'string') out[k] = v
+  const src: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const real = FIELD_ALIASES[k] || k
+    if (!(EDITABLE_FIELDS as readonly string[]).includes(real)) continue
+    if (!(real in src)) src[real] = v          // 真名优先：别名只在缺真名时顶上 ✓
+  }
+  for (const [k, v] of Object.entries(src)) {
+    if (ARR_FIELDS.includes(k)) {
+      if (Array.isArray(v)) {
+        const arr = v.map((x) => (x === null || x === undefined ? null : String(x)))
+        if (arr.length) out[k] = arr
+      }
       continue
     }
+    if (STR_FIELDS.includes(k)) { if (typeof v === 'string') out[k] = v; continue }
     const n = num(v)
     if (n !== undefined) out[k] = n
   }
@@ -339,17 +394,33 @@ export async function runAiTool(name: string, args: Record<string, unknown>, ctx
         ctx.addElements([{ type: 'richtex', overrides: el }])
         return { ok: true, result: { 已插入题: Math.round(id), 带答案: withAnswer, 字数: text.length } }
       }
+      case 'set_figure_style': {
+        const ids = Array.isArray(a.ids) ? a.ids.map((x) => str(x)).filter(Boolean) : []
+        if (!ids.length) return { ok: false, error: '缺 ids（先用 get_deck_state 拿）' }
+        const patch = sanitizePatch({
+          conicStroke: a.curveColor !== undefined ? a.curveColor : a.conicStroke,
+          axisColor: a.axisColor, lineColors: a.lineColors, pointColors: a.pointColors,
+          strokeWidth: a.lineWidth !== undefined ? a.lineWidth : a.strokeWidth,
+        })
+        if (!Object.keys(patch).length) return { ok: false, error: '没给要改的颜色（curveColor / axisColor / lineColors / pointColors / lineWidth）' }
+        if (ctx.pushHistory) ctx.pushHistory()
+        for (const id of ids) ctx.updateElement(id, patch)
+        return { ok: true, result: { 改了: ids.length + ' 个图形的颜色', 字段: Object.keys(patch) } }
+      }
       case 'update_elements': {
         const ids = Array.isArray(a.ids) ? a.ids.map((x) => str(x)).filter(Boolean) : []
         if (!ids.length) return { ok: false, error: '缺 ids（先用 get_deck_state 拿）' }
         const patch = sanitizePatch(a.patch)
         if (!Object.keys(patch).length) return { ok: false, error: 'patch 里没有可改的字段（只认：' + EDITABLE_FIELDS.join('、') + '）' }
+        // 一次批量只存一份快照 ✓（store.updateElement 自己不存 ✗ → 不补的话老师 Ctrl+Z 回不来 ✓）
+        if (ctx.pushHistory) ctx.pushHistory()
         for (const id of ids) ctx.updateElement(id, patch)
         return { ok: true, result: { 改了: ids.length + ' 个元素', 字段: Object.keys(patch) } }
       }
       case 'delete_elements': {
         const ids = Array.isArray(a.ids) ? a.ids.map((x) => str(x)).filter(Boolean) : []
         if (!ids.length) return { ok: false, error: '缺 ids' }
+        if (ctx.pushHistory) ctx.pushHistory()
         for (const id of ids) ctx.removeElement(id)
         return { ok: true, result: { 删了: ids.length + ' 个元素（可以撤销）' } }
       }
