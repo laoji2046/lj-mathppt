@@ -12,6 +12,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { invoke, isTauri } from '@/composables/useTauri'
 import AppIcon from './AppIcon.vue'
 import { pdfToMarkdown } from '@/pdf/pdfImport'
+import { deckToPlainText } from '@/composables/deckToText'
 import { firstUserDir, writeTextFile, qSearch, questionTextOf, type QItem } from '@/composables/useQuestionBank'
 import { markdownToDeck } from '@/composables/mdDeck'
 import { attachTikzFigures, flowDeckElements, picElementItems, tikzSolver, type PicInput } from '@/composables/figureRender'
@@ -233,11 +234,20 @@ async function onPickDoc(e: Event) {
       if (/\.pdf$/i.test(f.name)) {
         const r = await pdfToMarkdown(new Uint8Array(await f.arrayBuffer()), {})
         text = String((r as { markdown?: string })?.markdown || '')
+      } else if (/\.pptx$/i.test(f.name)) {
+        // 【v1671】PPT：直接复用应用自己的解析器（「导入 PPT」那个功能用的就是它 ✓）
+        //   动态 import：解析器不小，别拖进启动包 ✗（TopToolbar 里也是这么懒加载的 ✓）
+        const { pptxToDeck } = await import('@/pptx/pptxToDeck')
+        const { deck } = await pptxToDeck(new Uint8Array(await f.arrayBuffer()))
+        text = deckToPlainText(deck)
+      } else if (/\.ppt$/i.test(f.name)) {
+        attMsg.value = f.name + ' 是老版 .ppt 格式，打不开；请在 PowerPoint 里另存为 .pptx 再发'
+        continue
       } else {
         text = await f.text()
       }
       text = text.trim()
-      if (!text) { attMsg.value = f.name + ' 里没抽出文字（可能是扫描件；可以把它当图片发）'; continue }
+      if (!text) { attMsg.value = f.name + ' 里没抽出文字（可能是扫描件 / 纯图片的 PPT；可以把它当图片发）'; continue }
       const cut = text.length > MAX_DOC_CHARS ? text.slice(0, MAX_DOC_CHARS) + '\n…（已截断）' : text
       attDocs.value.push({ name: f.name, chars: text.length, text: cut })
     } catch (err) { attMsg.value = f.name + " 解析失败：" + String((err as Error)?.message || err) }
@@ -587,7 +597,7 @@ async function saveAnswer(t: string) {
           <span v-if="attMsg" class="ds__hintwarn">{{ attMsg }}</span>
         </div>
         <input ref="imgInput" type="file" accept="image/*" multiple style="display:none" @change="onPickImg" />
-        <input ref="docInput" type="file" accept=".pdf,.md,.markdown,.txt,.json,.csv" multiple style="display:none" @change="onPickDoc" />
+        <input ref="docInput" type="file" accept=".pdf,.pptx,.md,.markdown,.txt,.json,.csv" multiple style="display:none" @change="onPickDoc" />
         <textarea ref="taEl" v-model="input" class="ds__ta" rows="3" placeholder="输入问题…（Enter 发送，Shift+Enter 换行）" @keydown.enter.exact.prevent="send" />
         <div class="ds__footRow">
           <span class="ds__hint" title="Ctrl+V 可以直接粘贴题目截图；点「切图 → 幻灯片」只把图形切进当前页">可粘贴截图 · 「切图」只留图形部分</span>
