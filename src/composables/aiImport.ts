@@ -254,3 +254,28 @@ export function firstBlocking(items: AiQuestion[]): { index: number; issue: Fiel
   }
   return null
 }
+
+/* ---------------- 【v1684】对话框提交前的口径：没抽答案时「缺答案」不拦提交 ✓ ---------------- */
+
+/**
+ * 按「这批有没有让 AI 抽答案」把逐字段结果过一遍：
+ *   没抽答案时，缺答案是**老师自己选的** → 降到 warn，不拦提交 ✓（其余一律照旧，绝不顺手放过 ✗）。
+ */
+export function softenIssues(issues: FieldIssue[], withAnswer: boolean): FieldIssue[] {
+  const list = issues || []
+  if (withAnswer) return list
+  return list.map((x) => (x.field === 'answer' && x.level === 'error'
+    ? { field: x.field, level: 'warn' as const, msg: '这次没让 AI 抽答案，入库前人工补' }
+    : x))
+}
+
+/** 批量提交前定位第一处拦路问题（口径同 softenIssues ✓）；下标是**传进来这批**里的位置 ✓ */
+export function firstBlockerOf(items: AiQuestion[], withAnswer: boolean): { index: number; issue: FieldIssue } | null {
+  const list = items || []
+  if (withAnswer) return firstBlocking(list)
+  for (let i = 0; i < list.length; i++) {
+    const bad = softenIssues(validateQuestion(list[i]), false).filter((x) => x.level === 'error')
+    if (bad.length) return { index: i, issue: bad[0] }
+  }
+  return null
+}

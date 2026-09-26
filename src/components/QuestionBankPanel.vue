@@ -32,6 +32,8 @@ import type { AnsScan } from '@/composables/useAnswerBackfill'
 const QuestionImportDialog = defineAsyncComponent(() => import('./QuestionImportDialog.vue'))
 /** 草稿箱（v5 · P1b）：AI / OCR 的产出先落这里，人工确认后才进正式库 ✓ */
 const DraftBox = defineAsyncComponent(() => import('./DraftBox.vue'))
+/** 【v1684】AI 导入试题：贴原文 / 拖文件 → 抽成题卡 → 就地改 → 存草稿（体量不小，按需加载 ✓） */
+const AiImportDialog = defineAsyncComponent(() => import('./AiImportDialog.vue'))
 import { isTauri } from '@/composables/useTauri'
 import { useDeckStore } from '@/stores/deck'
 import { sendToPaper } from '@/ui/paper'
@@ -54,6 +56,8 @@ const previewHost = ref<HTMLElement | null>(null)
 const importOpen = ref(false)
 /** 草稿箱开没开（v5 · P1b） */
 const draftOpen = ref(false)
+/** 【v1684】AI 导入试题对话框开没开 */
+const aiImportOpen = ref(false)
 /** 最近一次批量删除前 Rust 侧留的整库备份路径（hover 可看全路径）✓ */
 const lastBackup = ref('')
 
@@ -580,7 +584,7 @@ function pickGeom3DFigure() {
  */
 function onPanelKey(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
-  if (importOpen.value || draftOpen.value || reportOpen.value || ansOpen.value || aiOpen.value) return
+  if (importOpen.value || draftOpen.value || aiImportOpen.value || reportOpen.value || ansOpen.value || aiOpen.value) return
   emit('close')
 }
 onMounted(() => {
@@ -808,6 +812,14 @@ async function save() {
 
 /* ---------------- M3：多选 / 批量 / 插入 ---------------- */
 
+/** 【v1684】AI 导入存好草稿后：关掉对话框、直接开草稿箱复核
+ *  ⚠ 只存了草稿、正式库还没动 —— 别说成「已入库」（那是确认入库时才说的话 ✓） */
+function onAiDrafts() {
+  aiImportOpen.value = false
+  draftOpen.value = true
+  flash('✓ 已存草稿 —— 在「草稿箱」里复核后点「确认入库」')
+}
+
 /** 录入完成后：提示 + 重算计数（新题马上能在左树/筛选里看到 ✓） */
 function onImported(n: number) {
   flash('✓ 已入库 ' + n + ' 道')
@@ -1001,6 +1013,7 @@ async function batchDelete() {
           <button class="qb__btn" title="来源合规报告：多少题有来源 / 有多少已成模板 / 哪几道要处理" @click="openReport">来源报告</button>
           <button class="qb__btn" title="从录入时的 MinerU 产物缓存重新拆答案补给缺答案的题（纯本地、只补不覆盖）" @click="openAnswerFill">补答案</button>
           <button class="qb__btn" title="给勾选的题（一道没勾 = 当前筛选全部）自动打知识点 / 难度 / 板块 —— 结果先进确认表，勾选后才写库（只填空字段、可回退）" @click="openAiTag">AI 打标</button>
+          <button class="qb__btn" title="AI 导入：贴试卷原文（或拖文件）→ AI 抽成题卡 → 题卡上就地改 → 一键写待复核草稿（正式库一个字不动）" @click="aiImportOpen = true">AI 导入</button>
           <button class="qb__btn qb__btn--main" title="从 Markdown / JSON / PDF 批量录入试题" @click="importOpen = true">录入试题</button>
           <button class="qb__close" title="关闭 (Esc)" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
         </span>
@@ -1207,6 +1220,8 @@ async function batchDelete() {
     </div>
 
     <QuestionImportDialog v-if="importOpen" @close="importOpen = false" @imported="onImported" />
+    <!-- 【v1684】AI 导入试题：抽出来先落待复核草稿，复核后才入库 ✓ -->
+    <AiImportDialog v-if="aiImportOpen" @close="aiImportOpen = false" @open-drafts="onAiDrafts" />
     <DraftBox v-if="draftOpen" @close="draftOpen = false" @committed="onImported" />
 
     <!-- 【P0b】知识点建议：来自受控词表 kp_catalog（kind=knowledge 的板块级词）✓ -->
