@@ -291,3 +291,11 @@ export function readableChars(raw: string): number {
 export function tooThinForAi(raw: string, min = 20): boolean {
   return readableChars(raw) < min
 }
+
+/* ---------------- 【v1689】扫描件 PDF 走哪条路（口径在这儿，探针测得到 ✓） ---------------- */
+
+/** 扫描件（整页是图、没有文字层）本地抽不出字：**桌面端 + 有 MinerU token** 就直接走精准解析 ✓，
+ *  否则只能让老师把文字贴进来 ✓（网页预览没有内核、没有 token 也没法调 MinerU ✗）。 */
+export function scanPath(opt: { desktop: boolean; hasToken: boolean }): 'mineru' | 'paste' {
+  return opt && opt.desktop && opt.hasToken ? 'mineru' : 'paste'
+}

@@ -10,12 +10,13 @@
  *   · 落草稿 → useQuestionBank 的 importBegin / importAddDrafts（和「录入试题」同一条链路 ✓；
  *     落点是**草稿**，复核入库在「草稿箱」里做 ✓）
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
-import { extractQuestions, firstBlockerOf, readableChars, softenIssues, tooThinForAi, validateQuestion } from '@/composables/aiImport'
+import { extractQuestions, firstBlockerOf, readableChars, scanPath, softenIssues, tooThinForAi, validateQuestion } from '@/composables/aiImport'
 import type { AiQuestion, FieldIssue } from '@/composables/aiImport'
 import { LEVELS, QTYPE_LABEL, SECTIONS, idemKeyOf, importAddDrafts, importBegin } from '@/composables/useQuestionBank'
-import { invoke } from '@/composables/useTauri'
+import { invoke, isTauri, listenTauri, mineruParse, mineruStagePdf } from '@/composables/useTauri'
+import type { MineruProgress } from '@/composables/useTauri'
 import { typesetMixed } from '@/composables/useMathJax'
 import { escapeHtml } from '@/types'
 import { licensed } from '@/composables/useLicense'
@@ -53,6 +54,19 @@ const dragOver = ref(false)
 const fileName = ref('')
 /** 试卷名 / 来源：一次填好，整批草稿都带上（不填也能存，只是入库后按来源不好找 ✓） */
 const paperName = ref('')
+/** MinerU token（扫描件 PDF 用）：与「录入试题」**共用同一个 localStorage 键** ✓ —— 一处填、两处都能用 ✓ */
+const MINERU_TOKEN_KEY = 'lj-mathslides:mineru-token'
+const mineruToken = ref('')
+try { mineruToken.value = localStorage.getItem(MINERU_TOKEN_KEY) || '' } catch { /* 隐私模式读不到就算了 */ }
+watch(mineruToken, (v) => {
+  try {
+    const t = String(v || '').trim()
+    if (t) localStorage.setItem(MINERU_TOKEN_KEY, t)
+    else localStorage.removeItem(MINERU_TOKEN_KEY)
+  } catch { /* 存不上不影响本次使用 */ }
+})
+/** MinerU 要走桌面端内核（请求在 Rust 侧发；网页端直连被 CORS 挡 ✗） */
+const isDesktop = isTauri()
 const fileInput = ref<HTMLInputElement | null>(null)
 const listBox = ref<HTMLElement | null>(null)
 
@@ -89,14 +103,17 @@ async function fileToText(f: File): Promise<{ text: string; note: string }> {
     // 【v1688 修】先 probePdf 看一眼有没有文字层：扫描件（整页都是图）文本模型**一个字也读不到** ✗。
     //   以前不问青红皂白就送去抽题 → 模型回一句「没找到题目」，等于把锅甩给模型 ✗（用户实报 ✓）。
     const p = await probePdf(buf)
-    if (p.textPages === 0) {
+      // 【v1689】扫描件：桌面端 + 填了 MinerU token → 直接走精准解析（文字能拿全 ✓，图带不过来 ✗），
+      //   识别出来的 Markdown 填进原文框，后面的抽题流程完全一样 ✓；没有 token 就把两条路说清楚 ✓。
+      if (scanPath({ desktop: isDesktop, hasToken: !!mineruToken.value.trim() }) === 'mineru') {
+        return await readScanByMineru(f, p.pages)
+      }
       return {
         text: '',
         note: '这份 PDF 是扫描件（共 ' + p.pages + ' 页，整页都是图片、没有文字层）—— AI 只读文字，读不到它 ✗。'
-          + '两条能走的路：① 试题库 →「录入试题」→ 导入 .pdf（走 MinerU 识别，token 不填也能用轻量接口）；'
-          + '② 把试卷文字复制粘贴到左边的框里，再点「AI 抽题」',
+          + '两条能走的路：① 在下面填一个 MinerU token（mineru.net 免费申请；填了以后扫描件在这里就能直接识别成文字 ✓）；'
+          + '② 把试卷文字复制粘贴到左边的框里，再点「AI 抽题」✓',
       }
-    }
     const r = await pdfToMarkdown(buf, {})
     const md = String((r as { markdown?: string })?.markdown || '')
     return { text: md, note: 'PDF 共 ' + p.pages + ' 页，其中有文字层的 ' + p.textPages + ' 页' }
@@ -111,6 +128,43 @@ async function fileToText(f: File): Promise<{ text: string; note: string }> {
     throw new Error('Word 文件先在 Word 里全选复制，再贴到左边的框里（.docx 的排版与公式解析不了）')
   }
   return { text: await f.text(), note: '' }
+}
+
+/** 【v1689】扫描件：交给 MinerU **精准解析**（请求在 Rust 侧发 ✓），回来的是 Markdown ✓
+ *  · 正文优先用 content_list + bbox 装配的那份（双栏卷会重排成「先左后右」✓），没有就退回 mdText ✓；
+ *  · 插图**带不过来**（本对话框只取文字）→ 去掉 ![](images/x.jpg) 与 [图N] 标记，只把张数说清楚：
+ *    留着标记不但题干里碍眼，还会让草稿被质量闸门按「有图没带图」整批标待复核 ✗；
+ *  · 失败/空结果不吞：说清原因并给下一条路 ✓（绝不静默 ✗）。
+ */
+async function readScanByMineru(f: File, pages: number): Promise<{ text: string; note: string }> {
+  const token = mineruToken.value.trim()
+  prog.value = '扫描件：正在上传给 MinerU 识别…（' + pages + ' 页，通常 1~3 分钟，别关窗口）'
+  try {
+    const path = await mineruStagePdf(f)
+    const { assembleContentDoc } = await import('@/composables/contentDoc')
+    const r = await mineruParse(path, token, 'precise')
+    const md = String((r && r.mdText) || '')
+    const doc = (r && r.contentJson ? assembleContentDoc(String(r.contentJson)) : '').trim()
+      || String((r && r.contentText) || '').trim() || md
+    const figs = (doc.match(/!\[[^\]]*\]\([^)]*\)/g) || []).length + (doc.match(/\[图\s*\d+/g) || []).length
+    const text = doc.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/\[图\s*\d+(?::[^\]]*)?\]/g, ' ')
+    const cw = String((r && r.contract && r.contract.warn) || '')
+    if (readableChars(text) < 20) {
+      return {
+        text: '',
+        note: 'MinerU 没识别出文字' + (cw ? '：' + cw : '') + ' —— 稍后重试；或在「录入试题」里换免 token 的轻量接口试试 ✓',
+      }
+    }
+    return {
+      text,
+      note: '扫描件已由 MinerU 精准解析（' + ((r && r.pages) || pages) + ' 页'
+        + (r && r.seconds ? '，' + Math.round(Number(r.seconds)) + ' 秒' : '') + '）'
+        + (figs ? '；卷面有 ' + figs + ' 处插图，本对话框只取文字、图带不过来 —— 图形题请走「录入试题 → 导入 .pdf（MinerU）」，那里能把图挂到题上 ✓' : '')
+        + (cw ? '；注意：' + cw : ''),
+    }
+  } finally {
+    prog.value = ''
+  }
 }
 
 async function takeFiles(files: File[]) {
@@ -433,10 +487,27 @@ function onKey(e: KeyboardEvent) {
   e.stopPropagation()
   closeMe()
 }
-onMounted(() => document.addEventListener('keydown', onKey, true))
+/** MinerU 进度文案（Rust 侧 emit "mineru://progress" ✓）—— 扫一份卷子要一两分钟，不给进度会以为卡死 ✗ */
+const ZH_MINERU: Record<string, string> = {
+  submitting: '① 提交任务', waiting_file: '① 等待上传', uploading: '② 上传中',
+  pending: '③ 排队中', running: '③ 解析中', parsing: '③ 解析中', converting: '③ 转换中',
+  downloading: '④ 下载结果', extracting: '④ 解压中', done: '⑤ 完成', failed: '失败',
+}
+let unMineru: (() => void) | null = null
+onMounted(() => {
+  document.addEventListener('keydown', onKey, true)
+  void listenTauri<MineruProgress>('mineru://progress', (p) => {
+    if (!p || !p.state) return
+    let line = 'MinerU ' + (ZH_MINERU[p.state] || p.state)
+    if (p.extractedPages != null) line += ' ' + p.extractedPages + '/' + (p.totalPages ?? '?') + ' 页'
+    if (p.seconds != null) line += ' · 已 ' + p.seconds + 's'
+    prog.value = line
+  }).then((un) => { unMineru = un })
+})
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKey, true)
   if (pvTimer) window.clearTimeout(pvTimer)
+  if (unMineru) { unMineru(); unMineru = null }
 })
 </script>
 
@@ -462,6 +533,16 @@ onBeforeUnmount(() => {
             <button class="aiq__btn" @click="fileInput && fileInput.click()">选文件…</button>
             <span v-if="fileName" class="aiq__fname">{{ fileName }}</span>
           </div>
+
+          <label
+            class="aiq__lab aiq__lab--wide"
+            title="扫描件 PDF（整页是图、没有文字层）用它识别成文字；与「录入试题」里那个是同一个 token（只存本机，绝不进仓库）"
+          >MinerU token
+            <input
+              v-model="mineruToken" class="aiq__inp" type="password" autocomplete="off" spellcheck="false"
+              :placeholder="isDesktop ? '扫描件 PDF 用；mineru.net 免费申请（只存本机）' : '网页预览里不可用（要桌面端内核）'"
+            />
+          </label>
 
           <textarea
             v-model="text" class="aiq__ta" rows="14" spellcheck="false"
@@ -493,7 +574,7 @@ onBeforeUnmount(() => {
 
           <div class="aiq__hint">
             抽出来只是<b>草稿</b>：正式库一个字不动，到「草稿箱」复核后才入库。<br />
-            模型只读文字：<b>扫描件 PDF</b>（整页是图、没有文字层）本地解析不出字 —— 走「录入试题 → 导入 .pdf（MinerU）」，或把文字贴进来。<br />
+            模型只读文字：<b>扫描件 PDF</b>（整页是图、没有文字层）本地解析不出字 —— 桌面端填了上面的 MinerU token 就会自动走精准解析；没填就把文字贴进来。<br />
             抽题用的 key 与「AI 助手」是同一个（设置 → AI 助手）。
           </div>
         </section>
