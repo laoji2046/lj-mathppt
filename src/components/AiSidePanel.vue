@@ -13,6 +13,8 @@ import { invoke, isTauri } from '@/composables/useTauri'
 import AppIcon from './AppIcon.vue'
 import { pdfToMarkdown } from '@/pdf/pdfImport'
 import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
+import { markdownToDeck } from '@/composables/mdDeck'
+import { useDeckStore } from '@/stores/deck'
 
 const open = ref(false)
 const input = ref('')
@@ -128,6 +130,18 @@ async function copyOne(t: string) { try { await navigator.clipboard.writeText(t)
  *   浏览器预览里退回 Blob 下载 ✓。存出来的 .md 能直接走「导入 .md 文件」核对入库 ✓
  */
 const saveMsg = ref('')
+const store = useDeckStore()
+
+/** 【v1647】一键插入幻灯片（用户要求）：AI 回答是 Markdown → 走应用自己的 markdownToDeck ✓
+ *   （与「导入 PDF → 抽取文字」同一条链路，公式/标题/段落都按应用的口径成页 ✓）*/
+function insertToSlides(t: string) {
+  try {
+    const deck = markdownToDeck(mdClean(t))
+    if (!deck || !deck.slides || !deck.slides.length) { saveMsg.value = '这段内容里没有能成页的文字'; return }
+    const ok = store.importDeck(deck)
+    saveMsg.value = ok ? ('已插入 ' + deck.slides.length + ' 页幻灯片') : '生成的内容无效（已取消，未影响当前内容）'
+  } catch (e) { saveMsg.value = '插入失败：' + String((e as Error)?.message || e) }
+}
 function mdClean(t: string): string {
   let s = String(t || '').trim()
   // 去掉模型爱加的整段围栏（```markdown … ``` / ``` … ```），否则再导入会多出一堆噪声 ✗
@@ -189,6 +203,7 @@ async function saveAnswer(t: string) {
           <div class="ds__text">{{ m.text }}</div>
           <span v-if="m.role === 'ai'" class="ds__acts">
             <button class="ds__mini" title="复制这条回答" @click="copyOne(m.text)">复制</button>
+            <button class="ds__mini" title="把这条回答按 Markdown 直接变成幻灯片，插到当前演示后面（公式按应用的排版口径渲染）" @click="insertToSlides(m.text)">插入幻灯片</button>
             <button class="ds__mini" title="存成 .md（桌面端存到「文档」目录，可以直接用「导入 .md 文件」核对入库）" @click="saveAnswer(m.text)">存为 .md</button>
           </span>
         </div>
