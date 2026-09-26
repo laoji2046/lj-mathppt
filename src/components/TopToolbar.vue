@@ -136,8 +136,16 @@ async function onPptxPicked(e: Event) {
     const geoWarn = stats.geomSuspect > 0
       ? ' · ⚠ ' + stats.geomSuspect + ' 个元素位置/尺寸异常（可能没取到写入位置）—— 请把出问题那一页截图给我'
       : ''
+    // 【v1672】导入后**自动统一风格**（用户要求：只统一字体/配色，**不动版式** ✓；风格跟当前主题走 ✓）
+    //   applyHouseStyle → restyleDeck 的承诺：只改样式、绝不碰内容 ✓
+    //   （字号吸附到主题档位、换主题字体、背景换主题底色、文字色**保色相**只夹对比度 ✓）
+    //   slides === 0 表示「统一风格」这个插件被关掉了（requireAddon 挡下）→ 如实说出来，别假装改了 ✗
+    const rs = store.applyHouseStyle()
+    const styleNote = rs.slides === 0
+      ? ' · 风格没动：「统一风格」在插件里被关掉了（设置 → 插件）'
+      : (rs.changed ? ' · 已统一风格：' + rs.changed + ' 个元素对齐主题（字体/配色，版式没动）' : ' · 风格本来就和主题一致')
     fileToast.value = 'PPT 导入完成：' + deck.slides.length + ' 页 · 公式 ' + stats.formulas +
-      ' · 图片 ' + stats.images + ' · 表格 ' + stats.tables + warn + oleWarn2 + geoWarn
+      ' · 图片 ' + stats.images + ' · 表格 ' + stats.tables + warn + oleWarn2 + geoWarn + styleNote
   } catch (err) {
     fileToast.value = 'PPT 导入失败：' + (err instanceof Error ? err.message : String(err))
   }
