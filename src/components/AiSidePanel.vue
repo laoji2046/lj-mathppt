@@ -11,6 +11,7 @@
 import { computed, nextTick, ref } from 'vue'
 import { invoke, isTauri } from '@/composables/useTauri'
 import AppIcon from './AppIcon.vue'
+import { pdfToMarkdown } from '@/pdf/pdfImport'
 
 const open = ref(false)
 const input = ref('')
@@ -33,6 +34,55 @@ function aiKey(): string {
 }
 const hasKey = computed(() => { void keyTick.value; return !!aiKey() })
 
+/* ---- 【v1645】附件：图片（多模态）+ 文档（本地抽文本，纯文本模型也能读）---- */
+const attImgs = ref<string[]>([])
+const attDocs = ref<{ name: string; chars: number; text: string }[]>([])
+const attMsg = ref('')
+const imgInput = ref<HTMLInputElement | null>(null)
+const docInput = ref<HTMLInputElement | null>(null)
+const MAX_IMG = 4
+const MAX_BYTES = 4 * 1024 * 1024
+const MAX_DOC_CHARS = 20000
+function readAsDataUrl(f: File): Promise<string> {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result || "")); r.onerror = () => rej(new Error("读图失败")); r.readAsDataURL(f) })
+}
+async function onPickImg(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  input.value = ''
+  attMsg.value = ''
+  for (const f of files) {
+    if (attImgs.value.length >= MAX_IMG) { attMsg.value = '最多带 ' + MAX_IMG + ' 张图'; break }
+    if (f.size > MAX_BYTES) { attMsg.value = f.name + ' 超过 4MB，跳过'; continue }
+    try { attImgs.value.push(await readAsDataUrl(f)) } catch { attMsg.value = f.name + " 读不出来" }
+  }
+}
+async function onPickDoc(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  input.value = ''
+  attMsg.value = ''
+  for (const f of files) {
+    try {
+      let text = ''
+      if (/\.pdf$/i.test(f.name)) {
+        const r = await pdfToMarkdown(new Uint8Array(await f.arrayBuffer()), {})
+        text = String((r as { markdown?: string })?.markdown || '')
+      } else {
+        text = await f.text()
+      }
+      text = text.trim()
+      if (!text) { attMsg.value = f.name + ' 里没抽出文字（可能是扫描件；可以把它当图片发）'; continue }
+      const cut = text.length > MAX_DOC_CHARS ? text.slice(0, MAX_DOC_CHARS) + '\n…（已截断）' : text
+      attDocs.value.push({ name: f.name, chars: text.length, text: cut })
+    } catch (err) { attMsg.value = f.name + " 解析失败：" + String((err as Error)?.message || err) }
+  }
+}
+function dropAtt(kind: "img" | "doc", i: number) {
+  if (kind === 'img') attImgs.value.splice(i, 1)
+  else attDocs.value.splice(i, 1)
+}
+
 const SYSTEM = '你是高中数学老师的备课助手。回答用中文，简洁、可直接放进讲义：公式用 $...$（行内）或 $$...$$（独立行），结论先说，步骤可省。'
 
 async function send() {
@@ -42,20 +92,26 @@ async function send() {
   const key = aiKey()
   if (!key) { err.value = '还没填 AI Key —— 打开「设置」填一个 DeepSeek Key 就能用 ✓'; keyTick.value++; return }
   err.value = ''
-  msgs.value.push({ role: 'user', text: t })
+  const ctx = attDocs.value.length
+    ? attDocs.value.map((d) => '【附件：' + d.name + '】\n' + d.text).join('\n\n') + '\n\n—— 以上是附件内容，请结合它回答 ——\n'
+    : ''
+  const userText = ctx + t
+  const imgs = attImgs.value.slice()
+  const tag = (attDocs.value.length ? '（附文档 ' + attDocs.value.length + ' 份' : '') + (imgs.length ? (attDocs.value.length ? '、图 ' : '（图 ') + imgs.length + ' 张' : '') + ((attDocs.value.length || imgs.length) ? '）' : '')
+  msgs.value.push({ role: 'user', text: t + tag })
   input.value = ''
   busy.value = true
   await scrollDown()
   try {
     const r = await invoke<{ ok?: boolean; text?: string; content?: string; error?: string }>('ai_chat', {
-      baseUrl: '', apiKey: key, model: 'deepseek-chat', system: SYSTEM, userText: t,
+      baseUrl: '', apiKey: key, model: 'deepseek-chat', system: SYSTEM, userText, images: imgs.length ? imgs : null,
     })
     const text = String((r && (r.text || r.content)) || '').trim()
     if (r && r.ok === false) err.value = String(r.error || '调用失败')
     else if (!text) err.value = '模型没有返回内容'
     else msgs.value.push({ role: 'ai', text })
   } catch (e) { err.value = String((e as Error)?.message || e) }
-  finally { busy.value = false; await scrollDown() }
+  finally { busy.value = false; attImgs.value = []; attDocs.value = []; await scrollDown() }
 }
 async function scrollDown() {
   await nextTick()
@@ -95,6 +151,15 @@ async function copyOne(t: string) { try { await navigator.clipboard.writeText(t)
         <div v-if="err" class="ds__err">{{ err }}</div>
       </div>
       <footer class="ds__foot">
+        <div class="ds__att">
+          <button class="ds__mini" title="带图片（需要端点/模型支持视觉，否则会明确报错）" @click="imgInput?.click()">＋图</button>
+          <button class="ds__mini" title="带文档：PDF 在本机抽文字，MD/TXT/JSON 直接读（纯文本模型也能用）" @click="docInput?.click()">＋文档</button>
+          <span v-for="(_, i) in attImgs" :key="'i' + i" class="ds__chip">图{{ i + 1 }}<em @click="dropAtt('img', i)">×</em></span>
+          <span v-for="(d, i) in attDocs" :key="'d' + i" class="ds__chip" :title="d.chars + ' 字'">{{ d.name }}<em @click="dropAtt('doc', i)">×</em></span>
+          <span v-if="attMsg" class="ds__hintwarn">{{ attMsg }}</span>
+        </div>
+        <input ref="imgInput" type="file" accept="image/*" multiple style="display:none" @change="onPickImg" />
+        <input ref="docInput" type="file" accept=".pdf,.md,.markdown,.txt,.json,.csv" multiple style="display:none" @change="onPickDoc" />
         <textarea v-model="input" class="ds__ta" rows="3" placeholder="输入问题（Enter 发送，Shift+Enter 换行）" @keydown.enter.exact.prevent="send" />
         <button class="ds__send" :disabled="busy || !input.trim()" @click="send">发送</button>
       </footer>
@@ -125,4 +190,8 @@ async function copyOne(t: string) { try { await navigator.clipboard.writeText(t)
 .ds__ta { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 12.5px; font-family: inherit; resize: vertical; }
 .ds__send { align-self: flex-end; height: 28px; padding: 0 14px; border: 1px solid var(--brand-600, #534AB7); background: var(--brand-600, #534AB7); color: #fff; border-radius: 8px; font-size: 12.5px; cursor: pointer; }
 .ds__send:disabled { opacity: .5; cursor: default; }
+.ds__att { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ds__chip { display: inline-flex; align-items: center; gap: 4px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #4a3b8f; background: #f1efff; border: 1px solid #ded7ff; border-radius: 999px; padding: 2px 8px; }
+.ds__chip em { cursor: pointer; font-style: normal; color: #8a7fd0; }
+.ds__hintwarn { font-size: 11px; color: #b3541e; }
 </style>

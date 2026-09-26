@@ -4525,7 +4525,7 @@ fn mineru_stage_pdf(data_base64: String, file_name: String) -> Result<String, St
 /// 为什么放 Rust 侧：网页端直连 api.deepseek.com 会被 CORS 挡 ✗（和 MinerU 同理）。
 /// base_url / model 都可传，方便以后换服务商；api_key 只从设置里来，**绝不写进源码** ✓
 #[tauri::command]
-fn ai_chat(base_url: String, api_key: String, model: String, system: String, user_text: String) -> serde_json::Value {
+fn ai_chat(base_url: String, api_key: String, model: String, system: String, user_text: String, images: Option<Vec<String>>) -> serde_json::Value {
     let url = if base_url.trim().is_empty() {
         "https://api.deepseek.com/chat/completions".to_string()
     } else {
@@ -4542,12 +4542,24 @@ fn ai_chat(base_url: String, api_key: String, model: String, system: String, use
         Ok(c) => c,
         Err(e) => return serde_json::json!({ "ok": false, "error": format!("HTTP 客户端创建失败: {}", e) }),
     };
+    // 【v1645】带图提问：图片按 OpenAI 兼容格式放进 content 数组（data URL）✓
+    //   端点/模型不支持视觉时，服务端会返回错误，前端如实显示（不要把图静默丢掉 ✗）
+    let content = serde_json::json!(user_text.clone());
+    let imgs: Vec<String> = images.unwrap_or_default();
+    if !imgs.is_empty() {
+        let mut arr: Vec<serde_json::Value> = vec![serde_json::json!({ "type": "text", "text": user_text })];
+        for u in imgs.iter() {
+            if u.trim().is_empty() { continue; }
+            arr.push(serde_json::json!({ "type": "image_url", "image_url": { "url": u } }));
+        }
+        content = serde_json::json!(arr);
+    }
     let body = serde_json::json!({
         "model": model,
         "temperature": 0,
         "messages": [
             { "role": "system", "content": system },
-            { "role": "user", "content": user_text }
+            { "role": "user", "content": content }
         ]
     });
     let resp = match client
