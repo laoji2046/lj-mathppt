@@ -12,6 +12,7 @@ import { computed, nextTick, ref } from 'vue'
 import { invoke, isTauri } from '@/composables/useTauri'
 import AppIcon from './AppIcon.vue'
 import { pdfToMarkdown } from '@/pdf/pdfImport'
+import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
 
 const open = ref(false)
 const input = ref('')
@@ -121,6 +122,47 @@ async function scrollDown() {
 
 function clearAll() { msgs.value = []; err.value = '' }
 async function copyOne(t: string) { try { await navigator.clipboard.writeText(t) } catch { /* 忽略 */ } }
+
+/* ---- 【v1646】把 AI 回答存成 .md（用户要求：能下载下来）----
+ *   桌面端写到「文档」目录（复用导出用的 firstUserDir / writeTextFile ✓ 比浏览器下载稳）；
+ *   浏览器预览里退回 Blob 下载 ✓。存出来的 .md 能直接走「导入 .md 文件」核对入库 ✓
+ */
+const saveMsg = ref('')
+function mdClean(t: string): string {
+  let s = String(t || '').trim()
+  // 去掉模型爱加的整段围栏（```markdown … ``` / ``` … ```），否则再导入会多出一堆噪声 ✗
+  const m = s.match(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/)
+  if (m) s = m[1].trim()
+  return s + '\n'
+}
+function stampName(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return 'AI回答-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + '.md'
+}
+async function saveAnswer(t: string) {
+  const md = mdClean(t)
+  const name = stampName()
+  saveMsg.value = ''
+  if (isTauri()) {
+    try {
+      const dir = await firstUserDir('文档')
+      if (!dir) { saveMsg.value = '没选目录，已取消'; return }
+      const r = await writeTextFile(dir, name, md)
+      saveMsg.value = r && r.ok ? ('已存到 ' + r.path) : ('保存失败：' + String((r && r.error) || ''))
+    } catch (e) { saveMsg.value = '保存失败：' + String((e as Error)?.message || e) }
+    return
+  }
+  try {
+    const url = URL.createObjectURL(new Blob([md], { type: 'text/markdown;charset=utf-8' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 3000)
+    saveMsg.value = '已下载：' + name
+  } catch (e) { saveMsg.value = '下载失败：' + String((e as Error)?.message || e) }
+}
 </script>
 
 <template>
@@ -145,10 +187,14 @@ async function copyOne(t: string) { try { await navigator.clipboard.writeText(t)
         <div v-for="(m, i) in msgs" :key="i" class="ds__msg" :class="'ds__msg--' + m.role">
           <div class="ds__who">{{ m.role === 'user' ? '我' : 'AI' }}</div>
           <div class="ds__text">{{ m.text }}</div>
-          <button v-if="m.role === 'ai'" class="ds__mini" @click="copyOne(m.text)">复制</button>
+          <span v-if="m.role === 'ai'" class="ds__acts">
+            <button class="ds__mini" title="复制这条回答" @click="copyOne(m.text)">复制</button>
+            <button class="ds__mini" title="存成 .md（桌面端存到「文档」目录，可以直接用「导入 .md 文件」核对入库）" @click="saveAnswer(m.text)">存为 .md</button>
+          </span>
         </div>
         <div v-if="busy" class="ds__msg ds__msg--ai"><div class="ds__who">AI</div><div class="ds__text">正在思考…</div></div>
         <div v-if="err" class="ds__err">{{ err }}</div>
+        <div v-if="saveMsg" class="ds__saved">{{ saveMsg }}</div>
       </div>
       <footer class="ds__foot">
         <div class="ds__att">
@@ -194,4 +240,6 @@ async function copyOne(t: string) { try { await navigator.clipboard.writeText(t)
 .ds__chip { display: inline-flex; align-items: center; gap: 4px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #4a3b8f; background: #f1efff; border: 1px solid #ded7ff; border-radius: 999px; padding: 2px 8px; }
 .ds__chip em { cursor: pointer; font-style: normal; color: #8a7fd0; }
 .ds__hintwarn { font-size: 11px; color: #b3541e; }
+.ds__acts { display: flex; gap: 6px; align-self: flex-end; }
+.ds__saved { font-size: 11px; color: #2f9e63; word-break: break-all; }
 </style>
