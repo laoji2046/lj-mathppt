@@ -708,9 +708,7 @@ onBeforeUnmount(() => {
           <button class="dropdown__item" title="Markdown 源码：导出或导入（--- 横向 / -- 垂直 / Note: 备注）" @click="setViewMode('split')"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>MD 源码（导出/导入 Markdown）</button>
           <div class="dropdown__group">导入与库</div>
           <button class="dropdown__item" title="导入之前导出的演示 JSON（.json）" @click="pickDeckJson"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>导入演示 JSON</button>
-          <button class="dropdown__item" title="课件库：管理存过的整份课件（打开会替换当前内容，可用 Ctrl+Z 撤销）" @click="deckLibOpen = true"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>课件库</button>
-          <button class="dropdown__item" title="试题库：按章节/知识点/题型/难度/年份筛选，看题干与答案，并能就地补全（新）" @click="qbOpen = true"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>试题库</button>
-        <button v-if="addonOn('pptx-import')" class="dropdown__item" title="导入 PPT（.pptx）：本地解析，文字 / 公式 / 图片 / 表格一并搬过来" @click="pickPptx">
+                            <button v-if="addonOn('pptx-import')" class="dropdown__item" title="导入 PPT（.pptx）：本地解析，文字 / 公式 / 图片 / 表格一并搬过来" @click="pickPptx">
           <span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.file"></svg></span>导入 PPT(.pptx)
         </button>
         <button v-if="addonOn('docx-import')" class="dropdown__item" title="导入 Word 文档（.docx）：本地解析、图片内嵌，一题一页" @click="pickDocx"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>导入 Word 文档（.docx）</button>
@@ -729,7 +727,10 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <button class="btn" :class="{ 'btn--open': viewMode !== 'canvas' }" title="MD 源码：分屏实时预览" @click="setViewMode(viewMode === 'canvas' ? 'split' : 'canvas')">
+    <!-- 【v1679】用户要求：课件库 / 试题库 从「文件」菜单挪到工具条（「文件」右侧）✓ -->
+<button class="btn" title="课件库：管理存过的整份课件（打开会替换当前内容，可用 Ctrl+Z 撤销）" @click="deckLibOpen = true"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.folder"></svg>课件库</button>
+<button class="btn" title="试题库：按章节/知识点/题型/难度/年份筛选，看题干与答案，并能就地补全（新）" @click="qbOpen = true"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.folder"></svg>试题库</button>
+<button class="btn" :class="{ 'btn--open': viewMode !== 'canvas' }" title="MD 源码：分屏实时预览"> @click="setViewMode(viewMode === 'canvas' ? 'split' : 'canvas')">
       <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.md"></svg></span>MD 源码
     </button>
     <div class="group">
