@@ -4587,6 +4587,29 @@ fn ai_chat(base_url: String, api_key: String, model: String, system: String, use
     serde_json::json!({ "ok": true, "content": content, "usage": usage })
 }
 
+/// 【v1673】本机机器码：Windows 的 MachineGuid（不需要管理员权限 ✓，重装系统才会变 ✓）。
+/// 用户要求「一个号两台电脑」→ 发号时把最多两个机器码写进序列号里，**完全离线**也能卡住第三台 ✓。
+/// 用 reg 命令读，不引入任何新依赖 ✓；读不到就退回 计算机名+处理器标识（弱一点，但不会完全拿不到 ✓）。
+#[tauri::command]
+fn machine_code() -> String {
+    if let Ok(o) = std::process::Command::new("reg")
+        .args(["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"])
+        .output()
+    {
+        let s = String::from_utf8_lossy(&o.stdout).to_string();
+        if let Some(i) = s.find("MachineGuid") {
+            let rest = &s[i..];
+            if let Some(p) = rest.find("REG_SZ") {
+                let v = rest[p + 6..].trim().to_string();
+                if !v.is_empty() { return v; }
+            }
+        }
+    }
+    let name = std::env::var("COMPUTERNAME").unwrap_or_default();
+    let cpu = std::env::var("PROCESSOR_IDENTIFIER").unwrap_or_default();
+    format!("{}-{}", name.trim(), cpu.trim())
+}
+
 /// 【v1669】AI 工具调用通道：把请求体**原样转发**给模型接口，返回原始 JSON。
 /// 为什么另开一个命令：ai_chat 是"一问一答"的固定载荷（system + 这句话 + 图）；
 /// 工具循环要自己维护 messages（含 assistant.tool_calls 与 role:"tool" 的结果）—— 放在前端更好改、也更好测。
@@ -5151,6 +5174,7 @@ pub fn run() {
         lib_source_report,
         ai_chat,
         ai_chat_raw,
+        machine_code,
         asset_get,
             lib_query,
             lib_save,
