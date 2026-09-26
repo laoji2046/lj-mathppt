@@ -6,7 +6,7 @@ import { CONICS, DEFAULT_PIECEWISE, conicLineRoots, figureBox, mapper, withParam
 import { THM_LABELS } from '@/composables/solid3d'
 import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
 import type { TikzGeomSolver, TikzSpec } from '@/composables/tikzFigure'
-import type { Deck } from '@/types'
+import type { Deck, Slide } from '@/types'
 import type { View } from '@/composables/mathPlot'
 
 /**
@@ -158,23 +158,85 @@ export function attachTikzFigures(deck: Deck, specs: TikzSpec[]): { figures: num
  * 放在第一页文字的**下面**，与题库「插入幻灯片」同一套排版（图片元素 + contain，不裁不拉 ✓）。
  * 放在这个文件（而不是面板里）是为了**能被探针直接测到** ✓ —— 上一轮"探针照抄逻辑"的教训。
  */
-export function attachPics(deck: Deck, pics: string[], opt: { x?: number; w?: number; h?: number } = {}): number {
-  const s0 = deck.slides && deck.slides[0]
-  if (!s0 || !pics.length) return 0
-  const els = s0.elements as { y?: number; h?: number }[]
-  let y = 40
-  for (const e of els) y = Math.max(y, (Number(e.y) || 0) + (Number(e.h) || 0) + 16)
-  const x = opt.x ?? 48, w = opt.w ?? 900, h = opt.h ?? 560
-  let n = 0
-  for (const src of pics.slice(0, 4)) {
-    if (!src) continue
-    const el = createElement('image', { x, y: Math.round(y), w, h })
-    Object.assign(el, { src, fit: 'contain' })
-    s0.elements.push(el)
-    y += h + 16
-    n++
+/** 【v1665】要贴进幻灯片的"图"：src + 它的原始像素尺寸（有尺寸才能按比例排版 ✓） */
+export interface PicInput { src: string; w?: number; h?: number }
+
+/**
+ * 【v1665】按图片**自己的宽高比**定元素尺寸：塞进 maxW×maxH 里，不拉伸、**也不放大** ✓
+ *  为什么改：原来一律插成 900×560 ✗ —— 竖长的图（高的几何图）被塞进 16:9 框，缩成小小一条 ✗
+ */
+export function fitPicSize(nw: number, nh: number, maxW = 900, maxH = 620): { w: number; h: number } {
+  const w0 = Math.max(1, Math.round(Number(nw) || maxW))
+  const h0 = Math.max(1, Math.round(Number(nh) || maxH))
+  const f = Math.min(1, (Number(maxW) || 900) / w0, (Number(maxH) || 620) / h0)
+  return { w: Math.max(1, Math.round(w0 * f)), h: Math.max(1, Math.round(h0 * f)) }
+}
+
+/**
+ * 【v1665】把若干张图排进一块**可用区域**里：按比例定尺寸 + 纵向依次排开（彼此不重叠 ✓）
+ *  · 多张时先把区域高度按张数**均分**（每张最多占一格）→ 竖长的图也排得下、不会挤出区域 ✓
+ *  · align=center 水平居中（手动往当前页插的时候好看 ✓）；left 左对齐（跟着正文排 ✓）
+ */
+export function layoutPics(
+  pics: PicInput[],
+  area: { x: number; y: number; w: number; h: number },
+  gap = 16,
+  align: 'left' | 'center' = 'left',
+): { x: number; y: number; w: number; h: number }[] {
+  const list = (pics || []).filter((p) => p && p.src)
+  if (!list.length) return []
+  const n = list.length
+  const slotH = Math.max(80, (area.h - gap * (n - 1)) / n)
+  const out: { x: number; y: number; w: number; h: number }[] = []
+  let y = area.y
+  for (const p of list) {
+    const size = fitPicSize(p.w || 900, p.h || 560, area.w, slotH)
+    const x = align === 'center' ? area.x + Math.round((area.w - size.w) / 2) : area.x
+    out.push({ x: Math.round(x), y: Math.round(y), w: size.w, h: size.h })
+    y += size.h + gap
   }
-  return n
+  return out
+}
+
+/** 新页的 id（不 import store 里的工具，免得给这个纯渲染模块添依赖 ✓） */
+function newSlideId(): string {
+  return 's-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7)
+}
+
+/**
+ * 【v1657】把"这条问题带的**附件原图**"贴进幻灯片（用户要求：题目本来就有图，就别重建数学图形了 ✓）
+ * 放在第一页文字的**下面**，与题库「插入幻灯片」同一套排版（图片元素 + contain，不裁不拉 ✓）。
+ * 放在这个文件（而不是面板里）是为了**能被探针直接测到** ✓ —— 上一轮"探针照抄逻辑"的教训。
+ * 【v1665】① 图片按**自己的比例**定尺寸、纵向排开（原来固定 900×560、y 只挪一格 ✗ 竖长的图被框小、多张叠在一起 ✗）；
+ *          ② 第一页已经排满 → **另起一页**放图（原来硬塞到页面外，根本看不见 ✗）
+ */
+export function attachPics(deck: Deck, pics: (string | PicInput)[], opt: { x?: number } = {}): number {
+  const list: PicInput[] = (pics || [])
+    .filter(Boolean)
+    .map((p) => (typeof p === 'string' ? { src: p } : p))
+    .filter((p) => !!p.src)
+  if (!deck || !deck.slides || !deck.slides.length || !list.length) return 0
+  const W = Number(deck.width) || 1280
+  const H = Number(deck.height) || 720
+  const x = opt.x ?? 48
+  let slide = deck.slides[0]
+  let y = 40
+  for (const e of (slide.elements || []) as { y?: number; h?: number }[]) {
+    y = Math.max(y, (Number(e.y) || 0) + (Number(e.h) || 0) + 16)
+  }
+  if (H - y - 24 < 220) {
+    slide = { id: newSlideId(), bg: '#ffffff', elements: [] } as unknown as Slide
+    deck.slides.push(slide)
+    y = 40
+  }
+  const area = { x, y, w: Math.max(320, W - x - 48), h: Math.max(200, H - y - 24) }
+  const rects = layoutPics(list.slice(0, 4), area)
+  rects.forEach((r, i) => {
+    const el = createElement('image', r)
+    Object.assign(el, { src: list[i].src, fit: 'contain' })
+    slide.elements.push(el)
+  })
+  return rects.length
 }
 
 /**

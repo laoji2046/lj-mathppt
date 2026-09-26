@@ -198,11 +198,48 @@ function fitBox(x0: number, y0: number, x1: number, y1: number, w: number, h: nu
   return { x: nx, y: ny, w: bw, h: bh }
 }
 
+/**
+ * 【v1665】兜底：**连图形都认不出来**时，至少把四周的空白边去掉 ✓
+ *  · 什么时候用得上：整张截图是"一大片白底 + 中间一块内容"，或图形区域判定失败退回整张 ——
+ *    原样插进幻灯片会拖着一圈白边 ✗（用户说的"切图不干净"，一部分就是这个 ✓）
+ *  · 只裁掉四周**完全空白**的行 / 列，里面一个像素都不动 ✓
+ *  · 省不下多少（面积 < 8%）就返回 null —— 与其白折腾，不如老老实实整张插 ✓
+ */
+export function trimBoxFromInk(ink: Uint8Array, w: number, h: number, opt: CropOpt = {}): CropBox | null {
+  const pad = opt.pad ?? 0.04
+  let x0 = w, y0 = h, x1 = -1, y1 = -1
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!ink[y * w + x]) continue
+      if (x < x0) x0 = x
+      if (x > x1) x1 = x
+      if (y < y0) y0 = y
+      if (y > y1) y1 = y
+    }
+  }
+  if (x1 < 0) return null                      // 整张空白
+  const box = fitBox(x0, y0, x1, y1, w, h, 0.0005, 0.98, pad)
+  if (!box) return null
+  if (box.w >= w && box.h >= h) return null    // 一点都没省下
+  return 1 - (box.w * box.h) / (w * h) >= 0.08 ? box : null
+}
+
 /* ---------------------------------------------------------------------------
  * 浏览器侧：读图 → 二值化 → 调上面的纯函数 → 按框裁出来（返回 dataURL）
  * -------------------------------------------------------------------------*/
 
-export interface CropResult { src: string; box: CropBox | null; cropped: boolean; why: string }
+export interface CropResult {
+  src: string
+  box: CropBox | null
+  /** 真按"图形区域"裁了（只去掉白边时是 false ✓） */
+  cropped: boolean
+  /** 【v1665】这一张是怎么处理的：figure=认出图形并裁好 / trim=没认出图形、只去掉四周白边 / raw=原样 */
+  mode: 'figure' | 'trim' | 'raw'
+  why: string
+  /** 【v1665】结果图的**原始像素尺寸** —— 调用方按它定幻灯片里的元素尺寸（不再一律 900×560 ✗） */
+  w: number
+  h: number
+}
 
 function loadImg(src: string): Promise<HTMLImageElement> {
   return new Promise((res, rej) => {
@@ -218,14 +255,14 @@ export async function cropToFigure(src: string, opt: CropOpt & { maxSide?: numbe
   try {
     const im = await loadImg(src)
     const W = im.naturalWidth || im.width, H = im.naturalHeight || im.height
-    if (!W || !H) return { src, box: null, cropped: false, why: '读不到尺寸' }
+    if (!W || !H) return { src, box: null, cropped: false, mode: 'raw', why: '读不到尺寸', w: 0, h: 0 }
     const maxSide = opt.maxSide ?? 1400
     const s = Math.min(1, maxSide / Math.max(W, H))
     const w = Math.max(8, Math.round(W * s)), h = Math.max(8, Math.round(H * s))
     const cv = document.createElement('canvas')
     cv.width = w; cv.height = h
     const ctx = cv.getContext('2d', { willReadFrequently: true })
-    if (!ctx) return { src, box: null, cropped: false, why: '没有 canvas' }
+    if (!ctx) return { src, box: null, cropped: false, mode: 'raw', why: '没有 canvas', w: W, h: H }
     ctx.drawImage(im, 0, 0, w, h)
     const d = ctx.getImageData(0, 0, w, h).data
     const gray = new Uint8Array(w * h)
@@ -240,18 +277,28 @@ export async function cropToFigure(src: string, opt: CropOpt & { maxSide?: numbe
     const th = otsuThreshold(hist, w * h)
     const ink = new Uint8Array(w * h)
     for (let p = 0; p < gray.length; p++) ink[p] = gray[p] <= th ? 1 : 0
-    const box = figureBoxFromInk(ink, w, h, opt)
-    if (!box) return { src, box: null, cropped: false, why: '这一张认不出单独的图形（整张都要）' }
+    // 【v1665】认不出单独的图形 → 退一步：**只把四周的白边去掉** ✓
+    //   （整张截图是"大白底 + 中间一块内容"很常见；以前是原样整张插 ✗ → 白边一起拖进幻灯片 ✗）
+    let mode: 'figure' | 'trim' = 'figure'
+    let box = figureBoxFromInk(ink, w, h, opt)
+    if (!box) {
+      box = trimBoxFromInk(ink, w, h, opt)
+      if (box) mode = 'trim'
+    }
+    if (!box) return { src, box: null, cropped: false, mode: 'raw', why: '这一张认不出单独的图形（整张都要）', w: W, h: H }
     const sx = box.x / s, sy = box.y / s, sw = box.w / s, sh = box.h / s
     const out = document.createElement('canvas')
     out.width = Math.max(8, Math.round(sw)); out.height = Math.max(8, Math.round(sh))
     const octx = out.getContext('2d')
-    if (!octx) return { src, box: null, cropped: false, why: '没有 canvas' }
+    if (!octx) return { src, box: null, cropped: false, mode: 'raw', why: '没有 canvas', w: W, h: H }
     octx.fillStyle = '#ffffff'
     octx.fillRect(0, 0, out.width, out.height)
     octx.drawImage(im, sx, sy, sw, sh, 0, 0, out.width, out.height)
-    return { src: out.toDataURL('image/png'), box, cropped: true, why: '已按图形区域裁好' }
+    return {
+      src: out.toDataURL('image/png'), box, mode, cropped: mode === 'figure', w: out.width, h: out.height,
+      why: mode === 'figure' ? '已按图形区域裁好' : '没认出单独的图形，只去掉了四周白边',
+    }
   } catch (e) {
-    return { src, box: null, cropped: false, why: String((e as Error)?.message || e) }
+    return { src, box: null, cropped: false, mode: 'raw', why: String((e as Error)?.message || e), w: 0, h: 0 }
   }
 }

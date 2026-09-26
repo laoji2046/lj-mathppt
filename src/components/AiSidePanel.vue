@@ -14,7 +14,7 @@ import AppIcon from './AppIcon.vue'
 import { pdfToMarkdown } from '@/pdf/pdfImport'
 import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
 import { markdownToDeck } from '@/composables/mdDeck'
-import { attachPics, attachTikzFigures, tikzSolver } from '@/composables/figureRender'
+import { attachPics, attachTikzFigures, layoutPics, tikzSolver, type PicInput } from '@/composables/figureRender'
 import { cropToFigure } from '@/composables/figCrop'
 import ScreenshotCapture from './ScreenshotCapture.vue'
 import { tikzToPlaceholders, type TikzSpec } from '@/composables/tikzFigure'
@@ -73,17 +73,21 @@ function toggleOnly() {
   try { localStorage.setItem(ONLY_KEY, onlyFigure.value ? '1' : '0') } catch { /* 忽略 */ }
 }
 
-/** 按开关把附件图裁成"只有图形"（认不出就原样返回 ✓），并回报每张的结果 */
-async function cutFigures(pics: string[]): Promise<{ out: string[]; cropped: number; kept: number }> {
-  if (!onlyFigure.value || !pics.length) return { out: pics.slice(), cropped: 0, kept: pics.length }
-  const out: string[] = []
-  let cropped = 0
+/** 按开关把附件图裁成"只有图形"（认不出就原样返回 ✓），并回报每张的结果（连**尺寸**一起回报 ✓） */
+async function cutFigures(pics: string[]): Promise<{ out: PicInput[]; cropped: number; trimmed: number; kept: number }> {
+  if (!onlyFigure.value || !pics.length) {
+    return { out: pics.map((src) => ({ src })), cropped: 0, trimmed: 0, kept: pics.length }
+  }
+  const out: PicInput[] = []
+  let cropped = 0, trimmed = 0
   for (const p of pics) {
     const r = await cropToFigure(p)
-    out.push(r.cropped ? r.src : p)
+    // 【v1665】只去掉白边（mode=trim）也算处理过了 → 尺寸按结果图走 ✓（图片比例排版要用它 ✓）
+    out.push(r.cropped || r.mode === 'trim' ? { src: r.src, w: r.w, h: r.h } : { src: p })
     if (r.cropped) cropped++
+    else if (r.mode === 'trim') trimmed++
   }
-  return { out, cropped, kept: out.length - cropped }
+  return { out, cropped, trimmed, kept: out.length - cropped - trimmed }
 }
 
 /** 【v1658】预制对话（用户要求）：一点就把提示词填进输入框（已有内容则接在后面），附件照旧自己带 ✓ */
@@ -104,23 +108,49 @@ function usePreset(p: { label: string; text: string }) {
   nextTick(() => { const el = taEl.value; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length) } })
 }
 
-/** 【v1658】「图 → 幻灯片」：**不调 AI**，直接把当前附件图插到当前页（用户："切出图形插入幻灯片"） */
+/** 【v1658】「图 → 幻灯片」：**不调 AI**，直接把当前附件图插到当前页（用户："切出图形插入幻灯片"）
+ *  【v1665】按**图片自己的比例**定尺寸、在当前页的**空位上纵向排开** ——
+ *    原来一律 900×560、每张只挪 24px ✗：竖长的图被框得又小又空，多张图几乎叠在同一处 ✗ */
 async function picsToSlide() {
   const pics = attImgs.value.slice(0, MAX_IMG)
   if (!pics.length) { saveMsg.value = '先在下面点「＋图」选一张（或 Ctrl+V 粘一张），再点这个'; return }
   busy.value = true
   try {
     const cut = await cutFigures(pics)
-    const items = cut.out.map((src, i) => {
-      const el = createElement('image', { x: 200 + i * 24, y: 180 + i * 24, w: 900, h: 560 })
-      Object.assign(el, { src, fit: 'contain' })
+    const rects = layoutPics(cut.out, freeArea(), 20, 'center')
+    const items = rects.map((r, i) => {
+      const el = createElement('image', r)
+      Object.assign(el, { src: cut.out[i].src, fit: 'contain' })
       return { type: 'image' as const, overrides: el as Partial<SlideElement> }
     })
     store.addElements(items)
-    saveMsg.value = '已把 ' + items.length + ' 张图插到当前页' +
-      (cut.cropped ? '（' + cut.cropped + ' 张只留了图形部分' + (cut.kept ? '；' + cut.kept + ' 张认不出图形，整张插了' : '') + '）' : '') +
+    saveMsg.value = '已把 ' + items.length + ' 张图插到当前页' + cutNote(cut) + sizeNote(rects) +
       (input.value.trim() ? '（想连题目文字一起，就用回答下面的「插入幻灯片」）' : '')
   } catch (e) { saveMsg.value = '插入失败：' + String((e as Error)?.message || e) } finally { busy.value = false }
+}
+
+/** 当前页还剩的空位（现有元素下方 → 页面底部）；已经排满就回到上面，别插到页面外看不见 ✗ */
+function freeArea() {
+  const d = store.deck as unknown as { width?: number; height?: number }
+  const W = Number(d && d.width) || 1280, H = Number(d && d.height) || 720
+  const cur = store.currentSlide as unknown as { elements?: { y?: number; h?: number }[] } | undefined
+  const els = (cur && cur.elements) || []
+  let y = 80
+  for (const e of els) y = Math.max(y, (Number(e.y) || 0) + (Number(e.h) || 0) + 16)
+  if (H - y - 24 < 240) y = 80
+  return { x: 60, y, w: Math.max(320, W - 120), h: Math.max(240, H - y - 24) }
+}
+/** 切图结果的说明（只留图形 / 只去白边 / 认不出图形整张插）✓ */
+function cutNote(cut: { cropped: number; trimmed: number; kept: number }): string {
+  const bits: string[] = []
+  if (cut.cropped) bits.push(cut.cropped + ' 张只留了图形部分')
+  if (cut.trimmed) bits.push(cut.trimmed + ' 张只去掉了白边')
+  if (cut.kept) bits.push(cut.kept + ' 张认不出图形，整张插了')
+  return bits.length ? '（' + bits.join('；') + '）' : ''
+}
+/** 插进去的实际尺寸（老师一眼就能看出图和版面配不配 ✓） */
+function sizeNote(rects: { w: number; h: number }[]): string {
+  return rects.length ? '，尺寸 ' + rects.map((r) => r.w + '×' + r.h).join('、') : ''
 }
 
 /** AI Key：名字不写死 —— 设置里存的是哪个键就用哪个（避免和设置面板漂移 ✗）✓ */
@@ -277,20 +307,21 @@ function tikzSummary(got: { figures: number; texts: number; orphans: number }, s
 async function insertToSlides(t: string, pics: string[] = []) {
   try {
     // 【v1659】先按"只切图形"把附件图裁好（用户要求：题目文字不切）✓
-    const cut = pics.length ? await cutFigures(pics) : { out: [] as string[], cropped: 0, kept: 0 }
-    pics = cut.out
+    const cut = pics.length ? await cutFigures(pics) : { out: [] as PicInput[], cropped: 0, trimmed: 0, kept: 0 }
+    // 【v1665】裁完的图带着尺寸（PicInput），后面按比例排版要用它 ✓ —— 不再往 pics 里塞 ✗
+    const picList: PicInput[] = cut.out
     const pre = tikzToPlaceholders(t, tikzSolver)
     // 【v1657】题目**本来就有图**（附件原图）时：直接贴原图，**不再把 TikZ 重建为数学图形** ✓
     //   （用户明确：重建出来的效果比较差；AI 那段 tikz 用原图替掉即可）
-    const md = pics.length ? pre.md.replace(/^!\[\]\(tikz:\d+\)[ \t]*$/gm, '') : pre.md
+    const md = picList.length ? pre.md.replace(/^!\[\]\(tikz:\d+\)[ \t]*$/gm, '') : pre.md
     const deck = markdownToDeck(mdClean(md))
     if (!deck || !deck.slides || !deck.slides.length) { saveMsg.value = '这段内容里没有能成页的文字'; return }
-    const got = attachTikzFigures(deck, pics.length ? [] : pre.specs)
-    const picN = pics.length ? attachPics(deck, pics) : 0
+    const got = attachTikzFigures(deck, picList.length ? [] : pre.specs)
+    const picN = picList.length ? attachPics(deck, picList) : 0
     const ok = store.importDeck(deck)
     saveMsg.value = ok
       ? ('已插入 ' + deck.slides.length + ' 页幻灯片' +
-        (picN ? '，题图 ' + picN + ' 张' + (cut.cropped ? '（' + cut.cropped + ' 张只留了图形部分' : '') + (cut.kept ? '；' + cut.kept + ' 张认不出图形，整张插了' : '') + '，没再重建数学图形）' : '') +
+        (picN ? '，题图 ' + picN + ' 张' + cutNote(cut) + '，没再重建数学图形' : '') +
         tikzSummary(got, pre.specs, pre.fails))
       : '生成的内容无效（已取消，未影响当前内容）'
   } catch (e) { saveMsg.value = '插入失败：' + String((e as Error)?.message || e) }
