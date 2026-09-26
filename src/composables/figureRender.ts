@@ -110,15 +110,28 @@ export function tikzSpecToElement(spec: TikzSpec): MFigEl {
  * （它只有"标注点 + 字母"），所以单独落成**文字元素**叠在图上 —— 位置按图形自己的取景换算，
  * 学生看是一张图，老师想改就单独拖那个文字框 ✓
  */
-export function attachTikzFigures(deck: Deck, specs: TikzSpec[]): { figures: number; texts: number } {
-  let figures = 0, texts = 0
+export function attachTikzFigures(deck: Deck, specs: TikzSpec[]): { figures: number; texts: number; orphans: number } {
+  let figures = 0, texts = 0, orphans = 0
   for (const slide of deck.slides) {
     const next: typeof slide.elements = []
     for (const item of slide.elements) {
       const src = item.type === 'image' ? String((item as { src?: string }).src || '') : ''
-      const mm = /^tikz:(d+)$/.exec(src)
+      // ⚠ 这个反斜杠丢过一次（写成 /^tikz:(d+)$/，只认字面量 "d"）→ 占位永远匹配不上，
+      //   幻灯片上就留一个**破图框** ✗（用户实报）。当时探针是"照抄一份替换逻辑"跑的，
+      //   没调到这个函数，所以没抓住 —— 现在探针直接调真函数 ✓
+      const mm = /^tikz:(\d+)$/.exec(src)
       const spec = mm ? specs[Number(mm[1])] : undefined
-      if (!spec) { next.push(item); continue }
+      if (!spec) {
+        // 【v1656】认得出是"我们的 TikZ 占位"却找不到对应图形 → **绝不能留破图框**：换成一行说明 ✓
+        if (mm) {
+          const note = createElement('text', { x: item.x, y: item.y, w: Math.max(600, item.w || 900), h: 60 })
+          Object.assign(note, { text: '（此处原为 TikZ 图形，没能落到幻灯片上）', fontSize: 22, align: 'left', color: '#b42318' })
+          next.push(note)
+          orphans++
+          continue
+        }
+        next.push(item); continue
+      }
       const fig = tikzSpecToElement(spec)
       fig.x = Math.max(0, Math.round(((deck.width || 1920) - fig.w) / 2))
       fig.y = item.y
@@ -137,7 +150,7 @@ export function attachTikzFigures(deck: Deck, specs: TikzSpec[]): { figures: num
     }
     slide.elements = next
   }
-  return { figures, texts }
+  return { figures, texts, orphans }
 }
 
 /**

@@ -99,7 +99,7 @@ const SYSTEM = '你是高中数学老师的备课助手。回答用中文，简�
   //   （用户实报：AI 回答里只剩一句「图形要素」，幻灯片上没图 ✗）
   //   现在要求它**按能译出来的子集写**：少写一种花活，就少一次"整张退回占位" ✓
   + '画图请用 TikZ（软件会把它译成**可编辑的数学图形**），并且只写下面这几种写法：'
-  + '① 整段用 \\begin{tikzpicture}…\\end{tikzpicture} 包起来；'
+  + '① 整段用 \\begin{tikzpicture}…\\end{tikzpicture} 包起来，**不要**再用三反引号的代码块把它包住；'
   + '② 坐标轴：\\draw[->] (-5,0) -- (5,0) node[below]{$x$}; 与 \\draw[->] (0,-3) -- (0,3) node[left]{$y$};（原点 O 不用写，软件自带）；'
   + '③ 曲线用参数式，一张图只画一条圆锥曲线（双曲线两支算一条，写两条 plot 即可）：'
   + '椭圆 plot ({3*cos(\\x)},{2*sin(\\x)})、双曲线 plot ({2*cosh(\\x)},{1.5*sinh(\\x)})（另一支前面加负号）、'
@@ -159,8 +159,9 @@ const saveMsg = ref('')
 const store = useDeckStore()
 
 /** 插入结果的补充说明：译了几张图、哪几处没认出来（绝不假装都译出来了 ✓） */
-function tikzSummary(got: { figures: number; texts: number }, specs: TikzSpec[], fails: string[]): string {
+function tikzSummary(got: { figures: number; texts: number; orphans: number }, specs: TikzSpec[], fails: string[]): string {
   const parts: string[] = []
+  if (got.orphans) parts.push(got.orphans + ' 张 TikZ 图形没能落到幻灯片上（已换成一行说明，请把这条回答发我看看）')
   if (got.figures) {
     // 曲线是什么 + 解析时的降级/绑定说明（"哪几个点被钉到交点上"就在 notes 里）✓
     const notes = specs.flatMap((s) => s.notes).slice(0, 2)
