@@ -85,28 +85,25 @@ export function figureBoxFromInk(ink: Uint8Array, w: number, h: number, opt: Cro
   if (w < 8 || h < 8) return null
 
   // ① 行投影 → 墨迹带（空隙 ≤2 行并进去 ✓）
-  const minRowInk = Math.max(1, Math.round(w * 0.004))
+  // ⚠ 阈值必须放到最低（有墨就算）：一根**竖直轴线**每行只有 1~2 个墨点，
+  //   按"整图宽度的 0.4%"当门限会把轴的上半段整段当成空白 ✗ → 切出来的图被削掉一截（实测）
+  const minRowInk = 1
   const prof = new Int32Array(h)
   for (let y = 0; y < h; y++) {
     let n = 0
     for (let x = 0; x < w; x++) if (ink[y * w + x]) n++
     prof[y] = n
   }
+  // ⚠ **不合并空隙**：题目最后一行常常紧挨着图（只隔 1~2 行）—— 一并就把"文字 + 图"并成一条很高的带，
+  //   高度不像一行 → 整条都留下 → 切出来还带题目 ✗（用户实报）。拆开判，之后**只在两边都像文字时**才合并 ✓
   const has = (y: number) => prof[y] >= minRowInk
   const bands: { y0: number; y1: number }[] = []
   for (let y = 0; y < h;) {
     if (!has(y)) { y++; continue }
     const y0 = y
-    let last = y
-    while (y < h) {
-      if (has(y)) { last = y; y++; continue }
-      let yy = y
-      while (yy < h && !has(yy) && yy - y <= 2) yy++
-      if (yy < h && has(yy) && yy - y <= 2) { y = yy; continue }
-      break
-    }
-    bands.push({ y0, y1: last })
-    y = last + 1
+    while (y + 1 < h && has(y + 1)) y++
+    bands.push({ y0, y1: y })
+    y++
   }
   if (!bands.length) return null
 
@@ -127,33 +124,44 @@ export function figureBoxFromInk(ink: Uint8Array, w: number, h: number, opt: Cro
     const bw = x1 >= x0 ? x1 - x0 + 1 : 0
     return { y0: b.y0, y1: b.y1, x0, x1, bw, inkN, runs: runsAt(ink, w, bestY), hh: b.y1 - b.y0 + 1 }
   })
-  const maxBw = info.reduce((m, b) => Math.max(m, b.bw), 1)
-  const wideEnough = Math.max(maxBw * rowSpan, w * 0.25)
-
-  // ④ "像一行字"的带（高度像、铺得不太窄、不是几乎空白）
-  const lineLike = info.map((b) => b.hh >= lineH * 0.5 && b.hh <= lineH * lineMax && b.bw >= wideEnough && b.inkN / Math.max(1, b.hh * b.bw) >= 0.05)
   const center = (b: Band) => (b.y0 + b.y1) / 2
-  // 段数够多 → 文字行；段数少但**与邻带成组**（高度/宽度接近、间距规律）→ 也是文字行 ✓
-  //   （真截图里汉字粘连会把一行连成长块，段数掉到 1~2 ✗ —— 靠"成组"认出来 ✓）
+  const inLineHeight = (b: Band) => b.hh >= lineH * 0.5 && b.hh <= lineH * lineMax
+  // 宽度基准 = **行高像文字的带**里最宽的那条
+  //   ⚠ 不能拿"所有带里最宽的"当基准：图比文字宽时，文字行反而不够宽 → 一条都不算文字 ✗（真截图常见）
+  const maxTextW = info.reduce((m, b) => (inLineHeight(b) ? Math.max(m, b.bw) : m), 0)
+  const wideEnough = Math.max(maxTextW * rowSpan, w * 0.15)
+  const dense = (b: Band) => b.inkN / Math.max(1, b.hh * b.bw) >= 0.05
+  // ④ "像一行字"的带：高度像一行 + 铺得不窄 + 不是几乎空白 + 段数够多
+  /** 高度像一行 + 铺得不窄 + 不是几乎空白（"是不是文字"再看段数/成组 ✓） */
+  const lineLike = info.map((b) => inLineHeight(b) && b.bw >= wideEnough && dense(b))
+  /** 两条带"像同一个段落里的两行"：高矮接近、宽度接近、间距在一行高上下 */
+  const looksStacked = (a: Band, c: Band) => {
+    const dh = Math.abs(a.hh - c.hh) <= lineH * 0.8
+    const dw = Math.abs(a.bw - c.bw) <= Math.max(a.bw, c.bw) * 0.4
+    return dh && dw && Math.abs(center(a) - center(c)) <= lineH * 4
+  }
+  // 文字行：段数够多 ✓；或者**与邻带成组**（成段排下来的就是正文 ✓）
+  //   ⚠ 后者不能要求邻带"段数够多"：整段汉字都粘连时，没有一条带段数多 ✗（实测用例 ④ 就漏了）
   const isText = info.map((b, i) => {
     if (!lineLike[i]) return false
     if (b.runs >= minRuns) return true
-    for (const j of [i - 1, i + 1]) {
-      if (j < 0 || j >= info.length || !lineLike[j]) continue
-      const c = info[j]
-      const dh = Math.abs(b.hh - c.hh) <= lineH * 0.6
-      const dw = Math.abs(b.bw - c.bw) <= Math.max(b.bw, c.bw) * 0.35
-      if (dh && dw && Math.abs(center(b) - center(c)) <= lineH * 4) return true
-    }
-    return false
+    return (i > 0 && lineLike[i - 1] && looksStacked(b, info[i - 1])) || (i + 1 < info.length && lineLike[i + 1] && looksStacked(b, info[i + 1]))
   })
-  // 续行：紧挨文字行、高度也像一行、段数 ≥3 的短行（段落最后一行常常只有几个字 ✓）
-  const drop = info.map((b, i) => {
-    if (isText[i]) return true
-    if (b.hh < lineH * 0.5 || b.hh > lineH * lineMax) return false      // 太薄（虚线/长划线）→ 不动 ✓
-    if (b.runs < 3) return false
+  // 把"两边都像文字、而且挨得近"的相邻带并成一段（汉字被空行劈成上下两半的情形 ✓）
+  const linkGap = Math.max(2, lineH * 0.9)
+  const merged = isText.map((v) => v)
+  for (let i = 1; i < info.length; i++) {
+    if (!isText[i] || !isText[i - 1]) continue
+    if (info[i].y0 - info[i - 1].y1 - 1 > linkGap) continue
+    merged[i] = merged[i - 1] = true
+  }
+  const drop = merged.map((v, i) => {
+    if (v) return true
+    // 续行：紧挨文字行、高度也像一行、段数 ≥3 的短行（段落最后一行常常只有几个字 ✓）
+    const b = info[i]
+    if (!inLineHeight(b) || b.runs < 3) return false
     for (const j of [i - 1, i + 1]) {
-      if (j < 0 || j >= info.length || !isText[j]) continue
+      if (j < 0 || j >= info.length || !merged[j]) continue
       if (Math.abs(center(b) - center(info[j])) <= lineH * 2.6) return true
     }
     return false
