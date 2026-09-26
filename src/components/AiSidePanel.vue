@@ -17,6 +17,7 @@ import { markdownToDeck } from '@/composables/mdDeck'
 import { attachPics, attachTikzFigures, tikzSolver } from '@/composables/figureRender'
 import { tikzToPlaceholders, type TikzSpec } from '@/composables/tikzFigure'
 import { useDeckStore } from '@/stores/deck'
+import { createElement, type SlideElement } from '@/types'
 
 const open = ref(false)
 const input = ref('')
@@ -25,6 +26,40 @@ const err = ref('')
 const listEl = ref<HTMLElement | null>(null)
 const msgs = ref<{ role: 'user' | 'ai'; text: string; imgs?: string[] }[]>([])
 const keyTick = ref(0)
+const taEl = ref<HTMLTextAreaElement | null>(null)
+
+/** 【v1658】预制对话（用户要求）：一点就把提示词填进输入框（已有内容则接在后面），附件照旧自己带 ✓ */
+const PRESETS: { id: string; label: string; hint: string; text: string }[] = [
+  { id: 'tex', label: '转成 LaTeX', hint: '行内 $…$、独立 $$…$$；只给结果，不要解释',
+    text: '把下面的内容转成 LaTeX：行内公式用 $...$，独立公式用 $$...$$；中文、题号、选项保持原样；只给结果，不要解释。\n\n' },
+  { id: 'md', label: '转成 Markdown', hint: '题干 / 选项 / 答案 / 解析分段，公式用 $…$',
+    text: '把下面的内容整理成 Markdown：题干、选项、答案、解析分段，公式用 $...$；只给结果，不要解释。\n\n' },
+  { id: 'fig', label: '切图插入幻灯片', hint: '只用附件原图，不让 AI 重画图形（AI 重画的常常不像）',
+    text: '把附件图里的题目转成 Markdown（公式用 $...$）；图形不要用 TikZ 重画，我直接用原图插入幻灯片。\n\n' },
+]
+function usePreset(p: { label: string; text: string }) {
+  const cur = input.value.replace(/\s+$/, '')
+  input.value = cur ? cur + '\n\n' + p.text : p.text
+  saveMsg.value = attImgs.value.length
+    ? '已填入「' + p.label + '」：这条问题带的 ' + attImgs.value.length + ' 张图会跟着一起插进幻灯片'
+    : '已填入「' + p.label + '」：把要处理的文字贴在提示词后面，或加个附件图'
+  nextTick(() => { const el = taEl.value; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length) } })
+}
+
+/** 【v1658】「图 → 幻灯片」：**不调 AI**，直接把当前附件图插到当前页（用户："切出图形插入幻灯片"） */
+function picsToSlide() {
+  const pics = attImgs.value.slice(0, MAX_IMG)
+  if (!pics.length) { saveMsg.value = '先在下面点「＋图」选一张（或 Ctrl+V 粘一张），再点这个'; return }
+  try {
+    const items = pics.map((src, i) => {
+      const el = createElement('image', { x: 200 + i * 24, y: 180 + i * 24, w: 900, h: 560 })
+      Object.assign(el, { src, fit: 'contain' })
+      return { type: 'image' as const, overrides: el as Partial<SlideElement> }
+    })
+    store.addElements(items)
+    saveMsg.value = '已把 ' + items.length + ' 张图插到当前页' + (input.value.trim() ? '（想连题目文字一起，就用回答下面的「插入幻灯片」）' : '')
+  } catch (e) { saveMsg.value = '插入失败：' + String((e as Error)?.message || e) }
+}
 
 /** AI Key：名字不写死 —— 设置里存的是哪个键就用哪个（避免和设置面板漂移 ✗）✓ */
 function aiKey(): string {
@@ -261,74 +296,127 @@ async function saveAnswer(t: string) {
     </button>
     <section v-if="open" class="ds__body">
       <header class="ds__head">
+        <span class="ds__dot" :class="{ 'ds__dot--off': !hasKey }" />
         <span class="ds__title">DeepSeek 助手</span>
-        <span class="ds__sub">{{ hasKey ? '已接 AI Key' : '未填 Key' }}</span>
-        <button class="ds__btn" title="清空对话" @click="clearAll">清空</button>
-        <button class="ds__btn" title="收起" @click="open = false">✕</button>
+        <span class="ds__pill" :class="{ 'ds__pill--warn': !hasKey }">{{ hasKey ? '已接 Key' : '未填 Key' }}</span>
+        <button class="ds__ico" title="清空对话（不动幻灯片）" @click="clearAll">清空</button>
+        <button class="ds__ico" title="收起" @click="open = false">✕</button>
       </header>
+
+      <!-- 【v1658】预制对话：一点填进输入框（用户要求）✓ -->
+      <div class="ds__presets">
+        <button v-for="p in PRESETS" :key="p.id" class="ds__preset" :title="p.hint" @click="usePreset(p)">{{ p.label }}</button>
+      </div>
       <div ref="listEl" class="ds__list">
         <div v-if="!msgs.length" class="ds__empty">
-          问点什么试试：<br />
-          「给一道考查线面平行的例题，附解析」<br />
-          「把这段话改成适合板书的短句」
+          <div class="ds__emptyT">问点什么，或点上面那三个预制对话</div>
+          <ul class="ds__emptyL">
+            <li>「给一道考查线面平行的例题，附解析」</li>
+            <li>「把这段话改成适合板书的短句」</li>
+            <li>「＋图」传一张题目截图 → 点「切图插入幻灯片」</li>
+          </ul>
         </div>
-        <div v-for="(m, i) in msgs" :key="i" class="ds__msg" :class="'ds__msg--' + m.role">
-          <div class="ds__who">{{ m.role === 'user' ? '我' : 'AI' }}</div>
-          <div class="ds__text">{{ m.text }}</div>
-          <span v-if="m.role === 'ai'" class="ds__acts">
-            <button class="ds__mini" title="复制这条回答" @click="copyOne(m.text)">复制</button>
-            <button class="ds__mini" :title="'把这条回答变成幻灯片' + (picsOf(i).length ? '（连上面那条问题带的 ' + picsOf(i).length + ' 张原图一起贴进去，不再重建数学图形）' : '（公式按应用的排版口径渲染）')" @click="insertToSlides(m.text, picsOf(i))">插入幻灯片</button>
-            <button class="ds__mini" title="存成 .md（桌面端存到「文档」目录，可以直接用「导入 .md 文件」核对入库）" @click="saveAnswer(m.text)">存为 .md</button>
-          </span>
+        <div v-for="(m, i) in msgs" :key="i" class="ds__row" :class="'ds__row--' + m.role">
+          <div class="ds__bubble">
+            <div class="ds__text">{{ m.text }}</div>
+            <div v-if="m.role === 'user' && (m.imgs || []).length" class="ds__pics">
+              <img v-for="(s, k) in m.imgs" :key="k" :src="s" alt="附件图" />
+            </div>
+            <span v-if="m.role === 'ai'" class="ds__acts">
+              <button class="ds__mini" title="复制这条回答" @click="copyOne(m.text)">复制</button>
+              <button class="ds__mini ds__mini--main" :title="'把这条回答变成幻灯片' + (picsOf(i).length ? '（连上面那条问题带的 ' + picsOf(i).length + ' 张原图一起贴进去，不再重建数学图形）' : '（公式按应用的排版口径渲染）')" @click="insertToSlides(m.text, picsOf(i))">插入幻灯片</button>
+              <button class="ds__mini" title="存成 .md（桌面端存到「文档」目录，可以直接用「导入 .md 文件」核对入库）" @click="saveAnswer(m.text)">存为 .md</button>
+            </span>
+          </div>
         </div>
-        <div v-if="busy" class="ds__msg ds__msg--ai"><div class="ds__who">AI</div><div class="ds__text">正在思考…</div></div>
+        <div v-if="busy" class="ds__row ds__row--ai">
+          <div class="ds__bubble ds__typing"><i /><i /><i /></div>
+        </div>
         <div v-if="err" class="ds__err">{{ err }}</div>
         <div v-if="saveMsg" class="ds__saved">{{ saveMsg }}</div>
       </div>
       <footer class="ds__foot">
         <div class="ds__att">
-          <button class="ds__mini" title="带图片（需要端点/模型支持视觉，否则会明确报错）" @click="imgInput?.click()">＋图</button>
+          <button class="ds__mini" title="带图片（需要端点/模型支持视觉；带图提问会跟着题目一起插进幻灯片）" @click="imgInput?.click()">＋图</button>
           <button class="ds__mini" title="带文档：PDF 在本机抽文字，MD/TXT/JSON 直接读（纯文本模型也能用）" @click="docInput?.click()">＋文档</button>
-          <span v-for="(_, i) in attImgs" :key="'i' + i" class="ds__chip">图{{ i + 1 }}<em @click="dropAtt('img', i)">×</em></span>
+          <button class="ds__mini" title="不调 AI：把上面选的图直接切进**当前页**" @click="picsToSlide">图 → 幻灯片</button>
+          <span v-for="(_, i) in attImgs" :key="'i' + i" class="ds__thumb" :title="'图' + (i + 1) + '（点右上角 × 去掉）'">
+            <img :src="attImgs[i]" alt="" /><em @click="dropAtt('img', i)">×</em>
+          </span>
           <span v-for="(d, i) in attDocs" :key="'d' + i" class="ds__chip" :title="d.chars + ' 字'">{{ d.name }}<em @click="dropAtt('doc', i)">×</em></span>
           <span v-if="attMsg" class="ds__hintwarn">{{ attMsg }}</span>
         </div>
         <input ref="imgInput" type="file" accept="image/*" multiple style="display:none" @change="onPickImg" />
         <input ref="docInput" type="file" accept=".pdf,.md,.markdown,.txt,.json,.csv" multiple style="display:none" @change="onPickDoc" />
-        <textarea v-model="input" class="ds__ta" rows="3" placeholder="输入问题（Enter 发送，Shift+Enter 换行）" @keydown.enter.exact.prevent="send" />
-        <button class="ds__send" :disabled="busy || !input.trim()" @click="send">发送</button>
+        <textarea ref="taEl" v-model="input" class="ds__ta" rows="3" placeholder="输入问题（Enter 发送，Shift+Enter 换行）；也可以直接粘贴一张题目截图" @keydown.enter.exact.prevent="send" />
+        <div class="ds__footRow">
+          <span class="ds__hint" title="附件图会跟着题目一起插进幻灯片；也可以直接 Ctrl+V 粘贴截图">Enter 发送 · Shift+Enter 换行 · 可粘贴截图</span>
+          <button class="ds__send" :disabled="busy || !input.trim()" @click="send">{{ busy ? '发送中…' : '发送' }}</button>
+        </div>
       </footer>
     </section>
   </div>
 </template>
 
 <style scoped>
+/* 【v1658】DeepSeek 面板美化（用户要求）：气泡对话 + 预制对话条 + 附件缩略图 + 动效 ✓ */
 .ds { display: flex; align-items: stretch; flex: 0 0 auto; border-left: 1px solid var(--border); background: var(--panel); }
-.ds__bar { width: 40px; border: none; background: var(--panel-2, #faf9f6); color: var(--muted); cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 12px; font-size: 11px; }
-.ds__bar:hover { color: var(--brand-600, #534AB7); }
-.ds__barTxt { writing-mode: vertical-rl; letter-spacing: .12em; }
-.ds__body { width: 340px; display: flex; flex-direction: column; min-width: 0; }
-.ds__head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-.ds__title { font-size: 13px; font-weight: 600; color: var(--text); }
-.ds__sub { font-size: 11px; color: var(--muted); }
-.ds__btn { margin-left: auto; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; font-size: 12px; cursor: pointer; }
-.ds__btn + .ds__btn { margin-left: 4px; }
-.ds__list { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
-.ds__empty { color: var(--muted); font-size: 12px; line-height: 1.9; }
-.ds__msg { display: flex; flex-direction: column; gap: 3px; }
-.ds__who { font-size: 11px; color: var(--muted); }
-.ds__text { font-size: 12.5px; line-height: 1.75; color: var(--text); white-space: pre-wrap; background: var(--panel-2, #faf9f6); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
-.ds__msg--user .ds__text { background: #f1efff; border-color: #ded7ff; }
-.ds__mini { align-self: flex-end; height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; font-size: 11px; cursor: pointer; }
-.ds__err { font-size: 12px; color: #b42318; background: #fff2f0; border: 1px solid #f0c9c4; border-radius: 8px; padding: 8px 10px; }
-.ds__foot { border-top: 1px solid var(--border); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
-.ds__ta { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 12.5px; font-family: inherit; resize: vertical; }
-.ds__send { align-self: flex-end; height: 28px; padding: 0 14px; border: 1px solid var(--brand-600, #534AB7); background: var(--brand-600, #534AB7); color: #fff; border-radius: 8px; font-size: 12.5px; cursor: pointer; }
-.ds__send:disabled { opacity: .5; cursor: default; }
+.ds__bar { width: 40px; border: none; background: linear-gradient(180deg, #f4f2ff, var(--panel-2, #faf9f6)); color: var(--muted); cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 14px; font-size: 11px; }
+.ds__bar:hover { color: var(--brand-600, #534AB7); background: #efecff; }
+.ds__barTxt { writing-mode: vertical-rl; letter-spacing: .14em; font-weight: 600; }
+.ds__body { width: 356px; display: flex; flex-direction: column; min-width: 0; background: #fff; }
+.ds__head { display: flex; align-items: center; gap: 7px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: linear-gradient(180deg, #faf9ff, #fff); }
+.ds__dot { width: 8px; height: 8px; border-radius: 50%; background: #2f9e63; box-shadow: 0 0 0 3px rgba(47, 158, 99, .14); }
+.ds__dot--off { background: #d0cec6; box-shadow: 0 0 0 3px rgba(0, 0, 0, .05); }
+.ds__title { font-size: 13px; font-weight: 700; color: var(--text); }
+.ds__pill { font-size: 10.5px; color: #2f7d5b; background: #eafaf1; border: 1px solid #cdeedd; border-radius: 999px; padding: 1px 7px; }
+.ds__pill--warn { color: #b3541e; background: #fff6ec; border-color: #f2dcc4; }
+.ds__ico { margin-left: auto; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--muted); font-size: 11.5px; cursor: pointer; }
+.ds__ico + .ds__ico { margin-left: 0; }
+.ds__ico:hover { color: var(--brand-600, #534AB7); border-color: #ded7ff; background: #f7f5ff; }
+.ds__presets { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: #fcfcff; }
+.ds__preset { height: 25px; padding: 0 10px; border: 1px solid #ded7ff; border-radius: 999px; background: #f6f4ff; color: #4a3b8f; font-size: 11.5px; cursor: pointer; }
+.ds__preset:hover { background: #ece7ff; border-color: #c9bfff; }
+.ds__list { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 10px; display: flex; flex-direction: column; gap: 12px; }
+.ds__list::-webkit-scrollbar { width: 8px; }
+.ds__list::-webkit-scrollbar-thumb { background: #e6e4dd; border-radius: 8px; }
+.ds__list::-webkit-scrollbar-thumb:hover { background: #d2cfc5; }
+.ds__empty { color: var(--muted); font-size: 12px; }
+.ds__emptyT { font-weight: 600; color: #6b6a63; margin-bottom: 6px; }
+.ds__emptyL { margin: 0; padding-left: 16px; line-height: 1.95; }
+.ds__row { display: flex; }
+.ds__row--user { justify-content: flex-end; }
+.ds__bubble { max-width: 93%; border-radius: 12px; padding: 8px 11px; border: 1px solid var(--border); background: var(--panel-2, #faf9f6); box-shadow: 0 1px 2px rgba(20, 16, 60, .04); }
+.ds__row--user .ds__bubble { background: #f1efff; border-color: #ded7ff; border-bottom-right-radius: 4px; }
+.ds__row--ai .ds__bubble { border-bottom-left-radius: 4px; }
+.ds__text { font-size: 12.5px; line-height: 1.78; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.ds__pics { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.ds__pics img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; border: 1px solid #ded7ff; }
+.ds__acts { display: flex; gap: 6px; margin-top: 7px; }
+.ds__mini { height: 23px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: #55534d; font-size: 11.5px; cursor: pointer; }
+.ds__mini:hover { border-color: #ded7ff; background: #f7f5ff; color: var(--brand-600, #534AB7); }
+.ds__mini--main { border-color: var(--brand-600, #534AB7); background: var(--brand-600, #534AB7); color: #fff; }
+.ds__mini--main:hover { background: #463d9e; color: #fff; }
+.ds__typing { display: inline-flex; gap: 4px; align-items: center; padding: 11px; }
+.ds__typing i { width: 6px; height: 6px; border-radius: 50%; background: #b9b4e8; animation: dsBlink 1.1s infinite ease-in-out; }
+.ds__typing i:nth-child(2) { animation-delay: .18s; }
+.ds__typing i:nth-child(3) { animation-delay: .36s; }
+@keyframes dsBlink { 0%, 80%, 100% { opacity: .35; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+.ds__err { font-size: 12px; color: #b42318; background: #fff2f0; border: 1px solid #f0c9c4; border-radius: 9px; padding: 8px 10px; }
+.ds__saved { font-size: 11px; color: #2f9e63; word-break: break-all; }
+.ds__foot { border-top: 1px solid var(--border); padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 7px; background: #fff; }
 .ds__att { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ds__thumb { position: relative; display: inline-flex; }
+.ds__thumb img { width: 42px; height: 42px; object-fit: cover; border-radius: 7px; border: 1px solid #ded7ff; }
+.ds__thumb em { position: absolute; right: -5px; top: -5px; width: 15px; height: 15px; line-height: 14px; text-align: center; border-radius: 50%; background: #6b5ce0; color: #fff; font-style: normal; font-size: 11px; cursor: pointer; }
 .ds__chip { display: inline-flex; align-items: center; gap: 4px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #4a3b8f; background: #f1efff; border: 1px solid #ded7ff; border-radius: 999px; padding: 2px 8px; }
 .ds__chip em { cursor: pointer; font-style: normal; color: #8a7fd0; }
 .ds__hintwarn { font-size: 11px; color: #b3541e; }
-.ds__acts { display: flex; gap: 6px; align-self: flex-end; }
-.ds__saved { font-size: 11px; color: #2f9e63; word-break: break-all; }
+.ds__ta { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; font-size: 12.5px; font-family: inherit; resize: vertical; line-height: 1.7; background: #fdfdfd; }
+.ds__ta:focus { outline: none; border-color: #c9bfff; box-shadow: 0 0 0 3px rgba(83, 74, 183, .10); background: #fff; }
+.ds__footRow { display: flex; align-items: center; gap: 8px; }
+.ds__hint { flex: 1 1 auto; min-width: 0; font-size: 10.5px; color: var(--muted); line-height: 1.4; }
+.ds__send { flex: 0 0 auto; white-space: nowrap; margin-left: auto; height: 30px; padding: 0 16px; border: 1px solid var(--brand-600, #534AB7); background: var(--brand-600, #534AB7); color: #fff; border-radius: 9px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.ds__send:hover:not(:disabled) { background: #463d9e; }
+.ds__send:disabled { opacity: .5; cursor: default; }
 </style>
