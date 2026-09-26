@@ -93,9 +93,22 @@ function visionModel(): string { try { return String(localStorage.getItem('lj-ma
 function visionBase(): string { try { return String(localStorage.getItem('lj-mathslides:vision-base') || '').trim() } catch { return '' } }
 
 const SYSTEM = '你是高中数学老师的备课助手。回答用中文，简洁、可直接放进讲义：公式用 $...$（行内）或 $$...$$（独立行），结论先说，步骤可省。'
-  // 【v1651】画图要按幻灯片的规矩来：MathJax 不认 TikZ/pgfplots/Asymptote（用户实报：AI 给的
-  //   tikzpicture 幻灯片完全认不出 ✗）—— 与其事后补救，不如在提示词里就要求它别写 ✓
-  + '画图时注意：这份幻灯片的数学排版只用 MathJax，**不要输出 TikZ / tikzpicture / pgfplots / Asymptote / PSTricks 等绘图代码**（渲染不出来）。需要图形时：用一句话说明图形要素（例：以 F₁F₂ 为焦点的双曲线，过 F₂ 的竖直弦 AB 交右支于 A、B），并提示老师可在软件的「数学图形」库里插入对应图形。'
+  // 【v1651】当时幻灯片不认 TikZ/pgfplots/Asymptote（用户实报：AI 给的 tikzpicture 完全渲染不出来 ✗）
+  //   → 提示词里干脆禁止它写图。
+  // 【v1655】**反过来**：v1652~v1654 已经把常见 TikZ 真译成可编辑图形了，再禁止写就等于"永远没有图" ✗
+  //   （用户实报：AI 回答里只剩一句「图形要素」，幻灯片上没图 ✗）
+  //   现在要求它**按能译出来的子集写**：少写一种花活，就少一次"整张退回占位" ✓
+  + '画图请用 TikZ（软件会把它译成**可编辑的数学图形**），并且只写下面这几种写法：'
+  + '① 整段用 \\begin{tikzpicture}…\\end{tikzpicture} 包起来；'
+  + '② 坐标轴：\\draw[->] (-5,0) -- (5,0) node[below]{$x$}; 与 \\draw[->] (0,-3) -- (0,3) node[left]{$y$};（原点 O 不用写，软件自带）；'
+  + '③ 曲线用参数式，一张图只画一条圆锥曲线（双曲线两支算一条，写两条 plot 即可）：'
+  + '椭圆 plot ({3*cos(\\x)},{2*sin(\\x)})、双曲线 plot ({2*cosh(\\x)},{1.5*sinh(\\x)})（另一支前面加负号）、'
+  + '抛物线 plot ({\\x*\\x/4},{\\x})，都要带 domain=…；'
+  + '④ 点：\\fill (x,y) circle (1.5pt) node[right]{$A$};（焦点写成 F_1、F_2）；'
+  + '⑤ 线段 / 弦：\\draw (x1,y1) -- (x2,y2);，虚线加 dashed；'
+  + '⑥ 文字：\\node at (x,y) {$M$};。'
+  + '点的坐标要**算准**（交点先解出来再写上去）；不要用 pgfplots 的 axis 环境 / Asymptote / \\foreach / \\def / \\clip / 旋转 / 相对坐标（+ 或 ++）—— 这些会让整张图退回一行占位。'
+  + '万一这张图用上面几种写法表达不了，就用一句话说明图形要素，并提示老师用「数学图形」库插入。'
 
 async function send() {
   const t = input.value.trim()
