@@ -179,6 +179,7 @@ export function buildExtractPrompt(text: string, opt: ExtractOpt = {}): { system
     '- qtype：choice / multi / blank / answer / proof 之一',
     secs.length ? '- section：从这些章节里选一个：' + secs.join('、') + '；都套不上就留空' : '- section：章节，认不出就留空',
     '- kp：知识点数组；level：基础 / 中档 / 拔高；difficulty：1~5 的整数',
+    '原文里的**插图标记**（形如 [图1]、[图2]）必须原样保留在对应题的题干里 —— 别删、别改写、别挪到别的题上。',
     '原文里没有的字段留空字符串或空数组，**不要编造**；题干缺失的条目直接不要输出。',
   ].join('\n')
   const head = opt.withAnswer === false ? '（只要题干与选项，不要答案、不要解析）\n\n' : ''

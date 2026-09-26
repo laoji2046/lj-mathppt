@@ -18,6 +18,8 @@ import { LEVELS, QTYPE_LABEL, SECTIONS, idemKeyOf, importAddDrafts, importBegin 
 import { invoke, isTauri, listenTauri, mineruParse, mineruStagePdf } from '@/composables/useTauri'
 import type { MineruProgress } from '@/composables/useTauri'
 import { typesetMixed } from '@/composables/useMathJax'
+import { attachOrphans, imagesForText, linkMineruImages, questionTextOf } from '@/composables/mineruImages'
+import type { QuestionImage } from '@/composables/parseQuestions'
 import { escapeHtml } from '@/types'
 import { licensed } from '@/composables/useLicense'
 
@@ -69,6 +71,16 @@ watch(mineruToken, (v) => {
 const isDesktop = isTauri()
 const fileInput = ref<HTMLInputElement | null>(null)
 const listBox = ref<HTMLElement | null>(null)
+
+/** 这次 MinerU 识别带的图（整卷共用一张表 ✓）+ 图号在正文里的位置 + 几何（兜底归属要用 ✓） */
+const pendingImages = ref<QuestionImage[]>([])
+const pendingMarks = ref<Record<number, number>>({})
+const pendingGeo = ref<{ where: Record<number, { page: number; y: number }>; blocks: { head: string; page: number; y: number }[] } | null>(null)
+/** 算「图落在哪道题之后」用的正文（MinerU 那一版原文；手打/粘贴时为空 → 就只按引用挂 ✓） */
+const pendingText = ref('')
+/** 每张题卡带的图 / 兜底告警（下标与 items 对齐 ✓） */
+const itemImgs = ref<QuestionImage[][]>([])
+const itemWarn = ref<string[]>([])
 
 /* ---------------- 模型调用：跟 AI 助手同一条链路（Rust 侧发请求；网页端直连被 CORS 挡 ✓） ---------------- */
 
@@ -136,37 +148,54 @@ async function fileToText(f: File): Promise<{ text: string; note: string }> {
  *    留着标记不但题干里碍眼，还会让草稿被质量闸门按「有图没带图」整批标待复核 ✗；
  *  · 失败/空结果不吞：说清原因并给下一条路 ✓（绝不静默 ✗）。
  */
+/** 【v1690 修】扫描件：交给 MinerU **精准解析**（请求在 Rust 侧发 ✓），回来的是 Markdown ✓
+ *  ⚠ 上一版把插图标记**去掉**了（怕闸门误判「有图没带图」✗）—— 结果用户导入后**图形全丢** ✗（实报 ✓）。
+ *    现在改成：content_list 里的 ![](images/x.jpg) 用 linkMineruImages 换成 [图N] 标记**留在正文里** ✓，
+ *    抽完题再按标记把图挂到各题上（口径与「录入试题」完全一致 ✓；提示词也要求模型原样保留标记 ✓）。
+ */
 async function readScanByMineru(f: File, pages: number): Promise<{ text: string; note: string }> {
   const token = mineruToken.value.trim()
   prog.value = '扫描件：正在上传给 MinerU 识别…（' + pages + ' 页，通常 1~3 分钟，别关窗口）'
   try {
     const path = await mineruStagePdf(f)
-    const { assembleContentDoc } = await import('@/composables/contentDoc')
+    const { assembleContentDoc, blockGeometry, imagePositions } = await import('@/composables/contentDoc')
     const r = await mineruParse(path, token, 'precise')
     const md = String((r && r.mdText) || '')
+    // 正文优先用 content_list + bbox 装配的那份（**双栏卷**会重排成「先左后右」✓），没有就退回 mdText ✓
     const doc = (r && r.contentJson ? assembleContentDoc(String(r.contentJson)) : '').trim()
       || String((r && r.contentText) || '').trim() || md
-    const figs = (doc.match(/!\[[^\]]*\]\([^)]*\)/g) || []).length + (doc.match(/\[图\s*\d+/g) || []).length
-    const text = doc.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/\[图\s*\d+(?::[^\]]*)?\]/g, ' ')
+    const linked = linkMineruImages(doc, (r && r.images) || [])
+    const json = String((r && r.contentJson) || '')
+    pendingImages.value = linked.images
+    pendingMarks.value = linked.marks
+    pendingText.value = linked.text
+    const pos = json ? imagePositions(json) : {}
+    const where: Record<number, { page: number; y: number }> = {}
+    for (const k of Object.keys(linked.paths || {})) {
+      const p = pos[linked.paths[Number(k)]]
+      if (p) where[Number(k)] = p
+    }
+    pendingGeo.value = json ? { where, blocks: blockGeometry(json) } : null
     const cw = String((r && r.contract && r.contract.warn) || '')
-    if (readableChars(text) < 20) {
+    if (readableChars(linked.text) < 20) {
+      pendingImages.value = []
+      pendingGeo.value = null
       return {
         text: '',
         note: 'MinerU 没识别出文字' + (cw ? '：' + cw : '') + ' —— 稍后重试；或在「录入试题」里换免 token 的轻量接口试试 ✓',
       }
     }
     return {
-      text,
+      text: linked.text,
       note: '扫描件已由 MinerU 精准解析（' + ((r && r.pages) || pages) + ' 页'
         + (r && r.seconds ? '，' + Math.round(Number(r.seconds)) + ' 秒' : '') + '）'
-        + (figs ? '；卷面有 ' + figs + ' 处插图，本对话框只取文字、图带不过来 —— 图形题请走「录入试题 → 导入 .pdf（MinerU）」，那里能把图挂到题上 ✓' : '')
+        + (linked.images.length ? '；带出插图 ' + linked.images.length + ' 张，抽完题会挂到引用了它的题上 ✓' : '')
         + (cw ? '；注意：' + cw : ''),
     }
   } finally {
     prog.value = ''
   }
 }
-
 async function takeFiles(files: File[]) {
   msg.value = ''
   for (const f of files) {
@@ -234,6 +263,7 @@ async function doExtract() {
     items.value = r.items
     on.value = r.items.map(() => true)
     kpDraft.value = r.items.map((q) => (q.kp || []).join('，'))
+    attachFigures()   // 【v1690】MinerU 的图按题挂上（没填图时是空操作 ✓）
     warnList.value = r.warn
     skipped.value = r.skipped
     saved.value = false
@@ -262,6 +292,12 @@ function clearAll() {
   skipped.value = 0
   saved.value = false
   savedCount.value = 0
+  pendingImages.value = []
+  pendingMarks.value = {}
+  pendingGeo.value = null
+  pendingText.value = ''
+  itemImgs.value = []
+  itemWarn.value = []
   msg.value = ''
 }
 
@@ -415,6 +451,30 @@ function togglePreview() {
 
 /* ---------------- ④ 落草稿（正式库一个字不动 ✓） ---------------- */
 
+
+/**
+ * 【v1690】把 MinerU 的插图按题挂上（口径**与「录入试题」一致** ✓）：
+ *   ① 先按 [图N] 引用：题干 + 选项 + 解析里提到哪张就挂哪张 ✓；
+ *   ② 没人认领的图 → attachOrphans 按「原图页/位置」兜底挂到**前一道题**并标 warn 让人核对 ✓（不静默丢 ✗）。
+ * ⚠ attachOrphans 要的是解析器那种题目形状（解析字段叫 solution，不叫 analysis）→ 这里套一层适配对象 ✓
+ */
+function attachFigures() {
+  const all = pendingImages.value
+  itemImgs.value = items.value.map(() => [])
+  itemWarn.value = items.value.map(() => '')
+  if (!all.length) return
+  const adapted = items.value.map((q) => ({
+    stem: q.stem, options: q.options, solution: q.analysis,
+    images: [] as QuestionImage[], warn: '',
+  }))
+  for (const q of adapted) {
+    const got = imagesForText(questionTextOf(q), all)
+    if (got.length) q.images = got
+  }
+  attachOrphans(pendingText.value, adapted, all, pendingMarks.value, pendingGeo.value || undefined)
+  itemImgs.value = adapted.map((q) => q.images || [])
+  itemWarn.value = adapted.map((q) => q.warn || '')
+}
 async function doSaveDrafts() {
   msg.value = ''
   const list = pickedIndexes()
@@ -438,6 +498,7 @@ async function doSaveDrafts() {
     if (!b.ok || !b.batch) { msg.value = b.error || '开批次失败'; return }
     const drafts = list.map((i, n) => {
       const q = items.value[i]
+      const pics = itemImgs.value[i] || []
       return {
         sourceItemId: 'ai' + (n + 1),
         sourceLabel: '第 ' + (i + 1) + ' 题（AI 抽取）',
@@ -450,6 +511,10 @@ async function doSaveDrafts() {
         difficulty: Number(q.difficulty) || 3,
         knowledge: (q.kp || []).map((x) => String(x)),
         paper,
+        // 【v1690】图必须进 extra 才存得下来（draft 表没有 images 列 ✓ v1465 的教训）；
+        //   顶层 images 只被质量闸门用来**数**张数 ✓
+        images: pics,
+        extra: JSON.stringify({ images: pics, no: i + 1, from: 'AI+MinerU' }),
         // ⚠ 这里**不能**把整份原文当 rawText 传：Rust 的质量闸门会拿它算「内容守恒」
         //   （保留原文 35%~160%），整卷 1 万字里挑出一道 200 字的题 → 每题都被误判「内容偏少」✗
         //   「录入试题」那条路（draftFromMeta）同样不传 rawText ✓
@@ -629,6 +694,15 @@ onBeforeUnmount(() => {
                 placeholder="题干（公式用 $...$）" @input="schedulePreview"
               ></textarea>
               <div v-if="previewOn && i < PREVIEW_MAX" class="aiq__pv" :data-ai="i"></div>
+              <!-- 【v1690】这道题带的插图（从 MinerU 那张整卷表里按题拆出来的 ✓）—— 看得见才敢信它没丢 ✓ -->
+              <div v-if="(itemImgs[i] || []).length" class="aiq__figs">
+                <img
+                  v-for="(im, k) in itemImgs[i]" :key="k" :src="im.src"
+                  :alt="im.caption || ('图' + (k + 1))" :title="im.caption || ('第 ' + (k + 1) + ' 张插图')"
+                />
+                <span class="aiq__fignum">{{ itemImgs[i].length }} 张插图</span>
+              </div>
+              <div v-if="itemWarn[i]" class="aiq__issue aiq__issue--warn">{{ itemWarn[i] }}</div>
 
               <div class="aiq__opts">
                 <!-- 只用下标：v-model 必须落在数组元素上（v-for 的别名是副本，写不回去 ✗） -->
@@ -759,5 +833,8 @@ onBeforeUnmount(() => {
 .aiq__gaps { font-size: 12px; color: var(--muted); }
 .aiq__gaps b { color: var(--danger); }
 .aiq__report { margin: 0; width: 100%; white-space: pre-wrap; font-size: 11.5px; line-height: 1.6; color: var(--gray-600); background: var(--gray-50); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+.aiq__figs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.aiq__figs img { max-height: 76px; max-width: 150px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.aiq__fignum { font-size: 11.5px; color: var(--muted); }
 .aiq__fileinput { display: none; }
 </style>
