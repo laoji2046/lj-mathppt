@@ -619,8 +619,17 @@ export function parseTikzPicture(src: string): TikzParseResult {
   let dedup = 0
   for (const p of pts) {
     // 位置对得上 **且**（TikZ 这个点没字母，或字母跟自带的一致）→ 才算重复
-    const hit = builtin.find((b) => Math.hypot(b.x - p.x, b.y - p.y) < 1e-3 * (1 + Math.abs(b.x) + Math.abs(b.y)))
-    const dup = !!hit && (!p.label || (!!hit.label && sameLabel(hit.label, p.label)))
+    // ⚠ 容差要**分两档**（实测教训）：AI 常把 c=√3.25=1.8028 写成 1.8（差 0.15%），
+    //   一刀 0.6% 是"擦边过"；所以"字母对得上"时放宽到 8%（同一个焦点，作者写多精确都认）✓
+    const sc = 1 + Math.abs(p.x) + Math.abs(p.y)
+    const hit = builtin.find((b) => {
+      const dist = Math.hypot(b.x - p.x, b.y - p.y)
+      if (dist >= 0.08 * sc) return false
+      if (!b.label) return !p.label && dist < 0.006 * sc        // 圆心点只有圆点没有字母
+      if (!p.label) return dist < 0.006 * sc                    // TikZ 只点了个大黑点 → 自带那个盖住它
+      return sameLabel(b.label, p.label)                        // 两边都有字母：同名即同一个点
+    })
+    const dup = !!hit
     if (dup) { dedup++; continue }
     keptPts.push(p)
   }

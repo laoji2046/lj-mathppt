@@ -182,7 +182,9 @@ function mdClean(t: string): string {
   s = s.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, '（此处原为 TikZ 绘图，幻灯片不支持；建议用「数学图形」库插一张对应的图）')
   s = s.replace(/\\begin\{axis\}[\s\S]*?\\end\{axis\}/g, '（此处原为 pgfplots 图，幻灯片不支持；建议用「数学图形」库插一张）')
   s = s.replace(/\\begin\{asy\}[\s\S]*?\\end\{asy\}/g, '（此处原为 Asymptote 图，幻灯片不支持；建议用「数学图形」库插一张）')
-  s = s.replace(/\\begin\{center\}\s*\n?\s*\\end\{center\}/g, '')
+  // 【v1652】纯排版外壳（\begin{center}…\end{center}）：幻灯片不认，**去掉外壳、内容留下** ✓
+  //   （用户原文那道双曲线题就包在 center 里；旧写法只认"空的一对"，于是 \begin{center} 会当正文显示出来 ✗）
+  s = s.replace(/\\begin\{(center|flushleft|flushright)\}\[ \t]*\n?/g, '').replace(/\\end\{(center|flushleft|flushright)\}[ \t]*\n?/g, '')
   return s + '\n'
 }
 function stampName(): string {
