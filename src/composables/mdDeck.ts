@@ -130,7 +130,14 @@ function mdBlockToSlide(lines: string[], opts: { fontSize?: number } = {}): Slid
     }
     const note = line.match(/^Note:\s*(.*)$/)
     if (note) { notes.push(note[1].trim()); continue }
-    if (!line.trim()) { flush(); continue }        // 空行 = 块的分界
+    // 【v1648】空行不一定是块的分界（用户报：AI 回答插进来变成好多行 ✗）——
+    //   AI 常在每行之间也空一行，若照样切块，一道题会被拆成「题干 / 选项 / 答案」好几个框 ✗。
+    //   规则：**当前块是"题号块"（首行像 `1.` `2、`）时，空行只当作块内的空行**，一直攒到下一题 ✓
+    if (!line.trim()) {
+      if (buf.length && /^\s*\d{1,3}\s*[.、．]/.test(buf[0])) { buf.push(""); continue }
+      flush()
+      continue
+    }
     // 独占一行的图片：不能塞进文字块里（应用只认行首的 ![]()）
     const img = line.match(/^!\[[^\]]*\]\(([^)]+)\)$/)
     if (img) { flush(); push({ id: uid('el'), type: 'image', x: 150, y: elements.y, w: 900, h: 520, rot: 0, src: img[1].trim(), fit: 'contain' } as any); continue }
