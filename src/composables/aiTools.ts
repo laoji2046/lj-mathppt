@@ -31,10 +31,17 @@ export interface AiToolCtx {
   undo(): void
   /** 改/删之前先存一份撤销快照（store.updateElement/removeElement 自己**不存** ✗ —— 上一版说错了 ✓） */
   pushHistory?(): void
-  /** 题库（可缺：探针/没装库时不影响别的工具 ✓） */
+  /** 【v1691】试卷编辑：读 / 追加 / 插题（试卷没开时由 App 自动打开 ✓；不传也能跑 ✓） */
+  paper?: {
+    state: (maxChars: number) => { open: boolean; text: string }
+    append: (text: string, pageBreak: boolean) => string
+    insertQuestion: (id: number, withAnswer: boolean) => Promise<string>
+  }  /** 题库（可缺：探针/没装库时不影响别的工具 ✓） */
   bank?: {
     search(query: string, limit: number): Promise<{ id: number; label: string }[]>
     textOf(id: number, withAnswer: boolean): Promise<string | null>
+    /** 【v1691】这道题带的图（插到试卷时要一起带过去 ✓） */
+    imgsOf?: (id: number) => Promise<{ n: number; src: string; caption?: string }[]>
   }
 }
 
@@ -229,6 +236,48 @@ export const AI_TOOLS: unknown[] = [
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'get_paper_state',
+      description: '读「试卷编辑」里的正文（A4 试卷的文字）。要改试卷前先调它 ✓；试卷没开时 opened 是 false ✓',
+      parameters: {
+        type: 'object',
+        properties: { max_chars: { type: 'integer', description: '最多回多少字，默认 3000' } },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'append_to_paper',
+      description: '把一段文字**追加到「试卷编辑」正文末尾**（试卷没开会自动打开）。写题请按试卷的排版约定：'
+        + '## 一、选择题 分大题、1. 题号（试卷会按 autoNum 重新编号 ✓）、[题]…[选项]…[解析]…[/题] 整块、$公式$、[图N] 插图、[分页] 手动分页 ✓',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: '要追加的正文（Markdown 风格 ✓）' },
+          page_break: { type: 'boolean', description: 'true = 先分页再追加（新的一套卷子各自起一页 ✓）' },
+        },
+        required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'insert_bank_question_to_paper',
+      description: '把题库里的题插进「试卷编辑」末尾，按试卷的**题目块**排版（解析默认收起、不会被分页拆开 ✓）。先 search_bank 拿 id ✓',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'integer', description: 'search_bank 返回的 id' },
+          with_answer: { type: 'boolean', description: '是否带答案解析，默认 false（考卷通常不带 ✓）' },
+        },
+        required: ['id'],
+      },
+    },
+  },
 ]
 
 /** 给 system 提示词追加的说明（告诉模型怎么用这些功能 ✓） */
@@ -237,6 +286,7 @@ export function aiToolGuide(): string {
     '【能用应用的功能】你可以调用工具**直接操作这个幻灯片应用**，不要只说"你可以插入…"。',
     '常用流程：先 get_deck_state 看当前页有什么 → 再 insert_math_figure / insert_text / add_slide 动手；',
     '要引用老师题库里的题：先 search_bank 拿 id，再 insert_bank_question。',
+    '要动「试卷编辑」里的 A4 试卷：先 get_paper_state 看正文，再用 append_to_paper 追加（按试卷排版：## 分大题、1. 题号、[题]…[/题] 整块 ✓）；单题也可以用 insert_bank_question_to_paper ✓。',
     '改已有元素前也先 get_deck_state 拿 id；改完/插完用一句中文说明你做了什么，别把工具的 JSON 原样倒给老师。',
     '数学图形一律用 insert_math_figure（kind + params），不要用 TikZ 画图、也不要只给 LaTeX 让老师自己画。',
     '老师说「字太小、放大一点」就用 update_elements 传 fontSize（例如 {"fontSize":36}）；',
@@ -428,7 +478,31 @@ export async function runAiTool(name: string, args: Record<string, unknown>, ctx
         ctx.undo()
         return { ok: true, result: { 已撤销一步: true } }
       }
-      default:
+      case 'get_paper_state': {
+      const p = ctx.paper
+      if (!p) return { ok: false, error: '这个版本没有试卷接口' }
+      const want = num(args.max_chars) || 0
+      const max = want > 0 ? Math.min(want, 8000) : 3000
+      const st = p.state(max)
+      if (!st.open) return { ok: true, result: { opened: false, note: '试卷编辑没开着 —— 调 append_to_paper 会自动打开它 ✓' } }
+      return { ok: true, result: { opened: true, chars: st.text.length, text: st.text } }
+    }
+    case 'append_to_paper': {
+      const p = ctx.paper
+      if (!p) return { ok: false, error: '这个版本没有试卷接口' }
+      const txt = str(args.text).trim()
+      if (!txt) return { ok: false, error: '缺 text' }
+      return { ok: true, result: { note: p.append(txt, !!args.page_break) } }
+    }
+    case 'insert_bank_question_to_paper': {
+      const p = ctx.paper
+      if (!p) return { ok: false, error: '这个版本没有试卷接口' }
+      const qid = num(args.id)
+      if (!qid) return { ok: false, error: '缺 id（先用 search_bank 搜题 ✓）' }
+      const note = await p.insertQuestion(qid, args.with_answer === undefined ? false : !!args.with_answer)
+      if (!note) return { ok: false, error: '题库里没有 id=' + qid + ' 这道题（先用 search_bank 搜一次 ✓）' }
+      return { ok: true, result: { note } }
+    }    default:
         return { ok: false, error: '没有这个功能：' + name }
     }
   } catch (e) {

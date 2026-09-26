@@ -33,3 +33,8 @@ export function sendToPaper(p: PaperInsertPayload) {
   if (sink) { sink(p); return }
   paperPending.value = p
 }
+
+/** 【v1691】AI 助手要用：PaperModal 打开时登记「读试卷正文」与「追加一段」 ✓
+ *  （试卷没开时这两个是 null → AI 助手的工具会说清"先把试卷编辑打开" ✓） */
+export const paperTextSink = ref<null | (() => string)>(null)
+export const paperAppendSink = ref<null | ((text: string, pageBreak?: boolean) => void)>(null)

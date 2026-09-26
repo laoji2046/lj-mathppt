@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import AppIcon from './AppIcon.vue'
 import { loadMathJax } from '@/composables/useMathJax'
@@ -10,7 +10,7 @@ import { MATH_FIGURE_OPTIONS } from '@/types'
 import { closeFigPalette, openFigPalette } from '@/ui/figPalette'
 import { geom3dSink, openGeom3D } from '@/ui/geom3d'
 import { vectorizeSink, openVectorize } from '@/ui/vectorize'
-import { paperInsertSink, paperPending } from '@/ui/paper'
+import { paperAppendSink, paperInsertSink, paperPending, paperTextSink } from '@/ui/paper'
 import type { PaperInsertPayload } from '@/ui/paper'
 import ColorSwatches from './ColorSwatches.vue'
 
@@ -21,6 +21,10 @@ import ColorSwatches from './ColorSwatches.vue'
  */
 
 const emit = defineEmits<{ close: [] }>()
+
+/** 【v1691】AI 组卷 / 命题对话框（体量不小，按需加载 ✓） */
+const AiPaperDialog = defineAsyncComponent(() => import('./AiPaperDialog.vue'))
+const aiOpen = ref(false)
 
 const input = ref('')
 /** 图片库：n -> { src 图像源(dataURL或URL), address 地址/文件目录/URL } */
@@ -1504,6 +1508,16 @@ onMounted(() => {
   render()
   // 试题库的接收口：本窗口开着就接住；顺带把「待办」消费掉 ✓
   paperInsertSink.value = onQuestionInsert
+  // 【v1691】AI 助手要用的读/追加口（试卷开着才登记 ✓）
+  paperTextSink.value = () => input.value
+  paperAppendSink.value = (t, brk) => {
+    const cur = input.value
+    const sep = cur && !cur.endsWith('\n') ? '\n\n' : ''
+    input.value += sep + (brk ? '[分页]\n' : '') + String(t || '') + '\n'
+    render()
+    saveDraftSoon()
+    paperMsg.value = 'AI 已追加到试卷末尾 ✓'
+  }
   const pend = paperPending.value
   if (pend) { paperPending.value = null; onQuestionInsert(pend) }
 })
@@ -1517,7 +1531,9 @@ onBeforeUnmount(() => {
   //   → **两边都插不进去** ✓（用户实测：三维插不进试卷、也插不进页面 ✓）。
   geom3dSink.value = null
   vectorizeSink.value = null   // 描摹的接收口同样要清 ✓
-  paperInsertSink.value = null   // 试题库的接收口同样要清 ✓
+  paperInsertSink.value = null
+    paperTextSink.value = null
+    paperAppendSink.value = null   // 试题库的接收口同样要清 ✓
 })
 /** 图片有更新（用户换了图）时清缓存重渲染 */
 function refreshImages() {
@@ -1536,6 +1552,8 @@ watch([headerText, footerText], () => render())
   <Teleport to="body">
     <div class="pm">
       <div class="pm__backdrop"></div>
+      <!-- 【v1691】AI 组卷对话框：必须挂在 .pm__box **外面** ✓ —— 那盒子有 transform + overflow:hidden，会把 fixed 浮层裁掉 ✗ -->
+      <AiPaperDialog v-if="aiOpen" @close="aiOpen = false" />
       <div class="pm__box">
         <header class="pm__head">
           <span>试卷编辑 · A4 文档</span>
@@ -1552,6 +1570,10 @@ watch([headerText, footerText], () => render())
                     <option value="exam19">19 题试卷模板（8单选/3多选/3填空/5解答）</option>
                     <option value="blank">空白</option>
                   </select>
+                </div>
+                <div class="pm__ctlrow">
+                  <label>AI</label>
+                  <button class="pm__fmt" title="说一句要什么 → 从题库按题型组卷，或让 AI 命新题 → 按试卷排版插进来（题图会一起带 ✓）" @click="aiOpen = true">AI 组卷 / 命题…</button>
                 </div>
                 <div class="pm__ctlrow">
                   <label>字体</label>

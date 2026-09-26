@@ -419,6 +419,33 @@ export function questionTextOf(it: QItem, withAnswer: boolean): string {
   return lines.join('\n')
 }
 
+
+/**
+ * 一道题 → 试卷的「题目块」（**只有试卷用** ✓）：[题]…[选项]…[解析]…[/题]
+ *
+ * 为什么不在 questionTextOf 里做：那是**幻灯片与试卷共用**的纯文本排版 ✓
+ *   （幻灯片放不下"折叠解析"这种结构 ✓）⇒ 只在「加入试卷」这一处包装 ✓
+ * ★ 好处：① 解析**默认收起**、点一下展开 ✓ ② 整块**不会被分页拆开** ✓
+ *   ③ **打印时解析自动展开** ✓（否则答案印不出来 ✓）④ 答案与解析都进 [解析] 段 ✓
+ * 【v1691】从 QuestionBankPanel 提到这里 —— AI 组卷也要用**同一套**排版 ✓（两处各写一份迟早漂移 ✗）
+ */
+export function questionBlockOf(it: QItem, withAnswer: boolean, no = 0): string {
+  const m = metaOf(it)
+  const stem = String(m.stem || it.body || it.title || '').trim()
+  if (!stem) return ''
+  const opts = Array.isArray(m.options) ? (m.options as unknown[]).map((x) => String(x)) : []
+  const lines = ['[题]', (no ? no + '. ' : '') + stem]
+  if (opts.length) lines.push('[选项]', opts.map((o, i) => 'ABCDEFGH'[i] + '．' + o).join('\n'))
+  if (withAnswer) {
+    const ans = String(m.answer || '').trim()
+    const sol = String(m.solution || '').trim()
+    const body = [ans ? '【答案】' + ans : '', sol].filter(Boolean).join('\n')
+    if (body) lines.push('[解析]', body)
+  }
+  lines.push('[/题]')
+  return lines.join('\n')
+}
+
 /** Markdown 图片语法（老数据正文里写的就是这个） */
 const MD_IMG = /!\[([^\]]*)\]\(\s*<?([^)\s>]+)[^)]*\)/g
 /** [图N] / [图N:参数]（试卷正文的图号约定） */

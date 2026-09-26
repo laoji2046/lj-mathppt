@@ -13,7 +13,7 @@ import { invoke, isTauri } from '@/composables/useTauri'
 import AppIcon from './AppIcon.vue'
 import { pdfToMarkdown } from '@/pdf/pdfImport'
 import { deckToPlainText } from '@/composables/deckToText'
-import { firstUserDir, writeTextFile, qSearch, questionTextOf, type QItem } from '@/composables/useQuestionBank'
+import { firstUserDir, writeTextFile, pickImages, qSearch, questionBlockOf, questionTextOf, type QItem } from '@/composables/useQuestionBank'
 import { markdownToDeck } from '@/composables/mdDeck'
 import { attachTikzFigures, flowDeckElements, picElementItems, tikzSolver, type PicInput } from '@/composables/figureRender'
 import { cropToFigure, previewToPics, type CropPreview } from '@/composables/figCrop'
@@ -23,6 +23,7 @@ import { runAiTool, AI_TOOLS, aiToolGuide, type AiToolCtx } from '@/composables/
 import { tikzToPlaceholders, type TikzSpec } from '@/composables/tikzFigure'
 import { useDeckStore } from '@/stores/deck'
 import { useLicense } from '@/composables/useLicense'
+import { paperAppendSink, paperTextSink, sendToPaper } from '@/ui/paper'
 
 const open = ref(false)
 const input = ref('')
@@ -426,6 +427,39 @@ function aiCtx(): AiToolCtx {
       textOf: async (id, withAnswer) => {
         const it = found.get(id)
         return it ? questionTextOf(it, withAnswer) : null
+      },
+      // 【v1691】这道题带的图（AI 把题插到试卷时要一起带过去 ✓）
+      imgsOf: async (id) => {
+        const it = found.get(id)
+        if (!it) return []
+        return (await pickImages(it)).map((im) => ({ n: im.n, src: im.src, caption: im.caption }))
+      },
+    },
+    // 【v1691】试卷编辑：读 / 追加 / 插题（PaperModal 开着时登记的接入口 ✓；没开也能用，App 会自动打开 ✓）
+    paper: {
+      state: (maxChars) => {
+        const readFn = paperTextSink.value
+        if (!readFn) return { open: false, text: '' }
+        const t = String(readFn() || '')
+        return { open: true, text: t.length > maxChars ? t.slice(0, maxChars) + String.fromCharCode(10) + '…（已截断）' : t }
+      },
+      append: (text, pageBreak) => {
+        const w = paperAppendSink.value
+        if (!w) {
+          sendToPaper({ text: (pageBreak ? '[分页]' + String.fromCharCode(10) : '') + text, id: 0, label: 'AI 追加' })
+          return '试卷没开着，已把内容交给它（App 会自动打开试卷 ✓）'
+        }
+        w(text, pageBreak)
+        return '已追加到试卷末尾 ✓'
+      },
+      insertQuestion: async (id, withAnswer) => {
+        const it = found.get(id)
+        if (!it) return ''
+        const text = questionBlockOf(it, withAnswer, 0)
+        if (!text) return ''
+        const imgs = (await pickImages(it)).map((im) => ({ n: im.n, src: im.src, caption: im.caption }))
+        sendToPaper({ text, id: 0, label: 'AI 插入试题 #' + id, imgs })
+        return '已插进试卷 ✓' + (imgs.length ? '（配图 ' + imgs.length + ' 张 ✓）' : '')
       },
     },
   }

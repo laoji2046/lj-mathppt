@@ -16,7 +16,7 @@ import { typesetMixed } from '@/composables/useMathJax'
 import {
   SECTIONS, QTYPE_LABEL, LEVELS, STATUS_ORDER, statusLabel,
   qFacets, qSearch, qPatch, qBatch, metaOf, excerptOf, previewHtmlOf,
-  questionTextOf, stripImageMarkers, pickImages, sourceReport, kpCatalog, sourcePlan, sourcePlanApply,
+  questionTextOf, questionBlockOf, stripImageMarkers, pickImages, sourceReport, kpCatalog, sourcePlan, sourcePlanApply,
   firstUserDir, exportVault,
 } from '@/composables/useQuestionBank'
 import type { QFacets, QFilter, QItem, SourceReport, SourcePlan } from '@/composables/useQuestionBank'
@@ -898,22 +898,6 @@ async function insertToSlide() {
  *    ③ **打印时解析自动展开** ✓（否则答案印不出来 ✓）
  *    ④ 答案与解析都进 `[解析]` 段 ✓（试卷没有单独的"答案"段 ✓）
  */
-function questionBlockOf(it: QItem, withAnswer: boolean, no = 0): string {
-  const m = metaOf(it)
-  const stem = String(m.stem || it.body || it.title || '').trim()
-  if (!stem) return ''
-  const opts = Array.isArray(m.options) ? (m.options as unknown[]).map((x) => String(x)) : []
-  const lines = ['[题]', (no ? no + '. ' : '') + stem]
-  if (opts.length) lines.push('[选项]', opts.map((o, i) => 'ABCDEFGH'[i] + '．' + o).join('\n'))
-  if (withAnswer) {
-    const ans = String(m.answer || '').trim()
-    const sol = String(m.solution || '').trim()
-    const body = [ans ? '【答案】' + ans : '', sol].filter(Boolean).join('\n')
-    if (body) lines.push('[解析]', body)
-  }
-  lines.push('[/题]')
-  return lines.join('\n')
-}
 
 /** 加入试卷：交给接收口（试卷没开 → App 会把它打开，PaperModal 挂载时消费 ✓） */
 async function addToPaper() {
