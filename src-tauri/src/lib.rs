@@ -4587,6 +4587,48 @@ fn ai_chat(base_url: String, api_key: String, model: String, system: String, use
     serde_json::json!({ "ok": true, "content": content, "usage": usage })
 }
 
+/// 【v1669】AI 工具调用通道：把请求体**原样转发**给模型接口，返回原始 JSON。
+/// 为什么另开一个命令：ai_chat 是"一问一答"的固定载荷（system + 这句话 + 图）；
+/// 工具循环要自己维护 messages（含 assistant.tool_calls 与 role:"tool" 的结果）—— 放在前端更好改、也更好测。
+/// 密钥仍然只从参数来，绝不写进源码 ✓；base_url 规则与 ai_chat 完全一致 ✓
+#[tauri::command]
+fn ai_chat_raw(base_url: String, api_key: String, body: serde_json::Value) -> serde_json::Value {
+    let url = if base_url.trim().is_empty() {
+        "https://api.deepseek.com/chat/completions".to_string()
+    } else {
+        let b = base_url.trim().trim_end_matches('/');
+        if b.ends_with("/chat/completions") { b.to_string() } else { format!("{}/chat/completions", b) }
+    };
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let client = match reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(20))
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("HTTP 客户端创建失败: {}", e) }),
+    };
+    let resp = match client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", api_key.trim()))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+    {
+        Ok(r) => r,
+        Err(e) => return serde_json::json!({ "ok": false, "error": format!("请求失败: {}", e) }),
+    };
+    let status = resp.status();
+    let text = resp.text().unwrap_or_default();
+    if !status.is_success() {
+        return serde_json::json!({ "ok": false, "status": status.as_u16(), "error": mineru_short(&text, 400) });
+    }
+    match serde_json::from_str::<serde_json::Value>(&text) {
+        Ok(v) => serde_json::json!({ "ok": true, "json": v }),
+        Err(_) => serde_json::json!({ "ok": false, "error": format!("返回非 JSON: {}", mineru_short(&text, 200)) }),
+    }
+}
+
 /// 把 content_list.json 组装成"**按块、一行一块**"的正文文本 —— 这是我们的解析主入口（v1428 起）：
 /// - `header / footer / page_number` **直接跳过** ✓（页眉页脚混进题干是老毛病 ✗）
 /// - `text / equation` → 原样一行 ✓（**块边界就是行边界**，选项不会被 MD 那种合并吃掉 ✓）
@@ -5108,6 +5150,7 @@ pub fn run() {
         lib_kp_catalog,
         lib_source_report,
         ai_chat,
+        ai_chat_raw,
         asset_get,
             lib_query,
             lib_save,

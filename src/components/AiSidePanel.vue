@@ -12,12 +12,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { invoke, isTauri } from '@/composables/useTauri'
 import AppIcon from './AppIcon.vue'
 import { pdfToMarkdown } from '@/pdf/pdfImport'
-import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
+import { firstUserDir, writeTextFile, qSearch, questionTextOf, type QItem } from '@/composables/useQuestionBank'
 import { markdownToDeck } from '@/composables/mdDeck'
 import { attachTikzFigures, flowDeckElements, picElementItems, tikzSolver, type PicInput } from '@/composables/figureRender'
 import { cropToFigure, previewToPics, type CropPreview } from '@/composables/figCrop'
 import ScreenshotCapture from './ScreenshotCapture.vue'
 import FigureCropDialog from './FigureCropDialog.vue'
+import { runAiTool, AI_TOOLS, aiToolGuide, type AiToolCtx } from '@/composables/aiTools'
 import { tikzToPlaceholders, type TikzSpec } from '@/composables/tikzFigure'
 import { useDeckStore } from '@/stores/deck'
 
@@ -289,17 +290,11 @@ async function send() {
   busy.value = true
   await scrollDown()
   try {
-    const r = await invoke<{ ok?: boolean; text?: string; content?: string; error?: string }>('ai_chat', {
-      // 【v1650】带图且有「视觉模型」配置时自动切换（设置里填的，键名两边一致 ✓）
-      baseUrl: imgs.length ? visionBase() : '',
-      apiKey: key,
-      model: imgs.length && visionModel() ? visionModel() : 'deepseek-chat',
-      system: SYSTEM, userText, images: imgs.length ? imgs : null,
-    })
-    const text = String((r && (r.text || r.content)) || '').trim()
-    if (r && r.ok === false) err.value = String(r.error || '调用失败')
-    else if (!text) err.value = '模型没有返回内容'
-    else msgs.value.push({ role: 'ai', text })
+    // 【v1669】换成"能调应用功能"的通道（通道不可用会自动退回原来的一问一答 ✓）
+    const got = await askOnce(SYSTEM, userText, imgs, key)
+    const text = got.text
+    if (!text) err.value = '模型没有返回内容'
+    else msgs.value.push({ role: 'ai', text: (got.did.length ? '（我调用了：' + got.did.join('、') + '）\n' : '') + text })
   } catch (e) { err.value = String((e as Error)?.message || e) }
   finally { busy.value = false; attImgs.value = []; attDocs.value = []; await scrollDown() }
 }
@@ -373,6 +368,99 @@ async function insertToSlides(t: string, pics: string[] = []) {
       tikzSummary(got, pre.specs, pre.fails)
   } catch (e) { saveMsg.value = '插入失败：' + String((e as Error)?.message || e) }
 }
+/* ---------------- 【v1669】让 AI 用上应用自己的功能 ---------------- */
+
+/** 这一轮调过哪些功能（给老师看的一行记录 ✓） */
+const toolLog = ref<string[]>([])
+/** 一次提问最多来回几轮（防止模型来回调个没完 ✗） */
+const MAX_TOOL_TURNS = 6
+
+/** 工具名的中文说明（记录里显示人话，不显示 JSON ✓） */
+function toolLabel(name: string, args: Record<string, unknown>): string {
+  const m: Record<string, string> = {
+    get_deck_state: '读课件', add_slide: '加一页', goto_slide: '翻到第 ' + String(args.page ?? '?') + ' 页',
+    insert_math_figure: '插入数学图形' + (args.kind ? '（' + String(args.kind) + '）' : ''),
+    insert_text: '插入文字', search_bank: '搜题库（' + String(args.query || '') + '）',
+    insert_bank_question: '插入题库第 ' + String(args.id ?? '?') + ' 题',
+    update_elements: '修改 ' + (Array.isArray(args.ids) ? args.ids.length : 0) + ' 个元素',
+    delete_elements: '删除 ' + (Array.isArray(args.ids) ? args.ids.length : 0) + ' 个元素', undo: '撤销一步',
+  }
+  return m[name] || name
+}
+
+/** 给工具用的「应用能力」适配器（工具模块不认识 Pinia，全靠这里对接 ✓） */
+function aiCtx(): AiToolCtx {
+  const found = new Map<number, QItem>()
+  return {
+    deck: store.deck as unknown as AiToolCtx['deck'],
+    currentIndex: store.currentIndex,
+    addElements: (items) => store.addElements(items as never),
+    addSlide: () => store.addSlide(),
+    gotoSlide: (i) => store.gotoSlide(i),
+    updateElement: (id, patch) => store.updateElement(id, patch as never),
+    removeElement: (id) => store.removeElement(id),
+    undo: () => store.undo(),
+    bank: {
+      // 搜到的题记在闭包里：insert_bank_question 直接用，不再多查一次库 ✓
+      search: async (query, limit) => {
+        const r = await qSearch({ q: query, limit })
+        const items = (r && r.items) || []
+        for (const it of items) found.set(Number(it.id), it)
+        return items.map((it) => ({ id: Number(it.id), label: (it.code ? it.code + ' ' : '') + String(it.title || it.body || '').slice(0, 60) }))
+      },
+      textOf: async (id, withAnswer) => {
+        const it = found.get(id)
+        return it ? questionTextOf(it, withAnswer) : null
+      },
+    },
+  }
+}
+
+/** 带工具的对话循环：模型说要调功能 → 应用里真的执行 → 把结果还给它 → 直到它给正文 ✓ */
+async function askWithTools(system: string, userText: string, imgs: string[], model: string, baseUrl: string, key: string): Promise<string> {
+  const userContent: unknown = imgs.length
+    ? [{ type: 'text', text: userText }, ...imgs.map((u) => ({ type: 'image_url', image_url: { url: u } }))]
+    : userText
+  const messages: unknown[] = [{ role: 'system', content: system + '\n\n' + aiToolGuide() }, { role: 'user', content: userContent }]
+  for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+    const r = await invoke<{ ok?: boolean; json?: unknown; error?: string }>('ai_chat_raw', {
+      baseUrl, apiKey: key, body: { model, temperature: 0, messages, tools: AI_TOOLS, tool_choice: 'auto' },
+    })
+    if (!r || r.ok === false) throw new Error(String((r && r.error) || '工具通道调用失败'))
+    const j = (r.json || {}) as { choices?: { message?: { content?: string; tool_calls?: unknown[] } }[] }
+    const msg = (j.choices && j.choices[0] && j.choices[0].message) || {}
+    const calls = (msg.tool_calls || []) as { id?: string; function?: { name?: string; arguments?: string } }[]
+    if (!calls.length) return String(msg.content || '').trim()
+    messages.push(msg)
+    for (const c of calls) {
+      const name = String((c.function && c.function.name) || '')
+      let args: Record<string, unknown> = {}
+      try { args = JSON.parse(String((c.function && c.function.arguments) || '{}')) as Record<string, unknown> } catch { args = {} }
+      const res = await runAiTool(name, args, aiCtx())
+      toolLog.value.push((res.ok ? '已' : '没能') + toolLabel(name, args) + (res.ok ? '' : '（' + String(res.error) + '）'))
+      messages.push({ role: 'tool', tool_call_id: c.id || '', content: JSON.stringify(res.ok ? res.result : { error: res.error }) })
+    }
+  }
+  return '（一次提问里调用的功能太多，先停在这里；你可以再让我接着做）'
+}
+
+/** 一次提问：先走能调功能的新通道；通道不可用（老 exe / 接口不支持）就退回原来的一问一答 ✓ */
+async function askOnce(system: string, userText: string, imgs: string[], key: string): Promise<{ text: string; did: string[] }> {
+  toolLog.value = []
+  const baseUrl = imgs.length ? visionBase() : ''
+  const model = imgs.length && visionModel() ? visionModel() : 'deepseek-chat'
+  try {
+    const text = await askWithTools(system, userText, imgs, model, baseUrl, key)
+    return { text, did: toolLog.value.slice() }
+  } catch {
+    const r = await invoke<{ ok?: boolean; text?: string; content?: string; error?: string }>('ai_chat', {
+      baseUrl, apiKey: key, model, system, userText, images: imgs.length ? imgs : null,
+    })
+    if (r && r.ok === false) throw new Error(String(r.error || '调用失败'))
+    return { text: String((r && (r.text || r.content)) || '').trim(), did: [] }
+  }
+}
+
 /** 这条 AI 回答对应的问题带了哪些附件原图（往上找最近一条 user 消息 ✓） */
 function picsOf(aiIndex: number): string[] {
   for (let i = aiIndex - 1; i >= 0; i--) {
