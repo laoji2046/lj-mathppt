@@ -14,7 +14,7 @@ import AppIcon from './AppIcon.vue'
 import { pdfToMarkdown } from '@/pdf/pdfImport'
 import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
 import { markdownToDeck } from '@/composables/mdDeck'
-import { attachPics, attachTikzFigures, picElementItems, tikzSolver, type PicInput } from '@/composables/figureRender'
+import { attachTikzFigures, flowDeckElements, picElementItems, tikzSolver, type PicInput } from '@/composables/figureRender'
 import { cropToFigure, previewToPics, type CropPreview } from '@/composables/figCrop'
 import ScreenshotCapture from './ScreenshotCapture.vue'
 import FigureCropDialog from './FigureCropDialog.vue'
@@ -169,7 +169,7 @@ function freeArea() {
   let y = 80
   for (const e of els) y = Math.max(y, (Number(e.y) || 0) + (Number(e.h) || 0) + 16)
   if (H - y - 24 < 240) y = 80
-  return { x: 60, y, w: Math.max(320, W - 120), h: Math.max(240, H - y - 24) }
+  return { x: 60, y, w: Math.max(320, W - 120), h: Math.max(240, H - y - 24), pageW: W, pageH: H }
 }
 /** 切图结果的说明（只留图形 / 只去白边 / 认不出图形整张插）✓ */
 function cutNote(cut: { cropped: number; trimmed: number; kept: number }): string {
@@ -335,7 +335,8 @@ function tikzSummary(got: { figures: number; texts: number; orphans: number }, s
 
 /** 【v1647】一键插入幻灯片（用户要求）：AI 回答是 Markdown → 走应用自己的 markdownToDeck ✓
  *   （与「导入 PDF → 抽取文字」同一条链路，公式/标题/段落都按应用的口径成页 ✓）
- *  【v1652】在此之前先把 AI 顺口写的 TikZ **真译成图形**（译不出的才退回一行占位）✓ */
+ *  【v1652】在此之前先把 AI 顺口写的 TikZ **真译成图形**（译不出的才退回一行占位）✓
+ *  【v1668】用户要求：插进**当前页**、不新建页 ✓ —— 元素摊平排到当前页已有内容下面（页面数量不变 ✓） */
 async function insertToSlides(t: string, pics: string[] = []) {
   try {
     // 【v1659】先按"只切图形"把附件图裁好（用户要求：题目文字不切）✓
@@ -354,17 +355,22 @@ async function insertToSlides(t: string, pics: string[] = []) {
     const deck = markdownToDeck(mdClean(md))
     if (!deck || !deck.slides || !deck.slides.length) { saveMsg.value = '这段内容里没有能成页的文字'; return }
     const got = attachTikzFigures(deck, picList.length ? [] : pre.specs)
-    const picN = picList.length ? attachPics(deck, picList) : 0
-    // 【v1667】★ 这里原来用 importDeck —— 它的语义是"**整份替换**当前课件"（导入课件库 / PDF 才该用它）✗：
-    //   用户实报"插入幻灯片后缩略图只剩一张，即使当前在第 2 张"✓。改成 insertSlides：
-    //   把 AI 生成的这几页插到**当前页之后**，原来的页面一张不少 ✓，插完停在第一张新页上 ✓
-    store.insertSlides(deck.slides, store.currentIndex)
-    const ok = deck.slides.length > 0
-    saveMsg.value = ok
-      ? ('已插入 ' + deck.slides.length + ' 页（接在当前页后面）' +
-        (picN ? '，题图 ' + picN + ' 张' + cutNote(cut) + '，没再重建数学图形' : '') +
-        tikzSummary(got, pre.specs, pre.fails))
-      : '生成的内容无效（已取消，未影响当前内容）'
+    // 【v1668】★ 用户要求：插进**当前页**、不新建页 ✓（v1667 的"接在新页后面"用户不要 ✗）
+    //   做法：还是走应用自己的 markdownToDeck（公式/标题/字号口径与「导入 PDF」一致 ✓），
+    //   但把元素**摊平**排到当前页已有内容的下面 ✓（与题库「插入幻灯片」同一套手感 ✓）
+    const area = freeArea()
+    const els = flowDeckElements(deck, area, 16, area.pageW)
+    // 题图接在文字元素后面（同一页 ✓ 一次选中 ✓）
+    if (picList.length) {
+      let y = area.y
+      for (const it of els) y = Math.max(y, (Number(it.overrides.y) || 0) + (Number(it.overrides.h) || 0) + 16)
+      els.push(...picElementItems(picList, { x: area.x, y, w: area.w, h: Math.max(200, area.y + area.h - y) }, 20, 'center'))
+    }
+    if (!els.length) { saveMsg.value = '这段内容里没有能插进去的文字'; return }
+    store.addElements(els)   // 一次快照、一次选中 ✓（页面数量不变 ✓）
+    saveMsg.value = '已把 ' + els.length + ' 个元素插到当前页（页面数量不变）' +
+      (picList.length ? '，题图 ' + picList.length + ' 张' + cutNote(cut) + '，没再重建数学图形' : '') +
+      tikzSummary(got, pre.specs, pre.fails)
   } catch (e) { saveMsg.value = '插入失败：' + String((e as Error)?.message || e) }
 }
 /** 这条 AI 回答对应的问题带了哪些附件原图（往上找最近一条 user 消息 ✓） */
@@ -461,7 +467,7 @@ async function saveAnswer(t: string) {
             </div>
             <span v-if="m.role === 'ai'" class="ds__acts">
               <button class="ds__mini" title="复制这条回答" @click="copyOne(m.text)">复制</button>
-              <button class="ds__mini ds__mini--main" :title="'把这条回答变成幻灯片' + (picsOf(i).length ? '（连上面那条问题带的 ' + picsOf(i).length + ' 张原图一起贴进去，不再重建数学图形）' : '（公式按应用的排版口径渲染）')" @click="insertToSlides(m.text, picsOf(i))">插入幻灯片</button>
+              <button class="ds__mini ds__mini--main" :title="'把这条回答插到当前页' + (picsOf(i).length ? '（连上面那条问题带的 ' + picsOf(i).length + ' 张原图一起贴进去，不再重建数学图形）' : '（文字/公式按应用口径渲染，接在当前页已有内容下面）')" @click="insertToSlides(m.text, picsOf(i))">插入幻灯片</button>
               <button class="ds__mini" title="存成 .md（桌面端存到「文档」目录，可以直接用「导入 .md 文件」核对入库）" @click="saveAnswer(m.text)">存为 .md</button>
             </span>
           </div>

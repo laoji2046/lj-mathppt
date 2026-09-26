@@ -1,7 +1,7 @@
 import { createApp, h } from 'vue'
 import MathFigureElement from '@/components/elements/MathFigureElement.vue'
 import { createElement } from '@/types'
-import type { MathFigureElement as MFigEl, MathFigureKind, SlideElement } from '@/types'
+import type { ElementType, MathFigureElement as MFigEl, MathFigureKind, SlideElement } from '@/types'
 import { CONICS, DEFAULT_PIECEWISE, conicLineRoots, figureBox, mapper, withParams } from '@/composables/mathPlot'
 import { THM_LABELS } from '@/composables/solid3d'
 import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
@@ -194,6 +194,47 @@ export function layoutPics(
     const x = align === 'center' ? area.x + Math.round((area.w - size.w) / 2) : area.x
     out.push({ x: Math.round(x), y: Math.round(y), w: size.w, h: size.h })
     y += size.h + gap
+  }
+  return out
+}
+
+/**
+ * 【v1668】把"生成好的那几页"**摊平成一串元素**，按顺序排进当前页的可用区域 ✓
+ *  用户要求（v1668）：AI 回答下面的「插入幻灯片」放进**当前页**，不新建页 ✓
+ *  · 复用应用自己的 markdownToDeck 结果（公式 / 标题 / 字号口径都与「导入 PDF」一致 ✓），只是不再成页 ✓
+ *  · 目标页比生成时窄（PPT 导入的课件是 1280，AI 生成的是 1920）就**整体缩** ✓（宽高与字号一起缩 ✓）
+ *  · **必须重发 id**：元素是从另一份 deck 里搬过来的，id 原样带过去会和当前页现有元素撞号 ✗
+ *    （store.addElements 会用 createElement 重新发 id，所以这里把 id / groupId 删掉 ✓）
+ */
+export function flowDeckElements(
+  deck: Deck | null | undefined,
+  area: { x: number; y: number; w: number; h: number },
+  gap = 16,
+  targetW?: number,
+): { type: ElementType; overrides: Partial<SlideElement> }[] {
+  const out: { type: ElementType; overrides: Partial<SlideElement> }[] = []
+  const slides = (deck && deck.slides) || []
+  const W0 = Number(deck && deck.width) || 1920
+  // 只在目标页更窄时缩 ✓（放大反而把字糊掉 ✗）
+  const k = Math.min(1, (Number(targetW) || W0) / W0)
+  let y = area.y
+  for (const s of slides) {
+    for (const e of (s.elements || []) as SlideElement[]) {
+      if (!e || !e.type) continue
+      const over: Record<string, unknown> = { ...e }
+      delete over.id
+      delete over.groupId
+      const fs = (e as { fontSize?: number }).fontSize
+      const w = Math.max(40, Math.round((Number(e.w) || 400) * k))
+      const h = Math.max(24, Math.round((Number(e.h) || 80) * k))
+      over.x = Math.round(area.x + (Number(e.x) || 0) * k)
+      over.y = Math.round(y)
+      over.w = w
+      over.h = h
+      if (typeof fs === 'number') over.fontSize = Math.max(8, Math.round(fs * k))
+      out.push({ type: e.type, overrides: over as Partial<SlideElement> })
+      y += h + gap
+    }
   }
   return out
 }
