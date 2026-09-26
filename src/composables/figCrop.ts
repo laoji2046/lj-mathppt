@@ -5,31 +5,34 @@
  * 文字也带进去（重复且难看）✗。这里做一个**够用的版面启发式**，并且**认得不准就返回 null**
  * （调用方退回"整张图"，绝不乱裁）✓。
  *
- * 判据（先找出"正文行"，剩下的墨迹就是图形）：
- *   1. 二值化（Otsu）→ 连通域 → 每个墨迹块的 bbox；
- *   2. 用小块高度的**中位数**估"一行字多高"，把高度接近它的小块当**字形块**；
- *   3. 字形块按 y 重叠聚成行；**又宽又多**的行（≥6 块且横向铺满 55%）判为正文行 → 整行去掉；
- *      紧挨着正文行、且铺得比较宽的续行也去掉（段落的最后一行常常只有几个字 ✓）；
- *   4. 剩下的墨迹（图形轮廓 + 图里的小字母）取 bbox = 图形区域 ✓；
- *   5. 兜底：图形区域太小（<2% 面积）或太大（>92%）→ 返回 null（不裁）。
+ * 判据（v1659b 改用"墨迹带"，不再依赖"每个字是一个小连通域"）：
+ *   ⚠ 教训：第一版按"小方块 = 字形"来认，真截图里**汉字粘连 / 抗锯齿**会把一行字连成长块 ✗
+ *     → 整行认不出是文字 → 切出来还带着题目（用户实报"好像切的还有题目"）✗
+ *   现在：
+ *   1. 行投影 → **墨迹带**（1~2 行的空隙并进去：汉字上下结构/抗锯齿常留空行 ✓）；
+ *   2. 行高 = 薄带高度的中位数；
+ *   3. 每条带算：墨迹范围、最密那一行的**段数**（一行字十几段；图形的边线只有一两段 ✓）；
+ *   4. 判"文字行" = 高度像一行 + 铺得不太窄 + 不是几乎空白，**再分两种**：
+ *      · 段数够多（≥5）→ 直接算文字行 ✓
+ *      · 段数少但**与邻带成组**（高度/宽度接近、间距规律）→ 也算文字行 ✓（粘连成一块也能认出来 ✓）
+ *   5. 续行：紧挨文字行、高度也像一行、段数 ≥3 的短行（段落最后一行常常只有几个字 ✓）也去掉；
+ *      ⚠ 但**薄**墨迹（< 半行高）不动它 —— 图里的虚线/长划线正是很薄的一带 ✗
+ *   6. 剩下的墨迹（图形轮廓 + 图里的小字母）取 bbox = 图形区域 ✓；
+ *   7. 兜底：太小（<2% 面积）或太大（>92%）→ 返回 null（不裁）。
  *
- * ⚠ 核心部分是**纯函数**（吃二值墨迹数组），所以能在 node 里用合成图直接测 ✓
+ * ⚠ 核心是**纯函数**（吃二值墨迹数组），所以能在 node 里用合成图直接测 ✓
  *   （教训：v1652~v1656 那个丢反斜杠的 bug 就是因为探针照抄了一份逻辑 ✗）
  */
 
 export interface CropBox { x: number; y: number; w: number; h: number }
 
 export interface CropOpt {
-  /** 一行至少几个字形块才算"正文行"（默认 6） */
-  minGlyphs?: number
-  /** 正文行要占"最宽那一行"的比例（默认 0.6，内容自适应 ✓） */
+  /** 一行至少几段墨迹才算"文字行"（默认 5：图形边线通常只有 1~2 段 ✓） */
+  minRuns?: number
+  /** 文字行要占"最宽那一带"的比例（默认 0.5，内容自适应 ✓） */
   rowSpan?: number
-  /** 字形块的高度上限 = 行高中位数的几倍（默认 2.2） */
-  glyphH?: number
-  /** 字形块的宽度上限 = 行高中位数的几倍（默认 8） */
-  glyphW?: number
-  /** 续行判据：紧邻正文行（几倍行高内）且铺满整图的比例（默认 0.22） */
-  contSpan?: number
+  /** 文字行的高度上限 = 行高的几倍（默认 2.2） */
+  lineMax?: number
   /** 图形区域面积占整图的下限 / 上限（默认 0.02 / 0.92） */
   minArea?: number
   maxArea?: number
@@ -55,127 +58,114 @@ export function otsuThreshold(hist: number[], total: number): number {
   return best
 }
 
-interface Blob { x0: number; y0: number; x1: number; y1: number; n: number }
-
-/** 连通域（8 邻域，迭代式栈，避免大图递归爆栈） */
-function blobs(ink: Uint8Array, w: number, h: number): Blob[] {
-  const seen = new Uint8Array(w * h)
-  const out: Blob[] = []
-  const stack: number[] = []
-  for (let i = 0; i < ink.length; i++) {
-    if (!ink[i] || seen[i]) continue
-    seen[i] = 1
-    stack.length = 0
-    stack.push(i)
-    let x0 = w, y0 = h, x1 = -1, y1 = -1, n = 0
-    while (stack.length) {
-      const p = stack.pop()!
-      const x = p % w, y = (p - x) / w
-      if (x < x0) x0 = x
-      if (x > x1) x1 = x
-      if (y < y0) y0 = y
-      if (y > y1) y1 = y
-      n++
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (!dx && !dy) continue
-          const nx = x + dx, ny = y + dy
-          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
-          const q = ny * w + nx
-          if (ink[q] && !seen[q]) { seen[q] = 1; stack.push(q) }
-        }
-      }
-    }
-    out.push({ x0, y0, x1, y1, n })
+/** 某一行上"有几段墨迹"—— 一行字有十几段（每个字 2~4 段）；图形边线只有一两段 ✓ */
+function runsAt(ink: Uint8Array, w: number, y: number): number {
+  let runs = 0, prev = 0
+  for (let x = 0; x < w; x++) {
+    const v = ink[y * w + x] ? 1 : 0
+    if (v && !prev) runs++
+    prev = v
   }
-  return out
+  return runs
 }
+
+interface Band { y0: number; y1: number; x0: number; x1: number; bw: number; inkN: number; runs: number; hh: number }
 
 /**
  * 二值墨迹图 → 图形区域。认不出（整张都是文字 / 剩下的太少太大）返回 null ✓
  * ink: 长度 w*h，非 0 表示"这里有墨" ✓
  */
 export function figureBoxFromInk(ink: Uint8Array, w: number, h: number, opt: CropOpt = {}): CropBox | null {
-  const minGlyphs = opt.minGlyphs ?? 6
-  const rowSpan = opt.rowSpan ?? 0.6
-  const glyphH = opt.glyphH ?? 2.2
-  const glyphW = opt.glyphW ?? 8
-  const contSpan = opt.contSpan ?? 0.22
+  const minRuns = opt.minRuns ?? 5
+  const rowSpan = opt.rowSpan ?? 0.5
+  const lineMax = opt.lineMax ?? 2.2
   const minArea = opt.minArea ?? 0.02
   const maxArea = opt.maxArea ?? 0.92
   const pad = opt.pad ?? 0.04
   if (w < 8 || h < 8) return null
 
-  const bs = blobs(ink, w, h)
-  if (!bs.length) return null
-
-  // 行高中位数：只统计"小块"（大块是图形轮廓，会把中位数拉飞 ✗）
-  const small = bs.filter((b) => (b.y1 - b.y0 + 1) <= h * 0.08 && b.n <= w * h * 0.002).map((b) => b.y1 - b.y0 + 1)
-  let lineH = 0
-  if (small.length >= 4) {
-    small.sort((a, b) => a - b)
-    lineH = small[Math.floor(small.length / 2)]
+  // ① 行投影 → 墨迹带（空隙 ≤2 行并进去 ✓）
+  const minRowInk = Math.max(1, Math.round(w * 0.004))
+  const prof = new Int32Array(h)
+  for (let y = 0; y < h; y++) {
+    let n = 0
+    for (let x = 0; x < w; x++) if (ink[y * w + x]) n++
+    prof[y] = n
   }
-  // 估不出行高（例如整张就是一幅线稿）→ 整幅当图形 ✓
+  const has = (y: number) => prof[y] >= minRowInk
+  const bands: { y0: number; y1: number }[] = []
+  for (let y = 0; y < h;) {
+    if (!has(y)) { y++; continue }
+    const y0 = y
+    let last = y
+    while (y < h) {
+      if (has(y)) { last = y; y++; continue }
+      let yy = y
+      while (yy < h && !has(yy) && yy - y <= 2) yy++
+      if (yy < h && has(yy) && yy - y <= 2) { y = yy; continue }
+      break
+    }
+    bands.push({ y0, y1: last })
+    y = last + 1
+  }
+  if (!bands.length) return null
+
+  // ② 行高：薄带高度的中位数（厚带多半是图形 ✓）
+  const thin = bands.map((b) => b.y1 - b.y0 + 1).filter((v) => v <= h * 0.1).sort((a, b) => a - b)
+  const lineH = thin.length ? thin[Math.floor(thin.length / 2)] : 0
   if (!lineH) return fitBox(0, 0, w - 1, h - 1, w, h, minArea, maxArea, pad)
 
-  const isGlyph = (b: Blob) => (b.y1 - b.y0 + 1) <= lineH * glyphH && (b.x1 - b.x0 + 1) <= lineH * glyphW
-  const glyphs = bs.filter(isGlyph)
-  if (glyphs.length < minGlyphs) return fitBox(0, 0, w - 1, h - 1, w, h, minArea, maxArea, pad)
-
-  // 按 y 中心聚行（同一行的字形块中心差不超过半个行高 ✓）
-  glyphs.sort((a, b) => ((a.y0 + a.y1) / 2) - ((b.y0 + b.y1) / 2))
-  interface Row { y0: number; y1: number; x0: number; x1: number; n: number; members: Blob[] }
-  const rows: Row[] = []
-  for (const g of glyphs) {
-    const cy = (g.y0 + g.y1) / 2
-    const r = rows[rows.length - 1]
-    if (r && Math.abs(cy - (r.y0 + r.y1) / 2) <= lineH * 0.7) {
-      r.y0 = Math.min(r.y0, g.y0); r.y1 = Math.max(r.y1, g.y1)
-      r.x0 = Math.min(r.x0, g.x0); r.x1 = Math.max(r.x1, g.x1)
-      r.n++; r.members.push(g)
-    } else {
-      rows.push({ y0: g.y0, y1: g.y1, x0: g.x0, x1: g.x1, n: 1, members: [g] })
+  // ③ 每条带：墨迹范围 + 最密那一行的段数
+  const info: Band[] = bands.map((b) => {
+    let x0 = w, x1 = -1, inkN = 0, bestY = b.y0, bestInk = -1
+    for (let y = b.y0; y <= b.y1; y++) {
+      let n = 0
+      for (let x = 0; x < w; x++) if (ink[y * w + x]) { n++; if (x < x0) x0 = x; if (x > x1) x1 = x }
+      inkN += n
+      if (n > bestInk) { bestInk = n; bestY = y }
     }
-  }
-  // 正文行：块多 + **铺得比别的行宽**（用内容自适应的行宽 ✓）
-  //   ⚠ 别写死"占整图 55%"：截图里文字往往只占半幅宽（实测合成图 26 字一行才 52% ✗）→ 会一行都认不出
-  const maxSpan = rows.reduce((m, r) => Math.max(m, r.x1 - r.x0 + 1), 1)
-  const bodySpan = Math.max(maxSpan * rowSpan, w * 0.25)
-  const cand = rows.map((r) => r.n >= minGlyphs && (r.x1 - r.x0 + 1) >= bodySpan)
-  // ⚠ 只删**成段**的正文（≥2 行相邻）：孤零零一行宽墨迹更可能是图里的**虚线/长划线** ✗
-  //   （实测风险：虚线的短划也是"小方块"，会被当成一行字 → 整条虚线被切掉 ✗）
-  // 相邻判据也**自适应**：用各行间距的中位数（写死 3 倍行高时，行距大一点的文本会一行都不算 ✗）
-  const centers = rows.map((r) => (r.y0 + r.y1) / 2)
-  const gaps = centers.slice(1).map((c, i) => c - centers[i]).filter((g) => g > 0).sort((a, b) => a - b)
-  // 用**最紧的那档行距**（= 正文自己的行距）：中位数会被"正文到图"那一段大间距带偏 ✗
-  //   （实测：3 行组成的图里，中位间距 226px → 虚线行被当成"紧挨着正文"→ 被切掉 ✗）
-  const baseGap = gaps.length ? gaps[0] : lineH * 2
-  const nearGap = Math.max(lineH * 2.5, baseGap * 1.6)
-  const isBody = cand.map((v, i) => {
-    if (!v) return false
-    const near = (j: number) => j >= 0 && j < rows.length && cand[j] && Math.abs(centers[j] - centers[i]) <= nearGap
-    return near(i - 1) || near(i + 1)
+    const bw = x1 >= x0 ? x1 - x0 + 1 : 0
+    return { y0: b.y0, y1: b.y1, x0, x1, bw, inkN, runs: runsAt(ink, w, bestY), hh: b.y1 - b.y0 + 1 }
   })
-  const drop = rows.map((r, i) => {
-    if (isBody[i]) return true
+  const maxBw = info.reduce((m, b) => Math.max(m, b.bw), 1)
+  const wideEnough = Math.max(maxBw * rowSpan, w * 0.25)
+
+  // ④ "像一行字"的带（高度像、铺得不太窄、不是几乎空白）
+  const lineLike = info.map((b) => b.hh >= lineH * 0.5 && b.hh <= lineH * lineMax && b.bw >= wideEnough && b.inkN / Math.max(1, b.hh * b.bw) >= 0.05)
+  const center = (b: Band) => (b.y0 + b.y1) / 2
+  // 段数够多 → 文字行；段数少但**与邻带成组**（高度/宽度接近、间距规律）→ 也是文字行 ✓
+  //   （真截图里汉字粘连会把一行连成长块，段数掉到 1~2 ✗ —— 靠"成组"认出来 ✓）
+  const isText = info.map((b, i) => {
+    if (!lineLike[i]) return false
+    if (b.runs >= minRuns) return true
     for (const j of [i - 1, i + 1]) {
-      if (j < 0 || j >= rows.length || !isBody[j]) continue
-      const gap = Math.abs((rows[j].y0 + rows[j].y1) / 2 - (r.y0 + r.y1) / 2)
-      if (gap <= lineH * 2.2 && (r.x1 - r.x0 + 1) >= Math.max(maxSpan * contSpan, w * 0.08)) return true
+      if (j < 0 || j >= info.length || !lineLike[j]) continue
+      const c = info[j]
+      const dh = Math.abs(b.hh - c.hh) <= lineH * 0.6
+      const dw = Math.abs(b.bw - c.bw) <= Math.max(b.bw, c.bw) * 0.35
+      if (dh && dw && Math.abs(center(b) - center(c)) <= lineH * 4) return true
     }
     return false
   })
-  const dropped = new Set<Blob>()
-  rows.forEach((r, i) => { if (drop[i]) for (const m of r.members) dropped.add(m) })
+  // 续行：紧挨文字行、高度也像一行、段数 ≥3 的短行（段落最后一行常常只有几个字 ✓）
+  const drop = info.map((b, i) => {
+    if (isText[i]) return true
+    if (b.hh < lineH * 0.5 || b.hh > lineH * lineMax) return false      // 太薄（虚线/长划线）→ 不动 ✓
+    if (b.runs < 3) return false
+    for (const j of [i - 1, i + 1]) {
+      if (j < 0 || j >= info.length || !isText[j]) continue
+      if (Math.abs(center(b) - center(info[j])) <= lineH * 2.6) return true
+    }
+    return false
+  })
 
-  // 剩下的墨迹 = 图形（含图里的小字母 ✓）
+  // ⑤ 剩下的墨迹 = 图形（含图里的小字母 ✓）
   let x0 = w, y0 = h, x1 = -1, y1 = -1
-  for (const b of bs) {
-    if (dropped.has(b)) continue
+  info.forEach((b, i) => {
+    if (drop[i]) return
     x0 = Math.min(x0, b.x0); y0 = Math.min(y0, b.y0)
     x1 = Math.max(x1, b.x1); y1 = Math.max(y1, b.y1)
-  }
+  })
   if (x1 < 0) return null                       // 整张都是文字 → 不裁
   return fitBox(x0, y0, x1, y1, w, h, minArea, maxArea, pad)
 }
@@ -237,7 +227,6 @@ export async function cropToFigure(src: string, opt: CropOpt & { maxSide?: numbe
     for (let p = 0; p < gray.length; p++) ink[p] = gray[p] <= th ? 1 : 0
     const box = figureBoxFromInk(ink, w, h, opt)
     if (!box) return { src, box: null, cropped: false, why: '这一张认不出单独的图形（整张都要）' }
-    // 按（放大回原图坐标的）框裁出来
     const sx = box.x / s, sy = box.y / s, sw = box.w / s, sh = box.h / s
     const out = document.createElement('canvas')
     out.width = Math.max(8, Math.round(sw)); out.height = Math.max(8, Math.round(sh))
