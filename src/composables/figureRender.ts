@@ -198,6 +198,28 @@ export function layoutPics(
   return out
 }
 
+/**
+ * 【v1667】把图变成**可以直接交给 store.addElements 的项**（一次插多张 ✓）
+ *  抽成函数是为了能在探针里断言"两张就是两张、位置不重叠、比例不变" ——
+ *  用户实报过"切图插入幻灯片只插进去一张"，这种事不该只靠肉眼 ✓
+ */
+export function picElementItems(
+  pics: (string | PicInput)[],
+  area: { x: number; y: number; w: number; h: number },
+  gap = 16,
+  align: 'left' | 'center' = 'left',
+): { type: 'image'; overrides: Partial<SlideElement> }[] {
+  const list: PicInput[] = (pics || [])
+    .filter(Boolean)
+    .map((p) => (typeof p === 'string' ? { src: p } : p))
+    .filter((p) => !!p.src)
+  return layoutPics(list, area, gap, align).map((r, i) => {
+    const el = createElement('image', r)
+    Object.assign(el, { src: list[i].src, fit: 'contain' })
+    return { type: 'image' as const, overrides: el as Partial<SlideElement> }
+  })
+}
+
 /** 新页的 id（不 import store 里的工具，免得给这个纯渲染模块添依赖 ✓） */
 function newSlideId(): string {
   return 's-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7)

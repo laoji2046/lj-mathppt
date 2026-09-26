@@ -14,13 +14,12 @@ import AppIcon from './AppIcon.vue'
 import { pdfToMarkdown } from '@/pdf/pdfImport'
 import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
 import { markdownToDeck } from '@/composables/mdDeck'
-import { attachPics, attachTikzFigures, layoutPics, tikzSolver, type PicInput } from '@/composables/figureRender'
+import { attachPics, attachTikzFigures, picElementItems, tikzSolver, type PicInput } from '@/composables/figureRender'
 import { cropToFigure, previewToPics, type CropPreview } from '@/composables/figCrop'
 import ScreenshotCapture from './ScreenshotCapture.vue'
 import FigureCropDialog from './FigureCropDialog.vue'
 import { tikzToPlaceholders, type TikzSpec } from '@/composables/tikzFigure'
 import { useDeckStore } from '@/stores/deck'
-import { createElement, type SlideElement } from '@/types'
 
 const open = ref(false)
 const input = ref('')
@@ -143,7 +142,8 @@ function usePreset(p: { label: string; text: string }) {
 /** 【v1658】「图 → 幻灯片」：**不调 AI**，直接把当前附件图插到当前页（用户："切出图形插入幻灯片"）
  *  【v1665】按**图片自己的比例**定尺寸、在当前页的**空位上纵向排开** ——
  *    原来一律 900×560、每张只挪 24px ✗：竖长的图被框得又小又空，多张图几乎叠在同一处 ✗
- *  【v1666】插之前先弹预览让老师确认（用户要求 ✓）；取消就什么都不插 ✓ */
+ *  【v1666】插之前先弹预览让老师确认（用户要求 ✓）；取消就什么都不插 ✓
+ *  【v1667】排版+成元素交给 figureRender.picElementItems（可被探针直接断言"几张就是几张" ✓） */
 async function picsToSlide() {
   const pics = attImgs.value.slice(0, MAX_IMG)
   if (!pics.length) { saveMsg.value = '先在下面点「＋图」选一张（或 Ctrl+V 粘一张），再点这个'; return }
@@ -153,14 +153,9 @@ async function picsToSlide() {
     const chosen = await askPreview(cut.items)
     if (!chosen) { saveMsg.value = '已取消，什么都没插'; return }
     const out = previewToPics(chosen)
-    const rects = layoutPics(out, freeArea(), 20, 'center')
-    const items = rects.map((r, i) => {
-      const el = createElement('image', r)
-      Object.assign(el, { src: out[i].src, fit: 'contain' })
-      return { type: 'image' as const, overrides: el as Partial<SlideElement> }
-    })
+    const items = picElementItems(out, freeArea(), 20, 'center')
     store.addElements(items)
-    saveMsg.value = '已把 ' + items.length + ' 张图插到当前页' + cutNote(cut) + sizeNote(rects) +
+    saveMsg.value = '已把 ' + items.length + ' 张图插到当前页' + cutNote(cut) + sizeNote(items.map((it) => it.overrides)) +
       (input.value.trim() ? '（想连题目文字一起，就用回答下面的「插入幻灯片」）' : '')
   } catch (e) { saveMsg.value = '插入失败：' + String((e as Error)?.message || e) } finally { busy.value = false }
 }
@@ -185,8 +180,9 @@ function cutNote(cut: { cropped: number; trimmed: number; kept: number }): strin
   return bits.length ? '（' + bits.join('；') + '）' : ''
 }
 /** 插进去的实际尺寸（老师一眼就能看出图和版面配不配 ✓） */
-function sizeNote(rects: { w: number; h: number }[]): string {
-  return rects.length ? '，尺寸 ' + rects.map((r) => r.w + '×' + r.h).join('、') : ''
+function sizeNote(rects: { w?: number; h?: number }[]): string {
+  const bits = rects.map((r) => (Number(r.w) || 0) + '×' + (Number(r.h) || 0))
+  return bits.length ? '，尺寸 ' + bits.join('、') : ''
 }
 
 /** AI Key：名字不写死 —— 设置里存的是哪个键就用哪个（避免和设置面板漂移 ✗）✓ */
@@ -359,9 +355,13 @@ async function insertToSlides(t: string, pics: string[] = []) {
     if (!deck || !deck.slides || !deck.slides.length) { saveMsg.value = '这段内容里没有能成页的文字'; return }
     const got = attachTikzFigures(deck, picList.length ? [] : pre.specs)
     const picN = picList.length ? attachPics(deck, picList) : 0
-    const ok = store.importDeck(deck)
+    // 【v1667】★ 这里原来用 importDeck —— 它的语义是"**整份替换**当前课件"（导入课件库 / PDF 才该用它）✗：
+    //   用户实报"插入幻灯片后缩略图只剩一张，即使当前在第 2 张"✓。改成 insertSlides：
+    //   把 AI 生成的这几页插到**当前页之后**，原来的页面一张不少 ✓，插完停在第一张新页上 ✓
+    store.insertSlides(deck.slides, store.currentIndex)
+    const ok = deck.slides.length > 0
     saveMsg.value = ok
-      ? ('已插入 ' + deck.slides.length + ' 页幻灯片' +
+      ? ('已插入 ' + deck.slides.length + ' 页（接在当前页后面）' +
         (picN ? '，题图 ' + picN + ' 张' + cutNote(cut) + '，没再重建数学图形' : '') +
         tikzSummary(got, pre.specs, pre.fails))
       : '生成的内容无效（已取消，未影响当前内容）'
