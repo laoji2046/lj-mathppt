@@ -25,7 +25,28 @@ function persist() {
   } catch { /* 存不上也不影响使用 */ }
 }
 
+/** 【v1678】一次性迁移：用户要求关掉「PDF 导入 / Word 导入」✓
+ *  ⚠ 光给 manifest 加 defaultOn:false **不管用** ✗ —— restore 的口径是"存过就以存档为准"，
+ *  而用户机器上的存档里这两项是开着的 ✓（实测：用户报"两个功能都还在" ✓）→ 必须把它从存档里摘掉一次 ✓。
+ *  只摘一次（留个迁移标记 ✓）：之后用户在「功能管理」里想再打开照样能打开 ✓（可逆 ✓）。
+ */
+const MIG_KEY = 'lj-mathslides-vue:addons-mig-1678'
+const OFF_BY_REQUEST = ['pdf-import', 'docx-import']
+function migrateOnce() {
+  try {
+    if (localStorage.getItem(MIG_KEY)) return
+    const raw = localStorage.getItem(KEY)
+    const on = raw ? JSON.parse(raw) : null
+    if (Array.isArray(on)) {
+      const next = on.filter((id: string) => OFF_BY_REQUEST.indexOf(id) < 0)
+      localStorage.setItem(KEY, JSON.stringify(next))
+    }
+    localStorage.setItem(MIG_KEY, '1')
+  } catch { /* 读不到/存不上都不影响启动 */ }
+}
+
 function restore() {
+  migrateOnce()
   let on: string[] | null = null
   try { on = JSON.parse(localStorage.getItem(KEY) || 'null') } catch { on = null }
   for (const m of manifests.values()) {
