@@ -4544,7 +4544,7 @@ fn ai_chat(base_url: String, api_key: String, model: String, system: String, use
     };
     // 【v1645】带图提问：图片按 OpenAI 兼容格式放进 content 数组（data URL）✓
     //   端点/模型不支持视觉时，服务端会返回错误，前端如实显示（不要把图静默丢掉 ✗）
-    let content = serde_json::json!(user_text.clone());
+    let mut content = serde_json::json!(user_text.clone());
     let imgs: Vec<String> = images.unwrap_or_default();
     if !imgs.is_empty() {
         let mut arr: Vec<serde_json::Value> = vec![serde_json::json!({ "type": "text", "text": user_text })];
