@@ -6,7 +6,12 @@ import { captureScreens, captureWindow, isTauri, listWindows, setCaptureMode, ty
 import type { SlideElement } from '@/types'
 
 const store = useDeckStore()
-const emit = defineEmits<{ (e: 'close'): void }>()
+/**
+ * 【v1663】attach 模式：不要往幻灯片插，而是把裁好的图**交回调用方** ✓
+ * （DeepSeek 侧边栏要的是"当附件用"，不是"插到画布上"✗ —— 其余交互、选区、桌面/窗口切换全都不用改 ✓）
+ */
+const props = defineProps<{ attach?: boolean }>()
+const emit = defineEmits<{ (e: 'close'): void; (e: 'done', dataUrl: string): void }>()
 
 const state = ref<'loading' | 'ready' | 'error'>('loading')
 const err = ref('')
@@ -202,6 +207,8 @@ function onUp() {
 }
 
 function insertImage(url: string, nw: number, nh: number) {
+  // attach 模式：交给调用方（侧边栏拿它当附件）✓
+  if (props.attach) { emit('done', url); void finish(); return }
   // 以合适尺寸插入（限制最大 900×620，保持比例）
   let w = nw || 640
   let h = nh || 400

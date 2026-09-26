@@ -8,7 +8,7 @@
  *
  * 收起时只留一条 40px 竖条；Key 复用「设置 → AI Key」那一份 ✓
  */
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { invoke, isTauri } from '@/composables/useTauri'
 import AppIcon from './AppIcon.vue'
 import { pdfToMarkdown } from '@/pdf/pdfImport'
@@ -16,6 +16,7 @@ import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
 import { markdownToDeck } from '@/composables/mdDeck'
 import { attachPics, attachTikzFigures, tikzSolver } from '@/composables/figureRender'
 import { cropToFigure } from '@/composables/figCrop'
+import ScreenshotCapture from './ScreenshotCapture.vue'
 import { tikzToPlaceholders, type TikzSpec } from '@/composables/tikzFigure'
 import { useDeckStore } from '@/stores/deck'
 import { createElement, type SlideElement } from '@/types'
@@ -28,6 +29,40 @@ const listEl = ref<HTMLElement | null>(null)
 const msgs = ref<{ role: 'user' | 'ai'; text: string; imgs?: string[] }[]>([])
 const keyTick = ref(0)
 const taEl = ref<HTMLTextAreaElement | null>(null)
+
+/* ---- 【v1663】截图：复用应用已有的桌面截图弹窗（能选窗口、能拖选区）✓ ---- */
+const shotOpen = ref(false)
+/** 截完的图直接当附件（不插幻灯片 ✓ 那是 SnippetCapture 的 attach 模式 ✓） */
+function onShot(url: string) {
+  shotOpen.value = false
+  if (!url) return
+  if (attImgs.value.length >= MAX_IMG) { attMsg.value = '最多带 ' + MAX_IMG + ' 张图'; return }
+  attImgs.value.push(url)
+  attMsg.value = ''
+  saveMsg.value = '截图已贴进对话（第 ' + attImgs.value.length + ' 张）—— 直接发送提问，或点「切图 → 幻灯片」只把图形切进当前页'
+}
+
+/** 【v1663】Ctrl+V 粘图：提示里一直写着"可粘贴截图"，但之前其实**没接** ✗ —— 现在补上 ✓
+ *  （老师习惯用 Snipaste 截图，粘一下最顺手 ✓） */
+async function onPaste(e: ClipboardEvent) {
+  const items = e.clipboardData && e.clipboardData.items
+  if (!items) return
+  let added = 0
+  for (const it of Array.from(items)) {
+    if (!it.type || !it.type.startsWith('image/')) continue
+    const f = it.getAsFile()
+    if (!f) continue
+    if (attImgs.value.length >= MAX_IMG) { attMsg.value = '最多带 ' + MAX_IMG + ' 张图'; break }
+    try { attImgs.value.push(await readAsDataUrl(f)); added++ } catch { attMsg.value = '粘进来的图读不出来' }
+  }
+  if (added) {
+    e.preventDefault()
+    attMsg.value = ''
+    saveMsg.value = '已粘进 ' + added + ' 张图——直接发送提问，或点「切图 → 幻灯片」只把图形切进当前页'
+  }
+}
+onMounted(() => window.addEventListener('paste', onPaste))
+onBeforeUnmount(() => window.removeEventListener('paste', onPaste))
 
 /** 【v1659】"只切图形"开关（用户要求：切图只要图形部分，题目文字不切）—— 记住上次的选择 ✓ */
 const ONLY_KEY = 'lj-mathslides:fig-only'
@@ -367,10 +402,11 @@ async function saveAnswer(t: string) {
       </div>
       <footer class="ds__foot">
         <div class="ds__tools">
-          <button class="ds__tool" title="带图片：会和题目一起插进幻灯片；也可以直接 Ctrl+V 粘贴截图" @click="imgInput?.click()">＋图</button>
+          <button class="ds__tool ds__tool--main" title="截屏：截完直接当附件（能选窗口 / 拖选区；也可以 Ctrl+V 粘 Snipaste 的图）" @click="shotOpen = true">截图</button>
+          <button class="ds__tool" title="从文件里选图：会和题目一起插进幻灯片；也可以直接 Ctrl+V 粘贴" @click="imgInput?.click()">＋图</button>
           <button class="ds__tool" title="带文档：PDF 在本机抽文字，MD/TXT/JSON 直接读（纯文本模型也能用）" @click="docInput?.click()">＋文档</button>
-          <span class="ds__toolGap" />
-          <button class="ds__tool ds__tool--main" title="不调 AI：把上面选的图切出来，插到当前页" @click="picsToSlide">切图 → 幻灯片</button>
+          <span class="ds__toolBreak" />
+          <button class="ds__tool ds__tool--main" title="不调 AI：把上面选的图切出来（只留图形），插到当前页" @click="picsToSlide">切图 → 幻灯片</button>
           <button class="ds__tool" :class="{ 'ds__tool--on': onlyFigure }"
             :title="onlyFigure ? '当前：只切图形部分（题目文字不切）—— 点一下改成整张图' : '当前：整张图都插——点一下改成只切图形'"
             @click="toggleOnly">{{ onlyFigure ? '✓ 只切图形' : '整张图' }}</button>
@@ -391,6 +427,8 @@ async function saveAnswer(t: string) {
         </div>
       </footer>
     </section>
+    <!-- 【v1663】截图弹窗（复用应用已有的那个：桌面/窗口切换、拖选区、Esc 取消都现成 ✓） -->
+    <ScreenshotCapture v-if="shotOpen" attach @close="shotOpen = false" @done="onShot" />
   </div>
 </template>
 
@@ -443,7 +481,8 @@ async function saveAnswer(t: string) {
 .ds__foot { border-top: 1px solid var(--border); padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 7px; background: #fff; }
 /* 【v1659】底部工具栏：三枚小工具 + "只切图形"开关（用户要求：美化按钮与布局）✓ */
 .ds__tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.ds__toolGap { flex: 1 1 0; min-width: 0; }
+/* 工具栏刻意分两行：上行"怎么给图"（截图/选图/文档），下行"切图动作" ✓ —— 挤成一行会折得很难看 ✗ */
+.ds__toolBreak { flex: 1 0 100%; height: 0; }
 .ds__tool { height: 26px; padding: 0 10px; border: 1px solid #e6e4dd; border-radius: 8px; background: #fbfbfa; color: #55534d; font-size: 11.5px; line-height: 1; cursor: pointer; }
 .ds__tool:hover { background: #fff; border-color: #ded7ff; color: var(--brand-600, #534AB7); }
 .ds__tool--main { border-color: #ded7ff; background: #f4f2ff; color: #4a3b8f; font-weight: 600; }
