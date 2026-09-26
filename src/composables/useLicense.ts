@@ -10,6 +10,11 @@ import { invoke, isTauri } from '@/composables/useTauri'
 import { verifySerial, LICENSED_FEATURES, type LicenseInfo, type LicensedFeature } from './license'
 
 const STORE_KEY = 'lj-mathslides:license'
+
+/** 【v1675】总开关：false = **授权还没启用**（默认）→ 所有功能都不锁 ✓
+ *  用户 2026-09-26 决定：应用还在开发期，先别给自己上锁 ✗（每换机器都要发号太碍事 ✓）。
+ *  准备往外分发时，把这一行改成 true 就生效 ✓（四个闸门、激活框、发号工具都是现成的 ✓）。 */
+export const LICENSE_ENFORCED = false
 const serial = ref('')
 const info = ref<LicenseInfo | null>(null)
 const machine = ref('')
@@ -55,8 +60,9 @@ export function deactivate() {
   try { localStorage.removeItem(STORE_KEY) } catch { /* 忽略 */ }
 }
 
-/** 这个功能能不能用（不在锁定清单里的一律放行 ✓） */
+/** 这个功能能不能用（不在锁定清单里的一律放行 ✓；总开关关着时全部放行 ✓） */
 export function licensed(f: LicensedFeature | string): boolean {
+  if (!LICENSE_ENFORCED) return true        // 开发期：先不锁（见上面的开关说明 ✓）
   if (info.value) return true
   return LICENSED_FEATURES.indexOf(f as LicensedFeature) < 0
 }

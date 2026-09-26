@@ -702,7 +702,9 @@ onBeforeUnmount(() => {
           <div class="dropdown__group">导出</div>
           <button class="dropdown__item" title="导出独立 HTML" @click="exportHtml"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.html"></svg></span>导出 HTML</button>
           <button class="dropdown__item" title="全部页面 → 打印对话框 → 另存为 PDF（矢量文字）" @click="exportPdf"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.pdf"></svg></span>导出 PDF</button>
-          <button class="dropdown__item" title="当前页截图为 PNG（2 倍分辨率）" @click="exportPng"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.png"></svg></span>导出 PNG（当前页）</button>
+          <!-- 【v1675】激活入口：开发期默认不锁功能，但这里随时能点开看机器码 / 测试激活 ✓ -->
+<button class="dropdown__item" title="序列号：显示本机机器码、激活或取消激活（开发期默认不锁功能）" @click="licOpen = true">激活 / 序列号…</button>
+<button class="dropdown__item" title="当前页截图为 PNG（2 倍分辨率）" @click="exportPng"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.png"></svg></span>导出 PNG（当前页）</button>
           <button class="dropdown__item" title="Markdown 源码：导出或导入（--- 横向 / -- 垂直 / Note: 备注）" @click="setViewMode('split')"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>MD 源码（导出/导入 Markdown）</button>
           <div class="dropdown__group">导入与库</div>
           <button class="dropdown__item" title="导入之前导出的演示 JSON（.json）" @click="pickDeckJson"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>导入演示 JSON</button>
