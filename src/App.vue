@@ -36,8 +36,6 @@ import { vectorizeOpen, vectorizeSrc, vectorizeReplaceId, vectorizeEditId, close
 import { svgEditorOpen, closeSvgEditor } from '@/ui/svgEditor'
 import { geom3dOpen, geom3dEditId } from '@/ui/geom3d'
 import { imageEditOpen, imageEditId, closeImageEditor, openImageEditor } from '@/ui/imageEditor'
-import MarkdownSourcePanel from '@/components/MarkdownSourcePanel.vue'
-import { viewMode } from '@/ui/view'
 import { tplOpen, tplMode, openTemplateLibrary, closeTemplateLibrary } from '@/ui/templateLibrary'
 import { helpOpen, closeHelp } from '@/ui/help'
 import { openFormulaLibrary } from '@/ui/formulaLibrary'
@@ -222,9 +220,8 @@ function onPresent() {
     <EditToolbar />
     <div class="app__body">
       <SlideList />
-      <EditorCanvas v-if="viewMode !== 'source'" :presenting="presenting" />
-      <MarkdownSourcePanel v-if="viewMode === 'split' || viewMode === 'source'" />
-      <PropertyPanel v-if="viewMode === 'canvas'" />
+      <EditorCanvas :presenting="presenting" />
+      <PropertyPanel />
       <!-- 【v1642】右侧 DeepSeek 助手：收起时只留 40px 竖条 ✓ -->
       <AiSidePanel v-if="!presenting" />
     </div>

@@ -60,8 +60,6 @@ export const ICONS: Record<string, string> = {
   up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
   down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
   trash: '<path d="M4 7h16M9 7V5h6v2M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12M10 11v6M14 11v6"/>',
-  /** Markdown 源码（尖括号 + 斜杠） */
-  md: '<path d="M8 9l-3 3 3 3M16 9l3 3-3 3M13.5 7l-3 10"/>',
   /** 旋转 90° / 重置（图片编辑、计时重置） */
   rotate: '<path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v4h-4"/>',
   /** 暂停（演讲者视图计时） */

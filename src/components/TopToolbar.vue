@@ -17,7 +17,6 @@ import ThemePalette from './ThemePalette.vue'
 import FormulaInserter from './FormulaInserter.vue'
 import FormulaLibrary from './FormulaLibrary.vue'
 import { formulaLib, openFormulaLibrary, closeFormulaLibrary } from '@/ui/formulaLibrary'
-import { setViewMode, viewMode } from '@/ui/view'
 import VersionHistory from './VersionHistory.vue'
 import SaveAsDialog from './SaveAsDialog.vue'
 import { isTauri } from '@/composables/useTauri'
@@ -705,7 +704,6 @@ onBeforeUnmount(() => {
           <!-- 【v1675】激活入口：开发期默认不锁功能，但这里随时能点开看机器码 / 测试激活 ✓ -->
 <button class="dropdown__item" title="序列号：显示本机机器码、激活或取消激活（开发期默认不锁功能）" @click="licOpen = true">激活 / 序列号…</button>
 <button class="dropdown__item" title="当前页截图为 PNG（2 倍分辨率）" @click="exportPng"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.png"></svg></span>导出 PNG（当前页）</button>
-          <button class="dropdown__item" title="Markdown 源码：导出或导入（--- 横向 / -- 垂直 / Note: 备注）" @click="setViewMode('split')"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.md"></svg></span>MD 源码（导出/导入 Markdown）</button>
           <div class="dropdown__group">导入与库</div>
           <button class="dropdown__item" title="导入之前导出的演示 JSON（.json）" @click="pickDeckJson"><span class="dropdown__icon"><svg viewBox="0 0 24 24" class="dd__svg" v-html="I.folder"></svg></span>导入演示 JSON</button>
                             <button v-if="addonOn('pptx-import')" class="dropdown__item" title="导入 PPT（.pptx）：本地解析，文字 / 公式 / 图片 / 表格一并搬过来" @click="pickPptx">
@@ -730,12 +728,6 @@ onBeforeUnmount(() => {
     <!-- 【v1679】用户要求：课件库 / 试题库 从「文件」菜单挪到工具条（「文件」右侧）✓ -->
     <button class="btn" title="课件库：管理存过的整份课件（打开会替换当前内容，可用 Ctrl+Z 撤销）" @click="deckLibOpen = true"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.folder"></svg>课件库</button>
     <button class="btn" title="试题库：按章节/知识点/题型/难度/年份筛选，看题干与答案，并能就地补全（新）" @click="qbOpen = true"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.folder"></svg>试题库</button>
-    <!-- ⚠【v1685 修】这一行的 title 后面被多写了一个 `>`（v1679 那次改动留下的）——
-       `>` 一写就把标签闭合了，后面的 @click 变成**正文文本**、整串显示在工具条上 ✗
-       （typecheck 抓不到：对编译器来说那只是一段文字 ✓ —— 所以补了探针用例 24 静态扫这种写法 ✓） -->
-    <button class="btn" :class="{ 'btn--open': viewMode !== 'canvas' }" title="MD 源码：分屏实时预览" @click="setViewMode(viewMode === 'canvas' ? 'split' : 'canvas')">
-      <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.md"></svg></span>MD 源码
-    </button>
     <div class="group">
       <template v-for="b in addButtons" :key="b.type">
         <!-- 表格：下拉选模板（三线表 / 对比表 / 表 4-1 式 …） -->
