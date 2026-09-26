@@ -15,6 +15,7 @@ import { pdfToMarkdown } from '@/pdf/pdfImport'
 import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
 import { markdownToDeck } from '@/composables/mdDeck'
 import { attachPics, attachTikzFigures, tikzSolver } from '@/composables/figureRender'
+import { cropToFigure } from '@/composables/figCrop'
 import { tikzToPlaceholders, type TikzSpec } from '@/composables/tikzFigure'
 import { useDeckStore } from '@/stores/deck'
 import { createElement, type SlideElement } from '@/types'
@@ -27,6 +28,28 @@ const listEl = ref<HTMLElement | null>(null)
 const msgs = ref<{ role: 'user' | 'ai'; text: string; imgs?: string[] }[]>([])
 const keyTick = ref(0)
 const taEl = ref<HTMLTextAreaElement | null>(null)
+
+/** 【v1659】"只切图形"开关（用户要求：切图只要图形部分，题目文字不切）—— 记住上次的选择 ✓ */
+const ONLY_KEY = 'lj-mathslides:fig-only'
+const onlyFigure = ref(true)
+try { const v = localStorage.getItem(ONLY_KEY); if (v === '0') onlyFigure.value = false } catch { /* 忽略 */ }
+function toggleOnly() {
+  onlyFigure.value = !onlyFigure.value
+  try { localStorage.setItem(ONLY_KEY, onlyFigure.value ? '1' : '0') } catch { /* 忽略 */ }
+}
+
+/** 按开关把附件图裁成"只有图形"（认不出就原样返回 ✓），并回报每张的结果 */
+async function cutFigures(pics: string[]): Promise<{ out: string[]; cropped: number; kept: number }> {
+  if (!onlyFigure.value || !pics.length) return { out: pics.slice(), cropped: 0, kept: pics.length }
+  const out: string[] = []
+  let cropped = 0
+  for (const p of pics) {
+    const r = await cropToFigure(p)
+    out.push(r.cropped ? r.src : p)
+    if (r.cropped) cropped++
+  }
+  return { out, cropped, kept: out.length - cropped }
+}
 
 /** 【v1658】预制对话（用户要求）：一点就把提示词填进输入框（已有内容则接在后面），附件照旧自己带 ✓ */
 const PRESETS: { id: string; label: string; hint: string; text: string }[] = [
@@ -47,18 +70,22 @@ function usePreset(p: { label: string; text: string }) {
 }
 
 /** 【v1658】「图 → 幻灯片」：**不调 AI**，直接把当前附件图插到当前页（用户："切出图形插入幻灯片"） */
-function picsToSlide() {
+async function picsToSlide() {
   const pics = attImgs.value.slice(0, MAX_IMG)
   if (!pics.length) { saveMsg.value = '先在下面点「＋图」选一张（或 Ctrl+V 粘一张），再点这个'; return }
+  busy.value = true
   try {
-    const items = pics.map((src, i) => {
+    const cut = await cutFigures(pics)
+    const items = cut.out.map((src, i) => {
       const el = createElement('image', { x: 200 + i * 24, y: 180 + i * 24, w: 900, h: 560 })
       Object.assign(el, { src, fit: 'contain' })
       return { type: 'image' as const, overrides: el as Partial<SlideElement> }
     })
     store.addElements(items)
-    saveMsg.value = '已把 ' + items.length + ' 张图插到当前页' + (input.value.trim() ? '（想连题目文字一起，就用回答下面的「插入幻灯片」）' : '')
-  } catch (e) { saveMsg.value = '插入失败：' + String((e as Error)?.message || e) }
+    saveMsg.value = '已把 ' + items.length + ' 张图插到当前页' +
+      (cut.cropped ? '（' + cut.cropped + ' 张只留了图形部分' + (cut.kept ? '；' + cut.kept + ' 张认不出图形，整张插了' : '') + '）' : '') +
+      (input.value.trim() ? '（想连题目文字一起，就用回答下面的「插入幻灯片」）' : '')
+  } catch (e) { saveMsg.value = '插入失败：' + String((e as Error)?.message || e) } finally { busy.value = false }
 }
 
 /** AI Key：名字不写死 —— 设置里存的是哪个键就用哪个（避免和设置面板漂移 ✗）✓ */
@@ -212,8 +239,11 @@ function tikzSummary(got: { figures: number; texts: number; orphans: number }, s
 /** 【v1647】一键插入幻灯片（用户要求）：AI 回答是 Markdown → 走应用自己的 markdownToDeck ✓
  *   （与「导入 PDF → 抽取文字」同一条链路，公式/标题/段落都按应用的口径成页 ✓）
  *  【v1652】在此之前先把 AI 顺口写的 TikZ **真译成图形**（译不出的才退回一行占位）✓ */
-function insertToSlides(t: string, pics: string[] = []) {
+async function insertToSlides(t: string, pics: string[] = []) {
   try {
+    // 【v1659】先按"只切图形"把附件图裁好（用户要求：题目文字不切）✓
+    const cut = pics.length ? await cutFigures(pics) : { out: [] as string[], cropped: 0, kept: 0 }
+    pics = cut.out
     const pre = tikzToPlaceholders(t, tikzSolver)
     // 【v1657】题目**本来就有图**（附件原图）时：直接贴原图，**不再把 TikZ 重建为数学图形** ✓
     //   （用户明确：重建出来的效果比较差；AI 那段 tikz 用原图替掉即可）
@@ -225,7 +255,7 @@ function insertToSlides(t: string, pics: string[] = []) {
     const ok = store.importDeck(deck)
     saveMsg.value = ok
       ? ('已插入 ' + deck.slides.length + ' 页幻灯片' +
-        (picN ? '，题图直接用附件原图 ' + picN + ' 张（没再重建数学图形）' : '') +
+        (picN ? '，题图 ' + picN + ' 张' + (cut.cropped ? '（' + cut.cropped + ' 张只留了图形部分' : '') + (cut.kept ? '；' + cut.kept + ' 张认不出图形，整张插了' : '') + '，没再重建数学图形）' : '') +
         tikzSummary(got, pre.specs, pre.fails))
       : '生成的内容无效（已取消，未影响当前内容）'
   } catch (e) { saveMsg.value = '插入失败：' + String((e as Error)?.message || e) }
@@ -336,10 +366,16 @@ async function saveAnswer(t: string) {
         <div v-if="saveMsg" class="ds__saved">{{ saveMsg }}</div>
       </div>
       <footer class="ds__foot">
-        <div class="ds__att">
-          <button class="ds__mini" title="带图片（需要端点/模型支持视觉；带图提问会跟着题目一起插进幻灯片）" @click="imgInput?.click()">＋图</button>
-          <button class="ds__mini" title="带文档：PDF 在本机抽文字，MD/TXT/JSON 直接读（纯文本模型也能用）" @click="docInput?.click()">＋文档</button>
-          <button class="ds__mini" title="不调 AI：把上面选的图直接切进**当前页**" @click="picsToSlide">图 → 幻灯片</button>
+        <div class="ds__tools">
+          <button class="ds__tool" title="带图片：会和题目一起插进幻灯片；也可以直接 Ctrl+V 粘贴截图" @click="imgInput?.click()">＋图</button>
+          <button class="ds__tool" title="带文档：PDF 在本机抽文字，MD/TXT/JSON 直接读（纯文本模型也能用）" @click="docInput?.click()">＋文档</button>
+          <span class="ds__toolGap" />
+          <button class="ds__tool ds__tool--main" title="不调 AI：把上面选的图切出来，插到当前页" @click="picsToSlide">切图 → 幻灯片</button>
+          <button class="ds__tool" :class="{ 'ds__tool--on': onlyFigure }"
+            :title="onlyFigure ? '当前：只切图形部分（题目文字不切）—— 点一下改成整张图' : '当前：整张图都插——点一下改成只切图形'"
+            @click="toggleOnly">{{ onlyFigure ? '✓ 只切图形' : '整张图' }}</button>
+        </div>
+        <div v-if="attImgs.length || attDocs.length || attMsg" class="ds__att">
           <span v-for="(_, i) in attImgs" :key="'i' + i" class="ds__thumb" :title="'图' + (i + 1) + '（点右上角 × 去掉）'">
             <img :src="attImgs[i]" alt="" /><em @click="dropAtt('img', i)">×</em>
           </span>
@@ -348,9 +384,9 @@ async function saveAnswer(t: string) {
         </div>
         <input ref="imgInput" type="file" accept="image/*" multiple style="display:none" @change="onPickImg" />
         <input ref="docInput" type="file" accept=".pdf,.md,.markdown,.txt,.json,.csv" multiple style="display:none" @change="onPickDoc" />
-        <textarea ref="taEl" v-model="input" class="ds__ta" rows="3" placeholder="输入问题（Enter 发送，Shift+Enter 换行）；也可以直接粘贴一张题目截图" @keydown.enter.exact.prevent="send" />
+        <textarea ref="taEl" v-model="input" class="ds__ta" rows="3" placeholder="输入问题…（Enter 发送，Shift+Enter 换行）" @keydown.enter.exact.prevent="send" />
         <div class="ds__footRow">
-          <span class="ds__hint" title="附件图会跟着题目一起插进幻灯片；也可以直接 Ctrl+V 粘贴截图">Enter 发送 · Shift+Enter 换行 · 可粘贴截图</span>
+          <span class="ds__hint" title="Ctrl+V 可以直接粘贴题目截图；点「切图 → 幻灯片」只把图形切进当前页">可粘贴截图 · 「切图」只留图形部分</span>
           <button class="ds__send" :disabled="busy || !input.trim()" @click="send">{{ busy ? '发送中…' : '发送' }}</button>
         </div>
       </footer>
@@ -405,6 +441,15 @@ async function saveAnswer(t: string) {
 .ds__err { font-size: 12px; color: #b42318; background: #fff2f0; border: 1px solid #f0c9c4; border-radius: 9px; padding: 8px 10px; }
 .ds__saved { font-size: 11px; color: #2f9e63; word-break: break-all; }
 .ds__foot { border-top: 1px solid var(--border); padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 7px; background: #fff; }
+/* 【v1659】底部工具栏：三枚小工具 + "只切图形"开关（用户要求：美化按钮与布局）✓ */
+.ds__tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ds__toolGap { flex: 1 1 0; min-width: 0; }
+.ds__tool { height: 26px; padding: 0 10px; border: 1px solid #e6e4dd; border-radius: 8px; background: #fbfbfa; color: #55534d; font-size: 11.5px; line-height: 1; cursor: pointer; }
+.ds__tool:hover { background: #fff; border-color: #ded7ff; color: var(--brand-600, #534AB7); }
+.ds__tool--main { border-color: #ded7ff; background: #f4f2ff; color: #4a3b8f; font-weight: 600; }
+.ds__tool--main:hover { background: #ece7ff; }
+.ds__tool--on { border-color: #bfe6cf; background: #eefaf3; color: #2f7d5b; }
+.ds__tool--on:hover { border-color: #9fd9b6; color: #256a4c; }
 .ds__att { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .ds__thumb { position: relative; display: inline-flex; }
 .ds__thumb img { width: 42px; height: 42px; object-fit: cover; border-radius: 7px; border: 1px solid #ded7ff; }
@@ -412,7 +457,8 @@ async function saveAnswer(t: string) {
 .ds__chip { display: inline-flex; align-items: center; gap: 4px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #4a3b8f; background: #f1efff; border: 1px solid #ded7ff; border-radius: 999px; padding: 2px 8px; }
 .ds__chip em { cursor: pointer; font-style: normal; color: #8a7fd0; }
 .ds__hintwarn { font-size: 11px; color: #b3541e; }
-.ds__ta { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; font-size: 12.5px; font-family: inherit; resize: vertical; line-height: 1.7; background: #fdfdfd; }
+.ds__ta { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; font-size: 12.5px; font-family: inherit; resize: vertical; line-height: 1.7; background: #fdfdfd; min-height: 58px; max-height: 240px; }
+.ds__ta::placeholder { color: #a9a79f; }
 .ds__ta:focus { outline: none; border-color: #c9bfff; box-shadow: 0 0 0 3px rgba(83, 74, 183, .10); background: #fff; }
 .ds__footRow { display: flex; align-items: center; gap: 8px; }
 .ds__hint { flex: 1 1 auto; min-width: 0; font-size: 10.5px; color: var(--muted); line-height: 1.4; }
