@@ -156,3 +156,52 @@ export function parseAiQuestions(raw: unknown): AiParseResult {
   if (!items.length && !skipped) warn.push('没找到题目')
   return { items, skipped, warn }
 }
+
+/* ---------------- 【v1682】抽题的提示词与调用（对话框下一步就用它 ✓） ---------------- */
+
+export interface ExtractOpt {
+  /** 只要题干+选项（不要答案与解析）✓ */
+  withAnswer?: boolean
+  /** 章节候选（把题库的 SECTIONS 传进来 ✓，让模型从里面挑而不是自由发挥 ✗） */
+  sections?: string[]
+}
+
+/** 抽题提示词：schema 写死 ✓，省得模型自由发挥 ✗ */
+export function buildExtractPrompt(text: string, opt: ExtractOpt = {}): { system: string; user: string } {
+  const secs = (opt.sections || []).filter(Boolean)
+  const system = [
+    '你是高中数学试卷结构化助手。把老师给的试卷正文抽成题目数组。',
+    '只输出 JSON，不要解释、不要用 Markdown 代码块包起来。',
+    '输出格式：{"questions": [ ... ]}，每题的字段：',
+    '- stem：题干（必填；公式用 $...$）',
+    '- options：选项数组，如 ["A. 1", "B. 2"]；非选择题给空数组',
+    '- answer：答案；analysis：解析',
+    '- qtype：choice / multi / blank / answer / proof 之一',
+    secs.length ? '- section：从这些章节里选一个：' + secs.join('、') + '；都套不上就留空' : '- section：章节，认不出就留空',
+    '- kp：知识点数组；level：基础 / 中档 / 拔高；difficulty：1~5 的整数',
+    '原文里没有的字段留空字符串或空数组，**不要编造**；题干缺失的条目直接不要输出。',
+  ].join('\n')
+  const head = opt.withAnswer === false ? '（只要题干与选项，不要答案、不要解析）\n\n' : ''
+  return { system, user: head + String(text || '') }
+}
+
+/**
+ * 抽题：调模型 → 交给 parseAiQuestions 归一 ✓
+ * 模型调用这一步由 caller 注入（面板里走 ai_chat 那条链路 ✓；探针里塞一个假的 ✓ —— 这样这一层测得动 ✓）。
+ */
+export async function extractQuestions(
+  caller: (system: string, user: string) => Promise<string>,
+  text: string,
+  opt: ExtractOpt = {},
+): Promise<AiParseResult> {
+  const p = buildExtractPrompt(text, opt)
+  let raw = ''
+  try {
+    raw = await caller(p.system, p.user)
+  } catch (e) {
+    return { items: [], skipped: 0, warn: ['调用模型失败：' + String((e as Error)?.message || e)] }
+  }
+  const r = parseAiQuestions(raw)
+  if (!r.items.length && !r.warn.length) r.warn.push('模型没抽出题目')
+  return r
+}
