@@ -86,6 +86,10 @@ function dropAtt(kind: "img" | "doc", i: number) {
   else attDocs.value.splice(i, 1)
 }
 
+/** 【v1650】设置里的「视觉模型」——带图提问时用它 ✓ */
+function visionModel(): string { try { return String(localStorage.getItem('lj-mathslides:vision-model') || '').trim() } catch { return '' } }
+function visionBase(): string { try { return String(localStorage.getItem('lj-mathslides:vision-base') || '').trim() } catch { return '' } }
+
 const SYSTEM = '你是高中数学老师的备课助手。回答用中文，简洁、可直接放进讲义：公式用 $...$（行内）或 $$...$$（独立行），结论先说，步骤可省。'
 
 async function send() {
@@ -107,7 +111,11 @@ async function send() {
   await scrollDown()
   try {
     const r = await invoke<{ ok?: boolean; text?: string; content?: string; error?: string }>('ai_chat', {
-      baseUrl: '', apiKey: key, model: 'deepseek-chat', system: SYSTEM, userText, images: imgs.length ? imgs : null,
+      // 【v1650】带图且有「视觉模型」配置时自动切换（设置里填的，键名两边一致 ✓）
+      baseUrl: imgs.length ? visionBase() : '',
+      apiKey: key,
+      model: imgs.length && visionModel() ? visionModel() : 'deepseek-chat',
+      system: SYSTEM, userText, images: imgs.length ? imgs : null,
     })
     const text = String((r && (r.text || r.content)) || '').trim()
     if (r && r.ok === false) err.value = String(r.error || '调用失败')

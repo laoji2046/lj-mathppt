@@ -39,6 +39,22 @@ function saveMineruKey(v: string) {
 // ── 【v1501】「启动时显示开始向导」开关 —— 关掉后打开应用直接进文稿 ✓
 //    NewDeckWizard 读的就是这个键 ✓（'off' = 不再自动弹 ✓）
 const WIZ_KEY = 'lj-mathslides-vue:newdeck-wizard'
+/* 【v1650】视觉模型（本地存）：带图提问时用，键名与右侧助手面板约定一致 ✓ */
+export const VISION_BASE_KEY = 'lj-mathslides:vision-base'
+export const VISION_MODEL_KEY = 'lj-mathslides:vision-model'
+const visionBase = ref('')
+const visionModel = ref('')
+function saveVision(k: 'base' | 'model', v: string) {
+  if (k === 'base') { visionBase.value = v; try { localStorage.setItem(VISION_BASE_KEY, v) } catch { /* 忽略 */ } }
+  else { visionModel.value = v; try { localStorage.setItem(VISION_MODEL_KEY, v) } catch { /* 忽略 */ } }
+}
+onMounted(() => {
+  try {
+    visionBase.value = localStorage.getItem(VISION_BASE_KEY) || ''
+    visionModel.value = localStorage.getItem(VISION_MODEL_KEY) || ''
+  } catch { /* 忽略 */ }
+})
+
 /* 【v1641】清理：读占用 / 按保留份数清理 ✓ */
 const cache = ref<CacheStats | null>(null)
 const keepMineru = ref(10)
@@ -149,7 +165,26 @@ function setWizardOn(v: boolean) {
         <p class="hint">只保存在本机；**试题录入里选 .pdf 时**用它做云端识别（识别产物缓存本机 ✓）。与上面的 AI Key 是两回事 ✓ 都不填也能用 MD / JSON / 粘贴录入 ✓。</p>
       </div>
 
-      <!-- 【v1641】清理：识别缓存与整库备份都只留最近 N 份（用户要求：设置里给个清理入口）✓ -->
+      <!-- 【v1650】视觉模型（可选）：带图提问时自动切到它（用户要求：看图要能换模型）✓ -->
+      <div class="ai">
+        <div class="ai__title">视觉模型 <span class="hint" style="font-weight:400">（可选 · 只在带图提问时用）</span></div>
+        <label class="field field--row"><span>接口地址</span>
+          <input
+            type="text" style="flex:1"
+            placeholder="留空 = 与上面的 AI Key 同一端点（如 https://dashscope.aliyuncs.com/compatible-mode/v1）"
+            :value="visionBase" @input="saveVision('base', ($event.target as HTMLInputElement).value)"
+          />
+        </label>
+        <label class="field field--row"><span>模型名</span>
+          <input
+            type="text" style="flex:1"
+            placeholder="例如 qwen-vl-max / glm-4v / gpt-4o（留空 = 不切换，仍用原模型发图）"
+            :value="visionModel" @input="saveVision('model', ($event.target as HTMLInputElement).value)"
+          />
+        </label>
+        <p class="hint">填了模型名之后：**带图**的提问自动改用这个模型（纯文字提问仍用原来的）；不填就照原模型发，端点不支持视觉时会明确报错 ✓</p>
+      </div>
+
       <div class="ai">
         <div class="ai__title">清理 <span class="hint" style="font-weight:400">（只删"缓存/备份"，不碰题库 ✓）</span></div>
         <p class="hint" v-if="cache">
