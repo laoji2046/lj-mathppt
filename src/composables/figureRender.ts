@@ -154,6 +154,30 @@ export function attachTikzFigures(deck: Deck, specs: TikzSpec[]): { figures: num
 }
 
 /**
+ * 【v1657】把"这条问题带的**附件原图**"贴进幻灯片（用户要求：题目本来就有图，就别重建数学图形了 ✓）
+ * 放在第一页文字的**下面**，与题库「插入幻灯片」同一套排版（图片元素 + contain，不裁不拉 ✓）。
+ * 放在这个文件（而不是面板里）是为了**能被探针直接测到** ✓ —— 上一轮"探针照抄逻辑"的教训。
+ */
+export function attachPics(deck: Deck, pics: string[], opt: { x?: number; w?: number; h?: number } = {}): number {
+  const s0 = deck.slides && deck.slides[0]
+  if (!s0 || !pics.length) return 0
+  const els = s0.elements as { y?: number; h?: number }[]
+  let y = 40
+  for (const e of els) y = Math.max(y, (Number(e.y) || 0) + (Number(e.h) || 0) + 16)
+  const x = opt.x ?? 48, w = opt.w ?? 900, h = opt.h ?? 560
+  let n = 0
+  for (const src of pics.slice(0, 4)) {
+    if (!src) continue
+    const el = createElement('image', { x, y: Math.round(y), w, h })
+    Object.assign(el, { src, fit: 'contain' })
+    s0.elements.push(el)
+    y += h + 16
+    n++
+  }
+  return n
+}
+
+/**
  * 把文本里的 {{fig:kind}} 换成**行内 SVG**（高度跟随字号，1.35em）。
  * 用在表格单元格、以及导出的单元格正文里 —— 两边共用，保证一致。
  */

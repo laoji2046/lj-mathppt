@@ -14,7 +14,7 @@ import AppIcon from './AppIcon.vue'
 import { pdfToMarkdown } from '@/pdf/pdfImport'
 import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
 import { markdownToDeck } from '@/composables/mdDeck'
-import { attachTikzFigures, tikzSolver } from '@/composables/figureRender'
+import { attachPics, attachTikzFigures, tikzSolver } from '@/composables/figureRender'
 import { tikzToPlaceholders, type TikzSpec } from '@/composables/tikzFigure'
 import { useDeckStore } from '@/stores/deck'
 
@@ -23,7 +23,7 @@ const input = ref('')
 const busy = ref(false)
 const err = ref('')
 const listEl = ref<HTMLElement | null>(null)
-const msgs = ref<{ role: 'user' | 'ai'; text: string }[]>([])
+const msgs = ref<{ role: 'user' | 'ai'; text: string; imgs?: string[] }[]>([])
 const keyTick = ref(0)
 
 /** AI Key：名字不写死 —— 设置里存的是哪个键就用哪个（避免和设置面板漂移 ✗）✓ */
@@ -123,7 +123,9 @@ async function send() {
   const userText = ctx + t
   const imgs = attImgs.value.slice()
   const tag = (attDocs.value.length ? '（附文档 ' + attDocs.value.length + ' 份' : '') + (imgs.length ? (attDocs.value.length ? '、图 ' : '（图 ') + imgs.length + ' 张' : '') + ((attDocs.value.length || imgs.length) ? '）' : '')
-  msgs.value.push({ role: 'user', text: t + tag })
+  // 【v1657】把这条问题的**附件原图**记在消息上 —— 插入幻灯片时要跟题目一起贴进去 ✓
+  //   （用户要求：题目本来就有图，就别去重建数学图形了，直接把原图切出来一起插 ✓）
+  msgs.value.push({ role: 'user', text: t + tag, imgs: imgs.slice() })
   input.value = ''
   busy.value = true
   await scrollDown()
@@ -175,18 +177,33 @@ function tikzSummary(got: { figures: number; texts: number; orphans: number }, s
 /** 【v1647】一键插入幻灯片（用户要求）：AI 回答是 Markdown → 走应用自己的 markdownToDeck ✓
  *   （与「导入 PDF → 抽取文字」同一条链路，公式/标题/段落都按应用的口径成页 ✓）
  *  【v1652】在此之前先把 AI 顺口写的 TikZ **真译成图形**（译不出的才退回一行占位）✓ */
-function insertToSlides(t: string) {
+function insertToSlides(t: string, pics: string[] = []) {
   try {
     const pre = tikzToPlaceholders(t, tikzSolver)
-    const deck = markdownToDeck(mdClean(pre.md))
+    // 【v1657】题目**本来就有图**（附件原图）时：直接贴原图，**不再把 TikZ 重建为数学图形** ✓
+    //   （用户明确：重建出来的效果比较差；AI 那段 tikz 用原图替掉即可）
+    const md = pics.length ? pre.md.replace(/^!\[\]\(tikz:\d+\)[ \t]*$/gm, '') : pre.md
+    const deck = markdownToDeck(mdClean(md))
     if (!deck || !deck.slides || !deck.slides.length) { saveMsg.value = '这段内容里没有能成页的文字'; return }
-    const got = attachTikzFigures(deck, pre.specs)
+    const got = attachTikzFigures(deck, pics.length ? [] : pre.specs)
+    const picN = pics.length ? attachPics(deck, pics) : 0
     const ok = store.importDeck(deck)
     saveMsg.value = ok
-      ? ('已插入 ' + deck.slides.length + ' 页幻灯片' + tikzSummary(got, pre.specs, pre.fails))
+      ? ('已插入 ' + deck.slides.length + ' 页幻灯片' +
+        (picN ? '，题图直接用附件原图 ' + picN + ' 张（没再重建数学图形）' : '') +
+        tikzSummary(got, pre.specs, pre.fails))
       : '生成的内容无效（已取消，未影响当前内容）'
   } catch (e) { saveMsg.value = '插入失败：' + String((e as Error)?.message || e) }
 }
+/** 这条 AI 回答对应的问题带了哪些附件原图（往上找最近一条 user 消息 ✓） */
+function picsOf(aiIndex: number): string[] {
+  for (let i = aiIndex - 1; i >= 0; i--) {
+    const m = msgs.value[i]
+    if (m && m.role === 'user') return m.imgs || []
+  }
+  return []
+}
+
 function mdClean(t: string): string {
   let s = String(t || '').trim()
   // 去掉模型爱加的整段围栏（```markdown … ``` / ``` … ```），否则再导入会多出一堆噪声 ✗
@@ -260,7 +277,7 @@ async function saveAnswer(t: string) {
           <div class="ds__text">{{ m.text }}</div>
           <span v-if="m.role === 'ai'" class="ds__acts">
             <button class="ds__mini" title="复制这条回答" @click="copyOne(m.text)">复制</button>
-            <button class="ds__mini" title="把这条回答按 Markdown 直接变成幻灯片，插到当前演示后面（公式按应用的排版口径渲染）" @click="insertToSlides(m.text)">插入幻灯片</button>
+            <button class="ds__mini" :title="'把这条回答变成幻灯片' + (picsOf(i).length ? '（连上面那条问题带的 ' + picsOf(i).length + ' 张原图一起贴进去，不再重建数学图形）' : '（公式按应用的排版口径渲染）')" @click="insertToSlides(m.text, picsOf(i))">插入幻灯片</button>
             <button class="ds__mini" title="存成 .md（桌面端存到「文档」目录，可以直接用「导入 .md 文件」核对入库）" @click="saveAnswer(m.text)">存为 .md</button>
           </span>
         </div>
