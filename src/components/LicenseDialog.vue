@@ -15,7 +15,7 @@ const err = ref('')
 const busy = ref(false)
 const fileEl = ref<HTMLInputElement | null>(null)
 
-onMounted(() => { void lic.initLicense() })
+onMounted(async () => { await lic.initLicense(); await lic.ensureMachine() })   // 【v1680】机器码改成这里才读 ✓
 
 async function copyMachine() {
   try { await navigator.clipboard.writeText(lic.machine.value); msg.value = '机器码已复制，发给发号的人即可' } catch { msg.value = '复制失败，请手动选中复制' }

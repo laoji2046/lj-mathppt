@@ -30,13 +30,23 @@ async function readMachine(): Promise<string> {
 
 export function machineCode(): string { return machine.value }
 
+/** 【v1680】第一次真正需要用机器码时才读（打开激活框 / 开关打开后验号 ✓）—— 别放在启动路径上 ✗ */
+export async function ensureMachine(): Promise<string> {
+  if (machine.value) return machine.value
+  machine.value = await readMachine()
+  return machine.value
+}
+
 export function initLicense(): Promise<void> {
   if (inited) return inited
   inited = (async () => {
-    machine.value = await readMachine()
+    // 【v1680】★ **启动时不读机器码** ✗ —— 读它要 spawn 一个 reg 进程（用户实报：刚打开应用点「文件」几秒没反应 ✓），
+    //   那只是 Windows 冷启动 + 杀软扫描的正常代价 ✓。改成**第一次真的要用时才读** ✓。
     try { serial.value = String(localStorage.getItem(STORE_KEY) || '') } catch { serial.value = '' }
-    if (serial.value) {
-      const r = await verifySerial(serial.value, machine.value)
+    // 只有真要卡人时才验号；开关关着（开发期）一律放行 ✓，连机器码都不读 ✓
+    if (LICENSE_ENFORCED && serial.value) {
+      const mc = await ensureMachine()
+      const r = await verifySerial(serial.value, mc)
       info.value = r.ok ? (r.info || null) : null
     }
     ready.value = true
@@ -46,7 +56,8 @@ export function initLicense(): Promise<void> {
 
 export async function activate(text: string): Promise<{ ok: boolean; reason?: string }> {
   await initLicense()
-  const r = await verifySerial(text, machine.value)
+  const mc = await ensureMachine()
+  const r = await verifySerial(text, mc)
   if (!r.ok) return { ok: false, reason: r.reason }
   serial.value = String(text || '').trim()
   info.value = r.info || null
@@ -68,5 +79,5 @@ export function licensed(f: LicensedFeature | string): boolean {
 }
 
 export function useLicense() {
-  return { serial, info, ready, machine, isActivated, licensed, activate, deactivate, initLicense }
+  return { serial, info, ready, machine, isActivated, licensed, activate, deactivate, initLicense, ensureMachine }
 }
