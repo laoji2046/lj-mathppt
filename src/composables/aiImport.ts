@@ -205,3 +205,52 @@ export async function extractQuestions(
   if (!r.items.length && !r.warn.length) r.warn.push('模型没抽出题目')
   return r
 }
+
+/* ---------------- 【v1683】逐字段校验（就地编辑时每个字段旁边提示用 ✓） ---------------- */
+
+export interface FieldIssue {
+  /** 哪个字段：stem / options / answer / kp / section / difficulty / analysis ✓ */
+  field: string
+  /** error = 不补就不该入库 ✗；warn = 能入库但最好看一眼 ✓ */
+  level: 'error' | 'warn'
+  msg: string
+}
+
+/**
+ * 一道题能不能入库、还有哪些地方要老师补 ✓
+ * 口径（用户要求"就地编辑"✓）：编辑时**逐字段**提示 ✓，不是整题一个"不合格" ✗ ——
+ * 老师看着提示改，改完提示自己消失 ✓。
+ */
+export function validateQuestion(q: AiQuestion): FieldIssue[] {
+  const out: FieldIssue[] = []
+  const stem = String(q && q.stem || '').trim()
+  const answer = String(q && q.answer || '').trim()
+  const options = (q && q.options) || []
+  const kp = (q && q.kp) || []
+  if (!stem) out.push({ field: 'stem', level: 'error', msg: '题干是空的，必填' })
+  if (options.length === 1) out.push({ field: 'options', level: 'error', msg: '选择题至少要有两个选项' })
+  if (!answer) out.push({ field: 'answer', level: 'error', msg: '还没有答案，入库前请补上' })
+  if ((q.qtype === 'choice' || q.qtype === 'multi') && options.length < 2) {
+    out.push({ field: 'options', level: 'error', msg: '题型是选择题，但没有选项' })
+  }
+  if (options.length >= 2 && q.qtype !== 'choice' && q.qtype !== 'multi') {
+    out.push({ field: 'options', level: 'warn', msg: '有选项但题型不是选择题，确认一下题型' })
+  }
+  if (!kp.length) out.push({ field: 'kp', level: 'warn', msg: '还没标知识点' })
+  if (!String(q.section || '').trim()) out.push({ field: 'section', level: 'warn', msg: '还没归章节' })
+  if (!String(q.analysis || '').trim() && q.qtype !== 'choice' && q.qtype !== 'multi') {
+    out.push({ field: 'analysis', level: 'warn', msg: '解答题建议补上解析' })
+  }
+  if (Number(q.difficulty) === 3) out.push({ field: 'difficulty', level: 'warn', msg: '难度是按默认中档填的，确认一下' })
+  return out
+}
+
+/** 这一批里能不能提交（有 error 就不让提交 ✓ 提示到具体是第几题 ✓） */
+export function firstBlocking(items: AiQuestion[]): { index: number; issue: FieldIssue } | null {
+  const list = items || []
+  for (let i = 0; i < list.length; i++) {
+    const bad = validateQuestion(list[i]).filter((x) => x.level === 'error')
+    if (bad.length) return { index: i, issue: bad[0] }
+  }
+  return null
+}
