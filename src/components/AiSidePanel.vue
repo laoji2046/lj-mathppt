@@ -91,6 +91,9 @@ function visionModel(): string { try { return String(localStorage.getItem('lj-ma
 function visionBase(): string { try { return String(localStorage.getItem('lj-mathslides:vision-base') || '').trim() } catch { return '' } }
 
 const SYSTEM = '你是高中数学老师的备课助手。回答用中文，简洁、可直接放进讲义：公式用 $...$（行内）或 $$...$$（独立行），结论先说，步骤可省。'
+  // 【v1651】画图要按幻灯片的规矩来：MathJax 不认 TikZ/pgfplots/Asymptote（用户实报：AI 给的
+  //   tikzpicture 幻灯片完全认不出 ✗）—— 与其事后补救，不如在提示词里就要求它别写 ✓
+  + '画图时注意：这份幻灯片的数学排版只用 MathJax，**不要输出 TikZ / tikzpicture / pgfplots / Asymptote / PSTricks 等绘图代码**（渲染不出来）。需要图形时：用一句话说明图形要素（例：以 F₁F₂ 为焦点的双曲线，过 F₂ 的竖直弦 AB 交右支于 A、B），并提示老师可在软件的「数学图形」库里插入对应图形。'
 
 async function send() {
   const t = input.value.trim()
@@ -160,6 +163,12 @@ function mdClean(t: string): string {
   if (m) s = m[1].trim()
   // `\textbf{1.}` 这类宏在幻灯片里只会原样显示 ✗ → 还原成里面的文字 ✓
   s = s.replace(/\\textbf\{([^{}]*)\}/g, '$1').replace(/\\mathrm\{([^{}]*)\}/g, '$1')
+  // 【v1651】TikZ / pgfplots 绘图环境：幻灯片不认 ✗ —— 换一行占位，而不是把几十行代码贴上去 ✓
+  s = s.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, '（此处原为 TikZ 绘图，幻灯片不支持；建议用「数学图形」库插一张对应的图）')
+  s = s.replace(/\\begin\{axis\}[\s\S]*?\\end\{axis\}/g, '（此处原为 pgfplots 图，幻灯片不支持；建议用「数学图形」库插一张）')
+  s = s.replace(/\\begin\{asy\}[\s\S]*?\\end\{asy\}/g, '（此处原为 Asymptote 图，幻灯片不支持；建议用「数学图形」库插一张）')
+  s = s.replace(/\\begin\{center\}\s*\n?\s*\\end\{center\}/g, '')
+  return s + '\n'
   return s + '\n'
 }
 function stampName(): string {
