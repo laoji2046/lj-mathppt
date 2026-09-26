@@ -140,14 +140,19 @@ export function figureBoxFromInk(ink: Uint8Array, w: number, h: number, opt: Cro
     const dw = Math.abs(a.bw - c.bw) <= Math.max(a.bw, c.bw) * 0.4
     return dh && dw && Math.abs(center(a) - center(c)) <= lineH * 4
   }
-  // 文字行：段数够多 ✓；或者**与邻带成组**（成段排下来的就是正文 ✓）
-  //   ⚠ 后者不能要求邻带"段数够多"：整段汉字都粘连时，没有一条带段数多 ✗（实测用例 ④ 就漏了）
+  // ★ 还有一个很硬的特征：**文字是左对齐的** —— 各行的左边界落在同一条竖线上 ✓
+  //   用它兜住"短行 / 窄行"（用户真样本：从中间截的图，末尾短行只有百来像素宽，
+  //   老的"宽度 ≥ 最宽行 25%"直接把它判成非文字 ✗ → 切出来留着半截题目 ✗）
+  const marginXs = info.filter((b, i) => lineLike[i] && b.runs >= minRuns).map((b) => b.x0).sort((a, b) => a - b)
+  const margin = marginXs.length ? marginXs[Math.floor(marginXs.length / 2)] : -1
+  const nearMargin = (b: Band) => margin >= 0 && Math.abs(b.x0 - margin) <= Math.max(10, lineH * 0.8)
   const isText = info.map((b, i) => {
-    if (!lineLike[i]) return false
-    // 主判据：段数够多（一行字十几段；图形边线只有一两段 ✓）
-    if (b.runs >= minRuns) return true
-    // 兜底：整段汉字都粘连成一条时段数会掉到 1~2 ✗ —— 那就看"是不是成段排下来的一行"✓
-    return (i > 0 && lineLike[i - 1] && looksStacked(b, info[i - 1])) || (i + 1 < info.length && lineLike[i + 1] && looksStacked(b, info[i + 1]))
+    // 主判据：高度像一行 + 铺得不窄 + 段数够多（一行字十几段；图形边线只有一两段 ✓）
+    if (lineLike[i] && b.runs >= minRuns) return true
+    // 兜底一：整段汉字粘连成一条时段数会掉到 1~2 ✗ —— 看"是不是成段排下来的一行"✓
+    if (lineLike[i] && ((i > 0 && lineLike[i - 1] && looksStacked(b, info[i - 1])) || (i + 1 < info.length && lineLike[i + 1] && looksStacked(b, info[i + 1])))) return true
+    // 兜底二：**左边界跟正文对齐**的短行（窄但确实是那一行字）✓
+    return inLineHeight(b) && dense(b) && b.runs >= 3 && nearMargin(b)
   })
   // 把"两边都像文字、而且挨得近"的相邻带并成一段（汉字被空行劈成上下两半的情形 ✓）
   const linkGap = Math.max(2, lineH * 0.9)
