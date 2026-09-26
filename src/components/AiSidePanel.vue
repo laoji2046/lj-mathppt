@@ -22,6 +22,7 @@ import FigureCropDialog from './FigureCropDialog.vue'
 import { runAiTool, AI_TOOLS, aiToolGuide, type AiToolCtx } from '@/composables/aiTools'
 import { tikzToPlaceholders, type TikzSpec } from '@/composables/tikzFigure'
 import { useDeckStore } from '@/stores/deck'
+import { useLicense } from '@/composables/useLicense'
 
 const open = ref(false)
 const input = ref('')
@@ -323,6 +324,8 @@ async function copyOne(t: string) { try { await navigator.clipboard.writeText(t)
  */
 const saveMsg = ref('')
 const store = useDeckStore()
+/** 【v1674】AI 助手属于需要序列号的功能（用户指定） */
+const lic = useLicense()
 
 /** 插入结果的补充说明：译了几张图、哪几处没认出来（绝不假装都译出来了 ✓） */
 function tikzSummary(got: { figures: number; texts: number; orphans: number }, specs: TikzSpec[], fails: string[]): string {
@@ -458,6 +461,8 @@ async function askWithTools(system: string, userText: string, imgs: string[], mo
 
 /** 一次提问：先走能调功能的新通道；通道不可用（老 exe / 接口不支持）就退回原来的一问一答 ✓ */
 async function askOnce(system: string, userText: string, imgs: string[], key: string): Promise<{ text: string; did: string[] }> {
+  // 【v1674】AI 助手属于需要序列号的功能（用户指定）→ 没激活就明确说清楚，别让它报一个看不懂的网络错 ✗
+  if (!lic.licensed('ai-assistant')) throw new Error('AI 助手需要序列号才能用：点工具栏「激活 / 序列号」，把本机机器码发给我换一个号')
   toolLog.value = []
   const baseUrl = imgs.length ? visionBase() : ''
   const model = imgs.length && visionModel() ? visionModel() : 'deepseek-chat'

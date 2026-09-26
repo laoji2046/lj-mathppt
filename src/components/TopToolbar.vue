@@ -6,6 +6,9 @@ import { renderDeckToRevealHtml } from '@/reveal/renderer'
 import type { ElementType, EmbedKind, SlideElement } from '@/types'
 import SymbolPalette from './SymbolPalette.vue'
 import MathFigurePalette from './MathFigurePalette.vue'
+import LicenseDialog from './LicenseDialog.vue'
+import { watch } from 'vue'
+import { useLicense } from '@/composables/useLicense'
 import { figPaletteOpen, openFigPalette } from '@/ui/figPalette'
 import IconPalette from './IconPalette.vue'
 import ImageLibrary from './ImageLibrary.vue'
@@ -97,6 +100,19 @@ function onDeckJsonPicked(e: Event) {
 }
 /** 导入 Word（.docx）：本地解析 → Markdown → 走应用自己的 Markdown 导入管线（图片内嵌成 data URL） */
 const docxInput = ref<HTMLInputElement | null>(null)
+
+/* 【v1674】序列号：没激活时锁住 数学图形 / AI 助手 / 讲义 / 试卷编辑（用户指定） */
+const lic = useLicense()
+const licOpen = ref(false)
+void lic.initLicense()
+/** 能用就返回 true；不能用就弹激活框（四个闸门都走它 ✓） */
+function needLic(f: string): boolean {
+  if (lic.licensed(f)) return true
+  licOpen.value = true
+  return false
+}
+// 图形库的入口在别处（菜单里点一下就置位）→ 盯住这个开关：没激活就拦下来弹激活框 ✓
+watch(figPaletteOpen, (v) => { if (v && !lic.licensed('math-figure')) { figPaletteOpen.value = false; licOpen.value = true } })
 function pickDocx() { if (!requireAddon('docx-import')) return fileOpen.value = false; docxInput.value?.click() }
 const pptxInput = ref<HTMLInputElement | null>(null)
 function pickPptx() { if (!requireAddon('pptx-import')) return fileOpen.value = false; pptxInput.value?.click() }
@@ -905,10 +921,10 @@ onBeforeUnmount(() => {
       </div>
     </div>
       <!-- 【M1】数学讲义：知识梳理 + 例题精讲 + 练习；一份内容出**学生版 / 教师版** ✓ -->
-      <button class="btn" title="数学讲义：写讲义（知识梳理 / 例题精讲 / 变式 / 练习），一键切学生版与教师版，打印导出 PDF" @click="emit('open-handout')">
+      <button class="btn" title="数学讲义：写讲义（知识梳理 / 例题精讲 / 变式 / 练习），一键切学生版与教师版，打印导出 PDF" @click="needLic('handout') && emit('open-handout')">
         <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.paper"></svg></span>讲义
       </button>
-      <button v-if="addonOn('pdf-gen')" class="btn" title="试卷编辑：把 Markdown / 试卷写成 A4 文档并导出 PDF" @click="openPaper">
+      <button v-if="addonOn('pdf-gen')" class="btn" title="试卷编辑：把 Markdown / 试卷写成 A4 文档并导出 PDF" @click="needLic('paper-edit') && openPaper()">
         <span class="btn__icon"><svg viewBox="0 0 24 24" class="btn__svg" v-html="I.paper"></svg></span>试卷编辑
       </button>
       <button class="btn btn--primary" @click="present">
@@ -920,6 +936,8 @@ onBeforeUnmount(() => {
   <PdfImportDialog v-if="pdfImportOpen && pdfImportFile" :file="pdfImportFile" @close="closePdfImport()" @done="onPdfDone" />
   <SymbolPalette v-if="symbolOpen" @close="symbolOpen = false" />
   <MathFigurePalette v-if="figPaletteOpen" @close="figPaletteOpen = false" />
+    <!-- 【v1674】序列号对话框（机器码 / 粘贴或选 .ljsn / 激活） -->
+    <LicenseDialog v-if="licOpen" @close="licOpen = false" />
   <IconPalette v-if="iconOpen" @close="iconOpen = false" />
   <ImageLibrary v-if="imgLibOpen" @close="imgLibOpen = false" />
   <ScreenshotCapture v-if="screenshotOpen" @close="screenshotOpen = false" />
