@@ -239,6 +239,9 @@ export interface CropResult {
   /** 【v1665】结果图的**原始像素尺寸** —— 调用方按它定幻灯片里的元素尺寸（不再一律 900×560 ✗） */
   w: number
   h: number
+  /** 【v1666】**原图**的尺寸 —— 插入前预览要显示"原图 1835×790"，勾"用整张原图"时也按它排版 ✓ */
+  ow: number
+  oh: number
 }
 
 function loadImg(src: string): Promise<HTMLImageElement> {
@@ -255,14 +258,14 @@ export async function cropToFigure(src: string, opt: CropOpt & { maxSide?: numbe
   try {
     const im = await loadImg(src)
     const W = im.naturalWidth || im.width, H = im.naturalHeight || im.height
-    if (!W || !H) return { src, box: null, cropped: false, mode: 'raw', why: '读不到尺寸', w: 0, h: 0 }
+    if (!W || !H) return { src, box: null, cropped: false, mode: 'raw', why: '读不到尺寸', w: 0, h: 0, ow: 0, oh: 0 }
     const maxSide = opt.maxSide ?? 1400
     const s = Math.min(1, maxSide / Math.max(W, H))
     const w = Math.max(8, Math.round(W * s)), h = Math.max(8, Math.round(H * s))
     const cv = document.createElement('canvas')
     cv.width = w; cv.height = h
     const ctx = cv.getContext('2d', { willReadFrequently: true })
-    if (!ctx) return { src, box: null, cropped: false, mode: 'raw', why: '没有 canvas', w: W, h: H }
+    if (!ctx) return { src, box: null, cropped: false, mode: 'raw', why: '没有 canvas', w: W, h: H, ow: W, oh: H }
     ctx.drawImage(im, 0, 0, w, h)
     const d = ctx.getImageData(0, 0, w, h).data
     const gray = new Uint8Array(w * h)
@@ -285,20 +288,55 @@ export async function cropToFigure(src: string, opt: CropOpt & { maxSide?: numbe
       box = trimBoxFromInk(ink, w, h, opt)
       if (box) mode = 'trim'
     }
-    if (!box) return { src, box: null, cropped: false, mode: 'raw', why: '这一张认不出单独的图形（整张都要）', w: W, h: H }
+    if (!box) return { src, box: null, cropped: false, mode: 'raw', why: '这一张认不出单独的图形（整张都要）', w: W, h: H, ow: W, oh: H }
     const sx = box.x / s, sy = box.y / s, sw = box.w / s, sh = box.h / s
     const out = document.createElement('canvas')
     out.width = Math.max(8, Math.round(sw)); out.height = Math.max(8, Math.round(sh))
     const octx = out.getContext('2d')
-    if (!octx) return { src, box: null, cropped: false, mode: 'raw', why: '没有 canvas', w: W, h: H }
+    if (!octx) return { src, box: null, cropped: false, mode: 'raw', why: '没有 canvas', w: W, h: H, ow: W, oh: H }
     octx.fillStyle = '#ffffff'
     octx.fillRect(0, 0, out.width, out.height)
     octx.drawImage(im, sx, sy, sw, sh, 0, 0, out.width, out.height)
     return {
-      src: out.toDataURL('image/png'), box, mode, cropped: mode === 'figure', w: out.width, h: out.height,
+      src: out.toDataURL('image/png'), box, mode, cropped: mode === 'figure', w: out.width, h: out.height, ow: W, oh: H,
       why: mode === 'figure' ? '已按图形区域裁好' : '没认出单独的图形，只去掉了四周白边',
     }
   } catch (e) {
-    return { src, box: null, cropped: false, mode: 'raw', why: String((e as Error)?.message || e), w: 0, h: 0 }
+    return { src, box: null, cropped: false, mode: 'raw', why: String((e as Error)?.message || e), w: 0, h: 0, ow: 0, oh: 0 }
   }
 }
+
+/**
+ * 【v1666】插入前预览里的一项（对话框里显示、老师勾选）
+ *  · cut/cw/ch：切好的结果图与它的尺寸
+ *  · raw/rw/rh：原图与它的尺寸（勾"用整张原图"时用这一组 ✓）
+ *  · mode：figure=认出图形并裁好 / trim=只去掉四周白边 / raw=原样
+ */
+export interface CropPreview {
+  cut: string
+  cw: number
+  ch: number
+  raw: string
+  rw: number
+  rh: number
+  mode: 'figure' | 'trim' | 'raw'
+  why: string
+  /** 老师在对话框里勾了"用整张原图"（只对这一张生效 ✓） */
+  useRaw?: boolean
+}
+
+/**
+ * 【v1666】预览里的选择 → 真正要插的图（带尺寸，交给 layoutPics / attachPics 排版 ✓）
+ * 抽成纯函数是为了能在探针里直接断言 —— "勾了就用原图、尺寸跟着换"这种事不该只靠肉眼 ✓
+ */
+export function previewToPics(items: CropPreview[] | null | undefined): { src: string; w: number; h: number }[] {
+  const out: { src: string; w: number; h: number }[] = []
+  for (const it of items || []) {
+    if (!it) continue
+    if (it.useRaw && it.raw) out.push({ src: it.raw, w: it.rw, h: it.rh })
+    else if (it.cut) out.push({ src: it.cut, w: it.cw, h: it.ch })
+    else if (it.raw) out.push({ src: it.raw, w: it.rw, h: it.rh })
+  }
+  return out
+}
+

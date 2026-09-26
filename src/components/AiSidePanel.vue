@@ -15,8 +15,9 @@ import { pdfToMarkdown } from '@/pdf/pdfImport'
 import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
 import { markdownToDeck } from '@/composables/mdDeck'
 import { attachPics, attachTikzFigures, layoutPics, tikzSolver, type PicInput } from '@/composables/figureRender'
-import { cropToFigure } from '@/composables/figCrop'
+import { cropToFigure, previewToPics, type CropPreview } from '@/composables/figCrop'
 import ScreenshotCapture from './ScreenshotCapture.vue'
+import FigureCropDialog from './FigureCropDialog.vue'
 import { tikzToPlaceholders, type TikzSpec } from '@/composables/tikzFigure'
 import { useDeckStore } from '@/stores/deck'
 import { createElement, type SlideElement } from '@/types'
@@ -73,21 +74,52 @@ function toggleOnly() {
   try { localStorage.setItem(ONLY_KEY, onlyFigure.value ? '1' : '0') } catch { /* 忽略 */ }
 }
 
-/** 按开关把附件图裁成"只有图形"（认不出就原样返回 ✓），并回报每张的结果（连**尺寸**一起回报 ✓） */
-async function cutFigures(pics: string[]): Promise<{ out: PicInput[]; cropped: number; trimmed: number; kept: number }> {
+/** 按开关把附件图裁成"只有图形"（认不出就原样返回 ✓），并回报每张的**结果与尺寸**（预览要用 ✓） */
+async function cutFigures(pics: string[]): Promise<{ items: CropPreview[]; cropped: number; trimmed: number; kept: number }> {
   if (!onlyFigure.value || !pics.length) {
-    return { out: pics.map((src) => ({ src })), cropped: 0, trimmed: 0, kept: pics.length }
+    return {
+      items: pics.map((src) => ({ cut: src, cw: 0, ch: 0, raw: src, rw: 0, rh: 0, mode: 'raw' as const, why: '整张可用' })),
+      cropped: 0, trimmed: 0, kept: pics.length,
+    }
   }
-  const out: PicInput[] = []
+  const items: CropPreview[] = []
   let cropped = 0, trimmed = 0
   for (const p of pics) {
     const r = await cropToFigure(p)
     // 【v1665】只去掉白边（mode=trim）也算处理过了 → 尺寸按结果图走 ✓（图片比例排版要用它 ✓）
-    out.push(r.cropped || r.mode === 'trim' ? { src: r.src, w: r.w, h: r.h } : { src: p })
+    const useCut = r.cropped || r.mode === 'trim'
+    items.push({
+      cut: useCut ? r.src : p, cw: useCut ? r.w : r.ow, ch: useCut ? r.h : r.oh,
+      raw: p, rw: r.ow, rh: r.oh, mode: r.mode, why: r.why,
+    })
     if (r.cropped) cropped++
     else if (r.mode === 'trim') trimmed++
   }
-  return { out, cropped, trimmed, kept: out.length - cropped - trimmed }
+  return { items, cropped, trimmed, kept: items.length - cropped - trimmed }
+}
+
+/** 【v1666】插入前先看一眼（用户要求）：把切好的结果摆出来，确认了才插 ✓
+ *  · 不想每次都看 → 对话框里勾"以后不再问"，记住设置 ✓
+ *  · 返回 null = 用户点了取消（那就什么都不插 ✓） */
+const PREVIEW_KEY = 'lj-mathslides:fig-preview'
+const previewOpen = ref(false)
+const previewItems = ref<CropPreview[]>([])
+let previewDone: ((v: CropPreview[] | null) => void) | null = null
+function previewWanted(): boolean {
+  try { return localStorage.getItem(PREVIEW_KEY) !== '0' } catch { return true }
+}
+function askPreview(items: CropPreview[]): Promise<CropPreview[] | null> {
+  if (!items.length || !previewWanted()) return Promise.resolve(items)
+  previewItems.value = items.map((it) => ({ ...it, useRaw: false }))
+  previewOpen.value = true
+  return new Promise((res) => { previewDone = res })
+}
+function onPreviewDone(sel: CropPreview[] | null, noMore: boolean) {
+  previewOpen.value = false
+  if (noMore) { try { localStorage.setItem(PREVIEW_KEY, '0') } catch { /* 忽略 */ } }
+  const fn = previewDone
+  previewDone = null
+  if (fn) fn(sel)
 }
 
 /** 【v1658】预制对话（用户要求）：一点就把提示词填进输入框（已有内容则接在后面），附件照旧自己带 ✓ */
@@ -110,17 +142,21 @@ function usePreset(p: { label: string; text: string }) {
 
 /** 【v1658】「图 → 幻灯片」：**不调 AI**，直接把当前附件图插到当前页（用户："切出图形插入幻灯片"）
  *  【v1665】按**图片自己的比例**定尺寸、在当前页的**空位上纵向排开** ——
- *    原来一律 900×560、每张只挪 24px ✗：竖长的图被框得又小又空，多张图几乎叠在同一处 ✗ */
+ *    原来一律 900×560、每张只挪 24px ✗：竖长的图被框得又小又空，多张图几乎叠在同一处 ✗
+ *  【v1666】插之前先弹预览让老师确认（用户要求 ✓）；取消就什么都不插 ✓ */
 async function picsToSlide() {
   const pics = attImgs.value.slice(0, MAX_IMG)
   if (!pics.length) { saveMsg.value = '先在下面点「＋图」选一张（或 Ctrl+V 粘一张），再点这个'; return }
   busy.value = true
   try {
     const cut = await cutFigures(pics)
-    const rects = layoutPics(cut.out, freeArea(), 20, 'center')
+    const chosen = await askPreview(cut.items)
+    if (!chosen) { saveMsg.value = '已取消，什么都没插'; return }
+    const out = previewToPics(chosen)
+    const rects = layoutPics(out, freeArea(), 20, 'center')
     const items = rects.map((r, i) => {
       const el = createElement('image', r)
-      Object.assign(el, { src: cut.out[i].src, fit: 'contain' })
+      Object.assign(el, { src: out[i].src, fit: 'contain' })
       return { type: 'image' as const, overrides: el as Partial<SlideElement> }
     })
     store.addElements(items)
@@ -307,9 +343,14 @@ function tikzSummary(got: { figures: number; texts: number; orphans: number }, s
 async function insertToSlides(t: string, pics: string[] = []) {
   try {
     // 【v1659】先按"只切图形"把附件图裁好（用户要求：题目文字不切）✓
-    const cut = pics.length ? await cutFigures(pics) : { out: [] as PicInput[], cropped: 0, trimmed: 0, kept: 0 }
-    // 【v1665】裁完的图带着尺寸（PicInput），后面按比例排版要用它 ✓ —— 不再往 pics 里塞 ✗
-    const picList: PicInput[] = cut.out
+    const cut = pics.length ? await cutFigures(pics) : { items: [] as CropPreview[], cropped: 0, trimmed: 0, kept: 0 }
+    // 【v1666】插之前先让老师看一眼切好的图形（用户要求）✓ 确认完才继续做幻灯片 ✓
+    let picList: PicInput[] = []
+    if (cut.items.length) {
+      const chosen = await askPreview(cut.items)
+      if (!chosen) { saveMsg.value = '已取消，没有插入（图形还没确认）'; return }
+      picList = previewToPics(chosen)
+    }
     const pre = tikzToPlaceholders(t, tikzSolver)
     // 【v1657】题目**本来就有图**（附件原图）时：直接贴原图，**不再把 TikZ 重建为数学图形** ✓
     //   （用户明确：重建出来的效果比较差；AI 那段 tikz 用原图替掉即可）
@@ -437,7 +478,7 @@ async function saveAnswer(t: string) {
           <button class="ds__tool" title="从文件里选图：会和题目一起插进幻灯片；也可以直接 Ctrl+V 粘贴" @click="imgInput?.click()">＋图</button>
           <button class="ds__tool" title="带文档：PDF 在本机抽文字，MD/TXT/JSON 直接读（纯文本模型也能用）" @click="docInput?.click()">＋文档</button>
           <span class="ds__toolBreak" />
-          <button class="ds__tool ds__tool--main" title="不调 AI：把上面选的图切出来（只留图形），插到当前页" @click="picsToSlide">切图 → 幻灯片</button>
+          <button class="ds__tool ds__tool--main" title="不调 AI：把上面选的图切出来（只留图形），插之前先让你看一眼，再插到当前页" @click="picsToSlide">切图 → 幻灯片</button>
           <button class="ds__tool" :class="{ 'ds__tool--on': onlyFigure }"
             :title="onlyFigure ? '当前：只切图形部分（题目文字不切）—— 点一下改成整张图' : '当前：整张图都插——点一下改成只切图形'"
             @click="toggleOnly">{{ onlyFigure ? '✓ 只切图形' : '整张图' }}</button>
@@ -460,6 +501,8 @@ async function saveAnswer(t: string) {
     </section>
     <!-- 【v1663】截图弹窗（复用应用已有的那个：桌面/窗口切换、拖选区、Esc 取消都现成 ✓） -->
     <ScreenshotCapture v-if="shotOpen" attach @close="shotOpen = false" @done="onShot" />
+    <!-- 【v1666】插入前的切图预览（用户要求：切完先看一眼再插 ✓） -->
+    <FigureCropDialog v-if="previewOpen" :items="previewItems" @done="onPreviewDone" />
   </div>
 </template>
 
