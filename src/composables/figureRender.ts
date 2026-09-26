@@ -2,9 +2,12 @@ import { createApp, h } from 'vue'
 import MathFigureElement from '@/components/elements/MathFigureElement.vue'
 import { createElement } from '@/types'
 import type { MathFigureElement as MFigEl, MathFigureKind, SlideElement } from '@/types'
-import { DEFAULT_PIECEWISE, figureBox } from '@/composables/mathPlot'
+import { CONICS, DEFAULT_PIECEWISE, figureBox, mapper, withParams } from '@/composables/mathPlot'
 import { THM_LABELS } from '@/composables/solid3d'
 import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
+import type { TikzSpec } from '@/composables/tikzFigure'
+import type { Deck } from '@/types'
+import type { View } from '@/composables/mathPlot'
 
 /**
  * 数学图形的"共用渲染"。
@@ -66,6 +69,68 @@ function elOfPreset(p: (typeof SOLID_FIGURE_PRESETS)[number]): SlideElement {
   const el = createElement('mathfig', { x: 0, y: 0 })
   Object.assign(el, { ...p.el, w: p.w, h: p.h, fill: 'transparent', stroke: '#1a1a1a', strokeWidth: 2.8 })
   return el
+}
+
+/* ===========================================================================
+ * 【v1652】TikZ → 图形：把解析结果落成真元素
+ * =========================================================================*/
+
+/** 某类图形"当前参数下"的取景（与 MathFigureElement 里用的是同一个函数 ✓） */
+function viewOfSpec(kind: string, params: Record<string, number>): View {
+  const def = CONICS[kind]
+  if (!def) return { xmin: -6, xmax: 6, ymin: -4.5, ymax: 4.5 }
+  const pv = withParams(kind, params)
+  return def.viewOf ? def.viewOf(pv) : def.view
+}
+
+/** 把一份 TikZ 解析结果变成 mathfig 元素（尺寸与图形库插入时同一套口径 ✓） */
+export function tikzSpecToElement(spec: TikzSpec): MFigEl {
+  const el = mathFigureElOfKind(spec.kind as MathFigureKind)
+  const box = figureBox(spec.kind) || { w: 520, h: 400 }
+  Object.assign(el, {
+    w: box.w,
+    h: box.h,
+    params: { ...(el.params || {}), ...spec.params },
+    pointLabels: spec.points.map((p) => p.label),
+  })
+  return el as MFigEl
+}
+
+/**
+ * 把 markdown 导入留下的图片占位 ![](tikz:N) **就地**换成真图形元素（位置不动）。
+ *
+ * 另外：TikZ 的 \node at (x,y){$A$} 这类**自由文字**，曲线图元里没有对应项
+ * （它只有"标注点 + 字母"），所以单独落成**文字元素**叠在图上 —— 位置按图形自己的取景换算，
+ * 学生看是一张图，老师想改就单独拖那个文字框 ✓
+ */
+export function attachTikzFigures(deck: Deck, specs: TikzSpec[]): { figures: number; texts: number } {
+  let figures = 0, texts = 0
+  for (const slide of deck.slides) {
+    const next: typeof slide.elements = []
+    for (const item of slide.elements) {
+      const src = item.type === 'image' ? String((item as { src?: string }).src || '') : ''
+      const mm = /^tikz:(d+)$/.exec(src)
+      const spec = mm ? specs[Number(mm[1])] : undefined
+      if (!spec) { next.push(item); continue }
+      const fig = tikzSpecToElement(spec)
+      fig.x = Math.max(0, Math.round(((deck.width || 1920) - fig.w) / 2))
+      fig.y = item.y
+      next.push(fig)
+      figures++
+      const view = viewOfSpec(spec.kind, spec.params)
+      const mp = mapper(view, fig.w, fig.h)
+      const fs = Math.max(12, Math.round(Math.min(fig.w, fig.h) * 0.055 * 0.85))
+      for (const t of spec.texts) {
+        const w = Math.max(60, fs * 3)
+        const txt = createElement('text', { x: fig.x + mp.X(t.x) - w / 2, y: fig.y + mp.Y(t.y) - fs, w, h: fs * 2 })
+        Object.assign(txt, { text: t.text, fontSize: fs, align: 'center', color: '#1a1a1a' })
+        next.push(txt)
+        texts++
+      }
+    }
+    slide.elements = next
+  }
+  return { figures, texts }
 }
 
 /**

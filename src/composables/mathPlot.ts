@@ -1249,6 +1249,8 @@ export const CONICS: Record<string, {
       { key: 'a', label: 'a（半长轴）', short: 'a', def: 4, step: 0.5, min: 0.5, max: 20 },
       { key: 'b', label: 'b（半短轴）', short: 'b', def: 3, step: 0.5, min: 0.5, max: 20 },
       { key: 'ab', label: '显示 a、b 标注', short: '标注', def: 1, bool: true },
+      // 【v1652】焦点标注可关：TikZ 译过来的图，原图没标焦点就不硬加 ✓（默认 1 → 老图元不变）
+      { key: 'foci', label: '显示焦点 F₁、F₂', short: '焦点', def: 1, bool: true },
       // 准线默认**关**：自定义椭圆原来没有准线，默认开会让老图元突然多两条线
       { key: 'dline', label: '显示准线', short: '准线', def: 0, bool: true },
     ],
@@ -1261,6 +1263,7 @@ export const CONICS: Record<string, {
       { key: 'a', label: 'a（半长轴）', short: 'a', def: 4, step: 0.5, min: 0.5, max: 20 },
       { key: 'b', label: 'b（半短轴）', short: 'b', def: 3, step: 0.5, min: 0.5, max: 20 },
       { key: 'ab', label: '显示 a、b 标注', short: '标注', def: 1, bool: true },
+      { key: 'foci', label: '显示焦点 F₁、F₂', short: '焦点', def: 1, bool: true },
       { key: 'dline', label: '显示准线', short: '准线', def: 0, bool: true },
     ],
     viewOf: (p) => ellipseWindowV(p.a || 1, p.b || 1),
@@ -1271,6 +1274,9 @@ export const CONICS: Record<string, {
     params: [
       { key: 'a', label: 'a（实半轴）', short: 'a', def: 3, step: 0.5, min: 0.3, max: 20 },
       { key: 'b', label: 'b（虚半轴）', short: 'b', def: 2, step: 0.5, min: 0.3, max: 20 },
+      // 【v1652】a= 标注可关（椭圆本来就有同名开关 ✓）—— 题图上一般不印参数值
+      { key: 'ab', label: '显示 a、b 标注', short: '标注', def: 1, bool: true },
+      { key: 'foci', label: '显示焦点 F₁、F₂', short: '焦点', def: 1, bool: true },
       { key: 'dline', label: '显示准线', short: '准线', def: 0, bool: true },
       { key: 'aline', label: '显示渐近线', short: '渐近线', def: 0, bool: true },
     ],
@@ -1352,6 +1358,8 @@ for (let i = 1; i <= 4; i++) {
     { key: 's' + i, label: '线' + i + ' 起点 x（与终点相同 = 整条直线）', short: '起x', group: 'ln' + i, def: 0, step: 0.5, min: -50, max: 50, showIf: on },
     { key: 'e' + i, label: '线' + i + ' 终点 x（与起点相同 = 整条直线）', short: '终x', group: 'ln' + i, def: 0, step: 0.5, min: -50, max: 50, showIf: on },
     { key: 'd' + i, label: '线' + i + ' 用虚线', short: '虚线', group: 'ln' + i, def: 0, bool: true, showIf: on },
+    // 【v1652】竖直直线 / 竖直弦：k 是无穷，斜率式存不下 —— 打开后 **m 就是 x**，起终点 s/e 解释成 **y** ✓
+    { key: 'v' + i, label: '线' + i + ' 竖直（x = m，起终点填 y）', short: '竖直', group: 'ln' + i, def: 0, bool: true, showIf: on },
   )
 }
 /** 「圆锥曲线的标注点」：圆点 + 名称。名称是字符串 ✗（params 只能放数字），
@@ -1422,19 +1430,33 @@ function drawExtraLines(
     const k = pv['k' + i] || 0, b2 = pv['m' + i] || 0
     const sN = pv['s' + i] ?? 0, eN = pv['e' + i] ?? 0
     const seg = Math.abs(eN - sN) > 1e-6                 // 起终点不同 = 线段
-    const span = clipLine(k, b2, view)
-    if (!span) continue
-    let lo = Math.min(span[0][0], span[1][0]), hi = Math.max(span[0][0], span[1][0])
+    if (Math.round(pv['hide' + i] ?? 0)) continue                     // 绑定的切线解不出来（定点在曲线内）→ 这条线不画
+    const col = colors && colors[i - 1] ? colors[i - 1]! : stroke     // 每条线可以有自己的颜色
+    const lDash = Math.round(pv['d' + i] ?? 0) ? '7 5' : ''             // 每条线可以自己选虚实 → 虚线标交点、实线画图形都行
+    // 【v1652】竖直直线：斜率式画不出 x = m（clipLine 对竖直只给得出一个点 ✗）→ 单开一条路，
+    //   取景裁剪与线段截断都换成 **y** 方向 ✓
+    const vert = Math.round(pv['v' + i] ?? 0) !== 0
+    let lo = 0, hi = 0
+    if (vert) {
+      if (b2 < view.xmin - 1e-9 || b2 > view.xmax + 1e-9) continue      // 整条竖线在取景外
+      lo = view.ymin; hi = view.ymax
+    } else {
+      const span = clipLine(k, b2, view)
+      if (!span) continue
+      lo = Math.min(span[0][0], span[1][0]); hi = Math.max(span[0][0], span[1][0])
+    }
     if (seg) {
       lo = Math.max(lo, Math.min(sN, eN))
       hi = Math.min(hi, Math.max(sN, eN))
       if (hi - lo < 1e-9) continue
     }
-    if (Math.round(pv['hide' + i] ?? 0)) continue                     // 绑定的切线解不出来（定点在曲线内）→ 这条线不画
-    const col = colors && colors[i - 1] ? colors[i - 1]! : stroke     // 每条线可以有自己的颜色
-    const lDash = Math.round(pv['d' + i] ?? 0) ? '7 5' : ''             // 每条线可以自己选虚实 → 虚线标交点、实线画图形都行
-    out += lineSvg(mm.X(lo), mm.Y(k * lo + b2), mm.X(hi), mm.Y(k * hi + b2), col, sw, lDash)
-    if (seg && dots) out += dotSvg(mm.X(lo), mm.Y(k * lo + b2), r, col) + dotSvg(mm.X(hi), mm.Y(k * hi + b2), r, col)
+    if (vert) {
+      out += lineSvg(mm.X(b2), mm.Y(lo), mm.X(b2), mm.Y(hi), col, sw, lDash)
+      if (seg && dots) out += dotSvg(mm.X(b2), mm.Y(lo), r, col) + dotSvg(mm.X(b2), mm.Y(hi), r, col)
+    } else {
+      out += lineSvg(mm.X(lo), mm.Y(k * lo + b2), mm.X(hi), mm.Y(k * hi + b2), col, sw, lDash)
+      if (seg && dots) out += dotSvg(mm.X(lo), mm.Y(k * lo + b2), r, col) + dotSvg(mm.X(hi), mm.Y(k * hi + b2), r, col)
+    }
     // 弦长：这条线与曲线的两个交点之间的距离，标在弦中点（默认关）
     if (Math.round(pv.chord ?? 0)) {
       const rs = conicLineRoots(kind, pv, i)
@@ -1466,16 +1488,29 @@ export function conicLineHandles(kind: string, w: number, h: number, params?: Re
     const k = pv['k' + i] || 0, b2 = pv['m' + i] || 0
     const sN = pv['s' + i] ?? 0, eN = pv['e' + i] ?? 0
     const seg = Math.abs(eN - sN) > 1e-6
-    const span = clipLine(k, b2, view)
-    if (!span) continue
-    let lo = Math.min(span[0][0], span[1][0]), hi = Math.max(span[0][0], span[1][0])
+    // 【v1652】竖直直线 / 竖直弦：手柄落在 (m, y) 上（与 drawExtraLines 同一套裁剪）✓
+    const vert = Math.round(pv['v' + i] ?? 0) !== 0
+    let lo = 0, hi = 0
+    if (vert) {
+      if (b2 < view.xmin - 1e-9 || b2 > view.xmax + 1e-9) continue
+      lo = view.ymin; hi = view.ymax
+    } else {
+      const span = clipLine(k, b2, view)
+      if (!span) continue
+      lo = Math.min(span[0][0], span[1][0]); hi = Math.max(span[0][0], span[1][0])
+    }
     if (seg) {
       lo = Math.max(lo, Math.min(sN, eN))
       hi = Math.min(hi, Math.max(sN, eN))
       if (hi - lo < 1e-9) continue
     }
-    out.push({ i, which: 0, x: mm.X(lo), y: mm.Y(k * lo + b2) })
-    out.push({ i, which: 1, x: mm.X(hi), y: mm.Y(k * hi + b2) })
+    if (vert) {
+      out.push({ i, which: 0, x: mm.X(b2), y: mm.Y(lo) })
+      out.push({ i, which: 1, x: mm.X(b2), y: mm.Y(hi) })
+    } else {
+      out.push({ i, which: 0, x: mm.X(lo), y: mm.Y(k * lo + b2) })
+      out.push({ i, which: 1, x: mm.X(hi), y: mm.Y(k * hi + b2) })
+    }
   }
   return out
 }
@@ -1500,6 +1535,17 @@ export function conicLineDrag(
   const fy = (p: number) => view.ymin + (h - p) / sy
   const ax = fx(other.x), ay = fy(other.y)
   let bx = fx(px), by = fy(py)
+  // 【v1652】竖直直线 / 竖直弦：拖动改的是 **x**（存在 m{i} 里），线段的起终点改的是 **y** ✓
+  if (Math.round(pv['v' + i] ?? 0)) {
+    const patchV: Record<string, number> = {}
+    patchV['m' + i] = +fx(px).toFixed(4)
+    const sV = pv['s' + i] ?? 0, eV = pv['e' + i] ?? 0
+    if (Math.abs(eV - sV) > 1e-6) {
+      patchV['s' + i] = +Math.min(ay, by).toFixed(3)
+      patchV['e' + i] = +Math.max(ay, by).toFixed(3)
+    }
+    return patchV
+  }
   // 拖成竖直时斜率无穷：给一点点错位（k 会很大，但不出 NaN / Infinity）
   if (Math.abs(bx - ax) < 1e-6) bx = ax + 1e-6
   const k = (by - ay) / (bx - ax)
@@ -1718,6 +1764,31 @@ export function conicLineRoots(kind: string, params: Record<string, number> | un
   const sN = pv['s' + line] ?? 0, eN = pv['e' + line] ?? 0
   const seg = Math.abs(eN - sN) > 1e-6
   const lo = Math.min(sN, eN), hi = Math.max(sN, eN)
+  // 【v1652】竖直直线 / 竖直弦：把 x = m 代进二次型 → B·y² + D·y + (A·m² + C·m + E) = 0
+  //   （有了它，"弦与曲线的交点"这类绑定在竖直弦上也成立 ✓）
+  if (Math.round(pv['v' + line] ?? 0)) {
+    const A3 = q.B, B3 = q.D, C3 = q.A * m2 * m2 + q.C * m2 + q.E
+    const ys: number[] = []
+    if (Math.abs(A3) < 1e-12) {
+      if (Math.abs(B3) > 1e-12) ys.push(-C3 / B3)
+    } else {
+      const disc3 = B3 * B3 - 4 * A3 * C3
+      const tol3 = 1e-9 * (B3 * B3 + Math.abs(4 * A3 * C3) + 1e-12)
+      if (disc3 >= -tol3) {
+        const sq3 = Math.sqrt(Math.max(0, disc3))
+        ys.push((-B3 + sq3) / (2 * A3), (-B3 - sq3) / (2 * A3))
+      }
+    }
+    const ptsV = ys
+      .filter((y) => isFinite(y) && !(seg && (y < lo - 1e-9 || y > hi + 1e-9)))
+      .sort((a, b) => a - b)                        // 按 y 升序：which=0/1 才有稳定含义 ✓
+      .map((y) => ({ x: m2, y }))
+    if (ptsV.length === 2) {
+      const epsV = 1e-3 * (1 + Math.abs(ptsV[0].x) + Math.abs(ptsV[0].y))
+      if (Math.hypot(ptsV[0].x - ptsV[1].x, ptsV[0].y - ptsV[1].y) < epsV) return [ptsV[0]]
+    }
+    return ptsV
+  }
   const A2 = q.A + q.B * k * k
   const B2 = 2 * q.B * k * m2 + q.C + q.D * k
   const C2 = q.B * m2 * m2 + q.D * m2 + q.E
@@ -1979,8 +2050,10 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
     const c = Math.sqrt(Math.max(0, a2 * a2 - b2 * b2))
     s += curve(plotParametric((t) => a * Math.cos(t), (t) => b * Math.sin(t), 0, TAU, view, w, h))
     s += lineSvg(X(-a), Y(0), X(a), Y(0), stroke, thin, dash)
-    s += dot(-c, 0) + dot(c, 0)
-    s += label(-c, 0, 'F₁', 0, fs * 1.15) + label(c, 0, 'F₂', 0, fs * 1.15)
+    if (Math.round(pv.foci ?? 1)) {                 // 【v1652】焦点可关（默认显示 → 老图元不变 ✓）
+      s += dot(-c, 0) + dot(c, 0)
+      s += label(-c, 0, 'F₁', 0, fs * 1.15) + label(c, 0, 'F₂', 0, fs * 1.15)
+    }
     // a / b 标注可选（默认显示，老图元不变）—— 教材图里一般不把参数值印在图上
     if (Math.round(pv.ab ?? 1)) {
       s += label(a, 0, 'a=' + a, fs * 0.5, -fs * 0.6)
@@ -2001,8 +2074,10 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
     const c = Math.sqrt(Math.max(0, a * a - b * b))
     s += curve(plotParametric((t) => b * Math.cos(t), (t) => a * Math.sin(t), 0, TAU, view, w, h))
     s += lineSvg(X(0), Y(-a), X(0), Y(a), stroke, thin, dash)
-    s += dot(0, -c) + dot(0, c)
-    s += label(0, -c, 'F₁', fs * 1.25, 0) + label(0, c, 'F₂', fs * 1.25, 0)
+    if (Math.round(pv.foci ?? 1)) {                 // 【v1652】焦点可关（默认显示 → 老图元不变 ✓）
+      s += dot(0, -c) + dot(0, c)
+      s += label(0, -c, 'F₁', fs * 1.25, 0) + label(0, c, 'F₂', fs * 1.25, 0)
+    }
     if (Math.round(pv.ab ?? 1)) {
       s += label(0, a, 'a=' + a, fs * 0.5, -fs * 0.6)
       s += label(b, 0, 'b=' + b, -fs * 1.6, -fs * 0.6)
@@ -2021,9 +2096,11 @@ export function conicFigure(kind: string, w: number, h: number, baseStroke: stri
     s += curve(plotParametric((t) => a * Math.cosh(t), (t) => b * Math.sinh(t), -U, U, view, w, h))
     s += curve(plotParametric((t) => -a * Math.cosh(t), (t) => b * Math.sinh(t), -U, U, view, w, h))
     const c = Math.sqrt(a * a + b * b)
-    s += dot(-c, 0) + dot(c, 0)
-    s += label(-c, 0, 'F₁', 0, fs * 1.15) + label(c, 0, 'F₂', 0, fs * 1.15)
-    s += label(a, 0, 'a=' + a, fs * 0.5, -fs * 0.6)
+    if (Math.round(pv.foci ?? 1)) {                 // 【v1652】焦点可关（默认显示 → 老图元不变 ✓）
+      s += dot(-c, 0) + dot(c, 0)
+      s += label(-c, 0, 'F₁', 0, fs * 1.15) + label(c, 0, 'F₂', 0, fs * 1.15)
+    }
+    if (Math.round(pv.ab ?? 1)) s += label(a, 0, 'a=' + a, fs * 0.5, -fs * 0.6)   // 【v1652】可关；默认仍显示 → 老图元外观不变 ✓
     // 渐近线 y = ±(b/a)x 与准线 x = ±a²/c —— 都默认关（原来没有，默认开会改老图元外观）
     if (Math.round(pv.aline ?? 0)) {
       const xa = view.xmax * 0.98

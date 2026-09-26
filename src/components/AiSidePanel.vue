@@ -14,6 +14,8 @@ import AppIcon from './AppIcon.vue'
 import { pdfToMarkdown } from '@/pdf/pdfImport'
 import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
 import { markdownToDeck } from '@/composables/mdDeck'
+import { attachTikzFigures } from '@/composables/figureRender'
+import { tikzToPlaceholders, type TikzSpec } from '@/composables/tikzFigure'
 import { useDeckStore } from '@/stores/deck'
 
 const open = ref(false)
@@ -143,14 +145,27 @@ async function copyOne(t: string) { try { await navigator.clipboard.writeText(t)
 const saveMsg = ref('')
 const store = useDeckStore()
 
+/** 插入结果的补充说明：译了几张图、哪几处没认出来（绝不假装都译出来了 ✓） */
+function tikzSummary(got: { figures: number; texts: number }, specs: TikzSpec[], fails: string[]): string {
+  const parts: string[] = []
+  if (got.figures) parts.push('TikZ 已译成 ' + got.figures + ' 张可编辑图形（' + specs.map((s) => s.curve).join('；') + '）')
+  if (fails.length) parts.push(fails.length + ' 处没认出来，已按一行占位（' + fails[0] + '）')
+  return parts.length ? '，' + parts.join('；') : ''
+}
+
 /** 【v1647】一键插入幻灯片（用户要求）：AI 回答是 Markdown → 走应用自己的 markdownToDeck ✓
- *   （与「导入 PDF → 抽取文字」同一条链路，公式/标题/段落都按应用的口径成页 ✓）*/
+ *   （与「导入 PDF → 抽取文字」同一条链路，公式/标题/段落都按应用的口径成页 ✓）
+ *  【v1652】在此之前先把 AI 顺口写的 TikZ **真译成图形**（译不出的才退回一行占位）✓ */
 function insertToSlides(t: string) {
   try {
-    const deck = markdownToDeck(mdClean(t))
+    const pre = tikzToPlaceholders(t)
+    const deck = markdownToDeck(mdClean(pre.md))
     if (!deck || !deck.slides || !deck.slides.length) { saveMsg.value = '这段内容里没有能成页的文字'; return }
+    const got = attachTikzFigures(deck, pre.specs)
     const ok = store.importDeck(deck)
-    saveMsg.value = ok ? ('已插入 ' + deck.slides.length + ' 页幻灯片') : '生成的内容无效（已取消，未影响当前内容）'
+    saveMsg.value = ok
+      ? ('已插入 ' + deck.slides.length + ' 页幻灯片' + tikzSummary(got, pre.specs, pre.fails))
+      : '生成的内容无效（已取消，未影响当前内容）'
   } catch (e) { saveMsg.value = '插入失败：' + String((e as Error)?.message || e) }
 }
 function mdClean(t: string): string {
@@ -168,7 +183,6 @@ function mdClean(t: string): string {
   s = s.replace(/\\begin\{axis\}[\s\S]*?\\end\{axis\}/g, '（此处原为 pgfplots 图，幻灯片不支持；建议用「数学图形」库插一张）')
   s = s.replace(/\\begin\{asy\}[\s\S]*?\\end\{asy\}/g, '（此处原为 Asymptote 图，幻灯片不支持；建议用「数学图形」库插一张）')
   s = s.replace(/\\begin\{center\}\s*\n?\s*\\end\{center\}/g, '')
-  return s + '\n'
   return s + '\n'
 }
 function stampName(): string {
