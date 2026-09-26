@@ -145,8 +145,13 @@ function insertToSlides(t: string) {
 function mdClean(t: string): string {
   let s = String(t || '').trim()
   // 去掉模型爱加的整段围栏（```markdown … ``` / ``` … ```），否则再导入会多出一堆噪声 ✗
+  // 去围栏：整段包着的情况，以及"只包了前面/后面"的情况都要处理 ✓
+  //  （用户实报：AI 回答以 ```latex 开头，整段没被识别成围栏，于是 \textbf 原样插进幻灯片 ✗）
+  s = s.replace(/^\s*```[a-zA-Z]*\s*\n/, "").replace(/\n```\s*$/, "")
   const m = s.match(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/)
   if (m) s = m[1].trim()
+  // `\textbf{1.}` 这类宏在幻灯片里只会原样显示 ✗ → 还原成里面的文字 ✓
+  s = s.replace(/\\textbf\{([^{}]*)\}/g, '$1').replace(/\\mathrm\{([^{}]*)\}/g, '$1')
   return s + '\n'
 }
 function stampName(): string {

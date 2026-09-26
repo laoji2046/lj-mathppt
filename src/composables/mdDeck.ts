@@ -134,7 +134,8 @@ function mdBlockToSlide(lines: string[], opts: { fontSize?: number } = {}): Slid
     //   AI 常在每行之间也空一行，若照样切块，一道题会被拆成「题干 / 选项 / 答案」好几个框 ✗。
     //   规则：**当前块是"题号块"（首行像 `1.` `2、`）时，空行只当作块内的空行**，一直攒到下一题 ✓
     if (!line.trim()) {
-      if (buf.length && /^\s*\d{1,3}\s*[.、．]/.test(buf[0])) { buf.push(""); continue }
+      // 题号写法要放宽（用户实报：AI 用的是 `（1）` 和 `\textbf{1.}`，只认 `1.` 会漏 ✗）
+      if (buf.length && /^\s*(?:\\textbf\{[^}]*\}|[（(]?\s*\d{1,3}\s*[.、．)）])/.test(buf[0])) { buf.push(""); continue }
       flush()
       continue
     }
