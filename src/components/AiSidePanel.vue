@@ -14,7 +14,7 @@ import AppIcon from './AppIcon.vue'
 import { pdfToMarkdown } from '@/pdf/pdfImport'
 import { firstUserDir, writeTextFile } from '@/composables/useQuestionBank'
 import { markdownToDeck } from '@/composables/mdDeck'
-import { attachTikzFigures } from '@/composables/figureRender'
+import { attachTikzFigures, tikzSolver } from '@/composables/figureRender'
 import { tikzToPlaceholders, type TikzSpec } from '@/composables/tikzFigure'
 import { useDeckStore } from '@/stores/deck'
 
@@ -148,7 +148,12 @@ const store = useDeckStore()
 /** 插入结果的补充说明：译了几张图、哪几处没认出来（绝不假装都译出来了 ✓） */
 function tikzSummary(got: { figures: number; texts: number }, specs: TikzSpec[], fails: string[]): string {
   const parts: string[] = []
-  if (got.figures) parts.push('TikZ 已译成 ' + got.figures + ' 张可编辑图形（' + specs.map((s) => s.curve).join('；') + '）')
+  if (got.figures) {
+    // 曲线是什么 + 解析时的降级/绑定说明（"哪几个点被钉到交点上"就在 notes 里）✓
+    const notes = specs.flatMap((s) => s.notes).slice(0, 2)
+    parts.push('TikZ 已译成 ' + got.figures + ' 张可编辑图形（' + specs.map((s) => s.curve).join('；') +
+      (notes.length ? '；' + notes.join('；') : '') + '）')
+  }
   if (fails.length) parts.push(fails.length + ' 处没认出来，已按一行占位（' + fails[0] + '）')
   return parts.length ? '，' + parts.join('；') : ''
 }
@@ -158,7 +163,7 @@ function tikzSummary(got: { figures: number; texts: number }, specs: TikzSpec[],
  *  【v1652】在此之前先把 AI 顺口写的 TikZ **真译成图形**（译不出的才退回一行占位）✓ */
 function insertToSlides(t: string) {
   try {
-    const pre = tikzToPlaceholders(t)
+    const pre = tikzToPlaceholders(t, tikzSolver)
     const deck = markdownToDeck(mdClean(pre.md))
     if (!deck || !deck.slides || !deck.slides.length) { saveMsg.value = '这段内容里没有能成页的文字'; return }
     const got = attachTikzFigures(deck, pre.specs)

@@ -40,8 +40,10 @@ function saveMineruKey(v: string) {
 //    NewDeckWizard 读的就是这个键 ✓（'off' = 不再自动弹 ✓）
 const WIZ_KEY = 'lj-mathslides-vue:newdeck-wizard'
 /* 【v1650】视觉模型（本地存）：带图提问时用，键名与右侧助手面板约定一致 ✓ */
-export const VISION_BASE_KEY = 'lj-mathslides:vision-base'
-export const VISION_MODEL_KEY = 'lj-mathslides:vision-model'
+//   ⚠ 这里**不能**写 export：script setup 里禁止 ES 模块导出，@vue/compiler-sfc 直接报错 → vite build 整条挂 ✗
+//     （v1654 发货时才撞出来：v1650/v1651 那两次发货的前端没构建成功，exe 里嵌的是更早的 dist ✗）
+const VISION_BASE_KEY = 'lj-mathslides:vision-base'
+const VISION_MODEL_KEY = 'lj-mathslides:vision-model'
 const visionBase = ref('')
 const visionModel = ref('')
 function saveVision(k: 'base' | 'model', v: string) {

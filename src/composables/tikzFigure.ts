@@ -29,6 +29,21 @@ export interface TikzLineSpec {
 }
 
 export interface TikzPointSpec { x: number; y: number; label: string | null }
+
+/** 点"钉在直线与曲线的交点"上（应用里的 pointLinks；null = 自由点） */
+export type TikzPointLink = { line: number; which: 0 | 1 } | null
+
+/**
+ * 交给解析器的**应用自己的几何**（弦与曲线的交点、当前取景）。
+ * 为什么不直接 import mathPlot：这个模块要保持"能被 node 直接加载"（探针的 LJ_TS 快路径），
+ * 而 '@/…' 别名只有打包器认；顺带也避免把圆锥曲线的求交实现**写第二份**（只此一份 ✓）。
+ */
+export interface TikzGeomSolver {
+  /** 第 line 条线（1 起）与曲线的交点，顺序与应用的 conicLineRoots 一致（which = 下标） */
+  lineRoots: (kind: string, params: Record<string, number>, line: number) => { x: number; y: number }[]
+  /** 当前参数下的取景（用来把"差多少"换算成相对量） */
+  view: (kind: string, params: Record<string, number>) => { xmin: number; xmax: number; ymin: number; ymax: number }
+}
 export interface TikzTextSpec { x: number; y: number; text: string }
 
 export interface TikzSpec {
@@ -36,6 +51,8 @@ export interface TikzSpec {
   kind: string
   params: Record<string, number>
   points: TikzPointSpec[]
+  /** 与 points 一一对应：钉在哪条线与曲线的交点上（没有就是自由点） */
+  links: TikzPointLink[]
   lines: TikzLineSpec[]
   texts: TikzTextSpec[]
   /** 曲线的一句话描述（给"插入结果"提示用） */
@@ -420,7 +437,7 @@ function builtinMarks(kind: string, p: Record<string, number>): { x: number; y: 
   return out
 }
 
-export function parseTikzPicture(src: string): TikzParseResult {
+export function parseTikzPicture(src: string, solver?: TikzGeomSolver): TikzParseResult {
   const raw = String(src || '')
   const m = raw.match(/\\begin\{tikzpicture\}(?:\[[^\]]*\])?([\s\S]*?)\\end\{tikzpicture\}/)
   const body = stripComments(m ? m[1] : raw.replace(/\\begin\{tikzpicture\}(\[[^\]]*\])?/, '').replace(/\\end\{tikzpicture\}/, ''))
@@ -682,6 +699,90 @@ export function parseTikzPicture(src: string): TikzParseResult {
     params['v' + (i + 1)] = L.vertical ? 1 : 0
   }
   params.n = keptLines.length
+
+  /* ---- 【v1654】把"明显是弦与曲线交点"的标注点**钉上去** ----
+   * 用户原文就栽在这儿：竖直弦画到 y=±2.5，A、B 却标在 ±1.8（真交点 ±2.2449）→ 点悬在曲线里 ✗。
+   * 判据（不猜）：点要**真的落在这条线上**、离某个交点不远；再按"整体最优"挑 ——
+   *   这样 A、B 会一起钉到那条弦上，而不是各自钉到最近却不相干的那条线 ✓
+   * （A 也躺在 F₁A 那条线段上：它是线段的**端点**，多半只是"从 F₁ 连到 A"，所以端点要罚一分 ✓） */
+  const links: TikzPointLink[] = keptPts.map(() => null)
+  if (solver && keptLines.length && keptPts.length) {
+    const view = solver.view(kind, params)
+    const scale = Math.max(1e-6, view.xmax - view.xmin, view.ymax - view.ymin)
+    // 判据是**实测**定出来的（用例 1/3/7 三条一起卡）：
+    //   · 点要真的落在这条线上（2%）；
+    //   · 离交点要"明显近"：用户原文 A、B 差 4.45% ✓ 该钉；弦中点到交点通常差 10% ✗ 不该钉 → 卡在 6%；
+    //   · 点**与线段端点重合**的不算候选：那是作者自己给的顶点/交点（内接三角形的三个顶点、弦 AB 的两头），
+    //     本来就在曲线上，钉上去只会让"拖顶点变成转边"✗
+    const onLineTol = 0.02 * scale
+    const snapMax = 0.06 * scale
+    const endTol = 0.02 * scale
+    interface Cand { pi: number; line: number; which: 0 | 1; cost: number; x: number; y: number; dist: number }
+    const byPoint: Cand[][] = keptPts.map(() => [])
+    /** 这个点是不是这条线段的一个端点（而且真的落在这条线上） */
+    const isEndOf = (p: TikzPointSpec, L: TikzLineSpec) => {
+      if (Math.abs(L.e - L.s) <= 1e-6) return false
+      const along = L.vertical ? p.y : p.x
+      const off = L.vertical ? Math.abs(p.x - L.m) : Math.abs(L.k * p.x - p.y + L.m) / Math.sqrt(L.k * L.k + 1)
+      if (off > onLineTol) return false
+      return Math.abs(along - L.s) <= endTol || Math.abs(along - L.e) <= endTol
+    }
+    // 一个点是**几条线段的端点**：≥2 = 多边形的顶点（内接三角形的 A）→ 钉上去会让"拖顶点"变成"转一条边" ✗
+    const endCount = keptPts.map((p) => keptLines.filter((L) => isEndOf(p, L)).length)
+    for (let li = 1; li <= keptLines.length; li++) {
+      const L = keptLines[li - 1]
+      const roots = solver.lineRoots(kind, params, li)
+      if (!roots.length) continue
+      for (let pi = 0; pi < keptPts.length; pi++) {
+        const p = keptPts[pi]
+        const off = L.vertical ? Math.abs(p.x - L.m) : Math.abs(L.k * p.x - p.y + L.m) / Math.sqrt(L.k * L.k + 1)
+        if (off > onLineTol) continue
+        const atThisEnd = isEndOf(p, L)
+        for (let wi = 0; wi < roots.length && wi < 2; wi++) {
+          const r = roots[wi]
+          const dist = Math.hypot(r.x - p.x, r.y - p.y)
+          if (dist > snapMax) continue
+          // 端点上：只有"线段就结束在这个交点上"（弦 AB 的两头就是交点，用例 2/7）而且它**只属于这一条线**
+          // 才钉；多边形顶点不钉（用例 3）✓
+          if (atThisEnd && (endCount[pi] !== 1 || dist > 0.01 * scale)) continue
+          byPoint[pi].push({ pi, line: li, which: (wi === 0 ? 0 : 1) as 0 | 1, cost: dist / scale, x: r.x, y: r.y, dist })
+        }
+      }
+    }
+    if (byPoint.some((a) => a.length)) {
+      let bestCount = 0, bestCost = Infinity, bestPick: Cand[] = []
+      const cur: Cand[] = []
+      const used = new Set<string>()
+      const dfs = (pi: number, count: number, cost: number) => {
+        if (count + (keptPts.length - pi) < bestCount) return          // 剪枝：已经不可能更好
+        if (pi === keptPts.length) {
+          if (count > bestCount || (count === bestCount && cost < bestCost)) { bestCount = count; bestCost = cost; bestPick = cur.slice() }
+          return
+        }
+        dfs(pi + 1, count, cost)                                       // 这个点不钉
+        for (const c of byPoint[pi]) {
+          const key = c.line + ':' + c.which
+          if (used.has(key)) continue                                  // 一个交点只能给一个点
+          used.add(key); cur.push(c)
+          dfs(pi + 1, count + 1, cost + c.cost)
+          cur.pop(); used.delete(key)
+        }
+      }
+      dfs(0, 0, 0)
+      const moved: string[] = []
+      for (const c of bestPick) {
+        links[c.pi] = { line: c.line, which: c.which }
+        if (c.dist > 1e-6) moved.push((keptPts[c.pi].label || ('点' + (c.pi + 1))) + ' → (' + c.x.toFixed(3) + ', ' + c.y.toFixed(3) + ')')
+        keptPts[c.pi].x = +c.x.toFixed(6)                              // px/py 也写成交点坐标：解除绑定时不会跳回老地方
+        keptPts[c.pi].y = +c.y.toFixed(6)
+      }
+      if (bestPick.length) {
+        notes.push(bestPick.length + ' 个标注点钉在「直线与曲线的交点」上' + (moved.length ? '（' + moved.join('；') + '）' : '') +
+          ' —— 拖那条线它们会跟着动，手动改 x/y 即解除')
+      }
+    }
+  }
+
   for (let i = 0; i < keptPts.length; i++) {
     params['px' + (i + 1)] = +keptPts[i].x.toFixed(4)
     params['py' + (i + 1)] = +keptPts[i].y.toFixed(4)
@@ -691,7 +792,7 @@ export function parseTikzPicture(src: string): TikzParseResult {
   // 曲线自带的 a=/b= 标注：题图上一般不印 → 关掉（椭圆本来就有这开关，双曲线的同名开关是本轮加的）
   if (kind !== 'conicCustomCircle' && kind !== 'conicCustomParabola') params.ab = 0
 
-  return { ok: true, spec: { kind, params, points: keptPts, lines: keptLines, texts: keptTexts, curve, notes } }
+  return { ok: true, spec: { kind, params, points: keptPts, links, lines: keptLines, texts: keptTexts, curve, notes } }
 }
 
 /* ===========================================================================
@@ -716,11 +817,11 @@ export interface TikzSplit {
  *             随后由 attachTikzFigures 换成真正的图形元素，位置就落在同一处）
  *   译不出 → 一行占位文字（不硬猜）
  */
-export function tikzToPlaceholders(md: string): TikzSplit {
+export function tikzToPlaceholders(md: string, solver?: TikzGeomSolver): TikzSplit {
   const specs: TikzSpec[] = []
   const fails: string[] = []
   const out = String(md || '').replace(RE_TIKZ, (whole) => {
-    const r = parseTikzPicture(whole)
+    const r = parseTikzPicture(whole, solver)
     if (r.ok) { specs.push(r.spec); return '\n![](tikz:' + (specs.length - 1) + ')\n' }
     fails.push(r.reason)
     return '\n' + tikzPlaceholderText(r.reason) + '\n'

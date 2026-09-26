@@ -1779,8 +1779,9 @@ export function conicLineRoots(kind: string, params: Record<string, number> | un
         ys.push((-B3 + sq3) / (2 * A3), (-B3 - sq3) / (2 * A3))
       }
     }
+    const segTolV = 1e-3 * Math.max(1, Math.abs(hi - lo))        // 同 conicLineRoots：端点是有限小数，交点会落在外面一点 ✓
     const ptsV = ys
-      .filter((y) => isFinite(y) && !(seg && (y < lo - 1e-9 || y > hi + 1e-9)))
+      .filter((y) => isFinite(y) && !(seg && (y < lo - segTolV || y > hi + segTolV)))
       .sort((a, b) => a - b)                        // 按 y 升序：which=0/1 才有稳定含义 ✓
       .map((y) => ({ x: m2, y }))
     if (ptsV.length === 2) {
@@ -1805,9 +1806,14 @@ export function conicLineRoots(kind: string, params: Record<string, number> | un
       roots.push((-B2 + sq) / (2 * A2), (-B2 - sq) / (2 * A2))
     }
   }
+  // ⚠ 起终点与交点都是**算出来的**，而坐标存的是有限小数 → 交点会落在端点外面一点点，
+  //   被"必须落在起终点之间"这一条滤掉 ✗（实测：椭圆内接三角形的顶点 √12=3.4641016 被写成 3.4641，
+  //   弦的两个交点**全丢** —— 面板里"交点"下拉是空的，点也钉不上去）。给一点点**相对容差** ✓
+  //   （1e-3 相对弦长 = 图上不到一个像素，不会把"明显没碰到曲线"的线段算成交于曲线）
+  const segTol = 1e-3 * Math.max(1, Math.abs(hi - lo))
   // ⚠ 按 x **升序**排：绑定时 which=0/1 才有稳定含义 ✓ 否则直线一动两个交点就可能互换 ✗
   const pts = roots
-    .filter((x) => isFinite(x) && !(seg && (x < lo - 1e-9 || x > hi + 1e-9)))
+    .filter((x) => isFinite(x) && !(seg && (x < lo - segTol || x > hi + segTol)))
     .sort((a, b) => a - b)
     .map((x) => ({ x, y: k * x + m2 }))
   // 两个根几乎重合 = **相切**（竖直切线用大斜率近似时尤其明显）→ 只留一个 ✓

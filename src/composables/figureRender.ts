@@ -2,10 +2,10 @@ import { createApp, h } from 'vue'
 import MathFigureElement from '@/components/elements/MathFigureElement.vue'
 import { createElement } from '@/types'
 import type { MathFigureElement as MFigEl, MathFigureKind, SlideElement } from '@/types'
-import { CONICS, DEFAULT_PIECEWISE, figureBox, mapper, withParams } from '@/composables/mathPlot'
+import { CONICS, DEFAULT_PIECEWISE, conicLineRoots, figureBox, mapper, withParams } from '@/composables/mathPlot'
 import { THM_LABELS } from '@/composables/solid3d'
 import { SOLID_FIGURE_PRESETS } from '@/templates/solidFigures'
-import type { TikzSpec } from '@/composables/tikzFigure'
+import type { TikzGeomSolver, TikzSpec } from '@/composables/tikzFigure'
 import type { Deck } from '@/types'
 import type { View } from '@/composables/mathPlot'
 
@@ -83,6 +83,12 @@ function viewOfSpec(kind: string, params: Record<string, number>): View {
   return def.viewOf ? def.viewOf(pv) : def.view
 }
 
+/** 交给 TikZ 解析器的"应用自己的几何"：弦与曲线的交点、当前取景 —— 解析器里**不重写一份** ✓ */
+export const tikzSolver: TikzGeomSolver = {
+  lineRoots: (kind, params, line) => conicLineRoots(kind, params, line),
+  view: (kind, params) => viewOfSpec(kind, params),
+}
+
 /** 把一份 TikZ 解析结果变成 mathfig 元素（尺寸与图形库插入时同一套口径 ✓） */
 export function tikzSpecToElement(spec: TikzSpec): MFigEl {
   const el = mathFigureElOfKind(spec.kind as MathFigureKind)
@@ -92,6 +98,7 @@ export function tikzSpecToElement(spec: TikzSpec): MFigEl {
     h: box.h,
     params: { ...(el.params || {}), ...spec.params },
     pointLabels: spec.points.map((p) => p.label),
+    pointLinks: spec.links.slice(),                 // 【v1654】钉在"弦与曲线交点"上的点（null = 自由点）
   })
   return el as MFigEl
 }
