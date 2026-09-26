@@ -580,11 +580,21 @@ function pickGeom3DFigure() {
 
 /**
  * 【修】Esc 关面板 —— 关闭按钮的 title 一直写着「关闭 (Esc)」，但以前**没有实现** ✗
- *   ⚠ 子浮层（录入/草稿箱/来源报告/补答案/AI 打标）开着时不抢 Esc：先关它们、别把整屏面板一起关掉 ✓
+ * 【v1687 修】子浮层（录入试题 / AI 导入 / 草稿箱 / 来源报告 / 补答案 / AI 打标）开着时，
+ *   以前这里**直接 return** —— 注释写着「先关它们」，代码却没关 ✗。
+ *   于是「AI 打标」这类窗口除了点 ✕ 根本没别的办法关（用户实报「AI打标窗口无法关闭」✗；
+ *   同轮的另一个根因是 .qb__rpt 少了 pointer-events:auto，见下面的样式注释 ✓）。
+ *   现在按「最上层先关」逐层关：先关子浮层，全都关了才关整屏面板 ✓
+ *   ⚠ AiImportDialog 自己在 capture 阶段处理 Esc 并掐断冒泡，走不到这里 ✓
  */
 function onPanelKey(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
-  if (importOpen.value || draftOpen.value || aiImportOpen.value || reportOpen.value || ansOpen.value || aiOpen.value) return
+  if (aiImportOpen.value) { aiImportOpen.value = false; return }
+  if (importOpen.value) { importOpen.value = false; return }
+  if (draftOpen.value) { draftOpen.value = false; return }
+  if (aiOpen.value) { aiOpen.value = false; return }
+  if (ansOpen.value) { ansOpen.value = false; return }
+  if (reportOpen.value) { reportOpen.value = false; return }
   emit('close')
 }
 onMounted(() => {
@@ -1529,7 +1539,13 @@ async function batchDelete() {
 .qb__chip--st-none { background: #f1f1f1; }
 .qb__chip--alert { background: #fdeceb; color: #a02016; font-weight: 600; }
 .qb__warnbox { margin: 0 0 8px; padding: 6px 8px; border: 1px solid #f3d3ce; border-radius: 6px; background: #fdf3f2; color: #8f2a1b; font-size: 12px; line-height: 1.6; }
-.qb__rpt { position: absolute; inset: 0; z-index: 12; background: rgba(20, 24, 34, 0.45); display: flex; align-items: center; justify-content: center; }
+/* ★【v1687 修】三个内联浮层（补答案 / AI 打标 / 来源报告）**真鼠标点不动**（用户实报「AI 打标窗口无法关闭」✗）：
+   根因：pointer-events 是**继承属性** —— 它们挂在 .qb（pointer-events:none，v1472 为了"不挡画布"加的）下面，
+   自己又没写回 auto ✗ → 整个浮层收不到点击，鼠标**穿过去**落到背后的 .qb__box 上
+   （所以现象很怪：浮层里的「关闭」点不动，背后的「试题库 ✕」反倒管用 ✗）。
+   同 .qi（v1616 踩过）/ .dbx / .aiq 的处理：模态浮层明确吃掉点击 ✓（顺带 @click.self 点遮罩关窗也才生效 ✓）。
+   证据（无头 Chrome 真跑 elementFromPoint）：修复前点「关闭按钮」落到 .qb__box ✗；修复后落到浮层里的按钮 ✓。 */
+.qb__rpt { pointer-events: auto; position: absolute; inset: 0; z-index: 12; background: rgba(20, 24, 34, 0.45); display: flex; align-items: center; justify-content: center; }
 .qb__rptbox { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: min(880px, 92%); max-height: 84%; display: flex; flex-direction: column; overflow: hidden; }
 .qb__rpthead { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
 .qb__rpthead .qb__close { margin-left: auto; }
