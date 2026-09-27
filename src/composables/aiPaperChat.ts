@@ -8,6 +8,7 @@
  *   这些都是**能测的规则** ✓（界面与网络调用留在 AiPaperChat.vue ✓）。
  */
 import type { AiToolCtx } from '@/composables/aiTools'
+import { STYLE_CLOSER_RULE } from '@/composables/paperStyle'
 
 /** 一次最多带几张图（与 AI 助手口径一致 ✓ 再多会超视觉模型的上下文 ✗） */
 export const PAPER_CHAT_MAX_IMG = 4
@@ -119,6 +120,7 @@ export const PAPER_HELP = [
   '对齐/浮动：center、left、right、float（右浮）、floatleft（左浮）；不要凭空编图号 ✗',
   '【空白与分页】[分页]　[换页]　[4cm]　[10mm]',
   '【段落样式】{c:red; s:16; f:楷体; b; i} 这段内容　（颜色支持 red、#ff0000、rgb()）',
+  '⚠ ' + STYLE_CLOSER_RULE,
   '【多选/填空】多选题节里的题会自动加「多选」标签；填空节里 =____ 会自动变答题横线',
   '【页眉页脚】是**设置项**（不进正文 ✓）：页眉/页脚文字支持 [图N] 与 {page} {total} 变量',
   '【可改的设置项（set_paper_style 的键）】template 模板、fontFamily 字体、fontSize 字号(pt)、fontColor 字色、',
@@ -174,5 +176,6 @@ export const PAPER_EDIT_RULE = [
   '先 get_paper_state 读到准确原文 → 用 edit_paper_text 做替换（原文可多行 ✓）→ 再报一句改了几处 ✓。',
   '**不要**用 append_to_paper 复制一份改造过的内容 ✗（那会把卷子变成两份，用户实测报过这个错 ✗）。',
   'append_to_paper 只用于**新增**（加一节、加一道题 ✓）。',
-  '要给现有段落上样式（颜色/加粗/字号），就在那段文字**行首**加 {c:blue} / {b} / {s:14} ✓（见 get_paper_help ✓）。',
+  '要给现有段落上样式（颜色、加粗、字号），就在那段文字**行首**加 {c:blue} / {b} / {s:14} ✓（见 get_paper_help ✓）。',
+  STYLE_CLOSER_RULE,
 ].join(String.fromCharCode(10))

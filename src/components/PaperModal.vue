@@ -12,6 +12,7 @@ import { geom3dSink, openGeom3D } from '@/ui/geom3d'
 import { vectorizeSink, openVectorize } from '@/ui/vectorize'
 import { paperAppendSink, paperInsertSink, paperOpsSink, paperPending, paperTextSink } from '@/ui/paper'
 import type { PaperOps } from '@/ui/paper'
+import { stripStyleClosers } from '@/composables/paperStyle'
 import { paperEdit, paperEditNote } from '@/composables/aiPaperChat'
 import type { PaperInsertPayload } from '@/ui/paper'
 import ColorSwatches from './ColorSwatches.vue'
@@ -32,6 +33,8 @@ const aiOpen = ref(false)
 const input = ref('')
 /** 图片库：n -> { src 图像源(dataURL或URL), address 地址/文件目录/URL } */
 const images = ref<Record<number, { src: string; address?: string; caption?: string }>>({})
+/** 【v1695】上一次 parse 丢掉过几个多余闭合标签（只提示一次 ✓ 不刷屏 ✗） */
+let lastCloserDropped = 0
 const imgSeq = ref(0)
 const zoom = ref(1)
 const numStyle = ref<'arabic' | 'cn'>('arabic')
@@ -292,6 +295,20 @@ function normalizeMdImages(src: string): string {
   })
 }
 function parse(src: string): string {
+  // 【v1695】多余的样式闭合标签（{/c} 之类）静默丢弃 ✓ —— 卷面干净优先 ✓
+  //   （用户实报：改完颜色后每行后面都印出 {/c} ✗ —— 段落样式是行首前缀、没有闭合写法 ✓）
+  {
+    const cleaned = stripStyleClosers(src)
+    if (cleaned.dropped) {
+      src = cleaned.text
+      if (lastCloserDropped !== cleaned.dropped) {
+        lastCloserDropped = cleaned.dropped
+        paperMsg.value = '已忽略 ' + cleaned.dropped + ' 个多余的样式闭合标签（{/c} 之类）—— 段落样式是行首前缀、不用闭合 ✓'
+      }
+    } else if (lastCloserDropped) {
+      lastCloserDropped = 0
+    }
+  }
   if (!src) return ''
   src = normalizeMdImages(src)
   let out = ''
@@ -778,6 +795,7 @@ async function addImageFromFile(file: File) {
 /** 【v1693】把试卷编辑的**全部能力**做成一个对象交给 AI 工具 ✓（接口见 ui/paper.ts 的 PaperOps ✓） */
 const paperOps: PaperOps = {
   edit: (find, replace, all) => {
+    replace = stripStyleClosers(String(replace == null ? '' : replace)).text   // 【v1695】AI 爱补 {/c} ✗ 写之前先清掉 ✓
     const r = paperEdit(input.value, find, replace, !!all)
     if (r.hits) {
       input.value = r.text
@@ -852,6 +870,7 @@ async function insertFigureByKind(kind: string, params: Record<string, unknown>)
 
 /** 追加 AI 写好的正文（与题库「加入试卷」同一套收尾：render + 存草稿 ✓） */
 function appendByAi(text: string, pageBreak: boolean) {
+  text = stripStyleClosers(text).text   // 【v1695】AI 爱补 {/c} ✗ 写进来之前先清掉 ✓
   const cur = input.value
   const sep = cur && !cur.endsWith('\n') ? '\n\n' : ''
   input.value += sep + (pageBreak ? '[分页]\n' : '') + String(text || '') + '\n'
