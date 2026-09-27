@@ -138,92 +138,132 @@ export const HD_NUM_PREFIX: Partial<Record<HdBlockType, string>> = { example: '�
  *   习题课 / 讲评课：各按一线检查记录里的栏目链（基础训练 / 提升性练习 / 补充练习 / 自我诊断 / 错因归类 ✓）
  * 每一节 = 一个 h1 栏目名 + 一个**空块**（栏目框在预览里直接看得见，往里填就行 ✓）
  */
+export interface HdSkeletonSec {
+  /** 栏目名（h1 ✓） */
+  h: string
+  /** 栏目下的第一个块 ✓ */
+  t: HdBlockType
+  /** 该栏目末尾留白几厘米（学生写的地方 ✓ 不填就不留 ✓） */
+  blankCm?: number
+  /** 小节（h2 + 块 ✓ —— 照研究报告里那些 ### 小节 ✓） */
+  subs?: { h: string; t: HdBlockType; blankCm?: number }[]
+}
+
 export interface HdSkeleton {
   id: string
   label: string
   note: string
-  secs: { h: string; t: HdBlockType }[]
+  secs: HdSkeletonSec[]
 }
 
+/**
+ * 【v1717】六套课型骨架 —— **照研究报告重排** ✓
+ * 研究报告：docs/数学讲义-体例研究-v1712.md（§7 模板 A~E + §8 落地清单 ✓）
+ *   · A 新授课：目标 → 知识链接 → 知识梳理（情境/思考/结论留空）→ 典例精讲 → 变式 → 方法归纳 → 当堂检测 → 课堂小结 → 课后作业（分层）
+ *   · B 一轮复习：课标与考情 → 知识清单（思维导图/结论留空）→ 考点突破 → 当堂检测 → 课时作业（A/B/C）
+ *   · C 二轮专题：真题导入 → 高考链接 → 必备知识与方法提炼 → 母题精讲 → 同源变式 → 当堂训练 → 课后作业（专题检测）
+ *   · D 习题课：方法目标 → 题组呈现（基础再现 / 方法辨析）→ 一题多变 → 方法归纳 → 巩固练习 → 小结与作业
+ *   · E 试卷讲评：考情概览 → 我的得失（自诊）→ 错因归类 → 典型错题精讲 → 当堂订正与补偿 → 总结反思 → 布置作业
+ *   · F 学案（导学案）：目标 → 预习 → 自主学习 → 合作探究 → 当堂检测 → 核心归纳 → 学习反思 → 课时作业
+ * 每节 = h1 栏目名 + 一个空块（+ 该栏的小节 h2 + 块 ✓ + 需要的地方留白 ✓）
+ */
 export const HD_SKELETONS: HdSkeleton[] = [
   {
-    id: 'new', label: '新授课', note: '同步新授：目标 → 预习 → 知识梳理 → 典例 → 变式 → 方法 → 检测 → 小结 → 作业（知识梳理学生版留空 ✓）',
+    id: 'new', label: '新授课',
+    note: '同步新授：目标（3~4 条、可检测动词）→ 知识链接 → 知识梳理（情境/思考/结论，结论留空）→ 典例精讲 → 变式训练 → 方法归纳 → 当堂检测 → 课堂小结（留空）→ 课后作业（A/B/C 分层、标 ★、不标分值）',
     secs: [
       { h: '一、学习目标', t: 'goal' },
-      { h: '二、课前预习', t: 'preview' },
-      { h: '三、知识梳理', t: 'knowledge' },
-      { h: '四、典例精讲', t: 'example' },
-      { h: '五、变式训练', t: 'variant' },
-      { h: '六、方法归纳', t: 'method' },
-      { h: '七、当堂检测', t: 'exercise' },
-      { h: '八、课堂小结', t: 'summary' },
-      { h: '九、课后作业', t: 'homework' },
+      { h: '二、知识链接（课前小测 / 复习回顾）', t: 'preview', blankCm: 3 },
+      {
+        h: '三、知识梳理（新知生成）', t: 'knowledge',
+        subs: [
+          { h: '3.1 情境与观察', t: 'explore' },
+          { h: '3.2 思考与探究', t: 'explore', blankCm: 5 },
+          { h: '3.3 结论梳理（学生版留空）', t: 'knowledge', blankCm: 6 },
+        ],
+      },
+      { h: '四、典例精讲', t: 'example', subs: [{ h: '例 1', t: 'example', blankCm: 8 }, { h: '例 2', t: 'example', blankCm: 8 }] },
+      { h: '五、变式训练', t: 'variant', blankCm: 6 },
+      { h: '六、方法归纳', t: 'method', blankCm: 4 },
+      { h: '七、当堂检测（限时 __ 分钟）', t: 'exercise' },
+      { h: '八、课堂小结', t: 'summary', blankCm: 5 },
+      { h: '九、课后作业（分层）', t: 'homework' },
     ],
   },
   {
-    id: 'learn', label: '学案', note: '导学案：目标 → 预习 → 自主学习 → 合作探究 → 检测 → 核心归纳 → 反思 → 课时作业（留白最多 ✓）',
+    id: 'learn', label: '学案',
+    note: '导学案：目标 → 课前预习 → 自主学习 → 合作探究 → 当堂检测 → 核心归纳 → 学习反思 → 课时作业（留白最多，学生自己走流程）',
     secs: [
       { h: '一、学习目标', t: 'goal' },
-      { h: '二、课前预习', t: 'preview' },
-      { h: '三、自主学习', t: 'knowledge' },
-      { h: '四、合作探究', t: 'explore' },
+      { h: '二、课前预习', t: 'preview', blankCm: 4 },
+      { h: '三、自主学习', t: 'knowledge', blankCm: 5 },
+      { h: '四、合作探究', t: 'explore', blankCm: 6 },
       { h: '五、当堂检测', t: 'exercise' },
-      { h: '六、核心归纳', t: 'summary' },
-      { h: '七、学习反思', t: 'reflect' },
+      { h: '六、核心归纳', t: 'summary', blankCm: 4 },
+      { h: '七、学习反思', t: 'reflect', blankCm: 4 },
       { h: '八、课时作业', t: 'homework' },
     ],
   },
   {
-    id: 'review', label: '一轮复习', note: '高三一轮：课标与考情 → 知识清单 → 考点突破 → 变式 → 方法 → 易错 → 当堂检测 → 课时作业',
+    id: 'review', label: '一轮复习',
+    note: '高三一轮（按教材顺序）：课标要求与考情分析 → 知识清单（思维导图 / 结论留空）→ 考点突破（典例 + 变式 + 方法技巧 + 易错提醒）→ 当堂检测（按 8 单选 3 多选 3 填空）→ 课时作业 A/B/C',
     secs: [
-      { h: '一、课标与考情', t: 'goal' },
-      { h: '二、知识清单', t: 'knowledge' },
-      { h: '三、考点突破', t: 'example' },
-      { h: '四、变式训练', t: 'variant' },
-      { h: '五、方法总结', t: 'method' },
-      { h: '六、易错警示', t: 'warn' },
-      { h: '七、当堂检测', t: 'exercise' },
-      { h: '八、课时作业', t: 'homework' },
+      { h: '一、课标要求与考情分析', t: 'goal' },
+      {
+        h: '二、知识梳理（知识清单 / 知识网络）', t: 'knowledge',
+        subs: [
+          { h: '2.1 思维导图（留空框架，学生补全）', t: 'knowledge', blankCm: 6 },
+          { h: '2.2 核心概念与结论（留空）', t: 'knowledge', blankCm: 6 },
+        ],
+      },
+      { h: '三、考点突破', t: 'example', subs: [{ h: '考点 1', t: 'example', blankCm: 8 }, { h: '考点 2', t: 'example', blankCm: 8 }] },
+      { h: '四、当堂检测（限时 __ 分钟）', t: 'exercise' },
+      { h: '五、课时作业（分层）', t: 'homework' },
     ],
   },
   {
-    id: 'topic', label: '二轮专题', note: '二轮微专题：真题导入 → 高考链接 → 考点整合 → 方法提炼 → 母题精讲 → 同源变式 → 当堂训练 → 专题检测',
+    id: 'topic', label: '二轮专题',
+    note: '二轮微专题（打破教材顺序）：真题导入 → 高考链接（命题分析）→ 必备知识与方法提炼（留空补全）→ 母题精讲（思路/解答/一题多解/易错点）→ 同源变式 → 当堂训练 → 课后作业（专题检测 + 压轴分步得分）',
     secs: [
-      { h: '一、真题导入', t: 'example' },
-      { h: '二、高考链接', t: 'goal' },
-      { h: '三、考点整合', t: 'knowledge' },
-      { h: '四、方法提炼', t: 'method' },
-      { h: '五、母题精讲', t: 'example' },
-      { h: '六、同源变式', t: 'variant' },
-      { h: '七、当堂训练', t: 'exercise' },
-      { h: '八、专题检测', t: 'exercise' },
+      { h: '一、真题导入 / 考题再现', t: 'example' },
+      { h: '二、高考链接（命题分析）', t: 'goal' },
+      { h: '三、必备知识 / 方法提炼', t: 'method', blankCm: 5 },
+      { h: '四、母题精讲', t: 'example', subs: [{ h: '母题 1', t: 'example', blankCm: 10 }] },
+      { h: '五、同源变式（变式拓展）', t: 'variant', blankCm: 6 },
+      { h: '六、当堂训练（限时 __ 分钟）', t: 'exercise' },
+      { h: '七、课后作业（专题检测）', t: 'homework' },
     ],
   },
   {
-    id: 'drill', label: '习题课', note: '习题课：知识回顾 → 基础训练 → 典型例题 → 变式 → 方法归纳 → 提升性练习 → 补充练习 → 小结',
+    id: 'drill', label: '习题课',
+    note: '习题课（一题多解 / 一题多变 / 多题一法）：方法目标 → 题组呈现（基础再现 / 方法辨析）→ 一题多变与一题多解 → 方法归纳（含失效条件）→ 巩固练习 → 小结与作业（分层）',
     secs: [
-      { h: '一、知识回顾', t: 'knowledge' },
-      { h: '二、基础训练', t: 'exercise' },
-      { h: '三、典型例题', t: 'example' },
-      { h: '四、变式训练', t: 'variant' },
-      { h: '五、方法归纳', t: 'method' },
-      { h: '六、提升性练习', t: 'exercise' },
-      { h: '七、补充练习', t: 'exercise' },
-      { h: '八、课堂小结', t: 'summary' },
+      { h: '一、学习目标（方法目标）', t: 'goal' },
+      {
+        h: '二、题组呈现', t: 'exercise',
+        subs: [
+          { h: '题组一 基础再现', t: 'exercise', blankCm: 6 },
+          { h: '题组二 方法辨析', t: 'example', blankCm: 6 },
+        ],
+      },
+      { h: '三、一题多变 / 一题多解', t: 'variant', blankCm: 8 },
+      { h: '四、方法归纳', t: 'method', blankCm: 5 },
+      { h: '五、巩固练习（限时 __ 分钟）', t: 'exercise' },
+      { h: '六、小结与作业', t: 'summary', blankCm: 4 },
+      { h: '七、课后作业（分层）', t: 'homework' },
     ],
   },
   {
-    id: 'comment', label: '试卷讲评', note: '讲评课：考情数据 → 自我诊断 → 错因归类 → 典型错题精讲 → 变式再练 → 当堂订正 → 补偿训练 → 错题反思',
+    id: 'comment', label: '试卷讲评',
+    note: '讲评课（数据说话）：考情概览 → 我的得失（学生自诊表）→ 错因归类（知识/方法/审题/规范）→ 典型错题精讲（错例 → 错因 → 正确解答 + 评分点 → 同源变式）→ 当堂订正与补偿训练 → 总结反思 → 布置作业（错题本 + 针对性训练）',
     secs: [
-      { h: '一、考情数据', t: 'goal' },
-      { h: '二、自我诊断', t: 'reflect' },
-      { h: '三、错因归类', t: 'warn' },
-      { h: '四、典型错题精讲', t: 'example' },
-      { h: '五、变式再练', t: 'variant' },
-      { h: '六、方法总结', t: 'method' },
-      { h: '七、当堂订正', t: 'exercise' },
-      { h: '八、补偿训练', t: 'exercise' },
-      { h: '九、错题反思', t: 'reflect' },
+      { h: '一、考情概览（数据说话）', t: 'goal' },
+      { h: '二、我的得失（学生自诊）', t: 'reflect', blankCm: 6 },
+      { h: '三、错因归类', t: 'warn', blankCm: 5 },
+      { h: '四、典型错题精讲', t: 'example', subs: [{ h: '第 __ 题（错误率 __%）', t: 'example', blankCm: 10 }] },
+      { h: '五、当堂订正与补偿训练（限时 __ 分钟）', t: 'exercise', blankCm: 6 },
+      { h: '六、总结反思与提升', t: 'reflect', blankCm: 5 },
+      { h: '七、布置作业', t: 'homework' },
     ],
   },
 ]
@@ -236,17 +276,30 @@ export function skeletonById(id: string): HdSkeleton | null {
   return null
 }
 
-/** 课型 → 一串块（每个栏目 = h1 栏目名 + 一个空块 ✓） */
+/** 课型 → 一串块（每节 = h1 栏目名 + 空块；小节 = h2 + 空块；该留白的地方插 blank ✓） */
 export function skeletonBlocks(id: string): HdBlock[] {
   const sk = skeletonById(id)
   if (!sk) return []
   const out: HdBlock[] = []
+  const pushBlank = (cm?: number) => {
+    if (!cm) return
+    const b = makeBlock('blank', '')
+    b.blankCm = cm
+    out.push(b)
+  }
   for (const sec of sk.secs) {
     out.push(makeBlock('h1', sec.h))
     out.push(makeBlock(sec.t, ''))
+    pushBlank(sec.blankCm)
+    for (const sub of sec.subs || []) {
+      out.push(makeBlock('h2', sub.h))
+      out.push(makeBlock(sub.t, ''))
+      pushBlank(sub.blankCm)
+    }
   }
   return out
 }
+
 
 /* ---------------- 【v1712】挖空（填空版 ✓） ----------------
  * 老师最常用的一招：知识梳理 / 必备知识做成**填空版** —— 学生版关键处是空线、教师版给原词 ✓

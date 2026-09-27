@@ -821,7 +821,7 @@ watch(ver, () => { void refreshNow() })
               <button v-for="a in ADD" :key="a.t" class="hd__addbtn" :title="'插入一块：' + HD_LABEL[a.t]" @click="addBlock(a.t)">+{{ a.label }}</button>
               <select class="hd__addbtn hd__skel" title="课型骨架：按课型一次生成栏目结构（追加到末尾 ✓ 不动现有内容 ✓）" @change="applySkeleton">
                 <option value="">+课型骨架</option>
-                <option v-for="s in HD_SKELETONS" :key="s.id" :value="s.id">{{ s.label }}</option>
+                <option v-for="s in HD_SKELETONS" :key="s.id" :value="s.id" :title="s.note">{{ s.label }}</option>
               </select>
             </div>
             <div class="hd__list">
