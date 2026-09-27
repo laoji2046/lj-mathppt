@@ -844,26 +844,40 @@ const paperOps: PaperOps = {
  * 认不出的 kind / 参数：渲染器会抛错或给空串 → 这里兜住并返回空串，让工具层报"没插进去" ✓（不静默 ✗）
  */
 async function insertFigureByKind(kind: string, params: Record<string, unknown>): Promise<string> {
+  // ⚠ 失败要**说清哪一步** ✗ —— 上一版把异常吞了、只回一句"kind 或参数可能不对"，
+  //   用户和模型都没法排查（用户实报：连着四次没能插入、提示一模一样 ✗）。
+  let step = '载入渲染器'
   try {
     const { mathFigureElOfKind, renderFigureSvg } = await import('@/composables/figureRender')
+    step = '造图形元素'
     const el = mathFigureElOfKind(kind as never) as { params?: Record<string, unknown> } | undefined
-    if (!el) return ''
+    if (!el) return '不认识的图形种类：' + kind
     const p: Record<string, unknown> = { ...(el.params || {}) }
     for (const k of Object.keys(params || {})) {
       if (params[k] !== undefined && params[k] !== null) p[k] = params[k]
     }
     el.params = p
-    const svg = renderFigureSvg(el as never)
-    if (!svg || svg.indexOf('<svg') < 0) return ''
+    step = '渲染成 SVG'
+    let svg = renderFigureSvg(el as never)
+    if (!svg || svg.indexOf('<svg') < 0) {
+      // 图形组件可能要**下一帧**才把 <svg> 挂上去 ✓（同步取到空串就是这个原因 ✗）→ 等一帧再取一次 ✓
+      await new Promise((r) => requestAnimationFrame(() => r(null)))
+      svg = renderFigureSvg(el as never)
+    }
+    if (!svg || svg.indexOf('<svg') < 0) {
+      return '图形没渲染出 SVG（种类 ' + kind + '；内部渲染器返回空 —— 该种类可能有必填参数，或前端渲染器没就绪）'
+    }
+    step = '转成 PNG'
     const png = await svgStringToPng(svg)
+    if (!png || png.length < 100) return 'PNG 生成失败（SVG ' + svg.length + ' 字符）'
     const n = ++imgSeq.value
     images.value[n] = { src: png, address: '数学图形 ' + kind }
     input.value += '[图' + n + ']'
     render()
     saveDraftSoon()
     return '[图' + n + ']'
-  } catch {
-    return ''
+  } catch (e) {
+    return '插图形失败（' + step + '）：' + String((e as Error)?.message || e)
   }
 }
 /** 【v1692】AI 侧栏要用的三件事 —— 都走**已有路径** ✓（不另起一套排版/图片逻辑 ✗） */

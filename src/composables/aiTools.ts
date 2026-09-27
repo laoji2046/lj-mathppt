@@ -15,7 +15,7 @@
  *  · 认不出来的工具名 / kind / 缺必填参数 → 返回 ok:false + 人话原因（模型会自己改 ✓），不静默乱来 ✗；
  *  · 每次写操作都走 store 自己的 API（含 pushHistory ✓），老师随时 Ctrl+Z 兜得住 ✓。
  */
-import { createElement } from '@/types'
+import { MATH_FIGURE_OPTIONS, createElement } from '@/types'
 import type { SlideElement } from '@/types'
 import { CONICS, withParams } from '@/composables/mathPlot'
 import { PAPER_HELP } from '@/composables/aiPaperChat'
@@ -80,7 +80,44 @@ export const FIELD_ALIASES: Record<string, string> = {
   lineWidth: 'strokeWidth', line_width: 'strokeWidth', stroke_width: 'strokeWidth',
 }
 
-/** 数学图形的合法 kind（从应用自己的 CONICS 里取，别手抄一份 ✗） */
+
+/**
+ * 【v1696】图形库的**完整** kind 清单（74 种 ✓）
+ *
+ * ⚠ 以前这里用的是 figureKinds() —— 它只取 CONICS（**19 种圆锥曲线** ✗），
+ *   于是 insert_math_figure / insert_paper_figure 会把 parabola、sine、cube 这些**合法**种类拒掉 ✗
+ *   （用户实报「5题后插入数学图形 抛物线」连着四次失败 ✗；探针用例 35 也把这个错抓出来了 ✓）。
+ *   真正的图形库在 types.MATH_FIGURE_OPTIONS（带中文名 ✓），一律以它为准 ✓。
+ */
+export function mathFigureKindList(): string[] {
+  try {
+    return (MATH_FIGURE_OPTIONS || [])
+      .map((o) => String((o as { v?: unknown }).v || ''))
+      .filter(Boolean)
+  } catch { return [] }
+}
+
+/** kind → 中文名（给模型的清单带上名字更好认 ✓） */
+export function mathFigureLabel(kind: string): string {
+  try {
+    const hit = (MATH_FIGURE_OPTIONS || []).find((o) => String((o as { v?: unknown }).v || '') === kind)
+    return hit ? String((hit as { label?: unknown }).label || '') : ''
+  } catch { return '' }
+}
+
+/** 拼一段「可选种类」提示（带中文名 ✓；太长就截断，别把上下文塞满 ✗） */
+export function figureKindHint(limit = 20): string {
+  const list = mathFigureKindList()
+  if (!list.length) return ''
+  const parts = list.slice(0, limit).map((k) => {
+    const lab = mathFigureLabel(k)
+    return lab ? k + ' ' + lab : k
+  })
+  return '可选（共 ' + list.length + ' 种' + (list.length > limit ? '，前 ' + limit + ' 个' : '') + '）：' + parts.join('、')
+}
+
+/** 常见图形速查（模型最爱问的那几个 ✓） */
+export const FIGURE_COMMON = '常用：parabola 抛物线、ellipse 椭圆、hyperbola 双曲线、sine 正弦曲线、linear 一次函数、cube 正方体 ✓'/** 旧的窄口径（只 19 种圆锥曲线 ✗）—— 留着给别处兼容用，**校验不要再用它** ✗ */
 export function figureKinds(): string[] {
   try { return Object.keys(CONICS || {}) } catch { return [] }
 }
@@ -157,7 +194,7 @@ export const AI_TOOLS: unknown[] = [
       parameters: {
         type: 'object',
         properties: {
-          kind: { type: 'string', description: '图形种类，例如 ' + figureKinds().slice(0, 6).join(' / ') },
+          kind: { type: 'string', description: '图形种类，例如 ' + mathFigureKindList().slice(0, 8).join(' / ') + ' …（共 ' + mathFigureKindList().length + ' 种 ✓）' },
           params: { type: 'object', description: '图形参数（如 a、b、p、dir、cx、cy 等）；不认识的 kind 会失败并给出可选清单' },
           x: { type: 'number' }, y: { type: 'number' },
           w: { type: 'number', description: '宽，默认 640' }, h: { type: 'number', description: '高，默认 420' },
@@ -374,7 +411,7 @@ export const AI_TOOLS: unknown[] = [
     function: {
       name: 'insert_paper_figure',
       description: '往试卷里插一张**数学图形**（按 kind + params 现场生成，落进图片库并给一个 [图N] ✓）——'
-        + '2D 图形种类与参数同 insert_math_figure ✓（圆锥曲线/函数/平面几何…）',
+        + ('2D 图形种类与参数同 insert_math_figure ✓；' + FIGURE_COMMON + '（种类写错会回完整可选清单 ✓）'),
       parameters: {
         type: 'object',
         properties: {
@@ -412,10 +449,10 @@ export function aiToolGuide(): string {
 /** 插图形：认不出的 kind / 参数报错要能让人看懂 ✓ */
 function buildFigure(args: Record<string, unknown>): AiToolResult {
   const kind = str(args.kind).trim()
-  const kinds = figureKinds()
-  if (!kind) return { ok: false, error: '缺 kind' }
+  const kinds = mathFigureKindList()
+  if (!kind) return { ok: false, error: '缺 kind；' + FIGURE_COMMON }
   if (kinds.length && kinds.indexOf(kind) < 0) {
-    return { ok: false, error: '不认识的图形种类 ' + kind + '；可选：' + kinds.join('、') }
+    return { ok: false, error: '不认识的图形种类 ' + kind + '；' + figureKindHint() + '；' + FIGURE_COMMON }
   }
   let params: unknown = (args.params && typeof args.params === 'object') ? args.params : {}
   try { params = withParams(kind as never, params as never) } catch { /* 参数补齐失败就原样用 ✓ */ }
@@ -653,11 +690,17 @@ export async function runAiTool(name: string, args: Record<string, unknown>, ctx
       const p = ctx.paper
       if (!p || !p.figure) return { ok: false, error: '这个版本没有试卷插图接口' }
       const kind = str(args.kind).trim()
-      if (!kind) return { ok: false, error: '缺 kind' }
+      if (!kind) return { ok: false, error: '缺 kind；' + FIGURE_COMMON }
+      // 【v1696】按**完整图形库**校验（以前错用 figureKinds() 只认 19 种圆锥曲线 ✗ → 抛物线被拒 ✗）
+      const kinds = mathFigureKindList()
+      if (kinds.length && kinds.indexOf(kind) < 0) {
+        return { ok: false, error: '不认识的图形种类 ' + kind + '；' + figureKindHint() + '；' + FIGURE_COMMON }
+      }
       const params = args.params && typeof args.params === 'object' ? (args.params as Record<string, unknown>) : {}
       const tag = await p.figure(kind, params)
-      if (!tag) return { ok: false, error: '图形没插进去（kind 或参数可能不对 ✓ 先用 insert_math_figure 的清单核对种类 ✓）' }
-      return { ok: true, result: { note: '已插入数学图形 ' + kind + ' → ' + tag } }
+      // 返回的不是 [图N] 就是**失败原因**（PaperModal 那边把每一步都说清楚了 ✓）—— 原样转给模型 ✓
+      if (!tag || tag.charAt(0) !== '[') return { ok: false, error: tag || '图形没插进去（没有更多信息）' }
+      return { ok: true, result: { note: '已插入数学图形 ' + kind + (mathFigureLabel(kind) ? '（' + mathFigureLabel(kind) + '）' : '') + ' → ' + tag } }
     }
     case 'print_paper': {
       const p = ctx.paper
