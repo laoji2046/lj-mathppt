@@ -201,6 +201,8 @@ export interface HandoutTrainCase {
   tool: string
   /** 期望参数里的要点（只比这些键 ✓） */
   args?: Record<string, unknown>
+  /** 【v1710】同样算对的其他工具 ✓（老师要的效果一样 ✓ —— 打分器不该罚它走了另一条合理的路 ✗） */
+  altTools?: string[]
   /** 这些工具**不该**被调 ✗（比如「藏答案」不该删块 ✓） */
   forbid?: string[]
   why: string
@@ -211,7 +213,7 @@ export const HANDOUT_TRAIN_CASES: HandoutTrainCase[] = [
   { id: 'c01', ask: '加一节「二、椭圆的定义」', tool: 'add_handout_blocks', args: { blocks: ['h2'] }, why: '章节标题走 add_handout_blocks（h2 节 ✓）' },
   { id: 'c02', ask: '写个学习目标，三条', tool: 'add_handout_blocks', args: { blocks: ['goal'] }, why: '学习目标 = goal 块 ✓' },
   { id: 'c03', ask: '加一段知识梳理：椭圆的定义…', tool: 'add_handout_blocks', args: { blocks: ['knowledge'] }, why: '知识梳理 = knowledge ✓' },
-  { id: 'c04', ask: '再来一道例题，随便出一道椭圆的', tool: 'add_handout_blocks', args: { blocks: ['example'] }, why: '手写例题 = example 块 ✓' },
+  { id: 'c04', ask: '再来一道例题，随便出一道椭圆的', tool: 'add_handout_blocks', args: { blocks: ['example'] }, altTools: ['insert_bank_question_to_handout'], why: '手写例题 = example 块 ✓；从题库插一道同样算对 ✓（老师要的效果一样 ✓）' },
   { id: 'c05', ask: '最后放个归纳小结', tool: 'add_handout_blocks', args: { blocks: ['summary'] }, why: '小结 = summary ✓' },
   { id: 'c06', ask: '这题太绕了，加个易错警示', tool: 'add_handout_blocks', args: { blocks: ['warn'] }, why: '易错警示 = warn ✓' },
   { id: 'c07', ask: '给我留 6 厘米让学生写解答', tool: 'add_handout_blocks', args: { blocks: ['blank'] }, why: '留白 = blank + blankCm ✓' },
@@ -244,15 +246,20 @@ export interface HandoutTrainCall { name: string; args?: Record<string, unknown>
 function argHit(want: unknown, got: unknown): boolean {
   if (Array.isArray(want)) {
     if (!Array.isArray(got)) return false
-    if (got.length !== want.length) return false
+    // 【v1710】按**前缀**比 ✓：模型多给几块（或顺序里多几个）不算错 ✓（真机实测：多给一块被判 0.8 ✗）
+    if (got.length < want.length) return false
     return want.every((w, i) => argHit(w, got[i]))
   }
   if (typeof want === 'number') {
     const g = Number(got)
     return Number.isFinite(g) && Math.round(g) === Math.round(want)
   }
+  // 【v1710】模型给的是块对象（{type:"h2", text:"…"}）→ 拿它的 **type** 跟期望的类型名比 ✓
+  const gotScalar = (got && typeof got === 'object')
+    ? (got as Record<string, unknown>).type
+    : got
   const w = String(want == null ? '' : want).trim()
-  const g = String(got == null ? '' : got).trim()
+  const g = String(gotScalar == null ? '' : gotScalar).trim()
   if (!w) return g.length > 0                 // 空串 = "随便给个非空值就行" ✓
   return g === w || g.indexOf(w) >= 0
 }
@@ -265,20 +272,22 @@ function argHit(want: unknown, got: unknown): boolean {
  */
 export function scoreHandoutCase(c: HandoutTrainCase, calls: HandoutTrainCall[]): { ok: boolean; score: number; why: string } {
   const list = Array.isArray(calls) ? calls : []
-  const hit = list.find((x) => x && x.name === c.tool)
+  const alts = c.altTools || []
+  const hit = list.find((x) => x && (x.name === c.tool || alts.indexOf(x.name) >= 0))
   if (!hit) {
     const names = list.map((x) => (x ? x.name : '')).filter(Boolean)
-    return { ok: false, score: 0, why: '没调 ' + c.tool + (names.length ? '（调的是 ' + names.join('、') + '）' : '（一个工具都没调）') }
+    return { ok: false, score: 0, why: '没调 ' + c.tool + ((c.altTools || []).length ? ' 或 ' + (c.altTools || []).join(' / ') : '') + (names.length ? '（调的是 ' + names.join('、') + '）' : '（一个都没调）') }
   }
   const bad = (c.forbid || []).filter((f) => list.some((x) => x && x.name === f))
-  const argsWanted = Object.keys(c.args || {})
+  // 走到 altTools 那条路：参数形状本来就不同 ✓ → 不再拿主工具的 args 卡它 ✗
+  const argsWanted = hit.name === c.tool ? Object.keys(c.args || {}) : []
   const missed = argsWanted.filter((k) => !argHit((c.args || {})[k], (hit.args || {})[k]))
   let score = 1
   if (missed.length) score -= Math.min(0.6, 0.2 * missed.length)
   if (bad.length) score -= 0.5
   score = Math.max(0, Math.round(score * 100) / 100)
   const why = [
-    '调了 ' + c.tool + ' ✓',
+    hit.name === c.tool ? '调了 ' + c.tool + ' ✓' : '调了 ' + hit.name + '（与 ' + c.tool + ' 同样合理 ✓）',
     missed.length ? '参数要点没对上：' + missed.join('、') + ' ✗' : '参数要点齐 ✓',
     bad.length ? '不该调的也调了：' + bad.join('、') + ' ✗' : '',
   ].filter(Boolean).join('；')
