@@ -1707,7 +1707,8 @@ watch([headerText, footerText], () => render())
       <AiPaperDialog v-if="aiOpen" @close="aiOpen = false" />
       <div class="pm__box">
         <header class="pm__head">
-          <span>试卷编辑 · A4 文档</span>
+          <!-- 【v1701】用户要求：标题里去掉「A4 文档」字样 ✓（只留「试卷编辑」） -->
+          <span>试卷编辑</span>
           <button class="pm__x" @click="emit('close')" title="关闭"><AppIcon name="close" :size="13" /></button>
         </header>
         <div class="pm__body">
