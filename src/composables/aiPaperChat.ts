@@ -19,7 +19,11 @@ export const PAPER_CHAT_MAX_BYTES = 4 * 1024 * 1024
  *   · 幻灯片那套（add_slide / insert_text / insert_math_figure …）在试卷里用不上 ——
  *     给了模型只会乱调，还会把话说岔（它以为在改幻灯片 ✗）。
  */
-export const PAPER_TOOL_NAMES = ['get_paper_state', 'append_to_paper', 'insert_bank_question_to_paper', 'search_bank']
+export const PAPER_TOOL_NAMES = [
+  'get_paper_state', 'append_to_paper', 'insert_bank_question_to_paper', 'search_bank',
+  'get_paper_help', 'get_paper_style', 'set_paper_style', 'apply_paper_template',
+  'set_paper_header', 'insert_paper_figure', 'print_paper',
+]
 
 /** 从完整工具表里只挑试卷用得上的（名字认不出就跳过，不炸 ✓） */
 export function paperToolsOf(all: unknown[]): unknown[] {
@@ -49,6 +53,7 @@ export function buildPaperChatSystem(): string {
     '· 插图用 [图N]（N 是图片库里已有的号 ✓）或 Markdown 图片语法 ![图注](地址)；**不要凭空编图号** ✗；',
     '· [分页] 手动分页、[换页] 等价、[4cm] 空白高度、{c:red; b} 段落样式；',
     '· 页眉页脚是**设置项**，不要写进正文 ✗。',
+    '要写具体语法（[题] 块、段落样式、图片写法、可改设置项）时先调 get_paper_help 查手册 ✓；改设置用 set_paper_style、页眉页脚用 set_paper_header、插数学图形用 insert_paper_figure、要 PDF 用 print_paper ✓。',
     '老师说「加一道…」就用 append_to_paper 追加；说「从题库找一道…」先 search_bank 再 insert_bank_question_to_paper；',
     '看不到的图号 / 页码不要猜 ✓；改完用一句中文说明你做了什么，别把工具返回的 JSON 倒给老师 ✗。',
   ].join('\n')
@@ -85,3 +90,40 @@ export function chatTitleOf(text: string, n = 24): string {
 
 /** 试卷那三个动作的口径（真实现在 AiPaperChat.vue ✓；这里只给类型，方便对照 ✓） */
 export type PaperCtx = NonNullable<AiToolCtx['paper']>
+
+/* ---------------- 【v1693】试卷语法手册（给模型**按需查** ✓，不是塞进 system ✗） ---------------- */
+
+/**
+ * 试卷编辑认的全部语法与设置项 —— 做成一个工具（get_paper_help）让模型自己查 ✓
+ * 为什么不塞进 system：太长会每轮都烧 token ✗；模型只在真需要细节时才查 ✓。
+ * ⚠ 这份手册必须与 PaperModal 的解析保持一致 ✓（改语法时两处一起改 ✗ 否则 AI 会写出排不出来的东西 ✗）
+ */
+export const PAPER_HELP = [
+  '【标题与结构】',
+  '# 大标题（居中）  ## 一、选择题（方块大题标题）  ### 小标题',
+  '【题目】',
+  '1. 题干…（题号，试卷按 autoNum 自动重排）  (1) 小问…',
+  '整块（题干/选项/解析不被分页拆开、解析默认收起、打印自动展开）：',
+  '[题]',
+  '1. 已知…（公式写 $x^2$ 或 $$…$$）',
+  '[选项]',
+  'A. …　B. …　C. …　D. …',
+  '[解析]',
+  '【答案】…',
+  '…解析文字…',
+  '[/题]',
+  '【图片】',
+  'Markdown：![图注](地址)　![图:center](地址)　![图2:floatleft:50%](地址)',
+  '[图N] 传统写法：　[图1]　[图2:center]　[图3:60%]（宽度%）　[图4:45]（旋转角）　[图5:图注文字]',
+  '对齐/浮动：center、left、right、float（右浮）、floatleft（左浮）；不要凭空编图号 ✗',
+  '【空白与分页】[分页]　[换页]　[4cm]　[10mm]',
+  '【段落样式】{c:red; s:16; f:楷体; b; i} 这段内容　（颜色支持 red、#ff0000、rgb()）',
+  '【多选/填空】多选题节里的题会自动加「多选」标签；填空节里 =____ 会自动变答题横线',
+  '【页眉页脚】是**设置项**（不进正文 ✓）：页眉/页脚文字支持 [图N] 与 {page} {total} 变量',
+  '【可改的设置项（set_paper_style 的键）】template 模板、fontFamily 字体、fontSize 字号(pt)、fontColor 字色、',
+  'lineHeight 行高、para 段距、indent 首行缩进、h2size 一级小标题字号、numStyle 题号(arabic 阿拉伯数字 / cn 中文)、',
+  'optLayout 选项排布(auto 自动 / one 一行一个 / two 一行两个 / four 一行四个)、autoNum 自动编号(true/false)、',
+  'bodyCols 正文分栏(1~3)、headerText 页眉、footerText 页脚、pdfName 导出文件名、gapQ 题间距、headerGap 页眉距、footerGap 页脚距',
+  '【其它】套模板 apply_paper_template：handout 讲义 / exam 试卷 / exam19 十九题卷 / blank 空白；',
+  '打印或导出 PDF 用 print_paper（矢量输出 ✓ 浏览器打印对话框里选「另存为 PDF」）',
+].join(String.fromCharCode(10))

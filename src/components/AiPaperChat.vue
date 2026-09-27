@@ -16,7 +16,7 @@ import { AI_TOOLS, aiToolGuide, runAiTool } from '@/composables/aiTools'
 import type { AiToolCtx } from '@/composables/aiTools'
 import { pickImages, qSearch, questionBlockOf, questionTextOf } from '@/composables/useQuestionBank'
 import type { QItem } from '@/composables/useQuestionBank'
-import { sendToPaper } from '@/ui/paper'
+import { paperOpsSink, sendToPaper } from '@/ui/paper'
 import {
   buildPaperChatSystem, canAttachPaperChat, canSendPaperChat, chatUserContent, paperToolsOf,
 } from '@/composables/aiPaperChat'
@@ -115,6 +115,13 @@ function ctxOf(): AiToolCtx {
         sendToPaper({ text: block, id: 0, label: 'AI 插入试题 #' + id, imgs })
         return '已插进试卷 ✓' + (imgs.length ? '（配图 ' + imgs.length + ' 张 ✓）' : '')
       },
+      // 【v1693】其余能力（读设置 / 改设置 / 模板 / 页眉 / 数学图形 / 打印）直接转给 PaperModal 登记的对象 ✓
+      style: () => (paperOpsSink.value ? paperOpsSink.value.style() : {}),
+      setStyle: (patch) => (paperOpsSink.value ? paperOpsSink.value.setStyle(patch) : '试卷没开着 ✗'),
+      template: (key) => (paperOpsSink.value ? paperOpsSink.value.template(key) : '试卷没开着 ✗'),
+      headerPreset: (id) => (paperOpsSink.value ? paperOpsSink.value.headerPreset(id) : '试卷没开着 ✗'),
+      figure: async (kind, params) => (paperOpsSink.value ? await paperOpsSink.value.figure(kind, params) : ''),
+      print: () => (paperOpsSink.value ? paperOpsSink.value.print() : '试卷没开着 ✗'),
     },
   }
 }

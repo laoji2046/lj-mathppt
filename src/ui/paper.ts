@@ -38,3 +38,30 @@ export function sendToPaper(p: PaperInsertPayload) {
  *  （试卷没开时这两个是 null → AI 助手的工具会说清"先把试卷编辑打开" ✓） */
 export const paperTextSink = ref<null | (() => string)>(null)
 export const paperAppendSink = ref<null | ((text: string, pageBreak?: boolean) => void)>(null)
+
+/* ---------------- 【v1693】把试卷编辑的**全部能力**曝光给 AI 工具 ----------------
+ * 用户问「如何让 AI 能用试卷编辑中的所有功能」✓ —— 答案不是把提示词写长 ✗，而是两条：
+ *   ① **能力做成工具**（读设置 / 改设置 / 套模板 / 页眉页脚 / 插数学图形 / 打印 ✓ 下面这块）；
+ *   ② **语法做成手册**（纯文本能力如 [题] 块、{c:red} 段落样式、[分页]，让模型按需查 ✓ 见 aiPaperChat.PAPER_HELP）。
+ * 这里集中成一个对象：零散加口子会越加越乱 ✗，而且 AI 侧要能一眼看出"总共有哪些能力" ✓。
+ */
+export interface PaperOps {
+  /** 读正文 ✓ */
+  text: () => string
+  /** 追加正文（pageBreak = 先 [分页] ✓） */
+  append: (text: string, pageBreak: boolean) => void
+  /** 当前样式 / 页面设置快照（字体 字号 颜色 行高 段距 缩进 题号 选项排布 分栏 页眉页脚 文件名 … ✓） */
+  style: () => Record<string, unknown>
+  /** 改设置（只改传进来的键 ✓，认不出的键忽略并说明 ✓，越界值会夹取 ✓） */
+  setStyle: (patch: Record<string, unknown>) => string
+  /** 套模板：handout（讲义）| exam（试卷）| exam19（19 题卷）| blank（空白）✓ */
+  template: (key: string) => string
+  /** 页眉页脚预设（id 见 PaperModal 的 HEADER_PRESETS ✓） */
+  headerPreset: (id: string) => string
+  /** 数学图形：kind + params → 栅格化后进图片库，返回 [图N] ✓ */
+  figure: (kind: string, params: Record<string, unknown>) => Promise<string>
+  /** 打印 / 另存 PDF（走浏览器打印，矢量 ✓） */
+  print: () => string
+}
+/** PaperModal 打开时登记；关掉时清掉 ✓（AI 工具据此判断"试卷开着没有" ✓） */
+export const paperOpsSink = ref<null | PaperOps>(null)

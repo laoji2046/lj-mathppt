@@ -10,7 +10,8 @@ import { MATH_FIGURE_OPTIONS } from '@/types'
 import { closeFigPalette, openFigPalette } from '@/ui/figPalette'
 import { geom3dSink, openGeom3D } from '@/ui/geom3d'
 import { vectorizeSink, openVectorize } from '@/ui/vectorize'
-import { paperAppendSink, paperInsertSink, paperPending, paperTextSink } from '@/ui/paper'
+import { paperAppendSink, paperInsertSink, paperOpsSink, paperPending, paperTextSink } from '@/ui/paper'
+import type { PaperOps } from '@/ui/paper'
 import type { PaperInsertPayload } from '@/ui/paper'
 import ColorSwatches from './ColorSwatches.vue'
 import AiPaperChat from './AiPaperChat.vue'
@@ -773,6 +774,70 @@ async function addImageFromFile(file: File) {
   }
 }
 
+/** 【v1693】把试卷编辑的**全部能力**做成一个对象交给 AI 工具 ✓（接口见 ui/paper.ts 的 PaperOps ✓） */
+const paperOps: PaperOps = {
+  text: () => input.value,
+  append: (t, brk) => appendByAi(t, brk),
+  style: () => pfSnapshot(),
+  setStyle: (patch) => {
+    const known = Object.keys(PF)
+    const keys = Object.keys(patch || {})
+    const good = keys.filter((k) => known.indexOf(k) >= 0)
+    const unknown = keys.filter((k) => known.indexOf(k) < 0)
+    pfApply(patch)
+    if (patch && patch.fontFamily !== undefined) applyFont()
+    if (patch && (patch.fontSize !== undefined || patch.lineHeight !== undefined || patch.para !== undefined || patch.bodyCols !== undefined)) refreshLayout()
+    render()
+    saveDraftSoon()
+    return '已改设置：' + (good.map((k) => k + '=' + String((patch as Record<string, unknown>)[k])).join('、') || '（一个可用的键都没有）')
+      + (unknown.length ? '；不认得的键已忽略：' + unknown.join('、') : '')
+  },
+  template: (key) => {
+    if (['handout', 'exam', 'exam19', 'blank'].indexOf(key) < 0) {
+      return '没有这个模板：' + key + '（可用 handout 讲义 / exam 试卷 / exam19 十九题卷 / blank 空白 ✓）'
+    }
+    applyTemplate(key)
+    return '已套模板 ' + key + '（⚠ 正文被替换了，Ctrl+Z 可撤销 ✓）'
+  },
+  headerPreset: (id) => {
+    applyHeaderPreset(String(id || ''))
+    return '已套页眉页脚预设：' + (id || '（不使用模板）')
+  },
+  figure: (kind, params) => insertFigureByKind(kind, params),
+  print: () => {
+    paperMsg.value = 'AI 触发了打印 / 另存 PDF ✓'
+    printPdf()
+    return '已打开打印对话框（里面选「另存为 PDF」就是矢量 PDF ✓）'
+  },
+}
+
+/**
+ * 【v1693】kind + params → SVG（**与画布上那套同一个渲染器** ✓，不另起一套 ✗）→ PNG → 进图片库 → 返回 [图N] ✓
+ * 认不出的 kind / 参数：渲染器会抛错或给空串 → 这里兜住并返回空串，让工具层报"没插进去" ✓（不静默 ✗）
+ */
+async function insertFigureByKind(kind: string, params: Record<string, unknown>): Promise<string> {
+  try {
+    const { mathFigureElOfKind, renderFigureSvg } = await import('@/composables/figureRender')
+    const el = mathFigureElOfKind(kind as never) as { params?: Record<string, unknown> } | undefined
+    if (!el) return ''
+    const p: Record<string, unknown> = { ...(el.params || {}) }
+    for (const k of Object.keys(params || {})) {
+      if (params[k] !== undefined && params[k] !== null) p[k] = params[k]
+    }
+    el.params = p
+    const svg = renderFigureSvg(el as never)
+    if (!svg || svg.indexOf('<svg') < 0) return ''
+    const png = await svgStringToPng(svg)
+    const n = ++imgSeq.value
+    images.value[n] = { src: png, address: '数学图形 ' + kind }
+    input.value += '[图' + n + ']'
+    render()
+    saveDraftSoon()
+    return '[图' + n + ']'
+  } catch {
+    return ''
+  }
+}
 /** 【v1692】AI 侧栏要用的三件事 —— 都走**已有路径** ✓（不另起一套排版/图片逻辑 ✗） */
 
 /** 追加 AI 写好的正文（与题库「加入试卷」同一套收尾：render + 存草稿 ✓） */
@@ -1530,6 +1595,7 @@ onMounted(() => {
   // 试题库的接收口：本窗口开着就接住；顺带把「待办」消费掉 ✓
   paperInsertSink.value = onQuestionInsert
   // 【v1691】AI 助手要用的读/追加口（试卷开着才登记 ✓）
+  paperOpsSink.value = paperOps
   paperTextSink.value = () => input.value
   paperAppendSink.value = (t, brk) => {
     const cur = input.value
@@ -1554,7 +1620,8 @@ onBeforeUnmount(() => {
   vectorizeSink.value = null   // 描摹的接收口同样要清 ✓
   paperInsertSink.value = null
     paperTextSink.value = null
-    paperAppendSink.value = null   // 试题库的接收口同样要清 ✓
+    paperAppendSink.value = null
+    paperOpsSink.value = null   // 试题库的接收口同样要清 ✓
 })
 /** 图片有更新（用户换了图）时清缓存重渲染 */
 function refreshImages() {

@@ -18,6 +18,7 @@
 import { createElement } from '@/types'
 import type { SlideElement } from '@/types'
 import { CONICS, withParams } from '@/composables/mathPlot'
+import { PAPER_HELP } from '@/composables/aiPaperChat'
 
 /** 面板传进来的「应用能力」适配器（探针里可以用假的 ✓） */
 export interface AiToolCtx {
@@ -36,6 +37,13 @@ export interface AiToolCtx {
     state: (maxChars: number) => { open: boolean; text: string }
     append: (text: string, pageBreak: boolean) => string
     insertQuestion: (id: number, withAnswer: boolean) => Promise<string>
+    /** 【v1693】试卷编辑的**其余能力**（改设置 / 套模板 / 页眉预设 / 插数学图形 / 打印 ✓） */
+    style?: () => Record<string, unknown>
+    setStyle?: (patch: Record<string, unknown>) => string
+    template?: (key: string) => string
+    headerPreset?: (id: string) => string
+    figure?: (kind: string, params: Record<string, unknown>) => Promise<string>
+    print?: () => string
   }  /** 题库（可缺：探针/没装库时不影响别的工具 ✓） */
   bank?: {
     search(query: string, limit: number): Promise<{ id: number; label: string }[]>
@@ -278,7 +286,93 @@ export const AI_TOOLS: unknown[] = [
       },
     },
   },
-]
+  {
+    type: 'function',
+    function: {
+      name: 'get_paper_help',
+      description: '取「试卷编辑」的**语法手册**（标题/题号/[题]块/图片/[分页]/段落样式/可改设置项 …）。要写试卷正文前不确定语法就查它 ✓',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_paper_style',
+      description: '读试卷当前的**样式与页面设置**（字体/字号/行高/段距/题号样式/选项排布/分栏/页眉页脚/导出文件名…）✓ 改设置前先读一次 ✓',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_paper_style',
+      description: '改试卷的样式与页面设置（只改传进来的键 ✓）。可用键：fontFamily 字体、fontSize 字号(pt)、fontColor 字色、'
+        + 'lineHeight 行高、para 段距、indent 首行缩进、h2size 小标题字号、numStyle 题号(arabic/cn)、'
+        + 'optLayout 选项排布(auto/one/two/four)、autoNum 自动编号(true/false)、bodyCols 正文分栏(1~3)、'
+        + 'gapQ 题间距、headerGap 页眉距、footerGap 页脚距 ✓',
+      parameters: {
+        type: 'object',
+        properties: {
+          patch: {
+            type: 'object',
+            description: '要改的键值，例如 {"fontSize":12,"numStyle":"cn","optLayout":"two"}',
+          },
+        },
+        required: ['patch'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'apply_paper_template',
+      description: '给试卷套模板（会**替换正文** ✗）：handout 讲义 / exam 试卷 / exam19 十九题卷 / blank 空白 ✓',
+      parameters: {
+        type: 'object',
+        properties: { key: { type: 'string', description: 'handout | exam | exam19 | blank' } },
+        required: ['key'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_paper_header',
+      description: '设页眉页脚与导出文件名（页眉页脚**不进正文** ✓，支持 [图N] 与 {page} {total} 变量）✓',
+      parameters: {
+        type: 'object',
+        properties: {
+          header: { type: 'string', description: '页眉文字，例如 某中学高三期末试卷' },
+          footer: { type: 'string', description: '页脚文字，例如 第 {page} 页 / 共 {total} 页' },
+          pdf_name: { type: 'string', description: '导出 PDF 的文件名（留空 = 用页眉文字）' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'insert_paper_figure',
+      description: '往试卷里插一张**数学图形**（按 kind + params 现场生成，落进图片库并给一个 [图N] ✓）——'
+        + '2D 图形种类与参数同 insert_math_figure ✓（圆锥曲线/函数/平面几何…）',
+      parameters: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', description: '图形种类，例如 parabola / ellipse / function …（见图形库 ✓）' },
+          params: { type: 'object', description: '图形参数（a、b、p、dir、cx、cy 等）；认不出的参数会失败并给清单 ✓' },
+        },
+        required: ['kind'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'print_paper',
+      description: '打印 / 另存 PDF（走浏览器打印，矢量文字可搜 ✓；用户会看到打印对话框 ✓）',
+      parameters: { type: 'object', properties: {} },
+    },
+  },]
 
 /** 给 system 提示词追加的说明（告诉模型怎么用这些功能 ✓） */
 export function aiToolGuide(): string {
@@ -286,6 +380,7 @@ export function aiToolGuide(): string {
     '【能用应用的功能】你可以调用工具**直接操作这个幻灯片应用**，不要只说"你可以插入…"。',
     '常用流程：先 get_deck_state 看当前页有什么 → 再 insert_math_figure / insert_text / add_slide 动手；',
     '要引用老师题库里的题：先 search_bank 拿 id，再 insert_bank_question。',
+    '试卷编辑还能改**设置**（字体/字号/题号样式/选项排布/分栏/页眉页脚 ✓ set_paper_style 与 set_paper_header）、套模板（apply_paper_template）、插数学图形（insert_paper_figure）、导出（print_paper ✓）；语法细节先查 get_paper_help ✓。',
     '要动「试卷编辑」里的 A4 试卷：先 get_paper_state 看正文，再用 append_to_paper 追加（按试卷排版：## 分大题、1. 题号、[题]…[/题] 整块 ✓）；单题也可以用 insert_bank_question_to_paper ✓。',
     '改已有元素前也先 get_deck_state 拿 id；改完/插完用一句中文说明你做了什么，别把工具的 JSON 原样倒给老师。',
     '数学图形一律用 insert_math_figure（kind + params），不要用 TikZ 画图、也不要只给 LaTeX 让老师自己画。',
@@ -502,6 +597,52 @@ export async function runAiTool(name: string, args: Record<string, unknown>, ctx
       const note = await p.insertQuestion(qid, args.with_answer === undefined ? false : !!args.with_answer)
       if (!note) return { ok: false, error: '题库里没有 id=' + qid + ' 这道题（先用 search_bank 搜一次 ✓）' }
       return { ok: true, result: { note } }
+    }    case 'get_paper_help': {
+      return { ok: true, result: { help: PAPER_HELP } }
+    }
+    case 'get_paper_style': {
+      const p = ctx.paper
+      if (!p || !p.style) return { ok: false, error: '这个版本没有试卷设置接口' }
+      return { ok: true, result: p.style() }
+    }
+    case 'set_paper_style': {
+      const p = ctx.paper
+      if (!p || !p.setStyle) return { ok: false, error: '这个版本没有试卷设置接口' }
+      const patch = args.patch && typeof args.patch === 'object' ? (args.patch as Record<string, unknown>) : null
+      if (!patch) return { ok: false, error: '缺 patch（要改的键值 ✓）' }
+      return { ok: true, result: { note: p.setStyle(patch) } }
+    }
+    case 'apply_paper_template': {
+      const p = ctx.paper
+      if (!p || !p.template) return { ok: false, error: '这个版本没有试卷模板接口' }
+      const key = str(args.key).trim()
+      if (!key) return { ok: false, error: '缺 key（handout | exam | exam19 | blank ✓）' }
+      return { ok: true, result: { note: p.template(key) } }
+    }
+    case 'set_paper_header': {
+      const p = ctx.paper
+      if (!p || !p.setStyle) return { ok: false, error: '这个版本没有试卷设置接口' }
+      const patch: Record<string, unknown> = {}
+      if (args.header !== undefined) patch.headerText = String(args.header)
+      if (args.footer !== undefined) patch.footerText = String(args.footer)
+      if (args.pdf_name !== undefined) patch.pdfName = String(args.pdf_name)
+      if (!Object.keys(patch).length) return { ok: false, error: '至少给 header / footer / pdf_name 之一 ✓' }
+      return { ok: true, result: { note: p.setStyle(patch) } }
+    }
+    case 'insert_paper_figure': {
+      const p = ctx.paper
+      if (!p || !p.figure) return { ok: false, error: '这个版本没有试卷插图接口' }
+      const kind = str(args.kind).trim()
+      if (!kind) return { ok: false, error: '缺 kind' }
+      const params = args.params && typeof args.params === 'object' ? (args.params as Record<string, unknown>) : {}
+      const tag = await p.figure(kind, params)
+      if (!tag) return { ok: false, error: '图形没插进去（kind 或参数可能不对 ✓ 先用 insert_math_figure 的清单核对种类 ✓）' }
+      return { ok: true, result: { note: '已插入数学图形 ' + kind + ' → ' + tag } }
+    }
+    case 'print_paper': {
+      const p = ctx.paper
+      if (!p || !p.print) return { ok: false, error: '这个版本没有试卷打印接口' }
+      return { ok: true, result: { note: p.print() } }
     }    default:
         return { ok: false, error: '没有这个功能：' + name }
     }
