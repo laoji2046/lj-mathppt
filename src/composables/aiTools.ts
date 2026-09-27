@@ -37,6 +37,10 @@ export interface AiToolCtx {
     state: (maxChars: number) => { open: boolean; text: string }
     append: (text: string, pageBreak: boolean) => string
     insertQuestion: (id: number, withAnswer: boolean) => Promise<string>
+    /** 【v1699】试卷大纲 + 按题号改 / 插（用户："它有点儿笨" → 让它按题号办事 ✓） */
+    outline?: () => string
+    replaceQuestion?: (no: number, text: string) => string
+    insertQuestionAt?: (afterNo: number, text: string) => string
     /** 【v1694】就地改正文（字面替换 ✓） */
     edit?: (find: string, replace: string, all?: boolean) => string
     /** 【v1693】试卷编辑的**其余能力**（改设置 / 套模板 / 页眉预设 / 插数学图形 / 打印 ✓） */
@@ -130,6 +134,46 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 /** 工具清单（给模型的 JSON Schema ✓；描述用中文，模型看得懂 ✓） */
 export const AI_TOOLS: unknown[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'get_paper_outline',
+      description: '取**试卷大纲**：每个大节下有哪些题号、每题在第几行、题干开头是什么 ✓。'
+        + '老师说「第 5 题…」时**先调它**（别通读原文、更别自己数题号 ✗），拿到题号再用 replace_paper_question / insert_paper_question 办事 ✓',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'replace_paper_question',
+      description: '**按题号**把一道题整块换掉（推荐 ✗ 不要用 edit_paper_text 去猜原文 ✓）。'
+        + 'text 给完整的新题（含题号、选项、[题] 块等都行 ✓），题号由试卷自动重排 ✓；找不到该题号会**一个字都不改**并回报现有题号 ✓',
+      parameters: {
+        type: 'object',
+        properties: {
+          no: { type: 'integer', description: '题号（卷面上写的那个 ✓，先用 get_paper_outline 确认 ✓）' },
+          text: { type: 'string', description: '新的整道题（可多行 ✓）' },
+        },
+        required: ['no', 'text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'insert_paper_question',
+      description: '**按题号**在它后面插一道新题（老师说「第 5 题后加一道」就用它 ✓）。新题给完整块 ✓，题号由试卷自动重排 ✓',
+      parameters: {
+        type: 'object',
+        properties: {
+          after_no: { type: 'integer', description: '插在这一题之后（题号 ✓）' },
+          text: { type: 'string', description: '新的整道题（可多行 ✓）' },
+        },
+        required: ['after_no', 'text'],
+      },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -437,6 +481,7 @@ export function aiToolGuide(): string {
     '【能用应用的功能】你可以调用工具**直接操作这个幻灯片应用**，不要只说"你可以插入…"。',
     '常用流程：先 get_deck_state 看当前页有什么 → 再 insert_math_figure / insert_text / add_slide 动手；',
     '要引用老师题库里的题：先 search_bank 拿 id，再 insert_bank_question。',
+    '老师说「第 5 题…」时：**先 get_paper_outline 拿题号** → 再用 replace_paper_question / insert_paper_question 办事 ✓（按题号最稳，别自己数题号 ✗，也别拿 edit_paper_text 去猜原文 ✗）。',
     '试卷编辑还能改**设置**（字体/字号/题号样式/选项排布/分栏/页眉页脚 ✓ set_paper_style 与 set_paper_header）、套模板（apply_paper_template）、插数学图形（insert_paper_figure）、导出（print_paper ✓）；语法细节先查 get_paper_help ✓。',
     '要动「试卷编辑」里的 A4 试卷：先 get_paper_state 看正文，再用 append_to_paper 追加（按试卷排版：## 分大题、1. 题号、[题]…[/题] 整块 ✓）；单题也可以用 insert_bank_question_to_paper ✓。',
     '改已有元素前也先 get_deck_state 拿 id；改完/插完用一句中文说明你做了什么，别把工具的 JSON 原样倒给老师。',
@@ -715,7 +760,35 @@ export async function runAiTool(name: string, args: Record<string, unknown>, ctx
       const replace = args.replace === undefined ? '' : String(args.replace)
       return { ok: true, result: { note: p.edit(find, replace, !!args.all) } }
     }
-    default:
+    case 'get_paper_outline': {
+      const p = ctx.paper
+      if (!p || !p.outline) return { ok: false, error: '这个版本没有试卷大纲接口' }
+      return { ok: true, result: { outline: p.outline() } }
+    }
+    case 'replace_paper_question': {
+      const p = ctx.paper
+      if (!p || !p.replaceQuestion) return { ok: false, error: '这个版本没有按题号改的接口' }
+      const no = num(args.no)
+      const text = str(args.text)
+      if (!no) return { ok: false, error: '缺 no（题号 ✓ 先用 get_paper_outline 看）' }
+      if (!text.trim()) return { ok: false, error: '缺 text（新的整道题 ✓）' }
+      const note = p.replaceQuestion(Math.round(no), text)
+      if (!note) return { ok: false, error: '没换成（原因不明）' }
+      if (note.indexOf('已换掉') < 0) return { ok: false, error: note }
+      return { ok: true, result: { note } }
+    }
+    case 'insert_paper_question': {
+      const p = ctx.paper
+      if (!p || !p.insertQuestionAt) return { ok: false, error: '这个版本没有按题号插的接口' }
+      const afterNo = num(args.after_no)
+      const text = str(args.text)
+      if (!afterNo) return { ok: false, error: '缺 after_no（插在哪个题号之后 ✓）' }
+      if (!text.trim()) return { ok: false, error: '缺 text（新的整道题 ✓）' }
+      const note = p.insertQuestionAt(Math.round(afterNo), text)
+      if (!note) return { ok: false, error: '没插进去（原因不明）' }
+      if (note.indexOf('已在第') < 0) return { ok: false, error: note }
+      return { ok: true, result: { note } }
+    }    default:
         return { ok: false, error: '没有这个功能：' + name }
     }
   } catch (e) {

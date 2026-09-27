@@ -53,7 +53,7 @@ const docInput = ref<HTMLInputElement | null>(null)
 /** 【v1698】截图弹窗（复用应用那个：选窗口 / 拖选区 / Esc 取消都现成 ✓） */
 const shotOpen = ref(false)
 /** 一次提问里最多让它改几步（防打转 ✓） */
-const MAX_TURNS = 6
+const MAX_TURNS = 12   // 【v1699】用户要「少啰嗦、多办事」→ 6 提到 12 ✓
 
 function aiKey(): string {
   try {
@@ -143,6 +143,9 @@ function ctxOf(): AiToolCtx {
       figure: async (kind, params) => (paperOpsSink.value ? await paperOpsSink.value.figure(kind, params) : ''),
       print: () => (paperOpsSink.value ? paperOpsSink.value.print() : '试卷没开着 ✗'),
       edit: (find, replace, all) => (paperOpsSink.value ? paperOpsSink.value.edit(find, replace, all) : '试卷没开着 ✗'),
+      outline: () => (paperOpsSink.value ? paperOpsSink.value.outline() : ''),
+      replaceQuestion: (no, text) => (paperOpsSink.value ? paperOpsSink.value.replaceQuestion(no, text) : '试卷没开着 ✗'),
+      insertQuestionAt: (afterNo, text) => (paperOpsSink.value ? paperOpsSink.value.insertQuestionAt(afterNo, text) : '试卷没开着 ✗'),
     },
   }
 }
@@ -186,7 +189,7 @@ async function askWithTools(
       scrollSoon()
     }
   }
-  return '（这一轮改的步骤有点多，先停在这里；你可以再让我接着改 ✓）'
+  return '（一次改的步骤太多了，先停在这里；你再说一句我接着改 ✓）'
 }
 
 /** 把 AI 回复里的 $公式$ 排出来（写 innerHTML 的手法与其它浮层一致 ✓：宿主是空 div，模板不绑内容 ✓） */
@@ -371,9 +374,13 @@ async function send() {
         </template>
         <template v-else>
           <div class="apc__body" :data-i="i"></div>
-          <ul v-if="m.did && m.did.length" class="apc__did">
-            <li v-for="(d, k) in m.did" :key="k">{{ d }}</li>
-          </ul>
+          <!-- 【v1699】用户："不看它说它做了啥，我只看结果" ✓ → 默认**折叠**（想看再点开 ✓） -->
+          <details v-if="m.did && m.did.length" class="apc__didwrap">
+            <summary>做了什么（{{ m.did.length }} 步）</summary>
+            <ul class="apc__did">
+              <li v-for="(d, k) in m.did" :key="k">{{ d }}</li>
+            </ul>
+          </details>
         </template>
       </div>
     </div>
@@ -425,7 +432,9 @@ async function send() {
 .apc__uimgs img { max-height: 68px; max-width: 110px; border: 1px solid var(--border); border-radius: 6px; }
 .apc__udocs { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; font-size: 11px; color: var(--muted); }
 .apc__body { font-size: 12.5px; line-height: 1.75; color: var(--text); background: var(--gray-50); border: 1px solid var(--border); border-radius: 10px; padding: 7px 9px; word-break: break-word; }
-.apc__did { margin: 0; padding-left: 16px; font-size: 11px; color: #2f6b45; line-height: 1.7; }
+.apc__didwrap { font-size: 11px; color: var(--muted); }
+.apc__didwrap summary { cursor: pointer; color: var(--muted); }
+.apc__did { margin: 4px 0 0; padding-left: 16px; font-size: 11px; color: #2f6b45; line-height: 1.7; }
 .apc__atts { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 8px; border-top: 1px dashed var(--border); }
 .apc__att { display: flex; align-items: center; gap: 4px; }
 .apc__att img { max-height: 40px; max-width: 60px; border: 1px solid var(--border); border-radius: 4px; }

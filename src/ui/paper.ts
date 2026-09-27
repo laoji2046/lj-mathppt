@@ -48,7 +48,12 @@ export const paperAppendSink = ref<null | ((text: string, pageBreak?: boolean) =
 export interface PaperOps {
   /** 【v1694】就地改正文：字面替换（find 可多行 ✓，all=false 只改第一处 ✓）—— 返回一句人话回执 ✓
    *  为什么必须补：只有 append 时，「把解答题改成蓝色」被模型实现成"复制一份并染蓝" ✗（用户实报 ✓） */
-  edit: (find: string, replace: string, all?: boolean) => string  /** 读正文 ✓ */
+  edit: (find: string, replace: string, all?: boolean) => string  /** 【v1699】试卷大纲（题号 / 行号 / 题干开头 ✓）—— 按题号办事的前提 ✓ */
+  outline: () => string
+  /** 【v1699】按题号整块换掉一道题（找不到就一个字不改，返回说明 ✓） */
+  replaceQuestion: (no: number, text: string) => string
+  /** 【v1699】按题号在它后面插一道 ✓ */
+  insertQuestionAt: (afterNo: number, text: string) => string  /** 读正文 ✓ */
   text: () => string
   /** 追加正文（pageBreak = 先 [分页] ✓） */
   append: (text: string, pageBreak: boolean) => void

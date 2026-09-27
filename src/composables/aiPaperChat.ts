@@ -24,6 +24,7 @@ export const PAPER_TOOL_NAMES = [
   'get_paper_state', 'append_to_paper', 'insert_bank_question_to_paper', 'search_bank',
   'get_paper_help', 'get_paper_style', 'set_paper_style', 'apply_paper_template',
   'set_paper_header', 'insert_paper_figure', 'print_paper', 'edit_paper_text',
+  'get_paper_outline', 'replace_paper_question', 'insert_paper_question',
 ]
 
 /** 从完整工具表里只挑试卷用得上的（名字认不出就跳过，不炸 ✓） */
@@ -58,7 +59,9 @@ export function buildPaperChatSystem(): string {
     '要写具体语法（[题] 块、段落样式、图片写法、可改设置项）时先调 get_paper_help 查手册 ✓；改设置用 set_paper_style、页眉页脚用 set_paper_header、插数学图形用 insert_paper_figure、要 PDF 用 print_paper ✓。',
     PAPER_EDIT_RULE,
     '老师说「加一道…」就用 append_to_paper 追加；说「从题库找一道…」先 search_bank 再 insert_bank_question_to_paper；',
-    '看不到的图号 / 页码不要猜 ✓；改完用一句中文说明你做了什么，别把工具返回的 JSON 倒给老师 ✗。',
+    '**老师说「第 N 题…」时先 get_paper_outline 拿题号与行号** ✓ → 再用 replace_paper_question / insert_paper_question（按题号最稳 ✓，别自己数、也别猜原文 ✗）。',
+    '⚠ **回复要短**：老师只看卷面结果 ✓ —— 改完只回一句「改了哪几处」（30 字内 ✓），不要复述原文、不要讲步骤、不要列工具 ✗。',
+    '看不到的图号 / 页码不要猜 ✓。',
   ].join('\n')
 }
 
@@ -207,4 +210,125 @@ export function paperDocBlock(docs: PaperDoc[] | undefined, maxChars = 20000): s
     return '【附件文档：' + String(d.name || '未命名') + '】' + NL + cut
   })
   return '（下面是老师给你的**参考文档**，不是试卷正文 —— 要不要落到试卷由老师的话决定 ✓）' + NL + parts.join(NL + NL)
+}
+/* ---------------- 【v1699】试卷大纲：让 AI「按题号办事」（用户：它现在只看到一大段文字 ✗） ---------------- */
+
+export interface PaperOutlineItem {
+  /** 题号（卷面上写的那个 ✓） */
+  no: number
+  /** 题干开头（去标记 ✓，给模型认题用） */
+  head: string
+  /** 起止行号（0 基，含两端 ✓）—— 替换 / 插入就靠它 ✓ */
+  startLine: number
+  endLine: number
+  /** 属于哪个大节（## 一、选择题 …；没有就空串 ✓） */
+  section: string
+}
+export interface PaperOutline {
+  sections: { title: string; line: number }[]
+  items: PaperOutlineItem[]
+  total: number
+}
+
+/** 题号行：1. / 2、/ 3． 开头 ✓（与 PaperModal 认的一致 ✓） */
+const Q_LINE = /^\s*(\d{1,3})\s*[.、．]\s*(.*)$/
+/** 大题（方块标题）✓ */
+const SEC_LINE = /^\s*##\s+(.*)$/
+
+/**
+ * 把试卷源码拆成「大节 + 题号 + 行号」✓
+ * 为什么需要：AI 现在拿到的是**一大段文字** ✗ —— 说「第 5 题」它得自己数，数错就改错地方 ✗（用户感受就是"笨"✓）。
+ * 纪律：**只认卷面写法**（[题] 块与 1. 题号 ✓），认不出就不算题 ✗（绝不瞎猜 ✓）。
+ */
+export function paperOutline(text: string): PaperOutline {
+  const NL = String.fromCharCode(10)
+  const lines = String(text == null ? '' : text).split(NL)
+  const sections: { title: string; line: number }[] = []
+  let curSec = ''
+  lines.forEach((l, i) => {
+    const s = SEC_LINE.exec(String(l))
+    if (s) { curSec = String(s[1]).trim(); sections.push({ title: curSec, line: i }) }
+  })
+  const starts: { line: number; no: number }[] = []
+  let inBlock = false
+  let blockStart = -1
+  lines.forEach((l, i) => {
+    const t = String(l)
+    if (/^\s*\[题\]/.test(t)) { inBlock = true; blockStart = i; return }
+    if (/^\s*\[\/题\]/.test(t)) { inBlock = false; return }
+    const m = Q_LINE.exec(t)
+    if (!m) return
+    // 块内的**第一个**题号行算这题的号 ✓；块里后续的 1. 2. 小问不算新题 ✓
+    if (inBlock && blockStart >= 0 && starts.length && starts[starts.length - 1].line === blockStart) return
+    starts.push({ line: inBlock && blockStart >= 0 ? blockStart : i, no: Number(m[1]) || 0 })
+  })
+  const items: PaperOutlineItem[] = []
+  starts.forEach((st, k) => {
+    const end = k + 1 < starts.length ? starts[k + 1].line - 1 : lines.length - 1
+    let stop = end
+    for (let j = st.line + 1; j <= end; j++) {
+      if (SEC_LINE.test(String(lines[j]))) { stop = j - 1; break }
+    }
+    const sec = sections.filter((x) => x.line <= st.line).pop()
+    const qLine = String(lines[st.line] || '')
+    const from = /^\s*\[题\]/.test(qLine) ? st.line + 1 : st.line
+    const head = String(lines[from] || '').replace(Q_LINE, '$2').replace(/\s+/g, ' ').trim().slice(0, 30)
+    items.push({ no: st.no, head, startLine: st.line, endLine: Math.max(st.line, stop), section: sec ? sec.title : '' })
+  })
+  return { sections, items, total: items.length }
+}
+
+/** 大纲 → 给模型看的一小段文字（**省 token** ✓ 别把整篇原文再塞一遍 ✗） */
+export function outlineText(o: PaperOutline, maxItems = 60): string {
+  const NL = String.fromCharCode(10)
+  if (!o.items.length) return '（这份试卷里还没认出题目：题号写成 1. 题干… 或整块 [题]…[/题] ✓）'
+  let sec = ''
+  const out: string[] = []
+  for (const it of o.items.slice(0, maxItems)) {
+    if (it.section !== sec) { sec = it.section; if (sec) out.push('## ' + sec) }
+    out.push('  第 ' + it.no + ' 题（第 ' + (it.startLine + 1) + '-' + (it.endLine + 1) + ' 行）：' + it.head)
+  }
+  if (o.items.length > maxItems) out.push('  …（还有 ' + (o.items.length - maxItems) + ' 道 ✓）')
+  return out.join(NL)
+}
+
+/** 找题号在 items 里的下标（找不到 -1 ✓） */
+export function findQuestion(o: PaperOutline, no: number): number {
+  const n = Number(no)
+  for (let i = 0; i < o.items.length; i++) if (o.items[i].no === n) return i
+  return -1
+}
+
+/** 按题号把一道题整块换掉 ✓（找不到就原样返回并说清现有题号 ✓，绝不改错地方 ✗） */
+export function replacePaperQuestion(text: string, no: number, newText: string): { text: string; ok: boolean; note: string } {
+  const NL = String.fromCharCode(10)
+  const src = String(text == null ? '' : text)
+  const o = paperOutline(src)
+  const i = findQuestion(o, no)
+  if (i < 0) {
+    const have = o.items.map((x) => x.no).join('、') || '（一道都没认出来）'
+    return { text: src, ok: false, note: '试卷里没有第 ' + no + ' 题（现有题号：' + have + '）—— 先用 get_paper_outline 看一遍 ✓ 一个字都没改' }
+  }
+  const it = o.items[i]
+  const lines = src.split(NL)
+  const body = String(newText == null ? '' : newText).replace(/\s+$/, '').split(NL)
+  lines.splice(it.startLine, it.endLine - it.startLine + 1, ...body)
+  return { text: lines.join(NL), ok: true, note: '已换掉第 ' + no + ' 题（原第 ' + (it.startLine + 1) + '-' + (it.endLine + 1) + ' 行）✓' }
+}
+
+/** 按题号在它后面插一道 ✓（新题写成完整块 ✓；题号由试卷自动重排 ✓） */
+export function insertPaperQuestion(text: string, afterNo: number, newText: string): { text: string; ok: boolean; note: string } {
+  const NL = String.fromCharCode(10)
+  const src = String(text == null ? '' : text)
+  const o = paperOutline(src)
+  const i = findQuestion(o, afterNo)
+  if (i < 0) {
+    const have = o.items.map((x) => x.no).join('、') || '（一道都没认出来）'
+    return { text: src, ok: false, note: '试卷里没有第 ' + afterNo + ' 题（现有题号：' + have + '）—— 先看一遍大纲 ✓ 一个字都没改' }
+  }
+  const it = o.items[i]
+  const lines = src.split(NL)
+  const body = String(newText == null ? '' : newText).replace(/\s+$/, '').split(NL)
+  lines.splice(it.endLine + 1, 0, ...body)
+  return { text: lines.join(NL), ok: true, note: '已在第 ' + afterNo + ' 题之后插入 ✓（题号由试卷自动重排 ✓）' }
 }

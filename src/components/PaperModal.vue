@@ -16,6 +16,7 @@ import { stripStyleClosers } from '@/composables/paperStyle'
 import { normalizeSvgForRaster } from '@/composables/svgNormalize'
 import { svgTextToPngUrl } from '@/composables/svgPng'
 import { paperEdit, paperEditNote } from '@/composables/aiPaperChat'
+import { insertPaperQuestion, outlineText, paperOutline, replacePaperQuestion } from '@/composables/aiPaperChat'
 import type { PaperInsertPayload } from '@/ui/paper'
 import ColorSwatches from './ColorSwatches.vue'
 import AiPaperChat from './AiPaperChat.vue'
@@ -806,6 +807,18 @@ const paperOps: PaperOps = {
     }
     paperMsg.value = paperEditNote(find, r.hits, !!all)
     return paperMsg.value
+  },  outline: () => outlineText(paperOutline(input.value)),
+  replaceQuestion: (no, text) => {
+    const r = replacePaperQuestion(input.value, no, text)
+    if (r.ok) { input.value = r.text; render(); saveDraftSoon() }
+    paperMsg.value = r.note
+    return r.note
+  },
+  insertQuestionAt: (afterNo, text) => {
+    const r = insertPaperQuestion(input.value, afterNo, text)
+    if (r.ok) { input.value = r.text; render(); saveDraftSoon() }
+    paperMsg.value = r.note
+    return r.note
   },  text: () => input.value,
   append: (t, brk) => appendByAi(t, brk),
   style: () => pfSnapshot(),
