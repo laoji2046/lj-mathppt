@@ -13,6 +13,8 @@ import { vectorizeSink, openVectorize } from '@/ui/vectorize'
 import { paperAppendSink, paperInsertSink, paperOpsSink, paperPending, paperTextSink } from '@/ui/paper'
 import type { PaperOps } from '@/ui/paper'
 import { stripStyleClosers } from '@/composables/paperStyle'
+import { normalizeSvgForRaster } from '@/composables/svgNormalize'
+import { svgTextToPngUrl } from '@/composables/svgPng'
 import { paperEdit, paperEditNote } from '@/composables/aiPaperChat'
 import type { PaperInsertPayload } from '@/ui/paper'
 import ColorSwatches from './ColorSwatches.vue'
@@ -868,7 +870,9 @@ async function insertFigureByKind(kind: string, params: Record<string, unknown>)
       return '图形没渲染出 SVG（种类 ' + kind + '；内部渲染器返回空 —— 该种类可能有必填参数，或前端渲染器没就绪）'
     }
     step = '转成 PNG'
-    const png = await svgStringToPng(svg)
+    // 【v1697】先规范化（丢掉原有尺寸属性、补 xmlns ✓）再走题库/讲义已在用的那套栅格化 ✓
+    const norm = normalizeSvgForRaster(svg)
+    const png = await svgTextToPngUrl(norm.svg, norm.w, norm.h, norm.k)
     if (!png || png.length < 100) return 'PNG 生成失败（SVG ' + svg.length + ' 字符）'
     const n = ++imgSeq.value
     images.value[n] = { src: png, address: '数学图形 ' + kind }
@@ -994,7 +998,10 @@ async function svgStringToPng(text: string, scale?: number): Promise<string> {
       '" width="' + Math.round(w * k) + '" height="' + Math.round(h * k) + '">' + doc + '</svg>'
   } else {
     if (doc.indexOf('xmlns') < 0) doc = doc.replace(/<svg\b/, '<svg xmlns="http://www.w3.org/2000/svg"')
-    doc = doc.replace(/<svg\b/, '<svg width="' + Math.round(w * k) + '" height="' + Math.round(h * k) + '"')
+    // 【v1697】原写法会把已有的 width/height **再加一份** ✗（重复属性 → 解析失败 ✗）→ 先把原来的尺寸属性去掉 ✓
+    doc = doc.replace(/<svg\b[^>]*>/, (openTag) => String(openTag)
+      .replace(/\s(width|height)\s*=\s*"[^"]*"/g, '')
+      .replace(/<svg\b/, '<svg width="' + Math.round(w * k) + '" height="' + Math.round(h * k) + '"'))
   }
   const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(doc)
   const img = await new Promise<HTMLImageElement>((res, rej) => {
