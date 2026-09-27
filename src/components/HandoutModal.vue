@@ -232,6 +232,20 @@ function doDelete(id: string) {
   void buildImgMap().then(() => refreshNow())
   flash('已删除 ✓')
 }
+/** 【v1715】清空讲义库：**全部**讲义都删掉（库目录里的文件挪进 .deleted\ 能捞回来）
+ *  用户口径：「删除已有的所有讲义」—— 与 deleteHandout 同一套口径：
+ *  文件挪进 .deleted\、localStorage 工作副本一起清、最后留一份空白（界面不能没有当前这份）
+ */
+function clearAllHandouts() {
+  const n = lib.value.length
+  if (n <= 1 && !h.value.blocks.length) { flash('讲义库里只有一份空白讲义'); return }
+  if (!window.confirm('清空讲义库？共 ' + n + ' 份讲义会全部删掉（库目录里的文件挪进 .deleted\ 能捞回来）')) return
+  for (const d of [...lib.value]) deleteHandout(d.id)
+  selIdx.value = 0
+  void buildImgMap().then(() => refreshNow())
+  flash('已清空讲义库：' + n + ' 份（库目录里的原文件在 LJ-讲义\.deleted\ 里，想捞回来用「打开库目录」）')
+}
+
 const q = ref('')
 const qList = ref<QItem[]>([])
 const qTotal = ref(0)
@@ -961,6 +975,10 @@ watch(ver, () => { void refreshNow() })
               </label>
               <button class="hd__btn hd__btn--half" title="清空当前这份讲义的全部内容（教材定位与标题保留 ✓）" @click="clearBlocks">清空本讲义</button>
             </div>
+            <div class="hd__drow">
+              <button class="hd__btn" title="把讲义库里的全部讲义都删掉（库目录里的文件挪进 .deleted\ 能捞回来；之后留一份空白讲义）" @click="clearAllHandouts">清空讲义库（全部 {{ lib.length }} 份）</button>
+            </div>
+
             <div class="hd__dlist">
               <template v-for="bk in tree" :key="bk.key">
                 <div class="hd__lb1">{{ bk.label }}</div>
