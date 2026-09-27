@@ -271,6 +271,56 @@ export function hdPlain(s: unknown): string {
   return String(s == null ? '' : s).replace(/\{\{([^}]*)\}\}/g, '$1')
 }
 
+/* ---------------- 【v1713】正文里的 Markdown 残留：图片与表格 ----------------
+ * 那批真实讲义（D:\vue-app\高中数学讲义 · 必修二 15 讲）里：
+ *   · 图是 `![图注](data:image/png;base64,…)`（内嵌自包含 ✓）或 `![图注](images/图注.png)` ✓
+ *   · 表格是标准竖线表（15 份里共 655 行 ✓）
+ * 以前一律当纯文本印出来 ✗（80 张图看不见、表格成了「| … |」）→ 这一层把它们认出来 ✓
+ *   ⚠ 输入必须是**已经 hdEsc 过的正文** ✓（这里只做结构替换，不再转义 ✓）
+ */
+const HD_IMG_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+
+/** 一行里残留的 `![图注](地址)` → `<figure><img>`（base64 / images/x.png / http 都原样塞 src ✓） */
+export function hdInlineFigures(line: string): string {
+  return String(line == null ? '' : line).replace(HD_IMG_RE, (_m, alt: string, url: string) => {
+    const cap = String(alt || '').trim()
+    return '<figure class="hd-fig hd-fig--inline"><img src="' + url + '" alt="' + cap + '" />'
+      + (cap ? '<figcaption>' + cap + '</figcaption>' : '') + '</figure>'
+  })
+}
+
+/** 竖线表行 → `<table>`（第二行必须是 `| --- |` 分隔行 ✓ 否则返回空串，调用方原样输出 ✓） */
+export function hdTableHtml(rows: string[]): string {
+  const cells = (r: string) => r.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
+  const isSep = (cs: string[]) => cs.length > 0 && cs.every((c) => /^:?-{2,}:?$/.test(c))
+  const list = (rows || []).map(cells)
+  if (list.length < 2 || !isSep(list[1])) return ''
+  const head = list[0].map((c) => '<th>' + c + '</th>').join('')
+  const rest = list.slice(2).map((cs) => '<tr>' + cs.map((c) => '<td>' + c + '</td>').join('') + '</tr>').join('')
+  return '<table class="hd-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + rest + '</tbody></table>'
+}
+
+/** 正文（已转义）→ HTML：连续竖线表成表格、其余行里的图片变图 ✓ */
+export function hdRichHtml(escaped: string): string {
+  const NL = String.fromCharCode(10)
+  const lines = String(escaped == null ? '' : escaped).split(NL)
+  const out: string[] = []
+  let i = 0
+  while (i < lines.length) {
+    if (lines[i].trim().charAt(0) === '|') {
+      const rows: string[] = []
+      while (i < lines.length && lines[i].trim().charAt(0) === '|') { rows.push(lines[i]); i++ }
+      const tbl = hdTableHtml(rows)
+      if (tbl) { out.push(tbl); continue }
+      for (const r of rows) out.push(hdInlineFigures(r))
+      continue
+    }
+    out.push(hdInlineFigures(lines[i]))
+    i++
+  }
+  return out.join(NL)
+}
+
 export function makeBlock(type: HdBlockType, text = ''): HdBlock {
   const b: HdBlock = {
     id: hdId(), type, text,
@@ -780,7 +830,7 @@ export function pageHtmlOf(h: Handout, v: HdVersion, imgMap: Record<string, stri
 
   for (const it of main) {
     const t = it.b.type
-    const body = hdFillOut(hdEsc(it.show), v)   // 【v1712】挖空：学生版印成空线 / 教师版给原词 ✓
+    const body = hdRichHtml(hdFillOut(hdEsc(it.show), v))   // 【v1712】挖空 + 【v1713】表格 / 图片 ✓
     const id = ' id="hd-b-' + it.b.id + '"'
     /** 知识底座插进来的条目**带上标题** ✓（「知识梳理 · 基本不等式」✓ 不然只剩公式，学生不知道这是哪一条 ✓） */
     const lab = (base: string) => hdEsc(base + (it.b.kbTitle ? ' · ' + it.b.kbTitle : ''))
@@ -828,7 +878,7 @@ export function pageHtmlOf(h: Handout, v: HdVersion, imgMap: Record<string, stri
   if (notes.length) {
     L.push('<h1 class="hd-h1 hd-h1--end">参考答案</h1>')
     notes.forEach((it, i) => {
-      L.push('<div class="hd-endnote"><span class="hd-qnum">' + (i + 1) + '</span><span class="hd-qtext"><b>' + hdEsc(HD_LABEL[it.b.type]) + '</b>' + hdFillOut(hdEsc(it.show), v) + '</span></div>')
+      L.push('<div class="hd-endnote"><span class="hd-qnum">' + (i + 1) + '</span><span class="hd-qtext"><b>' + hdEsc(HD_LABEL[it.b.type]) + '</b>' + hdRichHtml(hdFillOut(hdEsc(it.show), v)) + '</span></div>')
     })
   }
   return L.join('\n')

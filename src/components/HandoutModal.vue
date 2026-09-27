@@ -1217,6 +1217,13 @@ watch(ver, () => { void refreshNow() })
 .hd-pname i { display: inline-block; width: 84px; border-bottom: 1px solid #999; font-style: normal; }
 .hd__skel { max-width: 104px; }
 
+/* 【v1713】真实讲义那批资料用到的：竖线表渲染成真表格 + 正文里内联的图 ✓ */
+.hd-tbl { border-collapse: collapse; margin: 8px auto; font-size: 10pt; }
+.hd-tbl th, .hd-tbl td { border: 1px solid #9aa0aa; padding: 3px 8px; text-align: center; vertical-align: middle; }
+.hd-tbl th { background: #f2f4f8; font-weight: 700; }
+.hd-fig--inline { margin: 8px auto; }
+.hd-fig--inline img { max-width: 100%; max-height: 90mm; }
+
 @media print {
   @page { size: A4; margin: 0; }   /* 边距由 .hd__page 的 padding 负责 ✓（打印对话框边距=无 也不贴边 ✓） */
   .app { display: none !important; }   /* ✅ 关键：藏掉整个编辑器（scoped 里写这条是无效的 ✗） */
