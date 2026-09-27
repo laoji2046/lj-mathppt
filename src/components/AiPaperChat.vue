@@ -23,7 +23,7 @@ import { pickImages, qSearch, questionBlockOf, questionTextOf } from '@/composab
 import type { QItem } from '@/composables/useQuestionBank'
 import { paperOpsSink, sendToPaper } from '@/ui/paper'
 import {
-  buildPaperChatSystem, canAttachPaperChat, canSendPaperChat, chatUserContent, docCharsOf, paperToolsOf,
+  PAPER_OCR_PROMPT, buildPaperChatSystem, canAttachPaperChat, canSendPaperChat, chatUserContent, docCharsOf, paperToolsOf,
 } from '@/composables/aiPaperChat'
 import { typesetMixed } from '@/composables/useMathJax'
 import { escapeHtml } from '@/types'
@@ -380,14 +380,22 @@ async function cutToPaper() {
 async function send() {
   const c = canSendPaperChat(draft.value, busy.value, atts.value.length + docs.value.length)
   if (!c.ok) { note.value = c.why; return }
+  const text = draft.value.trim()
+  draft.value = ''
+  await sendAs(text)
+}
+
+/** 【v1704】真正发出去的那一步（从 send 里拆出来 —— 「录入试题」走**同一条路** ✓）
+ *  · bubble：气泡上显示的人话（留空 = 就把发出的原文显示出来 ✓） */
+async function sendAs(sendText: string, bubble = '') {
+  if (busy.value) return
   if (!licensed('ai-assistant')) { note.value = 'AI 助手要先激活：工具栏「激活 / 序列号」'; return }
   const key = aiKey()
   if (!key) { note.value = '还没填 AI Key：设置 → AI 助手 里填一个（只存本机 ✓）'; return }
-  const text = draft.value.trim()
+  const text = String(sendText || '').trim()
   const imgs = atts.value.map((a) => a.src)
   const docList = docs.value.slice()
-  msgs.value.push({ role: 'user', text, imgs: imgs.slice(), docs: docList.map((d) => d.name) })
-  draft.value = ''
+  msgs.value.push({ role: 'user', text: bubble || text, imgs: imgs.slice(), docs: docList.map((d) => d.name) })
   atts.value = []
   docs.value = []
   note.value = ''
@@ -407,6 +415,20 @@ async function send() {
     scrollSoon()
   }
 }
+/* ---------------- 【v1704】录入试题：把当前图里的题目录进试卷 ---------------- */
+
+/**
+ * 点一下就把**当前附件图**里的题目录进试卷（题干 / 选项 / 答案 / 解析 ✓）
+ *  与侧栏那几个预制对话同一套思路：不额外发明通道，直接走 sendAs（发送那条路 ✓）
+ *  ⚠ 必须配了「视觉模型」才让它看图 —— 否则纯文本模型会**照着图名瞎编** ✗（宁可拦住 ✓）
+ */
+async function ocrToPaper() {
+  const pics = atts.value.map((a) => a.src)
+  if (!pics.length) { note.value = '先在下面点「＋ 图」选一张（或「截图」/ Ctrl+V 粘一张），再点这个'; return }
+  if (!visionModel()) { note.value = '录入试题要让 AI 看图：先在「设置 → AI 助手」里配好「视觉模型」✓'; return }
+  if (busy.value) return
+  await sendAs(PAPER_OCR_PROMPT, '录入试题：把图里的题目（题干 / 选项 / 答案 / 解析）录进试卷')
+}
 </script>
 
 <template>
@@ -425,6 +447,7 @@ async function send() {
         · 这道题（粘图 / 截图）帮我录进试卷<br />
         · 这个文档里的题（＋文档）挑几道进试卷
 · 截图 / 粘图后点「切图 → 试卷」，只把图形部分插进卷子（题目文字不切）
+        · 拍照/截图 → 点「录入试题」，把图里的题目录进卷子（题干 / 选项 / 答案 / 解析）
       </div>
       <div v-for="(m, i) in msgs" :key="i" class="apc__msg" :class="'apc__msg--' + m.role">
         <template v-if="m.role === 'user'">
@@ -474,6 +497,7 @@ async function send() {
 <span class="apc__brk" />
         <button class="apc__btn apc__btn--cut" :disabled="busy" title="不调 AI：把上面的附件图切出图形部分（只留图形，题目文字不切），确认后插进试卷" @click="cutToPaper">切图 → 试卷</button>
         <button class="apc__btn apc__btn--chip" :class="{ 'apc__btn--on': onlyFigure }" :title="onlyFigure ? '当前：只切图形部分（题目文字不切）—— 点一下改成整张图' : '当前：整张图都插——点一下改成只切图形'" @click="toggleOnly">{{ onlyFigure ? '只切图形' : '整张图' }}</button>
+<button class="apc__btn apc__btn--ocr" :disabled="busy" title="让 AI 看图，把图里的题目（题干/选项/答案/解析）录进试卷；图形不重画，用「切图 → 试卷」自己插原图" @click="ocrToPaper">录入试题</button>
         <span v-if="note" class="apc__note">{{ note }}</span>
         <button class="apc__btn apc__btn--main" :disabled="busy" @click="send">{{ busy ? '处理中…' : '发送' }}</button>
       </div>
@@ -525,4 +549,7 @@ async function send() {
 .apc__btn--chip { height: 24px; padding: 0 8px; font-size: 11.5px; }
 .apc__btn--chip.apc__btn--on { border-color: #bfe6cf; background: #eefaf3; color: #2f7d5b; }
 .apc__note { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+/* 【v1704】「录入试题」按钮（与「切图」同排：都是对上面那几张图做的事 ✓） */
+.apc__btn--ocr { border-color: #cfe3ff; background: #f1f7ff; color: #1f5aa8; font-weight: 600; }
+.apc__btn--ocr:hover:not(:disabled) { background: #e5f0ff; }
 </style>
