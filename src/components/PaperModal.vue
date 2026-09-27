@@ -12,6 +12,7 @@ import { geom3dSink, openGeom3D } from '@/ui/geom3d'
 import { vectorizeSink, openVectorize } from '@/ui/vectorize'
 import { paperAppendSink, paperInsertSink, paperOpsSink, paperPending, paperTextSink } from '@/ui/paper'
 import type { PaperOps } from '@/ui/paper'
+import { paperEdit, paperEditNote } from '@/composables/aiPaperChat'
 import type { PaperInsertPayload } from '@/ui/paper'
 import ColorSwatches from './ColorSwatches.vue'
 import AiPaperChat from './AiPaperChat.vue'
@@ -776,7 +777,16 @@ async function addImageFromFile(file: File) {
 
 /** 【v1693】把试卷编辑的**全部能力**做成一个对象交给 AI 工具 ✓（接口见 ui/paper.ts 的 PaperOps ✓） */
 const paperOps: PaperOps = {
-  text: () => input.value,
+  edit: (find, replace, all) => {
+    const r = paperEdit(input.value, find, replace, !!all)
+    if (r.hits) {
+      input.value = r.text
+      render()
+      saveDraftSoon()
+    }
+    paperMsg.value = paperEditNote(find, r.hits, !!all)
+    return paperMsg.value
+  },  text: () => input.value,
   append: (t, brk) => appendByAi(t, brk),
   style: () => pfSnapshot(),
   setStyle: (patch) => {

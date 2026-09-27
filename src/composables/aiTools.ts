@@ -37,6 +37,8 @@ export interface AiToolCtx {
     state: (maxChars: number) => { open: boolean; text: string }
     append: (text: string, pageBreak: boolean) => string
     insertQuestion: (id: number, withAnswer: boolean) => Promise<string>
+    /** 【v1694】就地改正文（字面替换 ✓） */
+    edit?: (find: string, replace: string, all?: boolean) => string
     /** 【v1693】试卷编辑的**其余能力**（改设置 / 套模板 / 页眉预设 / 插数学图形 / 打印 ✓） */
     style?: () => Record<string, unknown>
     setStyle?: (patch: Record<string, unknown>) => string
@@ -91,6 +93,24 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 /** 工具清单（给模型的 JSON Schema ✓；描述用中文，模型看得懂 ✓） */
 export const AI_TOOLS: unknown[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'edit_paper_text',
+      description: '**改试卷里已有的文字**（字面替换 ✓，find 可以是多行原文）。老师说「把…改成…」「…变成蓝色」「删掉…」'
+        + '时**必须**用它 ✓ —— 不要用 append_to_paper 复制一份改造过的内容 ✗（那会把卷子变成两份，用户实测报过 ✗）。'
+        + '改之前先 get_paper_state 拿准确原文 ✓；给现有段落上样式就在那段行首加 {c:blue} / {b} / {s:14} ✓',
+      parameters: {
+        type: 'object',
+        properties: {
+          find: { type: 'string', description: '要替换掉的原文（照抄 get_paper_state 里的写法，可多行 ✓）' },
+          replace: { type: 'string', description: '换成什么（留空 = 删掉这段 ✓）' },
+          all: { type: 'boolean', description: 'true = 替换所有出现的地方；默认只改第一处 ✓' },
+        },
+        required: ['find', 'replace'],
+      },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -259,7 +279,7 @@ export const AI_TOOLS: unknown[] = [
     type: 'function',
     function: {
       name: 'append_to_paper',
-      description: '把一段文字**追加到「试卷编辑」正文末尾**（试卷没开会自动打开）。写题请按试卷的排版约定：'
+      description: '把一段文字**追加到「试卷编辑」正文末尾**（试卷没开会自动打开）。⚠ 只用于**新增**（加一节 / 加一道题 ✓）—— 改已有内容请用 edit_paper_text ✗ 不要复制一份 ✗。写题请按试卷的排版约定：'
         + '## 一、选择题 分大题、1. 题号（试卷会按 autoNum 重新编号 ✓）、[题]…[选项]…[解析]…[/题] 整块、$公式$、[图N] 插图、[分页] 手动分页 ✓',
       parameters: {
         type: 'object',
@@ -643,7 +663,16 @@ export async function runAiTool(name: string, args: Record<string, unknown>, ctx
       const p = ctx.paper
       if (!p || !p.print) return { ok: false, error: '这个版本没有试卷打印接口' }
       return { ok: true, result: { note: p.print() } }
-    }    default:
+}
+    case 'edit_paper_text': {
+      const p = ctx.paper
+      if (!p || !p.edit) return { ok: false, error: '这个版本没有试卷编辑接口' }
+      const find = str(args.find)
+      if (!find) return { ok: false, error: '缺 find（要替换的原文，可多行 ✓）' }
+      const replace = args.replace === undefined ? '' : String(args.replace)
+      return { ok: true, result: { note: p.edit(find, replace, !!args.all) } }
+    }
+    default:
         return { ok: false, error: '没有这个功能：' + name }
     }
   } catch (e) {

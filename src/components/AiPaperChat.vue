@@ -122,6 +122,7 @@ function ctxOf(): AiToolCtx {
       headerPreset: (id) => (paperOpsSink.value ? paperOpsSink.value.headerPreset(id) : '试卷没开着 ✗'),
       figure: async (kind, params) => (paperOpsSink.value ? await paperOpsSink.value.figure(kind, params) : ''),
       print: () => (paperOpsSink.value ? paperOpsSink.value.print() : '试卷没开着 ✗'),
+      edit: (find, replace, all) => (paperOpsSink.value ? paperOpsSink.value.edit(find, replace, all) : '试卷没开着 ✗'),
     },
   }
 }

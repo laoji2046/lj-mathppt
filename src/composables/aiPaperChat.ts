@@ -22,7 +22,7 @@ export const PAPER_CHAT_MAX_BYTES = 4 * 1024 * 1024
 export const PAPER_TOOL_NAMES = [
   'get_paper_state', 'append_to_paper', 'insert_bank_question_to_paper', 'search_bank',
   'get_paper_help', 'get_paper_style', 'set_paper_style', 'apply_paper_template',
-  'set_paper_header', 'insert_paper_figure', 'print_paper',
+  'set_paper_header', 'insert_paper_figure', 'print_paper', 'edit_paper_text',
 ]
 
 /** 从完整工具表里只挑试卷用得上的（名字认不出就跳过，不炸 ✓） */
@@ -54,6 +54,7 @@ export function buildPaperChatSystem(): string {
     '· [分页] 手动分页、[换页] 等价、[4cm] 空白高度、{c:red; b} 段落样式；',
     '· 页眉页脚是**设置项**，不要写进正文 ✗。',
     '要写具体语法（[题] 块、段落样式、图片写法、可改设置项）时先调 get_paper_help 查手册 ✓；改设置用 set_paper_style、页眉页脚用 set_paper_header、插数学图形用 insert_paper_figure、要 PDF 用 print_paper ✓。',
+    PAPER_EDIT_RULE,
     '老师说「加一道…」就用 append_to_paper 追加；说「从题库找一道…」先 search_bank 再 insert_bank_question_to_paper；',
     '看不到的图号 / 页码不要猜 ✓；改完用一句中文说明你做了什么，别把工具返回的 JSON 倒给老师 ✗。',
   ].join('\n')
@@ -126,4 +127,52 @@ export const PAPER_HELP = [
   'bodyCols 正文分栏(1~3)、headerText 页眉、footerText 页脚、pdfName 导出文件名、gapQ 题间距、headerGap 页眉距、footerGap 页脚距',
   '【其它】套模板 apply_paper_template：handout 讲义 / exam 试卷 / exam19 十九题卷 / blank 空白；',
   '打印或导出 PDF 用 print_paper（矢量输出 ✓ 浏览器打印对话框里选「另存为 PDF」）',
+].join(String.fromCharCode(10))
+/* ---------------- 【v1694】就地改正文（用户实报：说「把解答题改成蓝色」→ AI 把解答题**抄了一遍**改蓝 ✗） ---------------- */
+
+/**
+ * 在正文里做一次**字面替换**（不做正则 ✗ —— 老师卷子里的 $、[、] 都是普通字符 ✓）。
+ * 为什么要这个纯函数：模型只被给了 append（追加），没有"改现有的"能力 ✗，
+ *   于是「把解答题改成蓝色」被它实现成"复制一份并染蓝" ✗（用户实报 ✓）。这里把口径与边界测清楚 ✓。
+ *
+ * @returns { text: 新正文（没命中就是原样 ✓）, hits: 命中几处 }
+ */
+export function paperEdit(text: string, find: string, replace: string, all = false): { text: string; hits: number } {
+  const src = String(text || '')
+  const f = String(find == null ? '' : find)
+  if (!f) return { text: src, hits: 0 }
+  const r = String(replace == null ? '' : replace)
+  let hits = 0
+  let out = ''
+  let i = 0
+  for (;;) {
+    const at = src.indexOf(f, i)
+    if (at < 0) { out += src.slice(i); break }
+    hits++
+    out += src.slice(i, at) + r
+    i = at + f.length
+    if (!all) { out += src.slice(i); break }
+  }
+  return { text: out, hits }
+}
+
+/** 改完给模型/老师的一句话回执（没命中要说清"没找到"，别装作改好了 ✗） */
+export function paperEditNote(find: string, hits: number, all: boolean): string {
+  if (!hits) {
+    const brief = String(find || '').replace(/\s+/g, ' ').trim().slice(0, 30)
+    return '没找到这段原文' + (brief ? '（' + brief + '…）' : '') + '：先用 get_paper_state 看准确写法 ✓ 别自己猜 ✗，一个字都没改'
+  }
+  return '已改 ' + hits + ' 处' + (all ? '（全部出现的地方 ✓）' : '（只改了第一处；要全改就把 all 设为 true ✓）')
+}
+
+/**
+ * 一句话教模型：老师的"改成 X"是**改现有的**，不是复制一份 ✗
+ * （写进 system ✓ —— 这类误会光靠工具说明拦不住 ✓）
+ */
+export const PAPER_EDIT_RULE = [
+  '【改 vs 加 —— 别搞混 ✗】老师说「把…改成…」「…变成蓝色」「删掉…」「题号重排」时，是**改已有的内容**：',
+  '先 get_paper_state 读到准确原文 → 用 edit_paper_text 做替换（原文可多行 ✓）→ 再报一句改了几处 ✓。',
+  '**不要**用 append_to_paper 复制一份改造过的内容 ✗（那会把卷子变成两份，用户实测报过这个错 ✗）。',
+  'append_to_paper 只用于**新增**（加一节、加一道题 ✓）。',
+  '要给现有段落上样式（颜色/加粗/字号），就在那段文字**行首**加 {c:blue} / {b} / {s:14} ✓（见 get_paper_help ✓）。',
 ].join(String.fromCharCode(10))
