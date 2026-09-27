@@ -32,6 +32,11 @@ import { qFacets } from '@/composables/useQuestionBank'
 import type { QItem } from '@/composables/useQuestionBank'
 import { blocksFromQuestion, drawQuestions, kbBlockOf, loadKb, refreshRefBlocks, saveKbCustom, stemTextOf } from '@/composables/useHandoutLibrary'
 import type { KbItem } from '@/composables/useHandoutLibrary'
+import { handoutOpsSink } from '@/ui/handout'
+import type { HandoutOps } from '@/ui/handout'
+import { HANDOUT_RENDERS, handoutOutlineText } from '@/composables/aiHandoutChat'
+import { normalizeSvgForRaster } from '@/composables/svgNormalize'
+import AiHandoutChat from './AiHandoutChat.vue'
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 
@@ -308,6 +313,7 @@ async function syncRefs() {
 }
 async function openDrawer(which: 'pick' | 'draw' | 'kb' | 'lib') {
   drawer.value = drawer.value === which ? '' : which
+  if (drawer.value) aiOpen.value = false   // 【v1707】抽屉与 AI 面板抢同一列 → 互斥 ✓
   if (which === 'pick' && !qList.value.length) void loadQ()
   if (which === 'pick' && !Object.keys(facets.value.bySection).length) {
     const fc = await qFacets()
@@ -463,7 +469,11 @@ async function openFolder() {
   const ok = await hdFolderOpen()
   if (!ok) flash('✗ 打不开库目录：' + (folderDir.value || '还没读到路径'))
 }
-function onKey(e: KeyboardEvent) { if (e.key === 'Escape') emit('close') }
+function onKey(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  if (aiOpen.value) { aiOpen.value = false; return }   // 【v1707】先关 AI 面板，再关窗口 ✓
+  emit('close')
+}
 onMounted(() => {
   document.addEventListener('keydown', onKey)
   initHandoutLib()                       // 【M2.5】载入讲义库（首次会把单份讲义迁进来 ✓）
@@ -473,8 +483,12 @@ onMounted(() => {
     if (folderError.value) flash('✗ 库目录读写有问题：' + folderError.value)
   })
   void buildImgMap().then(() => refreshNow())
+  handoutOpsSink.value = handoutOps     // 【v1707】AI 工具按这个对象办事 ✓（关掉时清空 ✓）
 })
-onBeforeUnmount(() => { document.removeEventListener('keydown', onKey); if (timer) window.clearTimeout(timer) })
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKey); if (timer) window.clearTimeout(timer)
+  handoutOpsSink.value = null           // 【v1707】讲义关了 → AI 工具会说清「讲义没开着」✓
+})
 /** 【v1476】教材定位一变，标题跟着自动生成 ✓（自动标题关掉后就不再覆盖老师手写的 ✓） */
 watch(() => [h.value.meta.press, h.value.meta.book, h.value.meta.chapter, h.value.meta.section, h.value.meta.period], () => {
   syncAutoTitle(h.value)
@@ -485,6 +499,205 @@ function onTitleInput() { h.value.meta.autoTitle = false; void refresh() }   // 
 
 /** 内容一变就重排（深度监听 ✓）—— 加的块、改的公式都会立刻渲染 ✓ */
 watch(() => h.value, () => refresh(), { deep: true })
+/* ---------------- 【v1707】AI 助手：讲义的**全部能力**交给工具（接口见 ui/handout.ts ✓） ----------------
+ * 用户口径：「为讲义引入 AI 面板 —— AI 要精通讲义的各种操作和功能」✓
+ * 做法与试卷编辑 v1693 完全同一套：能力做成对象（这里）+ 手册（aiHandoutChat.HANDOUT_HELP ✓）
+ */
+
+/** AI 面板开没开 ✓（它和「抽屉」抢同一列 → 互斥 ✓ 否则 A4 就没地方了 ✗） */
+const aiOpen = ref(false)
+function toggleAi() {
+  aiOpen.value = !aiOpen.value
+  if (aiOpen.value) drawer.value = ''
+  void nextTick(() => refreshNow())
+}
+
+/** AI 侧栏把附件图插成**插图块**（走与「上传图片」同一条路 ✓ 大图自动进内容库 ✓） */
+async function insertImageForAi(dataUrl: string, caption = ''): Promise<string> {
+  if (!sel.value) { flash('先选一块（或先 +插图）✓'); return '' }
+  await applyFigureSrc(dataUrl, caption)
+  await buildImgMap()
+  void nextTick(() => refreshNow())
+  flash('已插成插图 ✓')
+  return '已插成插图' + (caption ? '（' + caption + '）' : '') + ' ✓'
+}
+
+/** 讲义的全部能力（AI 工具按这个对象办事 ✓ 讲义关掉时 HandoutModal 会把它清成 null ✓） */
+const handoutOps: HandoutOps = {
+  state: (maxChars) => {
+    const cap = Math.max(500, Math.round(maxChars) || 4000)
+    const t = handoutToText(h.value, ver.value)
+    return {
+      open: true,
+      version: ver.value === 'student' ? '学生版' : '教师版',
+      meta: { ...h.value.meta },
+      blocks: h.value.blocks.length,
+      text: t.length > cap ? t.slice(0, cap) + String.fromCharCode(10) + '…（已截断）' : t,
+    }
+  },
+  outline: () => {
+    const rows = h.value.blocks.map((b, i) => ({
+      no: i + 1, type: b.type,
+      text: b.type === 'blank' ? '留白 ' + (b.blankCm || 4) + 'cm' : String(b.text || ''),
+    }))
+    const toc = outlineOf(h.value).map((n) => '  ' + n.title + (n.kids.length ? '（' + n.kids.map((k) => k.title).join(' / ') + '）' : '')).join(String.fromCharCode(10))
+    return (toc ? '【目录】' + String.fromCharCode(10) + toc + String.fromCharCode(10) : '【目录】（还没有章 / 节块）' + String.fromCharCode(10))
+      + '【块】' + String.fromCharCode(10) + handoutOutlineText(rows)
+  },
+  addBlocks: (specs, where, afterNo) => {
+    const list: HdBlock[] = []
+    for (const s of specs || []) {
+      const b = makeBlock(s.type as HdBlockType, String(s.text || ''))
+      if (s.render) {
+        if (s.render.student && HANDOUT_RENDERS.indexOf(s.render.student) >= 0) b.render.student = s.render.student as HdRender
+        if (s.render.teacher && HANDOUT_RENDERS.indexOf(s.render.teacher) >= 0) b.render.teacher = s.render.teacher as HdRender
+      }
+      if (s.type === 'blank' && s.blankCm) b.blankCm = s.blankCm
+      list.push(b)
+    }
+    if (!list.length) return '没有要加的块 ✗'
+    let at = h.value.blocks.length
+    if (where === 'after' && afterNo > 0) at = Math.min(Math.round(afterNo), h.value.blocks.length)
+    else if (where === 'cursor') at = Math.min(selIdx.value + 1, h.value.blocks.length)
+    h.value.blocks.splice(at, 0, ...list)
+    selIdx.value = at
+    void nextTick(() => refreshNow())
+    return '已加 ' + list.length + ' 块（从第 ' + (at + 1) + ' 块起：' + list.map((b) => HD_LABEL[b.type]).join('、') + ' ✓）'
+  },
+  edit: (find, replace, all) => {
+    const f = String(find || '')
+    if (!f) return '缺 find（要改的原文片段 ✓）'
+    const to = String(replace == null ? '' : replace)
+    let hits = 0
+    for (const b of h.value.blocks) {
+      const t = String(b.text || '')
+      if (!t || t.indexOf(f) < 0) continue
+      if (all) { hits += t.split(f).length - 1; b.text = t.split(f).join(to) }
+      else { b.text = t.replace(f, to); hits++; break }
+    }
+    void nextTick(() => refreshNow())
+    return hits ? '已改 ' + hits + ' 处 ✓' : '没找到这段原文（先 get_handout_state 看正文 ✓）'
+  },
+  block: (no, action) => {
+    const i = Math.round(no) - 1
+    if (!(i >= 0 && i < h.value.blocks.length)) return '没有第 ' + no + ' 块（先 get_handout_outline 看块号 ✓）'
+    const label = HD_LABEL[h.value.blocks[i].type]
+    const a = String(action || '').trim()
+    if (a === 'remove') { delBlock(i); return '已删掉第 ' + no + ' 块（' + label + '）✓' }
+    if (a === 'up') { if (i === 0) return '第 ' + no + ' 块已经在最前面了 ✓'; move(i, -1); return '已把第 ' + no + ' 块（' + label + '）上移 ✓' }
+    if (a === 'down') { if (i === h.value.blocks.length - 1) return '第 ' + no + ' 块已经在最后面了 ✓'; move(i, 1); return '已把第 ' + no + ' 块（' + label + '）下移 ✓' }
+    if (a === 'select') { selIdx.value = i; return '已选中第 ' + no + ' 块（' + label + '）—— 接着 where=cursor 加块就插在它后面 ✓' }
+    return '认不出的动作：' + a + '（remove / up / down / select ✓）'
+  },
+  setRender: (no, render, version) => {
+    const i = Math.round(no) - 1
+    const b = h.value.blocks[i]
+    if (!b) return '没有第 ' + no + ' 块（先 get_handout_outline 看块号 ✓）'
+    const r = String(render || '').trim()
+    if (HANDOUT_RENDERS.indexOf(r) < 0) return '认不出的显示口径：' + r + '（只能 inline / hide / blank / endnote ✓）'
+    const v: 'student' | 'teacher' = version === 'student' ? 'student' : version === 'teacher' ? 'teacher' : (ver.value as 'student' | 'teacher')
+    b.render[v] = r as HdRender
+    void nextTick(() => refreshNow())
+    return '第 ' + no + ' 块（' + HD_LABEL[b.type] + '）在' + (v === 'student' ? '学生版' : '教师版') + '改成「' + RENDER_LABEL[r as HdRender] + '」✓'
+  },
+  meta: () => ({ ...h.value.meta, version: ver.value, blocks: h.value.blocks.length, path: path.value }),
+  setMeta: (patch) => {
+    const src = (patch && typeof patch === 'object' ? patch : {}) as Record<string, unknown>
+    const keys = Object.keys(src)
+    if (!keys.length) return '没有要改的字段 ✗'
+    const mm = h.value.meta as unknown as Record<string, unknown>
+    for (const k of keys) mm[k] = src[k]
+    // 手改了标题 → 切成手动（与标题输入框同一套口径 ✓）；没手改就按教材重算 ✓
+    if (src.title !== undefined && src.autoTitle === undefined) h.value.meta.autoTitle = false
+    syncAutoTitle(h.value)
+    void nextTick(() => refreshNow())
+    return '已改：' + keys.map((k) => k + '=' + String(mm[k])).join('、') + ' ✓'
+  },
+  version: (v) => {
+    const x: 'student' | 'teacher' = v === 'student' ? 'student' : 'teacher'
+    setVer(x)
+    return x === 'student' ? '已切到学生版（答案按各块口径排到文末 / 隐藏 ✓）' : '已切到教师版（答案与解析内联 ✓）'
+  },
+  insertQuestion: (q, kind, withAnswer) => {
+    const it = q as QItem
+    if (!it || !it.id) return ''
+    const k: 'example' | 'exercise' | 'variant' = kind === 'exercise' ? 'exercise' : kind === 'variant' ? 'variant' : 'example'
+    const list = blocksFromQuestion(it, k, true, withAnswer !== false)
+    if (!list.length) return ''
+    insertBlocks(list, '')
+    void nextTick(() => refreshNow())
+    return '已插成' + (k === 'example' ? '例题' : k === 'exercise' ? '当堂练习' : '变式')
+      + '（题干 + 解析' + (withAnswer !== false ? ' + 答案' : '') + ' ✓ 答案在学生版按默认排到文末 ✓）'
+  },
+  draw: async (filter, n, pool) => {
+    const f: Record<string, unknown> = {}
+    for (const k of ['section', 'kp', 'level']) {
+      const v = String((filter || {})[k] == null ? '' : (filter || {})[k]).trim()
+      if (v) f[k] = v
+    }
+    const cnt = Math.max(1, Math.min(20, Math.round(n) || 3))
+    const k: 'example' | 'exercise' | 'variant' = pool === 'exercise' ? 'exercise' : pool === 'variant' ? 'variant' : 'example'
+    const { items, total } = await drawQuestions(f, cnt)
+    if (!items.length) return '这个条件下题库里没有题（换条件，或先去题库录几道 ✓）'
+    const out: HdBlock[] = []
+    for (const it of items) out.push(...blocksFromQuestion(it, k, true, true))
+    insertBlocks(out, '')
+    void nextTick(() => refreshNow())
+    return '已抽题并插成' + (k === 'example' ? '例题' : k === 'exercise' ? '当堂练习' : '变式') + ' ' + items.length + ' 道（候选 ' + total + ' 道 ✓）'
+  },
+  figure: async (kind, params, caption) => {
+    let step = '载入渲染器'
+    try {
+      const { mathFigureElOfKind, renderFigureSvg } = await import('@/composables/figureRender')
+      step = '造图形元素'
+      const el = mathFigureElOfKind(kind as never) as { params?: Record<string, unknown> } | undefined
+      if (!el) return '不认识的图形种类：' + kind
+      const p: Record<string, unknown> = { ...(el.params || {}) }
+      for (const k of Object.keys(params || {})) {
+        if (params[k] !== undefined && params[k] !== null) p[k] = params[k]
+      }
+      el.params = p
+      step = '渲染成 SVG'
+      let svg = renderFigureSvg(el as never)
+      if (!svg || svg.indexOf('<svg') < 0) {
+        await new Promise((r) => requestAnimationFrame(() => r(null)))
+        svg = renderFigureSvg(el as never)
+      }
+      if (!svg || svg.indexOf('<svg') < 0) return '图形没渲染出 SVG（种类 ' + kind + ' —— 该种类可能有必填参数 ✓）'
+      step = '转成 PNG'
+      const norm = normalizeSvgForRaster(svg)
+      const png = await svgTextToPngUrl(norm.svg, norm.w, norm.h, norm.k)
+      if (!png || png.length < 100) return 'PNG 生成失败（SVG ' + svg.length + ' 字符）'
+      step = '插成插图块'
+      insertBlocks([makeBlock('figure')], '')
+      await applyFigureSrc(png, caption || '数学图形 ' + kind)
+      await buildImgMap()
+      void nextTick(() => refreshNow())
+      return '已插成插图块（' + kind + '）✓'
+    } catch (e) {
+      return '插图形失败（' + step + '）：' + String((e as Error)?.message || e)
+    }
+  },
+  syncRefs: async () => {
+    const n = await refreshRefBlocks(h.value.blocks)
+    void refreshNow()
+    return n ? '已按题库刷新 ' + n + ' 块 ✓' : '引用的题没有变化 ✓'
+  },
+  print: () => {
+    flash('AI 触发了打印 / 另存 PDF ✓')
+    printPdf()
+    return '已打开打印对话框（在里面选「另存为 PDF」就是矢量 PDF ✓）'
+  },
+  exportText: () => {
+    exportText()
+    return '已导出纯文本（' + (ver.value === 'student' ? '学生版' : '教师版') + ' ✓）'
+  },
+  save: async () => {
+    await saveToFile()
+    return '已存进库目录 ✓（' + (folderDir.value || 'exe 同级的 LJ-讲义') + '）'
+  },
+}
+
 watch(ver, () => { void refreshNow() })
 </script>
 
@@ -507,6 +720,7 @@ watch(ver, () => { void refreshNow() })
             <button class="hd__btn" :class="{ 'hd__btn--on': drawer === 'draw' }" title="按 册/章节/难度 抽 N 道，插成例题池或练习池 ✓" @click="openDrawer('draw')">抽题</button>
             <button class="hd__btn" :class="{ 'hd__btn--on': drawer === 'kb' }" title="知识底座：常用公式 / 模型 / 易错点，按教材存着，一键插成知识梳理块 ✓" @click="openDrawer('kb')">知识底座</button>
             <button class="hd__btn hd__btn--main" :disabled="saving" title="保存讲义：写进 **exe 同级的 LJ-讲义\<标题>.json** ✓（平时改动会自动落盘 ✓，这个按钮是「马上存一次」✓）" @click="saveToFile">{{ saving ? '保存中…' : '保存' }}</button>
+            <button class="hd__btn" :class="{ 'hd__btn--on': aiOpen }" title="AI 助手：说一句就改这份讲义（加块 / 改解析 / 学生版藏答案 / 插数学图形 / 从题库取题 / 打印导出 ✓）" @click="toggleAi">AI 助手</button>
             <button class="hd__btn" title="打印 / 另存为 PDF（矢量文字 ✓）" @click="printPdf">打印 / PDF</button>
             <button class="hd__btn" title="导出纯文本（当前版本）" @click="exportText">导出文本</button>
             <button class="hd__btn" title="导出讲义 JSON（可再导入 ✓）" @click="exportJson">导出 JSON</button>
@@ -517,7 +731,7 @@ watch(ver, () => { void refreshNow() })
           </span>
         </header>
 
-        <div class="hd__body" :class="{ 'hd__body--drawer': !!drawer }">
+        <div class="hd__body" :class="{ 'hd__body--drawer': !!drawer, 'hd__body--ai': aiOpen }">
           <aside class="hd__left">
             <div class="hd__toc">
               <div class="hd__t1">目录</div>
@@ -651,6 +865,10 @@ watch(ver, () => { void refreshNow() })
             </template>
             <div v-else class="hd__hint">在左边点一块，这里就能改它 ✓</div>
           </aside>
+          <!-- 【v1707】AI 助手面板：与抽屉互斥的第 4 列 ✓（打印时隐藏 ✓） -->
+          <aside v-if="aiOpen" class="hd__ai">
+            <AiHandoutChat :insert-image="insertImageForAi" />
+          </aside>
           <!-- 【M2】抽屉：插题 / 抽题 / 知识底座 ✓（在 .hd__body 里当第 4 列 ✓ 不覆盖 A4 ✓） -->
         <div v-if="drawer" class="hd__drawer">
           <div class="hd__dhead">
@@ -783,6 +1001,10 @@ watch(ver, () => { void refreshNow() })
 .hd__body { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px 1fr 300px; }
 /* 【v1478】抽屉打开时**多占一列** ✓ —— 以前是绝对定位浮在上面，把 A4 盖住 ✗（老师截图反馈 ✓） */
 .hd__body--drawer { grid-template-columns: 260px 1fr 300px 340px; }
+/* 【v1707】AI 面板那一列（与抽屉同一套：多一列 340px ✓） */
+.hd__body--ai { grid-template-columns: 260px 1fr 300px 340px; }
+.hd__ai { border-left: 1px solid var(--border); padding: 8px; min-height: 0; display: flex; }
+.hd__ai > * { flex: 1 1 auto; min-width: 0; }
 .hd__left { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
 .hd__toc { border-bottom: 1px solid var(--border); padding: 8px; max-height: 32%; overflow-y: auto; }
 .hd__path { font-size: 11px; color: var(--brand-600, #534AB7); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -924,7 +1146,7 @@ watch(ver, () => { void refreshNow() })
   .app { display: none !important; }   /* ✅ 关键：藏掉整个编辑器（scoped 里写这条是无效的 ✗） */
   .hd { position: static !important; background: #fff !important; display: block !important; }
   .hd__box { width: auto !important; height: auto !important; max-width: none !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; overflow: visible !important; }
-  .hd__head, .hd__left, .hd__right, .hd__drawer, .hd__foot { display: none !important; }
+  .hd__head, .hd__left, .hd__right, .hd__drawer, .hd__ai, .hd__foot { display: none !important; }
   .hd__body { display: block !important; }
   .hd__mid { overflow: visible !important; background: #fff !important; padding: 0 !important; }
   .hd__page { width: auto !important; min-height: 0 !important; height: auto !important; margin: 0 !important; box-shadow: none !important; padding: 16mm 15mm !important; }

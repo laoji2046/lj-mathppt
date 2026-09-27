@@ -19,6 +19,7 @@ import { MATH_FIGURE_OPTIONS, createElement } from '@/types'
 import type { SlideElement } from '@/types'
 import { CONICS, withParams } from '@/composables/mathPlot'
 import { PAPER_HELP } from '@/composables/aiPaperChat'
+import { HANDOUT_HELP, handoutBlockSpecs, handoutMetaPatch } from '@/composables/aiHandoutChat'
 
 /** 面板传进来的「应用能力」适配器（探针里可以用假的 ✓） */
 export interface AiToolCtx {
@@ -50,7 +51,28 @@ export interface AiToolCtx {
     headerPreset?: (id: string) => string
     figure?: (kind: string, params: Record<string, unknown>) => Promise<string>
     print?: () => string
-  }  /** 题库（可缺：探针/没装库时不影响别的工具 ✓） */
+}
+  /** 【v1707】讲义编辑：读 / 加块 / 改块 / 教材定位 / 版本口径 / 插图 / 题库 / 同步 / 打印 / 导出 / 保存 ✓
+   *  （讲义没开时是 null → 每个工具都会说清"讲义没开着" ✗ 而不是静默失败 ✓） */
+  handout?: {
+    state: (maxChars: number) => Record<string, unknown>
+    outline: () => string
+    addBlocks: (specs: { type: string; text?: string; render?: { student?: string; teacher?: string }; blankCm?: number }[], where: string, afterNo: number) => string
+    edit: (find: string, replace: string, all: boolean) => string
+    block: (no: number, action: string) => string
+    setRender: (no: number, render: string, version: string) => string
+    meta: () => Record<string, unknown>
+    setMeta: (patch: Record<string, unknown>) => string
+    version: (v: string) => string
+    insertQuestion: (q: unknown, kind: string, withAnswer: boolean) => string
+    draw: (filter: Record<string, unknown>, n: number, pool: string) => Promise<string>
+    figure: (kind: string, params: Record<string, unknown>, caption: string) => Promise<string>
+    syncRefs: () => Promise<string>
+    print: () => string
+    exportText: () => string
+    save: () => Promise<string>
+  }
+  /** 题库（可缺：探针/没装库时不影响别的工具 ✓） */
   bank?: {
     search(query: string, limit: number): Promise<{ id: number; label: string }[]>
     textOf(id: number, withAnswer: boolean): Promise<string | null>
@@ -473,7 +495,223 @@ export const AI_TOOLS: unknown[] = [
       description: '打印 / 另存 PDF（走浏览器打印，矢量文字可搜 ✓；用户会看到打印对话框 ✓）',
       parameters: { type: 'object', properties: {} },
     },
-  },]
+  },
+{
+    type: 'function',
+    function: {
+      name: 'get_handout_state',
+      description: '读当前讲义：当前版本的正文（纯文本）+ 教材定位 + 标题 + 块数（改之前先读 ✓）',
+      parameters: { type: 'object', properties: { maxChars: { type: 'number', description: '正文最多给多少字（默认 4000 ✓）' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_handout_help',
+      description: '查讲义手册：全部块类型（17 种）、教材定位字段、学生版/教师版显示口径、题库打通、插图、导出（写细节前先查 ✓）',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_handout_outline',
+      description: '讲义大纲：目录（章 → 节）+ 每个块的**块号** / 类型 / 摘要（老师说"第 N 块"时先调它拿号 ✓）',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'add_handout_blocks',
+      description: '给讲义**加块**（最常用 ✓）：type 见手册（h1 章 / h2 节 / para 正文 / formula 公式 / goal 学习目标 / '
+        + 'knowledge 知识梳理 / example 例题 / variant 变式 / exercise 练习 / summary 小结 / note 提示 / warn 易错 / '
+        + 'answer 答案 / solution 解析 / blank 留白 / pagebreak 分页 ✓）；公式写行内 $…$ ✓',
+      parameters: {
+        type: 'object',
+        properties: {
+          blocks: {
+            type: 'array',
+            description: '要加的块（按顺序 ✓）',
+            items: {
+              type: 'object',
+              properties: {
+                type: { type: 'string', description: '块类型（见手册 ✓）' },
+                text: { type: 'string', description: '正文（$…$ 公式 ✓；分页/留白/插图可以空着 ✓）' },
+                render: { type: 'object', description: '显示口径 {student, teacher}：inline / hide / blank / endnote（不传用默认 ✓）' },
+                blankCm: { type: 'number', description: 'type=blank 时的留白高度（cm ✓ 1–20）' },
+              },
+              required: ['type'],
+            },
+          },
+          where: { type: 'string', description: 'end 末尾（默认）| after 第 after_no 块之后 | cursor 当前选中块之后' },
+          after_no: { type: 'number', description: 'where=after 时的块号（先 get_handout_outline ✓）' },
+        },
+        required: ['blocks'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'edit_handout_text',
+      description: '**就地改**讲义里已有的文字：字面替换（find 必须是原文里的片段，可跨行 ✓；all=true 改所有处 ✓）'
+        + '—— 改现有内容用它，别用 add_handout_blocks 再抄一遍 ✗',
+      parameters: {
+        type: 'object',
+        properties: {
+          find: { type: 'string', description: '原文里的片段（先 get_handout_state 看原文 ✓）' },
+          replace: { type: 'string', description: '换成什么（空串 = 删掉 ✓）' },
+          all: { type: 'boolean', description: 'true = 改所有处（默认只改第一处 ✓）' },
+        },
+        required: ['find', 'replace'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'arrange_handout_block',
+      description: '块的删 / 移 / 选：action = remove 删掉 | up 上移 | down 下移 | select 选中（之后 where=cursor 就插在它后面 ✓）',
+      parameters: {
+        type: 'object',
+        properties: {
+          no: { type: 'number', description: '块号（1 起，先 get_handout_outline ✓）' },
+          action: { type: 'string', description: 'remove | up | down | select' },
+        },
+        required: ['no', 'action'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_handout_block_render',
+      description: '改某个块在**学生版 / 教师版**里的显示口径：inline 正常 | hide 不显示 | blank 留白 | endnote 排到文末 ✓'
+        + '（老师说"学生版别给答案"就用它 ✗ 别删答案 ✓）',
+      parameters: {
+        type: 'object',
+        properties: {
+          no: { type: 'number', description: '块号（1 起 ✓）' },
+          render: { type: 'string', description: 'inline | hide | blank | endnote' },
+          version: { type: 'string', description: 'student 学生版 | teacher 教师版（不传 = 当前正在看的那版 ✓）' },
+        },
+        required: ['no', 'render'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_handout_meta',
+      description: '改教材定位与标题：press 教材版本 / book 册 / chapter 章 / section 节 / period 课时 / title 标题 / '
+        + 'subtitle 副标题 / school / subject / grade / teacher / date / autoTitle（认不出的键会被挡下并说明 ✓）',
+      parameters: {
+        type: 'object',
+        properties: {
+          press: { type: 'string', description: '人教版 / 北师大版 / 苏教版 / 湘教版 / 沪教版 / 鄂教版 / 其他' },
+          book: { type: 'string', description: '必修一 / 必修二 / 必修三 / 选择性必修一 / 选择性必修二 / 选择性必修三' },
+          chapter: { type: 'string', description: '第几章（填数字或整句都行 ✓）' },
+          section: { type: 'string', description: '第几节 ✓' },
+          period: { type: 'string', description: '第几课时 ✓' },
+          title: { type: 'string', description: '讲义标题（写了就切成手动标题 ✓）' },
+          subtitle: { type: 'string', description: '副标题 ✓' },
+          autoTitle: { type: 'boolean', description: 'true = 标题按教材自动生成 ✓' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_handout_version',
+      description: '切学生版 / 教师版（只看不改内容 ✓；要改某块在两版里的显示用 set_handout_block_render ✓）',
+      parameters: { type: 'object', properties: { version: { type: 'string', description: 'student | teacher' } }, required: ['version'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'insert_bank_question_to_handout',
+      description: '从题库插一道题进讲义（会插成「题干 + 解析 + 答案」三块 ✓，答案在学生版默认排到文末 ✓）'
+        + '—— id 必须是**先 search_bank 查到的** ✓ 别猜 ✗',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'number', description: '题目 id（先 search_bank ✓）' },
+          kind: { type: 'string', description: 'example 例题（默认）| exercise 练习 | variant 变式' },
+          with_answer: { type: 'boolean', description: '要不要带答案（默认 true ✓）' },
+        },
+        required: ['id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'draw_bank_questions_to_handout',
+      description: '按条件从题库**抽 N 道**插成例题池 / 练习池（条件：section 章节 / kp 知识点 / level 难度 ✓）',
+      parameters: {
+        type: 'object',
+        properties: {
+          section: { type: 'string', description: '章节（可空 ✓）' },
+          kp: { type: 'string', description: '知识点 / 关键词（可空 ✓）' },
+          level: { type: 'string', description: '基础 | 中档 | 拔高（可空 ✓）' },
+          n: { type: 'number', description: '抽几道（默认 3 ✓ 最多 20）' },
+          pool: { type: 'string', description: 'example 例题（默认）| exercise 练习 | variant 变式' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'insert_handout_figure',
+      description: '给讲义插一张**数学图形**（按 kind + params 现场生成 ✓ 插成插图块 ✓）—— 不要用文字或 ASCII 画图 ✗',
+      parameters: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', description: '图形种类，例如 parabola / ellipse / hyperbola / function …（见图形库 ✓）' },
+          params: { type: 'object', description: '图形参数（a、b、p、dir、cx、cy 等 ✓）' },
+          caption: { type: 'string', description: '图注（可空 ✓）' },
+        },
+        required: ['kind'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'sync_handout_refs',
+      description: '讲义里引用了题库的块，按题库最新内容刷新（题在题库里改过之后用 ✓）',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'print_handout',
+      description: '打印 / 另存 PDF（走浏览器打印，矢量文字可搜 ✓；老师会看到打印对话框 ✓）',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'export_handout_text',
+      description: '导出纯文本（当前版本 ✓ 会下载一个 .txt ✓）',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'save_handout',
+      description: '把讲义存进库目录（exe 同级的 LJ-讲义\<标题>.json ✓；平时改动会自动落盘，这个是"马上存一次" ✓）',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+]
 
 /** 给 system 提示词追加的说明（告诉模型怎么用这些功能 ✓） */
 export function aiToolGuide(): string {
@@ -486,6 +724,9 @@ export function aiToolGuide(): string {
     '要动「试卷编辑」里的 A4 试卷：先 get_paper_state 看正文，再用 append_to_paper 追加（按试卷排版：## 分大题、1. 题号、[题]…[/题] 整块 ✓）；单题也可以用 insert_bank_question_to_paper ✓。',
     '改已有元素前也先 get_deck_state 拿 id；改完/插完用一句中文说明你做了什么，别把工具的 JSON 原样倒给老师。',
     '数学图形一律用 insert_math_figure（kind + params），不要用 TikZ 画图、也不要只给 LaTeX 让老师自己画。',
+'要动「数学讲义」里的讲义：先 get_handout_state 看有什么，再用 add_handout_blocks 加块（type + text ✓ 讲义是**块**结构，不认 [题] / [分页] / {c:red} 那些试卷语法 ✗）；',
+    '老师说「第 N 块 / 第几节」时先 get_handout_outline 拿块号 ✓ → 再 arrange_handout_block / set_handout_block_render / edit_handout_text ✓；',
+    '讲义还能改教材定位（set_handout_meta）、切学生版/教师版（set_handout_version）、插数学图形（insert_handout_figure）、从题库取题（insert_bank_question_to_handout / draw_bank_questions_to_handout）、打印导出（print_handout / export_handout_text / save_handout ✓）；块类型与字段先查 get_handout_help ✓。',
     '老师说「字太小、放大一点」就用 update_elements 传 fontSize（例如 {"fontSize":36}）；',
     '说「图形线条换个颜色、坐标轴变灰」就用 set_figure_style（curveColor / axisColor / lineColors / pointColors）。',
   ].join('\n')
@@ -788,7 +1029,143 @@ export async function runAiTool(name: string, args: Record<string, unknown>, ctx
       if (!note) return { ok: false, error: '没插进去（原因不明）' }
       if (note.indexOf('已在第') < 0) return { ok: false, error: note }
       return { ok: true, result: { note } }
-    }    default:
+    }
+case 'get_handout_state': {
+      const h = ctx.handout
+      if (!h) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      return { ok: true, result: h.state(Math.max(500, Math.round(num(args.maxChars) ?? 4000))) }
+    }
+    case 'get_handout_help': {
+      return { ok: true, result: { help: HANDOUT_HELP } }
+    }
+    case 'get_handout_outline': {
+      const h = ctx.handout
+      if (!h) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      return { ok: true, result: { outline: h.outline() } }
+    }
+    case 'add_handout_blocks': {
+      const h = ctx.handout
+      if (!h || !h.addBlocks) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      const parsed = handoutBlockSpecs(args.blocks)
+      if (!parsed.specs.length) {
+        return { ok: false, error: '没有能加的块：' + (parsed.errors.join('；') || '（blocks 给空了 ✓）') }
+      }
+      const where = ['end', 'after', 'cursor'].indexOf(str(args.where)) >= 0 ? str(args.where) : 'end'
+      const note = h.addBlocks(parsed.specs, where, Math.round(num(args.after_no) ?? 0))
+      return {
+        ok: true,
+        result: parsed.errors.length
+          ? { note, added: parsed.specs.length, warnings: parsed.errors }
+          : { note, added: parsed.specs.length },
+      }
+    }
+    case 'edit_handout_text': {
+      const h = ctx.handout
+      if (!h || !h.edit) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      const find = str(args.find)
+      if (!find) return { ok: false, error: '缺 find（要改的原文片段 ✓）' }
+      const note = h.edit(find, str(args.replace), args.all === true)
+      if (!note) return { ok: false, error: '没改到（原因不明）' }
+      if (note.indexOf('没找到') >= 0) return { ok: false, error: note }
+      return { ok: true, result: { note } }
+    }
+    case 'arrange_handout_block': {
+      const h = ctx.handout
+      if (!h || !h.block) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      const no = num(args.no)
+      if (!no) return { ok: false, error: '缺 no（第几块，1 起 ✓ 先 get_handout_outline ✓）' }
+      const act = str(args.action).trim()
+      if (['remove', 'up', 'down', 'select'].indexOf(act) < 0) return { ok: false, error: 'action 只能是 remove / up / down / select ✓' }
+      const note = h.block(Math.round(no), act)
+      if (!note) return { ok: false, error: '没动成（原因不明）' }
+      if (note.indexOf('没有第') >= 0 || note.indexOf('认不出') >= 0) return { ok: false, error: note }
+      return { ok: true, result: { note } }
+    }
+    case 'set_handout_block_render': {
+      const h = ctx.handout
+      if (!h || !h.setRender) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      const no = num(args.no)
+      if (!no) return { ok: false, error: '缺 no（第几块，1 起 ✓）' }
+      const note = h.setRender(Math.round(no), str(args.render), str(args.version))
+      if (!note) return { ok: false, error: '没改到（原因不明）' }
+      if (note.indexOf('没有第') >= 0 || note.indexOf('认不出') >= 0) return { ok: false, error: note }
+      return { ok: true, result: { note } }
+    }
+    case 'set_handout_meta': {
+      const h = ctx.handout
+      if (!h || !h.setMeta) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      const parsed = handoutMetaPatch(args)
+      const keys = Object.keys(parsed.patch)
+      if (!keys.length) return { ok: false, error: '没有能改的字段：' + parsed.errors.join('；') }
+      const note = h.setMeta(parsed.patch)
+      return { ok: true, result: parsed.errors.length ? { note, warnings: parsed.errors } : { note } }
+    }
+    case 'set_handout_version': {
+      const h = ctx.handout
+      if (!h || !h.version) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      const v = str(args.version).trim()
+      if (v !== 'student' && v !== 'teacher') return { ok: false, error: 'version 只能是 student 或 teacher ✓' }
+      return { ok: true, result: { note: h.version(v) } }
+    }
+    case 'insert_bank_question_to_handout': {
+      const h = ctx.handout
+      if (!h || !h.insertQuestion) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      if (!args.q) return { ok: false, error: '这道题还没查到：先 search_bank 搜一次拿到 id，再插 ✓' }
+      const kind = ['example', 'exercise', 'variant'].indexOf(str(args.kind)) >= 0 ? str(args.kind) : 'example'
+      const note = h.insertQuestion(args.q, kind, args.with_answer !== false)
+      if (!note) return { ok: false, error: '没插进去（题库里没有这道题？先 search_bank ✓）' }
+      return { ok: true, result: { note } }
+    }
+    case 'draw_bank_questions_to_handout': {
+      const h = ctx.handout
+      if (!h || !h.draw) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      const filter: Record<string, unknown> = {}
+      for (const k of ['section', 'kp', 'level']) if (str(args[k]).trim()) filter[k] = str(args[k]).trim()
+      const n = Math.max(1, Math.min(20, Math.round(num(args.n) ?? 3)))
+      const pool = String(args.pool || '')
+      const note = await h.draw(filter, n, pool)
+      if (!note) return { ok: false, error: '没抽到（原因不明）' }
+      if (note.indexOf('没有题') >= 0) return { ok: false, error: note }
+      return { ok: true, result: { note } }
+    }
+    case 'insert_handout_figure': {
+      const h = ctx.handout
+      if (!h || !h.figure) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      const kind = str(args.kind).trim()
+      const kinds = mathFigureKindList()
+      if (!kind) return { ok: false, error: '缺 kind；' + FIGURE_COMMON }
+      if (kinds.length && kinds.indexOf(kind) < 0) {
+        return { ok: false, error: '不认识的图形种类 ' + kind + '；' + figureKindHint() + '；' + FIGURE_COMMON }
+      }
+      const params = (args.params && typeof args.params === 'object' ? args.params : {}) as Record<string, unknown>
+      const note = await h.figure(kind, params, str(args.caption))
+      if (!note) return { ok: false, error: '没插进去（原因不明）' }
+      if (note.indexOf('失败') >= 0 || note.indexOf('不认识的图形种类') >= 0 || note.indexOf('没渲染出') >= 0) {
+        return { ok: false, error: note }
+      }
+      return { ok: true, result: { note } }
+    }
+    case 'sync_handout_refs': {
+      const h = ctx.handout
+      if (!h || !h.syncRefs) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      return { ok: true, result: { note: await h.syncRefs() } }
+    }
+    case 'print_handout': {
+      const h = ctx.handout
+      if (!h || !h.print) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      return { ok: true, result: { note: h.print() } }
+    }
+    case 'export_handout_text': {
+      const h = ctx.handout
+      if (!h || !h.exportText) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      return { ok: true, result: { note: h.exportText() } }
+    }
+    case 'save_handout': {
+      const h = ctx.handout
+      if (!h || !h.save) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      return { ok: true, result: { note: await h.save() } }
+    }
+    default:
         return { ok: false, error: '没有这个功能：' + name }
     }
   } catch (e) {
