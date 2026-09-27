@@ -243,7 +243,7 @@ function clearAllHandouts() {
   for (const d of [...lib.value]) deleteHandout(d.id)
   selIdx.value = 0
   void buildImgMap().then(() => refreshNow())
-  flash('已清空讲义库：' + n + ' 份（库目录里的原文件在 LJ-讲义\.deleted\ 里，想捞回来用「打开库目录」）')
+  flash('已清空讲义库：' + n + ' 份（留了一份空白讲义 ✓ 原文件在 LJ-讲义\\.deleted\\ 里，想捞回来用「打开库目录」）')
 }
 
 const q = ref('')

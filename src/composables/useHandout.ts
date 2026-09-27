@@ -360,6 +360,22 @@ export function sampleHandout(): Handout {
   }
 }
 
+/** 【v1716】一份**空白**讲义（不是那份示例讲义 ✗）—— 库里被清空时用 ✓
+ *  ⚠ 以前这里用的是 sampleHandout() ✗：那是一份**完整的示例讲义**（标题「椭圆外点切线的轨迹」✓ 高三 /
+ *    选择性必修一 / 第 3 章 / 第 1 节 ✓ 内容也是真的 ✓）—— 于是老师点了「清空讲义库」之后，
+ *    列表里**还是**站着一份「椭圆外点切线的轨迹」✗，看着就像"清不掉"✓（用户实报 ✓）
+ */
+export function blankHandout(): Handout {
+  return {
+    meta: {
+      school: '', subject: '数学', title: '未命名讲义', subtitle: '', grade: '', teacher: '',
+      date: new Date().toISOString().slice(0, 10),
+      press: '人教版', book: '必修一', chapter: '', section: '', period: '', autoTitle: true,
+    },
+    blocks: [],
+  }
+}
+
 function normalize(h: unknown): Handout {
   const o = (h || {}) as Partial<Handout>
   const meta: HandoutMeta = {
@@ -751,13 +767,14 @@ export function deleteHandout(id: string) {
   lib.value = lib.value.filter((x) => x.id !== id)
   if (!lib.value.length) {
     // 全删光了 → 自动给一份空白（界面不能没有"当前这份" ✓）
-    lib.value = [{ ...sampleHandout(), id: hdId(), updatedAt: nowStamp() }]
+    lib.value = [{ ...blankHandout(), id: hdId(), updatedAt: nowStamp() }]   // 【v1716】空白 ✓（以前给的是示例讲义 ✗）
   }
   writeLib()
   if (curId.value === id) {
     const first = lib.value[0]
     curId.value = first.id
     handout.value = { meta: first.meta, blocks: first.blocks }
+    saveHandout(handout.value)   // 【v1716】连单份那份（KEY）也写掉 ✓ 否则老内容下次启动会被「迁回来」✗
     try { localStorage.setItem(CUR_KEY, curId.value) } catch { /* 忽略 */ }
   }
 }
