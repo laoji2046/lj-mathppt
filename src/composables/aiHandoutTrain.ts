@@ -30,6 +30,11 @@ export const HANDOUT_TYPE_ALIAS: Record<string, string> = {
   '答案': 'answer', '参考答案': 'answer',
   '解析': 'solution', '解答': 'solution',
   '留白': 'blank', '空白': 'blank', '做笔记': 'blank',
+  '预习': 'preview', '课前预习': 'preview', '预习自测': 'preview', '课前检测': 'preview', '自主学习': 'preview',
+  '探究': 'explore', '探究思考': 'explore', '思考': 'explore', '观察': 'explore', '合作探究': 'explore', '思考题': 'explore',
+  '方法': 'method', '方法总结': 'method', '方法点拨': 'method', '技巧': 'method', '规律': 'method', '方法小结': 'method',
+  '作业': 'homework', '课后作业': 'homework', '分层作业': 'homework', '巩固作业': 'homework', '课时作业': 'homework',
+  '反思': 'reflect', '学后反思': 'reflect', '学习反思': 'reflect', '我的疑问': 'reflect', '疑问': 'reflect', '收获': 'reflect',
 }
 /** 显示口径别名 ✓ */
 export const HANDOUT_RENDER_ALIAS: Record<string, string> = {
@@ -86,6 +91,44 @@ export function guessKind(v: unknown): string {
 export function guessAction(v: unknown): string {
   const s = String(v == null ? '' : v).trim()
   return HANDOUT_ACTION_ALIAS[s] || s
+}
+
+/* ---------------- 【v1712】课型（起讲义骨架用 ✓） ---------------- */
+
+/** 课型 id 清单（与 useHandout.HD_SKELETONS 的 id 一一对应 ✓ 探针盯着 ✗） */
+export const HANDOUT_COURSE_IDS = ['new', 'learn', 'review', 'topic', 'drill', 'comment']
+
+/** 中文 / 别名 → 课型 id（模型常写「新授课」「一轮复习」而不是 new ✗） */
+export const HANDOUT_COURSE_ALIAS: Record<string, string> = {
+  '新授': 'new', '新授课': 'new', '新课': 'new', '同步课': 'new', '新讲课': 'new',
+  '学案': 'learn', '导学案': 'learn', '学案课': 'learn',
+  '一轮': 'review', '一轮复习': 'review', '复习课': 'review', '高考复习': 'review', '一轮复习课': 'review',
+  '二轮': 'topic', '二轮专题': 'topic', '专题': 'topic', '专题课': 'topic', '微专题': 'topic',
+  '习题课': 'drill', '练习课': 'drill', '习题': 'drill',
+  '讲评': 'comment', '讲评课': 'comment', '试卷讲评': 'comment',
+}
+
+/** 认课型：id / 中文 / 别名都认 ✓（认不出返回空串 ✗ 由工具侧报错 ✓） */
+export function guessCourse(v: unknown): string {
+  const s = String(v == null ? '' : v).trim()
+  if (!s) return ''
+  const low = s.toLowerCase()
+  if (HANDOUT_COURSE_IDS.indexOf(low) >= 0) return low
+  if (HANDOUT_COURSE_ALIAS[s]) return HANDOUT_COURSE_ALIAS[s]
+  const head = s.replace(/[（(].*$/, '').trim()
+  if (HANDOUT_COURSE_ALIAS[head]) return HANDOUT_COURSE_ALIAS[head]
+  /** 【v1712】容错：模型爱写「一轮复习讲义 / 新授课教案」✗ —— 去掉后缀再认一遍 ✓（探针盯着 ✓） */
+  let cut = head
+  for (let i = 0; i < 3; i++) {
+    const next = cut.replace(/(讲义|导学案|学案|教学设计|教案|课件|课)$/, '').trim()
+    if (next === cut) break
+    if (HANDOUT_COURSE_ALIAS[next]) return HANDOUT_COURSE_ALIAS[next]
+    cut = next
+  }
+  /** 再退一步：整串里**含**哪个课型名就认哪个（长名优先 ✓「一轮复习」不会被「复习课」抢 ✗） */
+  const keys = Object.keys(HANDOUT_COURSE_ALIAS).sort((a, b) => b.length - a.length)
+  for (const k of keys) if (s.indexOf(k) >= 0) return HANDOUT_COURSE_ALIAS[k]
+  return ''
 }
 
 /* ---------------- ② 把「模型爱写的正文」拆成块 ---------------- */
@@ -208,7 +251,7 @@ export interface HandoutTrainCase {
   why: string
 }
 
-/** 24 条：覆盖 17 个工具，且每条都是「老师真会这么说」的口吻 ✓ */
+/** 37 条：覆盖 19 个工具，且每条都是「老师真会这么说」的口吻 ✓ */
 export const HANDOUT_TRAIN_CASES: HandoutTrainCase[] = [
   { id: 'c01', ask: '加一节「二、椭圆的定义」', tool: 'add_handout_blocks', args: { blocks: ['h2'] }, why: '章节标题走 add_handout_blocks（h2 节 ✓）' },
   { id: 'c02', ask: '写个学习目标，三条', tool: 'add_handout_blocks', args: { blocks: ['goal'] }, why: '学习目标 = goal 块 ✓' },
@@ -244,6 +287,14 @@ export const HANDOUT_TRAIN_CASES: HandoutTrainCase[] = [
     tool: 'import_handout_markdown', altTools: ['add_handout_blocks'],
     why: '整份 md → import_handout_markdown ✓（一块一块手抄也算达标 ✓ 但优先用导入 ✓）',
   },
+  { id: 'c30', ask: '加个课前预习，让学生先看课本', tool: 'add_handout_blocks', args: { blocks: ['preview'] }, why: '课前预习 = preview 块 ✓' },
+  { id: 'c31', ask: '加一个探究思考：观察椭圆的画法', tool: 'add_handout_blocks', args: { blocks: ['explore'] }, why: '探究思考 = explore 块 ✓' },
+  { id: 'c32', ask: '这道例题后面补个方法总结', tool: 'add_handout_blocks', args: { blocks: ['method'] }, why: '方法总结 = method 块 ✓' },
+  { id: 'c33', ask: '加课后作业，分 A、B 两组', tool: 'add_handout_blocks', args: { blocks: ['homework'] }, why: '课后作业 = homework 块（分层写在正文里 ✓）' },
+  { id: 'c34', ask: '最后来个学后反思', tool: 'add_handout_blocks', args: { blocks: ['reflect'] }, why: '学后反思 = reflect 块 ✓' },
+  { id: 'c35', ask: '起一份新授课讲义给我', tool: 'build_handout_skeleton', args: { kind: '新授课' }, why: '按课型一次生成栏目骨架 ✓（别一块一块手搭 ✗）' },
+  { id: 'c36', ask: '这份不要了，重来一份一轮复习讲义', tool: 'build_handout_skeleton', args: { kind: '一轮复习' }, why: '课型骨架 ✓（清空现有块要老师明说「重来」才用 replace ✓）' },
+  { id: 'c37', ask: '把知识梳理做成填空版，学生版挖空', tool: 'edit_handout_text', args: { find: '' }, altTools: ['add_handout_blocks'], why: '挖空 = 把关键词用两个花括号包起来 ✓（现成段落就地改 ✓ 别删内容 ✗）' },
 ]
 
 export interface HandoutTrainCall { name: string; args?: Record<string, unknown> }

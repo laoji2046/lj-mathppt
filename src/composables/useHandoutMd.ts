@@ -27,23 +27,30 @@ export function parseMdName(fileName: string): { chapter: string; section: strin
 }
 
 /** 这一段的类型（看开头那几个字 ✓） */
-function paraKind(first: string): 'knowledge' | 'warn' | 'note' | 'summary' | 'para' {
+function paraKind(first: string): 'knowledge' | 'warn' | 'note' | 'summary' | 'method' | 'reflect' | 'para' {
   const t = first.replace(/[*_>\s]/g, '')
   if (/^(定义|性质|定理|公式|结论|法则|判定|注意|易错|提示)/.test(t)) {
     if (/^(注意|易错)/.test(t)) return 'warn'
     if (/^提示/.test(t)) return 'note'
     return 'knowledge'
   }
+  if (/^(方法|技巧|口诀|规律)/.test(t)) return 'method'
+  if (/^(反思|疑问|收获)/.test(t)) return 'reflect'
   return 'para'
 }
 
 /** 标题块的类型（例题 / 练习 / 变式 / 小结 ✓） */
-function headKind(title: string): 'h1' | 'example' | 'exercise' | 'variant' | 'summary' | 'goal' {
+function headKind(title: string): 'h1' | 'example' | 'exercise' | 'variant' | 'summary' | 'goal' | 'preview' | 'explore' | 'method' | 'homework' | 'reflect' {
   const t = title.replace(/\s/g, '')
   if (/目标/.test(t)) return 'goal'
   if (/(例题|典型例|精讲)/.test(t)) return 'example'
   if (/变式/.test(t)) return 'variant'
-  if (/(练习|作业|检测|巩固)/.test(t)) return 'exercise'
+  if (/(预习|课前)/.test(t)) return 'preview'
+  if (/(探究|思考|观察|发现)/.test(t)) return 'explore'
+  if (/(方法|技巧|规律|点拨)/.test(t)) return 'method'
+  if (/(反思|疑问|收获)/.test(t)) return 'reflect'
+  if (/(练习|检测|巩固|自测|达标)/.test(t)) return 'exercise'
+  if (/(作业|课后|分层)/.test(t)) return 'homework'
   // ⚠ 「复习引入」是**普通小节** ✗ —— 只有"本章小结 / 小结 / 总结 / 归纳小结"才算小结 ✓（老师那批 md 实测 ✓）
   if (/(小结|总结|归纳)/.test(t)) return 'summary'
   return 'h1'

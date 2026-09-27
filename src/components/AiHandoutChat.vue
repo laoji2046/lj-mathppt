@@ -3,7 +3,7 @@
  * 【v1707】讲义编辑里的 **AI 助手**（用户口径：讲义要引入 AI 面板，且 AI 要精通讲义的各种操作和功能 ✓）
  *
  * 与「试卷编辑」里那个 AI 侧栏是**同一套做法** ✓：
- *   · 工具（讲义专用 17 个，见 aiHandoutChat.HANDOUT_TOOL_NAMES ✓）+ 手册（get_handout_help ✓）
+ *   · 工具（讲义专用 19 个，见 aiHandoutChat.HANDOUT_TOOL_NAMES ✓）+ 手册（get_handout_help ✓）
  *   · 能带附件：截图 / 传图（走视觉模型 ✓）、文档（本地抽文本当参考材料 ✓）
  *
  * 与试卷那个的区别：讲义的"正文"是**块**（不是 Markdown 源码 ✗）—— 加内容一律走
@@ -105,7 +105,7 @@ function ctxOf(): AiToolCtx {
         return it ? questionTextOf(it, withAnswer) : null
       },
     },
-    /** 讲义那 17 个工具全部转给 HandoutModal 登记的 handoutOps ✓（讲义没开时是 null → 工具会说清 ✓） */
+    /** 讲义那 19 个工具全部转给 HandoutModal 登记的 handoutOps ✓（讲义没开时是 null → 工具会说清 ✓） */
     handout: {
       state: (maxChars) => (handoutOpsSink.value ? handoutOpsSink.value.state(maxChars) : { open: false }),
       outline: () => (handoutOpsSink.value ? handoutOpsSink.value.outline() : ''),
@@ -124,11 +124,12 @@ function ctxOf(): AiToolCtx {
       exportText: () => (handoutOpsSink.value ? handoutOpsSink.value.exportText() : '讲义没开着 ✗'),
       save: async () => (handoutOpsSink.value ? await handoutOpsSink.value.save() : '讲义没开着 ✗'),
       importMarkdown: (markdown, where, afterNo) => (handoutOpsSink.value ? handoutOpsSink.value.importMarkdown(markdown, where, afterNo) : '讲义没开着 ✗'),
+      skeleton: (kind, mode) => (handoutOpsSink.value ? handoutOpsSink.value.skeleton(kind, mode) : '讲义没开着 ✗'),
     },
   }
 }
 
-/** 带工具的对话循环（与试卷 AI 同一套通道 ✓；这里只给讲义那 17 个工具 ✓） */
+/** 带工具的对话循环（与试卷 AI 同一套通道 ✓；这里只给讲义那 19 个工具 ✓） */
 async function askWithTools(
   text: string,
   imgs: string[],

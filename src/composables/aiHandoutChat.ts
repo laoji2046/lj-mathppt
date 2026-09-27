@@ -19,12 +19,14 @@ export const HANDOUT_CHAT_MAX_BYTES = 4 * 1024 * 1024
 export const HANDOUT_BLOCK_TYPES = [
   'h1', 'h2', 'para', 'formula', 'figure', 'pagebreak', 'goal', 'knowledge',
   'example', 'variant', 'exercise', 'summary', 'note', 'warn', 'answer', 'solution', 'blank',
+  'preview', 'explore', 'method', 'homework', 'reflect',
 ]
 /** 类型 → 人话（与 HD_LABEL 同一套说法 ✓） */
 export const HANDOUT_BLOCK_LABEL: Record<string, string> = {
   h1: '章标题', h2: '节标题', para: '正文', formula: '公式', figure: '图片', pagebreak: '分页',
   goal: '学习目标', knowledge: '知识梳理', example: '例题', variant: '变式', exercise: '当堂练习',
   summary: '归纳小结', note: '提示', warn: '易错警示', answer: '答案', solution: '解析', blank: '留白',
+  preview: '课前预习', explore: '探究思考', method: '方法总结', homework: '课后作业', reflect: '学后反思',
 }
 /** 一个块在某一版里怎么显示 ✓（与 useHandout.HdRender 同一套 ✓） */
 export const HANDOUT_RENDERS = ['inline', 'hide', 'blank', 'endnote']
@@ -44,6 +46,7 @@ export const HANDOUT_META_KEYS = [
  */
 export const HANDOUT_TOOL_NAMES = [
   'get_handout_state', 'get_handout_help', 'get_handout_outline', 'add_handout_blocks',
+  'build_handout_skeleton',
   'edit_handout_text', 'arrange_handout_block', 'set_handout_block_render', 'set_handout_meta',
   'set_handout_version', 'insert_bank_question_to_handout', 'draw_bank_questions_to_handout',
   'search_bank', 'insert_handout_figure', 'sync_handout_refs', 'print_handout',
@@ -178,7 +181,7 @@ export function buildHandoutChatSystem(): string {
   return [
     '你是高中数学老师的**讲义编辑助手**。老师在「数学讲义」窗口里编一份 A4 讲义（左：目录+块列表；中：A4 预览；右：教材定位+块属性）。',
     '讲义是**给学生看的**（不是试卷 ✗）：有学习目标、知识梳理、例题、变式、当堂练习、归纳小结；答案与解析按**学生版 / 教师版**分开显示 ✓。',
-    '讲义由**块**串成（17 种类型 ✓）。加内容一律用 add_handout_blocks（type + text ✓），不要输出 Markdown 源码让老师自己贴 ✗。',
+    '讲义由**块**串成（22 种类型 ✓）。加内容一律用 add_handout_blocks（type + text ✓），不要输出 Markdown 源码让老师自己贴 ✗。',
     '要**主动用工具**改这份讲义，不要只说"你可以…"。动手前先 get_handout_state 看现在有什么 ✓。',
     '老师说「第 N 块 / 第几节」时：**先 get_handout_outline 拿块号** ✓ → 再用 arrange_handout_block / set_handout_block_render / edit_handout_text 办事（按块号最稳，别自己数 ✗）。',
     '公式一律行内 $…$（独立成行就单独放一个 formula 块 ✓）；不要写试卷语法（[题] / [选项] / [分页] / {c:red} —— 讲义都不认 ✗）。',
@@ -201,13 +204,27 @@ export function buildHandoutChatSystem(): string {
  */
 export const HANDOUT_HELP = [
   '【讲义是什么】高中**数学讲义**（不是试卷 ✗）：由**块**串成，A4 版式，可切学生版 / 教师版，可打印成矢量 PDF。',
-  '【块类型（17 种，就是 add_handout_blocks 的 type ✓）】',
+  '【块类型（22 种，就是 add_handout_blocks 的 type ✓）】',
   '  h1 章标题（目录一级）　h2 节标题（目录二级）',
   '  para 正文　formula 公式块　figure 插图　pagebreak 分页',
   '  goal 学习目标　knowledge 知识梳理　summary 归纳小结　note 提示　warn 易错警示',
   '  example 例题　variant 变式　exercise 当堂练习（这三种**自动编号**：例1 / 变式1 / 练习1 ✓）',
   '  answer 答案　solution 解析（默认：教师版内联、学生版排到文末 ✓）',
   '  blank 学生留白（blankCm 高度，1–20 cm ✓ 不给就 4cm ✓）',
+  '  preview 课前预习　explore 探究思考　method 方法总结　homework 课后作业　reflect 学后反思（v1712 新增 ✓ 对应讲义里的常见栏目 ✓）',
+  '【课型骨架（build_handout_skeleton ✓）】老师说「起一份新授课讲义 / 一轮复习讲义 / 学案 / 习题课 / 二轮专题 / 试卷讲评」时用它一次生成栏目骨架 ✓',
+  '  kind 只能填：新授课 / 学案 / 一轮复习 / 二轮专题 / 习题课 / 试卷讲评 ✓（也认 new / learn / review / topic / drill / comment ✓ 认不出会报错 ✓）',
+  '  mode = append 追加到末尾（默认 ✓）；replace 是**重建**（会清掉现有块 ✗ 只有老师说「重新起一份 / 这份不要了」才用 ✓）',
+  '【挖空（填空版 ✓）】正文里把要挖的地方用两个花括号包起来（如 距离之{{和}}为常数 ✓）：学生版印成空线（学生边听边填 ✓）、教师版印成原词 ✓；',
+  '  别写成下划线或「____」✗（那样两版都一样，学生版就没得填了 ✗）；知识梳理 / 必备知识 / 定义 / 定理最适合挖空 ✓',
+  '【学生版抬头】学生版 A4 抬头自带「姓名 / 班级 / 学号」填写行 ✓（老师不用自己加 ✓）',
+  '【栏目怎么选】预习任务 → preview；课堂探究 / 思考 / 观察 → explore；例题讲完的解法提炼 → method；作业（含分层）→ homework；课末反思 / 我的疑问 / 自我诊断 → reflect ✓',
+  '  讲义里常用「一、学习目标 / 二、知识梳理 …」这种**章级栏目名**（h1 ✓），栏目下面再放对应的块 ✓（骨架工具就是按这个规矩生成的 ✓）',
+  '【一线硬规矩（学校检查要求 ✓ 写讲义时照做 ✓）】① 分层用 ★ 标注（★ 基础 / ★★ 提升 / ★★★ 拓展 ✓）别只写「A 组 B 组」✗；',
+  '  ② 课后作业的题号后面**不标分值** ✗；③ 序号标点全场统一（要么都用 1. 要么都用（1）✗ 不能 1、和 1. 混用 ✗）；④ 题号必须连续 ✗ 不许跳号；⑤ 知识梳理 / 必备知识要留白给学生自己归纳 ✓',
+  '【新高考题型（新课标卷 19 题 ✓）】单选 8×5=40、多选 3×6=18（**部分给分**：两选项只选 1 个得 3 分；三选项选 1 个得 2 分、选 2 个得 4 分 ✓）、填空 3×5=15、解答 5 题（13 / 15 / 15 / 17 / 17 = 77 分 ✓ 压轴 17 分、三问递进 ✓）；',
+  '  出检测 / 限时训练时按这个梯度排（选填 73 分 + 解答 77 分 = 150 ✓），压轴题留给「分步得分 / 新定义题」练 ✓',
+  '【版式（可照抄 ✓）】正文宋体五号、1.5 倍行距、**无首行缩进**、两端对齐 ✓；小标题黑体五号左对齐 ✓；讲义 A4 单栏、纸张疏排留白（试卷才密排分栏 ✗）✓',
   '【正文怎么写】公式行内 $…$ ✓；一块里可以有多个自然段（用换行 ✓）；例题 / 练习要把条件写全（是给学生做的 ✓）；',
   '  不要写 [题] / [选项] / [分页] / {c:red} 这些**试卷语法** ✗（讲义不认，会原样印出来 ✗）。',
   '【教材定位（set_handout_meta ✓）】press 教材版本 / book 册 / chapter 章 / section 节 / period 课时 /',
@@ -260,6 +277,10 @@ export const HANDOUT_FEWSHOT: string[] = [
   '· 老师：「插一张抛物线」→ insert_handout_figure {kind:"parabola", params:{p:2}} ✓（别用文字画 ✗）',
   '· 老师：「打印 / 导出 PDF」→ print_handout ✓；「存一下」→ save_handout ✓',
   '· 老师贴来一整份 Markdown → import_handout_markdown（别一块一块手抄 ✗）✓',
+  '· 老师：「起一份新授课讲义 / 一轮复习讲义」→ build_handout_skeleton {kind:"新授课"} ✓（别一块一块手搭 ✗）',
+  '· 老师：「加课后作业，分 A、B 两层」→ add_handout_blocks {blocks:[{type:"homework", text:"A 组（基础）…；B 组（提升）…"}]} ✓',
+  '· 老师：「知识梳理做成填空版 / 学生版挖空」→ 把关键词用两个花括号包起来（现成段落用 edit_handout_text 就地改 ✓ 别删内容 ✗）✓',
+  '· 老师：「加个课前预习 / 探究思考 / 方法总结 / 学后反思」→ preview / explore / method / reflect 块 ✓',
 ]
 
 /** 示例拼成一段（system 里用 ✓） */

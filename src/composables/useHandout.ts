@@ -27,6 +27,11 @@ export type HdBlockType =
   | 'note' | 'warn'          // 提示 / 易错警示
   | 'answer' | 'solution'    // 答案 / 解析（讲义与试卷最大的不同 ✓）
   | 'blank'                  // 学生留白（做笔记 / 写解答 ✓）
+  | 'preview'                // 【v1712】课前预习（学案第一栏 ✓）
+  | 'explore'                // 【v1712】探究思考（教材「观察 / 思考 / 探究 / 归纳」✓）
+  | 'method'                 // 【v1712】方法总结（例题 / 变式后的解法提炼 ✓）
+  | 'homework'               // 【v1712】课后作业（分层：A 基础 / B 提升 / C 拓展 ✓）
+  | 'reflect'                // 【v1712】学后反思（我的疑问 / 学习反思 ✓）
 
 export interface HdBlock {
   id: string
@@ -107,17 +112,164 @@ export const HD_DEFAULT_RENDER: Record<HdBlockType, { student: HdRender; teacher
   answer: { student: 'endnote', teacher: 'inline' },
   solution: { student: 'endnote', teacher: 'inline' },
   blank: { student: 'inline', teacher: 'inline' },
+  preview: { student: 'inline', teacher: 'inline' },
+  explore: { student: 'inline', teacher: 'inline' },
+  method: { student: 'inline', teacher: 'inline' },
+  homework: { student: 'inline', teacher: 'inline' },
+  reflect: { student: 'inline', teacher: 'inline' },
 }
 
 export const HD_LABEL: Record<HdBlockType, string> = {
   h1: '章标题', h2: '节标题', para: '正文', formula: '公式', figure: '图片', pagebreak: '分页',
   goal: '学习目标', knowledge: '知识梳理', example: '例题', variant: '变式', exercise: '当堂练习',
   summary: '归纳小结', note: '提示', warn: '易错警示', answer: '答案', solution: '解析', blank: '留白',
+  preview: '课前预习', explore: '探究思考', method: '方法总结', homework: '课后作业', reflect: '学后反思',
 }
 
 /** 可以自动编号的块 ✓（例题 / 变式 / 练习 各自独立编号 ✓） */
 export const HD_NUMBERED: HdBlockType[] = ['example', 'variant', 'exercise']
 export const HD_NUM_PREFIX: Partial<Record<HdBlockType, string>> = { example: '例', variant: '变式', exercise: '练习' }
+/* ---------------- 【v1712】课型骨架（一键起一份讲义的栏目结构 ✓） ----------------
+ * 研究依据：_stage/research/高中数学讲义-体例研究.md（v1712 调研 · 461 行 ✓）+ docs/数学讲义-研究.md（M1 ✓）
+ *   新授：目标 → 预习 → 知识梳理（留空）→ 典例精讲 → 变式训练 → 方法归纳 → 当堂检测 → 课堂小结 → 课后作业（分层）✓
+ *   学案：目标 → 预习 → 自主学习 → 合作探究 → 当堂检测 → 核心归纳 → 学习反思 → 课时作业 ✓
+ *   一轮：课标与考情 → 知识清单 → 考点突破 → 变式 → 方法 → 易错 → 当堂检测 → 课时作业 A/B/C ✓
+ *   二轮：真题导入 → 高考链接 → 考点整合 → 方法提炼 → 母题精讲 → 同源变式 → 当堂训练 → 专题检测 ✓
+ *   习题课 / 讲评课：各按一线检查记录里的栏目链（基础训练 / 提升性练习 / 补充练习 / 自我诊断 / 错因归类 ✓）
+ * 每一节 = 一个 h1 栏目名 + 一个**空块**（栏目框在预览里直接看得见，往里填就行 ✓）
+ */
+export interface HdSkeleton {
+  id: string
+  label: string
+  note: string
+  secs: { h: string; t: HdBlockType }[]
+}
+
+export const HD_SKELETONS: HdSkeleton[] = [
+  {
+    id: 'new', label: '新授课', note: '同步新授：目标 → 预习 → 知识梳理 → 典例 → 变式 → 方法 → 检测 → 小结 → 作业（知识梳理学生版留空 ✓）',
+    secs: [
+      { h: '一、学习目标', t: 'goal' },
+      { h: '二、课前预习', t: 'preview' },
+      { h: '三、知识梳理', t: 'knowledge' },
+      { h: '四、典例精讲', t: 'example' },
+      { h: '五、变式训练', t: 'variant' },
+      { h: '六、方法归纳', t: 'method' },
+      { h: '七、当堂检测', t: 'exercise' },
+      { h: '八、课堂小结', t: 'summary' },
+      { h: '九、课后作业', t: 'homework' },
+    ],
+  },
+  {
+    id: 'learn', label: '学案', note: '导学案：目标 → 预习 → 自主学习 → 合作探究 → 检测 → 核心归纳 → 反思 → 课时作业（留白最多 ✓）',
+    secs: [
+      { h: '一、学习目标', t: 'goal' },
+      { h: '二、课前预习', t: 'preview' },
+      { h: '三、自主学习', t: 'knowledge' },
+      { h: '四、合作探究', t: 'explore' },
+      { h: '五、当堂检测', t: 'exercise' },
+      { h: '六、核心归纳', t: 'summary' },
+      { h: '七、学习反思', t: 'reflect' },
+      { h: '八、课时作业', t: 'homework' },
+    ],
+  },
+  {
+    id: 'review', label: '一轮复习', note: '高三一轮：课标与考情 → 知识清单 → 考点突破 → 变式 → 方法 → 易错 → 当堂检测 → 课时作业',
+    secs: [
+      { h: '一、课标与考情', t: 'goal' },
+      { h: '二、知识清单', t: 'knowledge' },
+      { h: '三、考点突破', t: 'example' },
+      { h: '四、变式训练', t: 'variant' },
+      { h: '五、方法总结', t: 'method' },
+      { h: '六、易错警示', t: 'warn' },
+      { h: '七、当堂检测', t: 'exercise' },
+      { h: '八、课时作业', t: 'homework' },
+    ],
+  },
+  {
+    id: 'topic', label: '二轮专题', note: '二轮微专题：真题导入 → 高考链接 → 考点整合 → 方法提炼 → 母题精讲 → 同源变式 → 当堂训练 → 专题检测',
+    secs: [
+      { h: '一、真题导入', t: 'example' },
+      { h: '二、高考链接', t: 'goal' },
+      { h: '三、考点整合', t: 'knowledge' },
+      { h: '四、方法提炼', t: 'method' },
+      { h: '五、母题精讲', t: 'example' },
+      { h: '六、同源变式', t: 'variant' },
+      { h: '七、当堂训练', t: 'exercise' },
+      { h: '八、专题检测', t: 'exercise' },
+    ],
+  },
+  {
+    id: 'drill', label: '习题课', note: '习题课：知识回顾 → 基础训练 → 典型例题 → 变式 → 方法归纳 → 提升性练习 → 补充练习 → 小结',
+    secs: [
+      { h: '一、知识回顾', t: 'knowledge' },
+      { h: '二、基础训练', t: 'exercise' },
+      { h: '三、典型例题', t: 'example' },
+      { h: '四、变式训练', t: 'variant' },
+      { h: '五、方法归纳', t: 'method' },
+      { h: '六、提升性练习', t: 'exercise' },
+      { h: '七、补充练习', t: 'exercise' },
+      { h: '八、课堂小结', t: 'summary' },
+    ],
+  },
+  {
+    id: 'comment', label: '试卷讲评', note: '讲评课：考情数据 → 自我诊断 → 错因归类 → 典型错题精讲 → 变式再练 → 当堂订正 → 补偿训练 → 错题反思',
+    secs: [
+      { h: '一、考情数据', t: 'goal' },
+      { h: '二、自我诊断', t: 'reflect' },
+      { h: '三、错因归类', t: 'warn' },
+      { h: '四、典型错题精讲', t: 'example' },
+      { h: '五、变式再练', t: 'variant' },
+      { h: '六、方法总结', t: 'method' },
+      { h: '七、当堂订正', t: 'exercise' },
+      { h: '八、补偿训练', t: 'exercise' },
+      { h: '九、错题反思', t: 'reflect' },
+    ],
+  },
+]
+
+/** 按 id / 中文名取课型骨架 ✓（认不出返回 null ✗） */
+export function skeletonById(id: string): HdSkeleton | null {
+  const s = String(id == null ? '' : id).trim()
+  if (!s) return null
+  for (const k of HD_SKELETONS) if (k.id === s || k.label === s) return k
+  return null
+}
+
+/** 课型 → 一串块（每个栏目 = h1 栏目名 + 一个空块 ✓） */
+export function skeletonBlocks(id: string): HdBlock[] {
+  const sk = skeletonById(id)
+  if (!sk) return []
+  const out: HdBlock[] = []
+  for (const sec of sk.secs) {
+    out.push(makeBlock('h1', sec.h))
+    out.push(makeBlock(sec.t, ''))
+  }
+  return out
+}
+
+/* ---------------- 【v1712】挖空（填空版 ✓） ----------------
+ * 老师最常用的一招：知识梳理 / 必备知识做成**填空版** —— 学生版关键处是空线、教师版给原词 ✓
+ * （一线检查记录里的原话：微专题「必备知识」要留白给学生自己归纳 ✓）
+ * 写法：把要挖的地方用两个花括号包起来 —— 椭圆的定义：到两定点距离之{{和}}为常数 ✓
+ *   · 学生版 → 下划线空（学生边听边填 ✓）
+ *   · 教师版 → 原词 ✓（老师照着讲 ✓）
+ */
+export function hdFillOut(escaped: string, v: HdVersion): string {
+  const re = /\{\{([^}]*)\}\}/g
+  if (v === 'student') return escaped.replace(re, '<span class="hd-fill"></span>')
+  return escaped.replace(re, '$1')
+}
+
+/** 导出纯文本时的挖空（学生版印成空线 ✓） */
+export function hdFillText(s: unknown, v: HdVersion): string {
+  return String(s == null ? '' : s).replace(/\{\{([^}]*)\}\}/g, (_m, k: string) => (v === 'student' ? '＿＿＿＿' : k))
+}
+
+/** 去掉挖空标记（列表摘要 / 目录这种地方显示用 ✓） */
+export function hdPlain(s: unknown): string {
+  return String(s == null ? '' : s).replace(/\{\{([^}]*)\}\}/g, '$1')
+}
 
 export function makeBlock(type: HdBlockType, text = ''): HdBlock {
   const b: HdBlock = {
@@ -265,12 +417,12 @@ export function handoutToText(h: Handout, v: HdVersion): string {
   const lines = [head, '']
   for (const it of main) {
     const label = HD_LABEL[it.b.type]
-    const txt = it.show || (it.b.type === 'blank' ? '（留白 ' + (it.b.blankCm || 4) + 'cm）' : '')
+    const txt = it.show ? hdFillText(it.show, v) : (it.b.type === 'blank' ? '（留白 ' + (it.b.blankCm || 4) + 'cm）' : '')
     lines.push((it.num ? it.num + '．' : label + '：') + txt)
   }
   if (notes.length) {
     lines.push('', '参考答案')
-    notes.forEach((it, i) => lines.push((i + 1) + '．' + (HD_LABEL[it.b.type]) + '：' + it.show))
+    notes.forEach((it, i) => lines.push((i + 1) + '．' + (HD_LABEL[it.b.type]) + '：' + hdFillText(it.show, v)))
   }
   return lines.join('\n')
 }
@@ -623,10 +775,12 @@ export function pageHtmlOf(h: Handout, v: HdVersion, imgMap: Record<string, stri
   const metaBits = [m.school, m.subject, m.grade, m.teacher ? '教师：' + m.teacher : '', m.date, handoutPathOf(h), m.period ? '第 ' + String(m.period).replace(/^第\s*/, '') + ' 课时' : '', v === 'student' ? '学生版' : '教师版']
     .filter(Boolean).map((x) => '<span>' + hdEsc(x) + '</span>').join('')
   L.push('<div class="hd-pmeta">' + metaBits + '</div>')
+  /** 【v1712】学生版抬头加「姓名 / 班级 / 学号」填写行 ✓（国内学生版讲义都有 ✓ 教师版不加 ✗） */
+  if (v === 'student') L.push('<div class="hd-pname"><span>姓名：<i class="hd-line"></i></span><span>班级：<i class="hd-line"></i></span><span>学号：<i class="hd-line"></i></span></div>')
 
   for (const it of main) {
     const t = it.b.type
-    const body = hdEsc(it.show)
+    const body = hdFillOut(hdEsc(it.show), v)   // 【v1712】挖空：学生版印成空线 / 教师版给原词 ✓
     const id = ' id="hd-b-' + it.b.id + '"'
     /** 知识底座插进来的条目**带上标题** ✓（「知识梳理 · 基本不等式」✓ 不然只剩公式，学生不知道这是哪一条 ✓） */
     const lab = (base: string) => hdEsc(base + (it.b.kbTitle ? ' · ' + it.b.kbTitle : ''))
@@ -659,6 +813,11 @@ export function pageHtmlOf(h: Handout, v: HdVersion, imgMap: Record<string, stri
     if (t === 'note') { L.push('<div class="hd-bx hd-bx--note"' + id + '><b>' + lab('提示') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
     if (t === 'warn') { L.push('<div class="hd-bx hd-bx--warn"' + id + '><b>' + lab('易错警示') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
     if (t === 'summary') { L.push('<div class="hd-bx hd-bx--sum"' + id + '><b>' + lab('归纳小结') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'preview') { L.push('<div class="hd-bx hd-bx--pre"' + id + '><b>' + lab('课前预习') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'explore') { L.push('<div class="hd-bx hd-bx--exp"' + id + '><b>' + lab('探究思考') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'method') { L.push('<div class="hd-bx hd-bx--met"' + id + '><b>' + lab('方法总结') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'homework') { L.push('<div class="hd-bx hd-bx--hw"' + id + '><b>' + lab('课后作业') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
+    if (t === 'reflect') { L.push('<div class="hd-bx hd-bx--ref"' + id + '><b>' + lab('学后反思') + '</b><div class="hd-txt">' + body + '</div></div>'); continue }
     if (t === 'example' || t === 'variant' || t === 'exercise') {
       L.push('<div class="hd-q"' + id + '><span class="hd-qnum">' + hdEsc(it.num) + '</span><span class="hd-qtext">' + body + '</span></div>'); continue
     }
@@ -669,7 +828,7 @@ export function pageHtmlOf(h: Handout, v: HdVersion, imgMap: Record<string, stri
   if (notes.length) {
     L.push('<h1 class="hd-h1 hd-h1--end">参考答案</h1>')
     notes.forEach((it, i) => {
-      L.push('<div class="hd-endnote"><span class="hd-qnum">' + (i + 1) + '</span><span class="hd-qtext"><b>' + hdEsc(HD_LABEL[it.b.type]) + '</b>' + hdEsc(it.show) + '</span></div>')
+      L.push('<div class="hd-endnote"><span class="hd-qnum">' + (i + 1) + '</span><span class="hd-qtext"><b>' + hdEsc(HD_LABEL[it.b.type]) + '</b>' + hdFillOut(hdEsc(it.show), v) + '</span></div>')
     })
   }
   return L.join('\n')

@@ -55,6 +55,8 @@ export interface HandoutOps {
   save: () => Promise<string>
   /** 【v1710】把一段 Markdown 导成讲义块（与工具栏「导入 MD」**同一个解析器** ✓） */
   importMarkdown: (markdown: string, where: string, afterNo: number) => string
+  /** 【v1712】按课型生成栏目骨架（kind = new / learn / review / topic / drill / comment ✓；mode = append | replace ✓） */
+  skeleton: (kind: string, mode: string) => string
 }
 
 /** HandoutModal 打开时登记；关掉时清掉 ✓ */

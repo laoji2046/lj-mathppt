@@ -20,7 +20,7 @@ import type { SlideElement } from '@/types'
 import { CONICS, withParams } from '@/composables/mathPlot'
 import { PAPER_HELP } from '@/composables/aiPaperChat'
 import { HANDOUT_HELP, handoutMetaPatch } from '@/composables/aiHandoutChat'
-import { guessAction, guessKind, guessRender, guessVersion, handoutBlockSpecsLoose } from '@/composables/aiHandoutTrain'
+import { guessAction, guessCourse, guessKind, guessRender, guessVersion, handoutBlockSpecsLoose } from '@/composables/aiHandoutTrain'
 
 /** 面板传进来的「应用能力」适配器（探针里可以用假的 ✓） */
 export interface AiToolCtx {
@@ -73,6 +73,7 @@ export interface AiToolCtx {
     exportText: () => string
     save: () => Promise<string>
     importMarkdown: (markdown: string, where: string, afterNo: number) => string
+    skeleton: (kind: string, mode: string) => string
   }
   /** 题库（可缺：探针/没装库时不影响别的工具 ✓） */
   bank?: {
@@ -510,7 +511,7 @@ export const AI_TOOLS: unknown[] = [
     type: 'function',
     function: {
       name: 'get_handout_help',
-      description: '查讲义手册：全部块类型（17 种）、教材定位字段、学生版/教师版显示口径、题库打通、插图、导出（写细节前先查 ✓）',
+      description: '查讲义手册：全部块类型（22 种）、教材定位字段、学生版/教师版显示口径、题库打通、插图、导出（写细节前先查 ✓）',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -528,7 +529,7 @@ export const AI_TOOLS: unknown[] = [
       name: 'add_handout_blocks',
       description: '给讲义**加块**（最常用 ✓）：type 见手册（h1 章 / h2 节 / para 正文 / formula 公式 / goal 学习目标 / '
         + 'knowledge 知识梳理 / example 例题 / variant 变式 / exercise 练习 / summary 小结 / note 提示 / warn 易错 / '
-        + 'answer 答案 / solution 解析 / blank 留白 / pagebreak 分页 ✓）；公式写行内 $…$ ✓',
+        + 'answer 答案 / solution 解析 / blank 留白 / pagebreak 分页；preview 课前预习 / explore 探究思考 / method 方法总结 / homework 课后作业 / reflect 学后反思 ✓）；公式写行内 $…$ ✓',
       parameters: {
         type: 'object',
         properties: {
@@ -550,6 +551,22 @@ export const AI_TOOLS: unknown[] = [
           after_no: { type: 'number', description: 'where=after 时的块号（先 get_handout_outline ✓）' },
         },
         required: ['blocks'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'build_handout_skeleton',
+      description: '按**课型**一次生成讲义栏目骨架（新授课 / 学案 / 一轮复习 / 二轮专题 / 习题课 / 试卷讲评 ✓）：'
+        + '每个栏目 = 一个 h1 栏目名 + 一个空块（老师再往里填 ✓）；mode = append 追加到末尾（默认 ✓）/ replace 重建（会清空现有块 ✗ 只有老师说「重来一份」才用 ✓）',
+      parameters: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', description: '课型：新授课 / 学案 / 一轮复习 / 二轮专题 / 习题课 / 试卷讲评（也认 new / learn / review / topic / drill / comment ✓）' },
+          mode: { type: 'string', description: 'append 追加到末尾（默认 ✓）| replace 重建（清空现有块 ✗）' },
+        },
+        required: ['kind'],
       },
     },
   },
@@ -744,7 +761,7 @@ export function aiToolGuide(): string {
     '数学图形一律用 insert_math_figure（kind + params），不要用 TikZ 画图、也不要只给 LaTeX 让老师自己画。',
 '要动「数学讲义」里的讲义：先 get_handout_state 看有什么，再用 add_handout_blocks 加块（type + text ✓ 讲义是**块**结构，不认 [题] / [分页] / {c:red} 那些试卷语法 ✗）；',
     '老师说「第 N 块 / 第几节」时先 get_handout_outline 拿块号 ✓ → 再 arrange_handout_block / set_handout_block_render / edit_handout_text ✓；',
-    '讲义还能改教材定位（set_handout_meta）、切学生版/教师版（set_handout_version）、插数学图形（insert_handout_figure）、从题库取题（insert_bank_question_to_handout / draw_bank_questions_to_handout）、打印导出（print_handout / export_handout_text / save_handout ✓）；块类型与字段先查 get_handout_help ✓；老师给你一整份 Markdown 时用 import_handout_markdown（章节 / 目标 / 例题 / 练习 / 小结会自动认 ✓）。',
+    '讲义还能改教材定位（set_handout_meta）、切学生版/教师版（set_handout_version）、插数学图形（insert_handout_figure）、从题库取题（insert_bank_question_to_handout / draw_bank_questions_to_handout）、打印导出（print_handout / export_handout_text / save_handout ✓）；块类型与字段先查 get_handout_help ✓；老师给你一整份 Markdown 时用 import_handout_markdown（章节 / 目标 / 例题 / 练习 / 小结会自动认 ✓）；说「起一份新授课 / 一轮复习讲义」就用 build_handout_skeleton（按课型一次生成栏目骨架 ✓）。',
     '老师说「字太小、放大一点」就用 update_elements 传 fontSize（例如 {"fontSize":36}）；',
     '说「图形线条换个颜色、坐标轴变灰」就用 set_figure_style（curveColor / axisColor / lineColors / pointColors）。',
   ].join('\n')
@@ -1078,6 +1095,19 @@ case 'get_handout_state': {
           ? { note, added: parsed.specs.length, warnings: warn }
           : { note, added: parsed.specs.length },
       }
+    }
+    case 'build_handout_skeleton': {
+      const h = ctx.handout
+      if (!h || !h.skeleton) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      const kind = guessCourse(args.kind)
+      if (!kind) {
+        return { ok: false, error: '认不出这个课型「' + str(args.kind) + '」：只能填 新授课 / 学案 / 一轮复习 / 二轮专题 / 习题课 / 试卷讲评 ✓' }
+      }
+      const mode = str(args.mode).trim() === 'replace' ? 'replace' : 'append'
+      const note = h.skeleton(kind, mode)
+      if (!note) return { ok: false, error: '没生成（原因不明）' }
+      if (note.indexOf('认不出') >= 0) return { ok: false, error: note }
+      return { ok: true, result: { note } }
     }
     case 'edit_handout_text': {
       const h = ctx.handout

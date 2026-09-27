@@ -12,7 +12,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { typesetMixed } from '@/composables/useMathJax'
 import {
-  HD_BOOKS, HD_LABEL, HD_NUMBERED, HD_PRESSES, handout, hdVersion, makeBlock, outlineOf, pageHtmlOf,
+  HD_BOOKS, HD_LABEL, HD_NUMBERED, HD_PRESSES, HD_SKELETONS, handout, hdVersion, hdPlain, makeBlock, outlineOf, pageHtmlOf, skeletonBlocks, skeletonById,
   rendered, saveHandout, handoutToText, handoutPathOf, syncAutoTitle, autoTitleOf,
   initHandoutLib, openHandout, newHandout, deleteHandout, handoutTree, lib, curId, currentSaved,
   /* 【M4】库目录（exe 同级 LJ-讲义）：真身 ✓ */
@@ -50,9 +50,10 @@ const path = computed(() => handoutPathOf(h.value))
 
 const ADD: { t: HdBlockType; label: string }[] = [
   { t: 'h1', label: '章' }, { t: 'h2', label: '节' }, { t: 'para', label: '正文' }, { t: 'formula', label: '公式' },
-  { t: 'goal', label: '目标' }, { t: 'knowledge', label: '知识' }, { t: 'example', label: '例题' }, { t: 'variant', label: '变式' },
-  { t: 'exercise', label: '练习' }, { t: 'answer', label: '答案' }, { t: 'solution', label: '解析' },
-  { t: 'summary', label: '小结' }, { t: 'note', label: '提示' }, { t: 'warn', label: '警示' },
+  { t: 'goal', label: '目标' }, { t: 'knowledge', label: '知识' }, { t: 'preview', label: '预习' }, { t: 'explore', label: '探究' },
+  { t: 'example', label: '例题' }, { t: 'variant', label: '变式' }, { t: 'method', label: '方法' }, { t: 'exercise', label: '练习' },
+  { t: 'answer', label: '答案' }, { t: 'solution', label: '解析' }, { t: 'summary', label: '小结' }, { t: 'reflect', label: '反思' },
+  { t: 'homework', label: '作业' }, { t: 'note', label: '提示' }, { t: 'warn', label: '警示' },
   { t: 'figure', label: '插图' }, { t: 'blank', label: '留白' }, { t: 'pagebreak', label: '分页' },
 ]
 const RENDER_LABEL: Record<HdRender, string> = { inline: '正常显示', hide: '不显示', blank: '留白', endnote: '排到文末' }
@@ -365,7 +366,7 @@ function move(i: number, d: number) {
   void nextTick(() => refreshNow())
 }
 function summary(b: HdBlock): string {
-  const t = String(b.text || '').replace(/\s+/g, ' ').trim()
+  const t = hdPlain(String(b.text || '')).replace(/s+/g, ' ').trim()
   if (b.type === 'blank') return '留白 ' + (b.blankCm || 4) + 'cm'
   return t ? t.slice(0, 22) : '（空）'
 }
@@ -523,6 +524,15 @@ async function importMdInto(e: Event) {
   insertBlocks(all, '')
   flash('已把 ' + files.length + ' 份 md 导成 ' + all.length + ' 块' + (notes.length ? '；' + notes.join('；') : ''))
 }
+/** 【v1712】课型骨架：选一个课型 → 追加整套栏目结构 ✓（老师再往里填 ✓ 不动现有内容 ✓） */
+function applySkeleton(e: Event) {
+  const el = e.target as HTMLSelectElement
+  const id = el.value
+  el.value = ''
+  if (!id) return
+  flash(handoutOps.skeleton(id, 'append'))
+}
+
 /* ---------------- 【v1707】AI 助手：讲义的**全部能力**交给工具（接口见 ui/handout.ts ✓） ----------------
  * 用户口径：「为讲义引入 AI 面板 —— AI 要精通讲义的各种操作和功能」✓
  * 做法与试卷编辑 v1693 完全同一套：能力做成对象（这里）+ 手册（aiHandoutChat.HANDOUT_HELP ✓）
@@ -727,6 +737,19 @@ const handoutOps: HandoutOps = {
     void nextTick(() => refreshNow())
     return '已把 Markdown 转成 ' + r.blocks.length + ' 块（从第 ' + (at + 1) + ' 块起 ✓）' + (r.notes.length ? '；' + r.notes.join('；') : '')
   },
+  skeleton: (kind, mode) => {
+    const sk = skeletonById(kind)
+    if (!sk) return '认不出这个课型（认得：' + HD_SKELETONS.map((x) => x.label).join(' / ') + ' ✓）'
+    const list = skeletonBlocks(sk.id)
+    if (!list.length) return '这个课型还没有骨架 ✗'
+    const rebuild = mode === 'replace'
+    if (rebuild) h.value.blocks = list
+    else h.value.blocks.splice(h.value.blocks.length, 0, ...list)
+    selIdx.value = h.value.blocks.length - list.length
+    void nextTick(() => refreshNow())
+    return (rebuild ? '已按「' + sk.label + '」重建讲义骨架（' : '已在末尾追加「' + sk.label + '」栏目骨架（')
+      + list.length + ' 块：' + sk.secs.map((s) => s.h).join('、') + ' ✓）'
+  },
   save: async () => {
     await saveToFile()
     return '已存进库目录 ✓（' + (folderDir.value || 'exe 同级的 LJ-讲义') + '）'
@@ -782,6 +805,10 @@ watch(ver, () => { void refreshNow() })
             </div>
             <div class="hd__add">
               <button v-for="a in ADD" :key="a.t" class="hd__addbtn" :title="'插入一块：' + HD_LABEL[a.t]" @click="addBlock(a.t)">+{{ a.label }}</button>
+              <select class="hd__addbtn hd__skel" title="课型骨架：按课型一次生成栏目结构（追加到末尾 ✓ 不动现有内容 ✓）" @change="applySkeleton">
+                <option value="">+课型骨架</option>
+                <option v-for="s in HD_SKELETONS" :key="s.id" :value="s.id">{{ s.label }}</option>
+              </select>
             </div>
             <div class="hd__list">
               <div
@@ -1179,6 +1206,17 @@ watch(ver, () => { void refreshNow() })
 .hd-fig--empty { border: 1px dashed #c9c6bd; border-radius: 4px; color: #bdbab2; font-size: 9.5pt; padding: 6px; }
 .hd-pagebreak { border-top: 1px dashed #bbb; text-align: center; color: #999; font-size: 9.5pt; margin: 12px 0; }
 /* 【v1479】打印：只留讲义 A4 纸 ✓（与试卷同一套做法：藏 .app + 纸张静态化 + 自己定页边距 ✓） */
+/* 【v1712】新栏目框（预习 / 探究 / 方法 / 作业 / 反思 ✓）+ 挖空 + 学生版抬头 ✓ */
+.hd-bx--pre { background: #f5f8fb; border-left-color: #7f9bb8; }
+.hd-bx--exp { background: #f4faf9; border-left-color: #5fa8a0; }
+.hd-bx--met { background: #fbf8f2; border-left-color: #c99a4e; }
+.hd-bx--hw { background: #f6f7fb; border-left-color: #6f7fbf; }
+.hd-bx--ref { background: #faf8fb; border-left-color: #a48fc0; }
+.hd-fill { display: inline-block; min-width: 56px; border-bottom: 1px solid #444; }
+.hd-pname { display: flex; gap: 22px; justify-content: center; font-size: 10pt; color: #333; margin: 6px 0 2px; }
+.hd-pname i { display: inline-block; width: 84px; border-bottom: 1px solid #999; font-style: normal; }
+.hd__skel { max-width: 104px; }
+
 @media print {
   @page { size: A4; margin: 0; }   /* 边距由 .hd__page 的 padding 负责 ✓（打印对话框边距=无 也不贴边 ✓） */
   .app { display: none !important; }   /* ✅ 关键：藏掉整个编辑器（scoped 里写这条是无效的 ✗） */
