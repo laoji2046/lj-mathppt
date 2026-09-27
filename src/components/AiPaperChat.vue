@@ -50,6 +50,8 @@ const docs = ref<{ name: string; chars: number; text: string }[]>([])
 const busy = ref(false)
 const note = ref('')
 const listEl = ref<HTMLElement | null>(null)
+/** 【v1705】输入框 —— 「录入试题」填完要把光标放到末尾，老师接着补一句 ✓ */
+const taEl = ref<HTMLTextAreaElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const docInput = ref<HTMLInputElement | null>(null)
 /** 【v1698】截图弹窗（复用应用那个：选窗口 / 拖选区 / Esc 取消都现成 ✓） */
@@ -415,19 +417,22 @@ async function sendAs(sendText: string, bubble = '') {
     scrollSoon()
   }
 }
-/* ---------------- 【v1704】录入试题：把当前图里的题目录进试卷 ---------------- */
+/* ---------------- 【v1705】录入试题：提示词落进输入框，老师补一句再发送 ---------------- */
 
 /**
- * 点一下就把**当前附件图**里的题目录进试卷（题干 / 选项 / 答案 / 解析 ✓）
- *  与侧栏那几个预制对话同一套思路：不额外发明通道，直接走 sendAs（发送那条路 ✓）
- *  ⚠ 必须配了「视觉模型」才让它看图 —— 否则纯文本模型会**照着图名瞎编** ✗（宁可拦住 ✓）
+ * 「录入试题」＝**把提示词填进输入框**（用户口径：录入试题 → 对话框输入 → 发送 ✓）
+ *  为什么不直接替他发：老师常常要补一句 —— 「插在第 3 题后面」「只要题干，不要解析」✓
+ *    先落在输入框里，看得见、改得动，再按发送 ✓（与侧栏那几个预制对话同一套手感 ✓）
+ *  ⚠ 没配「视觉模型」时照样填，但必须把话说清楚 —— 纯文本模型带图只会**照着图名瞎编** ✗
  */
-async function ocrToPaper() {
-  const pics = atts.value.map((a) => a.src)
-  if (!pics.length) { note.value = '先在下面点「＋ 图」选一张（或「截图」/ Ctrl+V 粘一张），再点这个'; return }
-  if (!visionModel()) { note.value = '录入试题要让 AI 看图：先在「设置 → AI 助手」里配好「视觉模型」✓'; return }
-  if (busy.value) return
-  await sendAs(PAPER_OCR_PROMPT, '录入试题：把图里的题目（题干 / 选项 / 答案 / 解析）录进试卷')
+function fillOcr() {
+  const cur = draft.value.replace(/\s+$/, '')
+  draft.value = cur ? cur + '\n\n' + PAPER_OCR_PROMPT : PAPER_OCR_PROMPT
+  const warn = visionModel() ? '' : '；⚠ 还没配「视觉模型」（设置 → AI 助手），带图它读不出图 ✗'
+  note.value = (atts.value.length
+    ? '已填进输入框（' + atts.value.length + ' 张图会跟着一起发）—— 要插在第几题后面就先补一句，再点发送'
+    : '已填进输入框 —— 先在下面点「＋ 图」选一张（或「截图」/ Ctrl+V 粘一张），再点发送') + warn
+  nextTick(() => { const el = taEl.value; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length) } })
 }
 </script>
 
@@ -486,7 +491,7 @@ async function ocrToPaper() {
 
     <div class="apc__foot">
       <textarea
-        v-model="draft" class="apc__ta" rows="3" spellcheck="false"
+        ref="taEl" v-model="draft" class="apc__ta" rows="3" spellcheck="false"
         placeholder="说一句要改什么…（Ctrl+V 可以直接粘图）" @paste="onPaste"
         @keydown.enter.exact.prevent="send"
       ></textarea>
@@ -497,7 +502,7 @@ async function ocrToPaper() {
 <span class="apc__brk" />
         <button class="apc__btn apc__btn--cut" :disabled="busy" title="不调 AI：把上面的附件图切出图形部分（只留图形，题目文字不切），确认后插进试卷" @click="cutToPaper">切图 → 试卷</button>
         <button class="apc__btn apc__btn--chip" :class="{ 'apc__btn--on': onlyFigure }" :title="onlyFigure ? '当前：只切图形部分（题目文字不切）—— 点一下改成整张图' : '当前：整张图都插——点一下改成只切图形'" @click="toggleOnly">{{ onlyFigure ? '只切图形' : '整张图' }}</button>
-<button class="apc__btn apc__btn--ocr" :disabled="busy" title="让 AI 看图，把图里的题目（题干/选项/答案/解析）录进试卷；图形不重画，用「切图 → 试卷」自己插原图" @click="ocrToPaper">录入试题</button>
+        <button class="apc__btn apc__btn--ocr" :disabled="busy" title="不直接发送：把「录入试题」的提示词填进输入框（题干/选项/答案/解析），你补一句位置再点发送" @click="fillOcr">录入试题</button>
         <span v-if="note" class="apc__note">{{ note }}</span>
         <button class="apc__btn apc__btn--main" :disabled="busy" @click="send">{{ busy ? '处理中…' : '发送' }}</button>
       </div>
