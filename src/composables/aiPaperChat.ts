@@ -60,6 +60,7 @@ export function buildPaperChatSystem(): string {
     PAPER_EDIT_RULE,
     '老师说「加一道…」就用 append_to_paper 追加；说「从题库找一道…」先 search_bank 再 insert_bank_question_to_paper；',
     '**老师说「第 N 题…」时先 get_paper_outline 拿题号与行号** ✓ → 再用 replace_paper_question / insert_paper_question（按题号最稳 ✓，别自己数、也别猜原文 ✗）。',
+    '老师说「这道题选项排成两行 / 一行 / 四行」时：**改那一题** —— 在**那题题干行末尾**加 [两行] / [一行] / [四行] ✓（用 replace_paper_question 整题换掉最稳 ✓）；只有说「整卷都…」才用 set_paper_style 的 optLayout ✓。',
     '⚠ **回复要短**：老师只看卷面结果 ✓ —— 改完只回一句「改了哪几处」（30 字内 ✓），不要复述原文、不要讲步骤、不要列工具 ✗。',
     '看不到的图号 / 页码不要猜 ✓。',
   ].join('\n')
@@ -129,6 +130,10 @@ export const PAPER_HELP = [
   '【段落样式】{c:red; s:16; f:楷体; b; i} 这段内容　（颜色支持 red、#ff0000、rgb()）',
   '⚠ ' + STYLE_CLOSER_RULE,
   '【多选/填空】多选题节里的题会自动加「多选」标签；填空节里 =____ 会自动变答题横线',
+  '【选项排布（一行/两行/四行）】⚠ 两种写法别搞混 ✗：',
+  '  · **某一道题**：在**那一题题干行的末尾**加 [一行] / [两行] / [四行]（也认 [1行]/[2行]/[4行]）—— 例：1. 已知…（　）[两行] ✓；',
+  '  · **整卷统一**：用 set_paper_style 的 optLayout（auto 自动 / one 一行一个 / two 一行两个 / four 一行四个）✓；',
+  '  老师说「这道题排两行」就改那一题 ✓；说「整卷都两行」才动 optLayout ✓。标记必须紧挨题干末尾（同一行 ✓），另起一行不生效 ✗',
   '【页眉页脚】是**设置项**（不进正文 ✓）：页眉/页脚文字支持 [图N] 与 {page} {total} 变量',
   '【可改的设置项（set_paper_style 的键）】template 模板、fontFamily 字体、fontSize 字号(pt)、fontColor 字色、',
   'lineHeight 行高、para 段距、indent 首行缩进、h2size 一级小标题字号、numStyle 题号(arabic 阿拉伯数字 / cn 中文)、',
@@ -223,6 +228,8 @@ export interface PaperOutlineItem {
   endLine: number
   /** 属于哪个大节（## 一、选择题 …；没有就空串 ✓） */
   section: string
+  /** 【v1700】这题当前的**选项排布标记**：'' | '一行' | '两行' | '四行'（老师问「这题几行」要能答 ✓） */
+  opt: string
 }
 export interface PaperOutline {
   sections: { title: string; line: number }[]
@@ -272,8 +279,15 @@ export function paperOutline(text: string): PaperOutline {
     const sec = sections.filter((x) => x.line <= st.line).pop()
     const qLine = String(lines[st.line] || '')
     const from = /^\s*\[题\]/.test(qLine) ? st.line + 1 : st.line
-    const head = String(lines[from] || '').replace(Q_LINE, '$2').replace(/\s+/g, ' ').trim().slice(0, 30)
-    items.push({ no: st.no, head, startLine: st.line, endLine: Math.max(st.line, stop), section: sec ? sec.title : '' })
+    const stemLine = String(lines[from] || '')
+    // 【v1700】顺带报出这题当前的**选项排布标记**（[两行] 之类 ✓）—— 老师问「这题几行」时要能答 ✓
+    const optMk = stemLine.match(/\[([0-9一二两四]+)\s*行\]\s*$/)
+    const opt = optMk
+      ? ((optMk[1] === '1' || optMk[1] === '一') ? '一行' : (optMk[1] === '2' || optMk[1] === '两' || optMk[1] === '二') ? '两行' : '四行')
+      : ''
+    // 题干里把排布标记去掉 ✓（排布已单列成 opt ✓ 别重复带 → 省 token 也更清楚 ✓）
+    const head = stemLine.replace(Q_LINE, '$2').replace(/\[([0-9一二两四]+)\s*行\]\s*$/, '').replace(/\s+/g, ' ').trim().slice(0, 30)
+    items.push({ no: st.no, head, startLine: st.line, endLine: Math.max(st.line, stop), section: sec ? sec.title : '', opt })
   })
   return { sections, items, total: items.length }
 }
@@ -286,7 +300,7 @@ export function outlineText(o: PaperOutline, maxItems = 60): string {
   const out: string[] = []
   for (const it of o.items.slice(0, maxItems)) {
     if (it.section !== sec) { sec = it.section; if (sec) out.push('## ' + sec) }
-    out.push('  第 ' + it.no + ' 题（第 ' + (it.startLine + 1) + '-' + (it.endLine + 1) + ' 行）：' + it.head)
+    out.push('  第 ' + it.no + ' 题（第 ' + (it.startLine + 1) + '-' + (it.endLine + 1) + ' 行' + (it.opt ? '，选项' + it.opt : '') + '）：' + it.head)
   }
   if (o.items.length > maxItems) out.push('  …（还有 ' + (o.items.length - maxItems) + ' 道 ✓）')
   return out.join(NL)
