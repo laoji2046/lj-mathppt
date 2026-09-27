@@ -6,7 +6,12 @@
  *   · 对话框：**一次成型**（按条件从题库组卷 / 让模型命一套题 ✓）
  *   · 这个侧栏：**边聊边改**（加一节、插一道、改题号、把照片里的题录进来 ✓），带工具循环，直接改左边源码 ✓
  *
- * 工具只给试卷用得上的四个（见 aiPaperChat.paperToolsOf ✓）—— 幻灯片那套给了它只会乱调 ✗。
+ * 附件三种（【v1698】用户要求补齐 ✓）：
+ *   · 「＋ 图」选图 / Ctrl+V 粘 / 拖进来 ✓（走视觉模型 ✓）
+ *   · 「＋ 文档」.pdf / .pptx / .txt / .md —— 本地抽文本当**参考材料** ✓（不是卷面 ✗）
+ *   · 「截图」复用应用那个截图弹窗（能选窗口 / 拖选区 ✓），attach 模式把图直接交回来当附件 ✓
+ *
+ * 工具见 aiPaperChat.paperToolsOf（12 个试卷专用 ✓）—— 幻灯片那套给了它只会乱调 ✗。
  * 带图时走视觉模型（设置里的「视觉模型」✓），没配就明说"可能读不了图" ✓（不糊弄 ✓）。
  */
 import { nextTick, ref } from 'vue'
@@ -18,10 +23,11 @@ import { pickImages, qSearch, questionBlockOf, questionTextOf } from '@/composab
 import type { QItem } from '@/composables/useQuestionBank'
 import { paperOpsSink, sendToPaper } from '@/ui/paper'
 import {
-  buildPaperChatSystem, canAttachPaperChat, canSendPaperChat, chatUserContent, paperToolsOf,
+  buildPaperChatSystem, canAttachPaperChat, canSendPaperChat, chatUserContent, docCharsOf, paperToolsOf,
 } from '@/composables/aiPaperChat'
 import { typesetMixed } from '@/composables/useMathJax'
 import { escapeHtml } from '@/types'
+import ScreenshotCapture from './ScreenshotCapture.vue'
 
 const props = defineProps<{
   /** 读试卷正文（PaperModal 传进来 ✓） */
@@ -32,14 +38,20 @@ const props = defineProps<{
   insertImage: (dataUrl: string, name?: string) => Promise<string>
 }>()
 
-interface Msg { role: 'user' | 'ai'; text: string; imgs?: string[]; did?: string[] }
+/** docs 只存文件名（气泡上显示 ✓）；正文在发送时一起拼进消息 ✓ */
+interface Msg { role: 'user' | 'ai'; text: string; imgs?: string[]; docs?: string[]; did?: string[] }
 const msgs = ref<Msg[]>([])
 const draft = ref('')
 const atts = ref<{ name: string; src: string }[]>([])
+/** 【v1698】文档附件：抽好的纯文本（当参考材料发给模型 ✓） */
+const docs = ref<{ name: string; chars: number; text: string }[]>([])
 const busy = ref(false)
 const note = ref('')
 const listEl = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
+const docInput = ref<HTMLInputElement | null>(null)
+/** 【v1698】截图弹窗（复用应用那个：选窗口 / 拖选区 / Esc 取消都现成 ✓） */
+const shotOpen = ref(false)
 /** 一次提问里最多让它改几步（防打转 ✓） */
 const MAX_TURNS = 6
 
@@ -61,14 +73,22 @@ function toolLine(name: string, args: Record<string, unknown>, res: { ok: boolea
   const n = (v: unknown) => (typeof v === 'number' ? v : 0)
   const map: Record<string, string> = {
     get_paper_state: '读了一遍试卷',
+    get_paper_help: '查了语法手册',
+    get_paper_style: '读了当前设置',
+    set_paper_style: '改了排版设置',
+    set_paper_header: '改了页眉页脚',
     append_to_paper: '追加了 ' + String(args.text || '').length + ' 字' + (args.page_break ? '（先分页 ✓）' : ''),
+    edit_paper_text: '就地改了正文',
     insert_bank_question_to_paper: '插入题库试题 #' + n(args.id) + (args.with_answer ? '（带答案）' : ''),
     search_bank: '在题库里搜「' + String(args.query || '') + '」',
+    insert_paper_figure: '插了一张数学图形（' + String(args.kind || '') + '）',
+    apply_paper_template: '套了模板 ' + String(args.key || ''),
+    print_paper: '打开了打印 / 另存 PDF',
   }
   return (res.ok ? '已' : '没能') + (map[name] || name) + (res.ok ? '' : '（' + String(res.error || '') + '）')
 }
 
-/** 给工具用的「应用能力」：试卷三件套 + 题库检索（幻灯片那几个填桩，反正也没给它 ✗） */
+/** 给工具用的「应用能力」：试卷全套 + 题库检索（幻灯片那几个填桩，反正也没给它 ✗） */
 function ctxOf(): AiToolCtx {
   const found = new Map<number, QItem>()
   return {
@@ -127,12 +147,18 @@ function ctxOf(): AiToolCtx {
   }
 }
 
-/** 带工具的对话循环（与 AI 助手同一套通道 ✓；这里只给试卷那四个工具 ✓） */
-async function askWithTools(text: string, imgs: string[], key: string, ai: Msg): Promise<string> {
+/** 带工具的对话循环（与 AI 助手同一套通道 ✓；这里只给试卷那 12 个工具 ✓） */
+async function askWithTools(
+  text: string,
+  imgs: string[],
+  docList: { name: string; chars: number; text: string }[],
+  key: string,
+  ai: Msg,
+): Promise<string> {
   const system = buildPaperChatSystem() + String.fromCharCode(10, 10) + aiToolGuide()
   const messages: unknown[] = [
     { role: 'system', content: system },
-    { role: 'user', content: chatUserContent(text, imgs) },
+    { role: 'user', content: chatUserContent(text, imgs, docList) },
   ]
   const tools = paperToolsOf(AI_TOOLS)
   const baseUrl = imgs.length ? visionBase() : ''
@@ -181,6 +207,8 @@ function scrollSoon() {
   void nextTick(() => { const el = listEl.value; if (el) el.scrollTop = el.scrollHeight })
 }
 
+/* ---------------- 附件①图 ---------------- */
+
 async function addFiles(files: File[]) {
   for (const f of files) {
     const c = canAttachPaperChat(atts.value.length, f.size)
@@ -217,7 +245,6 @@ function onDrop(e: DragEvent) {
   const files = Array.from((e.dataTransfer && e.dataTransfer.files) || [])
   if (files.length) void addFiles(files)
 }
-
 async function insertAtt(i: number) {
   const a = atts.value[i]
   if (!a) return
@@ -229,17 +256,74 @@ async function insertAtt(i: number) {
   }
 }
 
+/* ---------------- 附件②文档 ---------------- */
+
+/** 【v1698】「＋ 文档」：本地抽文本（.pdf / .pptx 走应用自己的解析器 ✓，其余按纯文本读 ✓） */
+async function addDocs(files: File[]) {
+  for (const f of files) {
+    try {
+      let text = ''
+      if (/\.pdf$/i.test(f.name)) {
+        const { pdfToMarkdown } = await import('@/pdf/pdfImport')
+        const r = await pdfToMarkdown(new Uint8Array(await f.arrayBuffer()), {})
+        text = String((r as { markdown?: string })?.markdown || '')
+      } else if (/\.pptx$/i.test(f.name)) {
+        const { pptxToDeck } = await import('@/pptx/pptxToDeck')
+        const { deckToPlainText } = await import('@/composables/deckToText')
+        const { deck } = await pptxToDeck(new Uint8Array(await f.arrayBuffer()))
+        text = deckToPlainText(deck)
+      } else if (/\.docx?$/i.test(f.name)) {
+        note.value = f.name + '：Word 请先在 Word 里全选复制、粘到下面的输入框里（.docx 的排版读不出 ✓）'
+        continue
+      } else {
+        text = await f.text()
+      }
+      const chars = docCharsOf(text)
+      if (chars < 10) {
+        note.value = f.name + ' 里没读出文字（可能是扫描件 / 纯图片）—— 当图片发我看看 ✓'
+        continue
+      }
+      docs.value.push({ name: f.name, chars, text })
+      note.value = '已加文档 ' + f.name + '（' + chars + ' 个可读字符 ✓，发送时当参考材料）'
+    } catch (e) {
+      note.value = '读 ' + f.name + ' 失败：' + String((e as Error)?.message || e)
+    }
+  }
+}
+async function onPickDoc(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  input.value = ''
+  await addDocs(files)
+}
+
+/* ---------------- 附件③截图 ---------------- */
+
+/** 【v1698】截图弹窗（attach 模式）交回来的图，直接当附件 ✓ */
+function onShot(dataUrl: string) {
+  shotOpen.value = false
+  if (!dataUrl) return
+  atts.value.push({ name: '截图', src: dataUrl })
+  note.value = visionModel()
+    ? '截图已当附件 ✓ 直接说要对它做什么就行'
+    : '截图已当附件，但还没配「视觉模型」—— 可能读不出图（设置 → AI 助手 ✓）'
+}
+
+/* ---------------- 发送 ---------------- */
+
 async function send() {
-  const c = canSendPaperChat(draft.value, busy.value, atts.value.length)
+  const c = canSendPaperChat(draft.value, busy.value, atts.value.length + docs.value.length)
   if (!c.ok) { note.value = c.why; return }
   if (!licensed('ai-assistant')) { note.value = 'AI 助手要先激活：工具栏「激活 / 序列号」'; return }
   const key = aiKey()
   if (!key) { note.value = '还没填 AI Key：设置 → AI 助手 里填一个（只存本机 ✓）'; return }
   const text = draft.value.trim()
   const imgs = atts.value.map((a) => a.src)
-  msgs.value.push({ role: 'user', text, imgs: imgs.slice() })
+  const docList = docs.value.slice()
+  msgs.value.push({ role: 'user', text, imgs: imgs.slice(), docs: docList.map((d) => d.name) })
   draft.value = ''
   atts.value = []
+  docs.value = []
   note.value = ''
   busy.value = true
   const ai: Msg = { role: 'ai', text: '（正在看试卷…）', did: [] }
@@ -247,7 +331,7 @@ async function send() {
   await renderAll()
   scrollSoon()
   try {
-    const out = await askWithTools(text, imgs, key, ai)
+    const out = await askWithTools(text, imgs, docList, key, ai)
     ai.text = out || '（模型没有返回内容）'
   } catch (e) {
     ai.text = '出错了：' + String((e as Error)?.message || e)
@@ -263,7 +347,7 @@ async function send() {
   <div class="apc" @dragover.prevent @drop.prevent="onDrop">
     <header class="apc__head">
       <span class="apc__title">AI 助手</span>
-      <span class="apc__sub">说一句就改这份卷子（可带图）</span>
+      <span class="apc__sub">说一句就改这份卷子（可带图 / 文档 / 截图）</span>
     </header>
 
     <div ref="listEl" class="apc__list">
@@ -271,14 +355,18 @@ async function send() {
         可以直接说：<br />
         · 加一节「二、填空题」，放 3 道中档题<br />
         · 从题库找一道椭圆的解答题插到末尾<br />
-        · 帮我把题号重排、选项对齐<br />
-        · 这道题（粘一张照片）帮我录进试卷
+        · 把解答题改成墨绿色（改现有的，不会多出一份）<br />
+        · 这道题（粘图 / 截图）帮我录进试卷<br />
+        · 这个文档里的题（＋文档）挑几道进试卷
       </div>
       <div v-for="(m, i) in msgs" :key="i" class="apc__msg" :class="'apc__msg--' + m.role">
         <template v-if="m.role === 'user'">
           <div v-if="m.text" class="apc__utext">{{ m.text }}</div>
           <div v-if="m.imgs && m.imgs.length" class="apc__uimgs">
             <img v-for="(u, k) in m.imgs" :key="k" :src="u" alt="附件" />
+          </div>
+          <div v-if="m.docs && m.docs.length" class="apc__udocs">
+            <span v-for="(d, k) in m.docs" :key="k">📄 {{ d }}</span>
           </div>
         </template>
         <template v-else>
@@ -290,11 +378,15 @@ async function send() {
       </div>
     </div>
 
-    <div v-if="atts.length" class="apc__atts">
-      <div v-for="(a, i) in atts" :key="i" class="apc__att">
+    <div v-if="atts.length || docs.length" class="apc__atts">
+      <div v-for="(a, i) in atts" :key="'i' + i" class="apc__att">
         <img :src="a.src" :title="a.name" alt="附件" />
         <button title="把这张图插进试卷（进图片库并给一个 [图N]）" @click="insertAtt(i)">插进试卷</button>
         <button title="移除" @click="atts.splice(i, 1)">✕</button>
+      </div>
+      <div v-for="(d, i) in docs" :key="'d' + i" class="apc__doc">
+        <span :title="d.name">📄 {{ d.name }}（{{ d.chars }} 字）</span>
+        <button title="移除" @click="docs.splice(i, 1)">✕</button>
       </div>
     </div>
 
@@ -306,12 +398,16 @@ async function send() {
       ></textarea>
       <div class="apc__bar">
         <button class="apc__btn" title="加图（也可以直接粘进来 / 拖进来）" @click="fileInput && fileInput.click()">＋ 图</button>
+        <button class="apc__btn" title="加文档：.pdf / .pptx / .txt / .md —— 本地抽文本当参考材料（不会自动写进卷子 ✓）" @click="docInput && docInput.click()">＋ 文档</button>
+        <button class="apc__btn" title="截图：截完直接当附件（能选窗口 / 拖选区；也可以 Ctrl+V 粘 Snipaste 的图）" @click="shotOpen = true">截图</button>
         <span v-if="note" class="apc__note">{{ note }}</span>
         <button class="apc__btn apc__btn--main" :disabled="busy" @click="send">{{ busy ? '处理中…' : '发送' }}</button>
       </div>
     </div>
 
     <input ref="fileInput" class="apc__file" type="file" accept="image/*" multiple @change="onPick" />
+    <input ref="docInput" class="apc__file" type="file" accept=".pdf,.pptx,.txt,.md,.json,.csv" multiple @change="onPickDoc" />
+    <ScreenshotCapture v-if="shotOpen" attach @close="shotOpen = false" @done="onShot" />
   </div>
 </template>
 
@@ -327,15 +423,18 @@ async function send() {
 .apc__utext { max-width: 92%; background: var(--brand-50, #f2f0ff); border: 1px solid var(--brand-100, #ded9fb); color: var(--text); border-radius: 10px; padding: 6px 9px; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .apc__uimgs { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .apc__uimgs img { max-height: 68px; max-width: 110px; border: 1px solid var(--border); border-radius: 6px; }
+.apc__udocs { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; font-size: 11px; color: var(--muted); }
 .apc__body { font-size: 12.5px; line-height: 1.75; color: var(--text); background: var(--gray-50); border: 1px solid var(--border); border-radius: 10px; padding: 7px 9px; word-break: break-word; }
 .apc__did { margin: 0; padding-left: 16px; font-size: 11px; color: #2f6b45; line-height: 1.7; }
 .apc__atts { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 8px; border-top: 1px dashed var(--border); }
 .apc__att { display: flex; align-items: center; gap: 4px; }
 .apc__att img { max-height: 40px; max-width: 60px; border: 1px solid var(--border); border-radius: 4px; }
 .apc__att button { font-size: 11px; border: 1px solid var(--border); background: #fff; border-radius: 5px; padding: 2px 6px; cursor: pointer; color: var(--text); }
+.apc__doc { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--text); background: var(--gray-50); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; }
+.apc__doc button { border: none; background: transparent; cursor: pointer; color: var(--gray-600); }
 .apc__foot { border-top: 1px solid var(--border); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 .apc__ta { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 12.5px; line-height: 1.6; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); }
-.apc__bar { display: flex; align-items: center; gap: 6px; }
+.apc__bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .apc__btn { height: 26px; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px; background: #fff; font-size: 12px; cursor: pointer; color: var(--text); }
 .apc__btn--main { margin-left: auto; background: var(--brand-600, #534AB7); border-color: var(--brand-600, #534AB7); color: #fff; }
 .apc__btn:disabled { opacity: .5; cursor: not-allowed; }

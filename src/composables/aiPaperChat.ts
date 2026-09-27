@@ -45,6 +45,7 @@ export function buildPaperChatSystem(): string {
   return [
     '你是高中数学老师的**试卷编辑助手**。老师在「试卷编辑」窗口里编一份 A4 试卷（左边源码、右边实时预览）。',
     '你要**主动用工具**改这份试卷，不要只说"你可以…"。动手前先 get_paper_state 看现在的内容 ✓。',
+    '老师可能带**附件**（截图 / 参考文档 ✓）：截图要照着读文字，文档是参考材料 —— 要不要落到试卷**由老师的话决定** ✓，别自作主张把整篇文档倒进卷子 ✗。',
     '试卷的排版约定（写错就排不出来 ✗）：',
     '· 以 # 开头是居中大标题；## 一、选择题 这种是**大题标题**（方块标题）；### 是小标题；',
     '· 题号写成 1. 题干…  （试卷会按 autoNum 自动重排 ✓）；小问写 (1) …；',
@@ -62,11 +63,14 @@ export function buildPaperChatSystem(): string {
 }
 
 /** 用户这条消息的内容：带图就是多模态数组 ✓（不带图就是纯字符串 ✓） */
-export function chatUserContent(text: string, imgs: string[]): unknown {
+/** 用户这条消息的内容：带图就是多模态数组 ✓（不带图就是纯字符串 ✓）；文档拼进 text ✓ */
+export function chatUserContent(text: string, imgs: string[], docs?: PaperDoc[]): unknown {
   const t = String(text || '')
   const list = (imgs || []).filter(Boolean).slice(0, PAPER_CHAT_MAX_IMG)
-  if (!list.length) return t
-  return [{ type: 'text', text: t }, ...list.map((u) => ({ type: 'image_url', image_url: { url: u } }))]
+  const docBlock = paperDocBlock(docs)
+  const full = docBlock ? (t ? t + String.fromCharCode(10, 10) + docBlock : docBlock) : t
+  if (!list.length) return full
+  return [{ type: 'text', text: full }, ...list.map((u) => ({ type: 'image_url', image_url: { url: u } }))]
 }
 
 /** 能不能发（不忙、有内容或有图 ✓）；不能发就说清为什么 ✓ */
@@ -179,3 +183,28 @@ export const PAPER_EDIT_RULE = [
   '要给现有段落上样式（颜色、加粗、字号），就在那段文字**行首**加 {c:blue} / {b} / {s:14} ✓（见 get_paper_help ✓）。',
   STYLE_CLOSER_RULE,
 ].join(String.fromCharCode(10))
+/* ---------------- 【v1698】附件文档（用户要求：试卷侧栏加「+文档」「截图」✓） ---------------- */
+
+/** 老师拖进来的参考文档（.pdf / .pptx / .txt / .md … 已抽成纯文本 ✓） */
+export interface PaperDoc { name: string; chars: number; text: string }
+
+/** 文档里的**可读字数**（只有空白 = 空文档，不收 ✓ 与图片那边的口径一致 ✓） */
+export function docCharsOf(text: string): number {
+  return String(text || '').replace(/\s+/g, '').length
+}
+
+/**
+ * 把文档拼成一段**参考材料**（每份截断到 maxChars ✓ —— 整本书塞进去会把上下文烧光 ✗）
+ * ⚠ 必须说清"这是附件、不是试卷正文" ✗ —— 否则模型会把文档内容当卷面去改 ✗（用户最怕这个 ✓）
+ */
+export function paperDocBlock(docs: PaperDoc[] | undefined, maxChars = 20000): string {
+  const list = (docs || []).filter((d) => d && String(d.text || '').trim())
+  if (!list.length) return ''
+  const NL = String.fromCharCode(10)
+  const parts = list.map((d) => {
+    const body = String(d.text || '').trim()
+    const cut = body.length > maxChars ? body.slice(0, maxChars) + '…（已截断）' : body
+    return '【附件文档：' + String(d.name || '未命名') + '】' + NL + cut
+  })
+  return '（下面是老师给你的**参考文档**，不是试卷正文 —— 要不要落到试卷由老师的话决定 ✓）' + NL + parts.join(NL + NL)
+}
