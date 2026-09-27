@@ -23,7 +23,7 @@ import { pickImages, qSearch, questionBlockOf, questionTextOf } from '@/composab
 import type { QItem } from '@/composables/useQuestionBank'
 import { paperOpsSink, sendToPaper } from '@/ui/paper'
 import {
-  PAPER_OCR_PROMPT, buildPaperChatSystem, canAttachPaperChat, canSendPaperChat, chatUserContent, docCharsOf, paperToolsOf,
+  buildPaperChatSystem, canAttachPaperChat, canSendPaperChat, chatUserContent, docCharsOf, paperToolsOf,
 } from '@/composables/aiPaperChat'
 import { typesetMixed } from '@/composables/useMathJax'
 import { escapeHtml } from '@/types'
@@ -50,8 +50,6 @@ const docs = ref<{ name: string; chars: number; text: string }[]>([])
 const busy = ref(false)
 const note = ref('')
 const listEl = ref<HTMLElement | null>(null)
-/** 【v1705】输入框 —— 「录入试题」填完要把光标放到末尾，老师接着补一句 ✓ */
-const taEl = ref<HTMLTextAreaElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const docInput = ref<HTMLInputElement | null>(null)
 /** 【v1698】截图弹窗（复用应用那个：选窗口 / 拖选区 / Esc 取消都现成 ✓） */
@@ -382,22 +380,14 @@ async function cutToPaper() {
 async function send() {
   const c = canSendPaperChat(draft.value, busy.value, atts.value.length + docs.value.length)
   if (!c.ok) { note.value = c.why; return }
-  const text = draft.value.trim()
-  draft.value = ''
-  await sendAs(text)
-}
-
-/** 【v1704】真正发出去的那一步（从 send 里拆出来 —— 「录入试题」走**同一条路** ✓）
- *  · bubble：气泡上显示的人话（留空 = 就把发出的原文显示出来 ✓） */
-async function sendAs(sendText: string, bubble = '') {
-  if (busy.value) return
   if (!licensed('ai-assistant')) { note.value = 'AI 助手要先激活：工具栏「激活 / 序列号」'; return }
   const key = aiKey()
   if (!key) { note.value = '还没填 AI Key：设置 → AI 助手 里填一个（只存本机 ✓）'; return }
-  const text = String(sendText || '').trim()
+  const text = draft.value.trim()
   const imgs = atts.value.map((a) => a.src)
   const docList = docs.value.slice()
-  msgs.value.push({ role: 'user', text: bubble || text, imgs: imgs.slice(), docs: docList.map((d) => d.name) })
+  msgs.value.push({ role: 'user', text, imgs: imgs.slice(), docs: docList.map((d) => d.name) })
+  draft.value = ''
   atts.value = []
   docs.value = []
   note.value = ''
@@ -417,23 +407,6 @@ async function sendAs(sendText: string, bubble = '') {
     scrollSoon()
   }
 }
-/* ---------------- 【v1705】录入试题：提示词落进输入框，老师补一句再发送 ---------------- */
-
-/**
- * 「录入试题」＝**把提示词填进输入框**（用户口径：录入试题 → 对话框输入 → 发送 ✓）
- *  为什么不直接替他发：老师常常要补一句 —— 「插在第 3 题后面」「只要题干，不要解析」✓
- *    先落在输入框里，看得见、改得动，再按发送 ✓（与侧栏那几个预制对话同一套手感 ✓）
- *  ⚠ 没配「视觉模型」时照样填，但必须把话说清楚 —— 纯文本模型带图只会**照着图名瞎编** ✗
- */
-function fillOcr() {
-  const cur = draft.value.replace(/\s+$/, '')
-  draft.value = cur ? cur + '\n\n' + PAPER_OCR_PROMPT : PAPER_OCR_PROMPT
-  const warn = visionModel() ? '' : '；⚠ 还没配「视觉模型」（设置 → AI 助手），带图它读不出图 ✗'
-  note.value = (atts.value.length
-    ? '已填进输入框（' + atts.value.length + ' 张图会跟着一起发）—— 要插在第几题后面就先补一句，再点发送'
-    : '已填进输入框 —— 先在下面点「＋ 图」选一张（或「截图」/ Ctrl+V 粘一张），再点发送') + warn
-  nextTick(() => { const el = taEl.value; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length) } })
-}
 </script>
 
 <template>
@@ -452,7 +425,6 @@ function fillOcr() {
         · 这道题（粘图 / 截图）帮我录进试卷<br />
         · 这个文档里的题（＋文档）挑几道进试卷
 · 截图 / 粘图后点「切图 → 试卷」，只把图形部分插进卷子（题目文字不切）
-        · 拍照/截图 → 点「录入试题」，把图里的题目录进卷子（题干 / 选项 / 答案 / 解析）
       </div>
       <div v-for="(m, i) in msgs" :key="i" class="apc__msg" :class="'apc__msg--' + m.role">
         <template v-if="m.role === 'user'">
@@ -491,7 +463,7 @@ function fillOcr() {
 
     <div class="apc__foot">
       <textarea
-        ref="taEl" v-model="draft" class="apc__ta" rows="3" spellcheck="false"
+        v-model="draft" class="apc__ta" rows="3" spellcheck="false"
         placeholder="说一句要改什么…（Ctrl+V 可以直接粘图）" @paste="onPaste"
         @keydown.enter.exact.prevent="send"
       ></textarea>
@@ -502,7 +474,6 @@ function fillOcr() {
 <span class="apc__brk" />
         <button class="apc__btn apc__btn--cut" :disabled="busy" title="不调 AI：把上面的附件图切出图形部分（只留图形，题目文字不切），确认后插进试卷" @click="cutToPaper">切图 → 试卷</button>
         <button class="apc__btn apc__btn--chip" :class="{ 'apc__btn--on': onlyFigure }" :title="onlyFigure ? '当前：只切图形部分（题目文字不切）—— 点一下改成整张图' : '当前：整张图都插——点一下改成只切图形'" @click="toggleOnly">{{ onlyFigure ? '只切图形' : '整张图' }}</button>
-        <button class="apc__btn apc__btn--ocr" :disabled="busy" title="不直接发送：把「录入试题」的提示词填进输入框（题干/选项/答案/解析），你补一句位置再点发送" @click="fillOcr">录入试题</button>
         <span v-if="note" class="apc__note">{{ note }}</span>
         <button class="apc__btn apc__btn--main" :disabled="busy" @click="send">{{ busy ? '处理中…' : '发送' }}</button>
       </div>
@@ -554,7 +525,4 @@ function fillOcr() {
 .apc__btn--chip { height: 24px; padding: 0 8px; font-size: 11.5px; }
 .apc__btn--chip.apc__btn--on { border-color: #bfe6cf; background: #eefaf3; color: #2f7d5b; }
 .apc__note { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-/* 【v1704】「录入试题」按钮（与「切图」同排：都是对上面那几张图做的事 ✓） */
-.apc__btn--ocr { border-color: #cfe3ff; background: #f1f7ff; color: #1f5aa8; font-weight: 600; }
-.apc__btn--ocr:hover:not(:disabled) { background: #e5f0ff; }
 </style>
