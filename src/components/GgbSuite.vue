@@ -5,6 +5,10 @@ import type { SlideElement } from '@/types'
 import { useDeckStore } from '@/stores/deck'
 import { hasLocalEngine, loadGeoGebra } from '@/composables/useGeoGebra'
 import { describeToCommands } from '@/composables/ggbAI'
+import { ggbSolvePlan, ggbSolveSystem, ggbToolOf } from '@/composables/ggbSolve'
+import { licensed } from '@/composables/useLicense'
+import { invoke } from '@/composables/useTauri'
+import ScreenshotCapture from './ScreenshotCapture.vue'
 import { HELP_GROUPS, SAMPLES, SAMPLE_GROUPS, sampleIndexOf, type GgbHelpItem } from '@/composables/ggbPresets'
 
 const store = useDeckStore()
@@ -168,6 +172,125 @@ function runAIInner() {
   toaster('🤖 AI 已执行 ' + ok + '/' + cmds.length + ' 条命令')
 }
 
+/* ---------------- 【v1711】贴图解题作图：题目图 → 解题过程 + 自动切工具作图 ----------------
+ *
+ * 老师口径：导入图片或截图 → 自动生成求解过程 → 在绘图套件里画出来 → 自动切换套件中的工具。
+ * 分工：模型只负责「想」（给 solution + steps 的 JSON），这里负责**执行**（setMode → evalCommand）。
+ */
+const solveImgs = ref<string[]>([])
+const solveSay = ref("")
+const solving = ref(false)
+const solution = ref("")
+const solveLog = ref<string[]>([])
+const solveShot = ref(false)
+const solveFile = ref<HTMLInputElement | null>(null)
+const MAX_SOLVE_IMG = 3
+
+/** AI Key / 视觉模型：与其它 AI 面板同一口径（键名不写死，设置里存的哪个就用哪个） */
+function solveAiKey(): string {
+  try {
+    for (const k of Object.keys(localStorage)) {
+      if (!/ai[-_]?key/i.test(k)) continue
+      const v = String(localStorage.getItem(k) || "").trim()
+      if (v) return v
+    }
+  } catch { /* 隐私模式读不到就算了 */ }
+  return ""
+}
+function solveVisionModel(): string { try { return String(localStorage.getItem("lj-mathslides:vision-model") || "").trim() } catch { return "" } }
+function solveVisionBase(): string { try { return String(localStorage.getItem("lj-mathslides:vision-base") || "").trim() } catch { return "" } }
+
+function readAsDataUrl(f: File): Promise<string> {
+  return new Promise((res, rej) => {
+    const r = new FileReader()
+    r.onload = () => res(String(r.result || ""))
+    r.onerror = () => rej(new Error("读图失败"))
+    r.readAsDataURL(f)
+  })
+}
+async function addSolveFiles(files: File[]) {
+  for (const f of files) {
+    if (solveImgs.value.length >= MAX_SOLVE_IMG) { toaster("最多贴 " + MAX_SOLVE_IMG + " 张题目图"); break }
+    if (!f.type || f.type.indexOf("image/") !== 0) continue
+    if (f.size > 4 * 1024 * 1024) { toaster(f.name + " 超过 4MB，先压一下"); continue }
+    try { solveImgs.value.push(await readAsDataUrl(f)) } catch { toaster(f.name + " 读不出来") }
+  }
+}
+async function onSolvePick(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  input.value = ""
+  await addSolveFiles(files)
+}
+async function onSolvePaste(e: ClipboardEvent) {
+  const items = Array.from((e.clipboardData && e.clipboardData.items) || [])
+  const files: File[] = []
+  for (const it of items) { if (it.kind === "file") { const f = it.getAsFile(); if (f) files.push(f) } }
+  if (files.length) { e.preventDefault(); await addSolveFiles(files); toaster("已贴进 " + solveImgs.value.length + " 张题目图 ✓ 点「解题并作图」") }
+}
+function onSolveShot(url: string) {
+  solveShot.value = false
+  if (!url) return
+  if (solveImgs.value.length >= MAX_SOLVE_IMG) { toaster("最多贴 " + MAX_SOLVE_IMG + " 张题目图"); return }
+  solveImgs.value.push(url)
+  toaster("截图已当题目图 ✓ 点「解题并作图」")
+}
+
+/** 点「解题并作图」：模型想 → 按步骤切工具 + 作图 ✓ */
+function solveAndDraw() { quietErrors(solveAndDrawInner) }
+async function solveAndDrawInner() {
+  const a = liveApplet()
+  if (!a || typeof a.evalCommand !== "function") { toaster("作图器尚未就绪"); return }
+  if (!solveImgs.value.length && !solveSay.value.trim()) { toaster("先贴一张题目图（或写一句题目）✓"); return }
+  if (!licensed("ai-assistant")) { toaster("AI 助手要先激活：工具栏「激活 / 序列号」"); return }
+  const key = solveAiKey()
+  if (!key) { toaster("还没填 AI Key：设置 → AI 助手 ✓"); return }
+  solving.value = true
+  solveLog.value = []
+  solution.value = ""
+  try {
+    const imgs = solveImgs.value.slice(0, MAX_SOLVE_IMG)
+    const ask = "请解这道题，并按格式给出作图步骤。" + (solveSay.value.trim() ? String.fromCharCode(10) + "补充：" + solveSay.value.trim() : "")
+    const content: unknown = imgs.length
+      ? [{ type: "text", text: ask }, ...imgs.map((u) => ({ type: "image_url", image_url: { url: u } }))]
+      : ask
+    const model = imgs.length && solveVisionModel() ? solveVisionModel() : "deepseek-chat"
+    const baseUrl = imgs.length ? solveVisionBase() : ""
+    const r = await invoke<{ ok?: boolean; json?: unknown; error?: string }>("ai_chat_raw", {
+      baseUrl, apiKey: key,
+      body: { model, temperature: 0, messages: [{ role: "system", content: ggbSolveSystem() }, { role: "user", content }] },
+    })
+    if (!r || r.ok === false) throw new Error(String((r && r.error) || "工具通道调用失败"))
+    const j = (r.json || {}) as { choices?: { message?: { content?: string } }[] }
+    const text = String((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || "")
+    const plan = ggbSolvePlan(text)
+    solution.value = plan.solution
+    for (const n of plan.notes) solveLog.value.push("· " + n)
+    if (!plan.steps.length) { toaster("它没给出作图步骤 —— 解题过程放在下面了 ✓"); return }
+    const beforeDefs = defSnapshot()
+    const prev = lastCreated.value.slice()
+    let ok = 0
+    let switched = 0
+    for (const s of plan.steps) {
+      if (s.tool) {
+        try { a.setMode(s.mode); switched++; solveLog.value.push("切换工具：" + (ggbToolOf(s.tool)?.label || s.tool)) } catch { /* 切不动就跳过 ✓ */ }
+        await new Promise((res) => window.setTimeout(res, 140))
+      }
+      try {
+        a.evalCommand(s.cmd)
+        ok++
+        solveLog.value.push(s.cmd + (s.say ? "　// " + s.say : "") + " ✓")
+      } catch (err) {
+        solveLog.value.push(s.cmd + " ✗ " + String((err as Error)?.message || err))
+      }
+      await new Promise((res) => window.setTimeout(res, 90))
+    }
+    finishRun(beforeDefs, prev)
+    toaster("🤖 已解题并作图：" + ok + "/" + plan.steps.length + " 条命令，切了 " + switched + " 次工具 ✓")
+  } finally {
+    solving.value = false
+  }
+}
 /* ---------------- 【v1513】JS 指令：用 JavaScript 控制 GeoGebra 作图 ✓ ----------------
  *
  * 老师要的："添加 javascript 指令 控制 geogebra 作图功能" ✓
@@ -557,6 +680,36 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
               <div class="ggbs__canvas"><div ref="host" class="ggbs__host"></div></div>
             </div>
             <div class="ggbs__side">
+<!-- 【v1711】贴图解题作图：题目图 → 解题过程 + 自动切工具作图 ✓ -->
+            <div class="ggbs__solve">
+              <div class="ggbs__solvehead">
+                <span class="ggbs__aiicon">🧠</span>
+                <span class="ggbs__solvet">贴图解题作图</span>
+                <span class="ggbs__solves">贴题目图 / 截图 → 自动解题 + 自动作图 + 自动换工具</span>
+              </div>
+              <div class="ggbs__solverow">
+                <button class="ggbs__btn ggbs__btn--tiny" title="导入题目图片（也可以 Ctrl+V 粘贴 / 直接拖进来）" @click="solveFile && solveFile.click()">＋ 题目图</button>
+                <button class="ggbs__btn ggbs__btn--tiny" title="截图：截完直接当题目图（能选窗口 / 拖选区）" @click="solveShot = true">截图</button>
+                <button v-if="solveImgs.length" class="ggbs__btn ggbs__btn--tiny" title="清掉题目图" @click="solveImgs = []">清空图</button>
+                <span v-if="solveImgs.length" class="ggbs__solveimgs">
+                  <img v-for="(u, i) in solveImgs" :key="i" :src="u" alt="题目图" title="点一下去掉这张" @click="solveImgs.splice(i, 1)" />
+                </span>
+              </div>
+              <textarea v-model="solveSay" class="ggbs__solveinput" rows="1" wrap="soft" placeholder="补充一句（可空）：比如「只画第一问」「用参数方程」" @paste="onSolvePaste"></textarea>
+              <div class="ggbs__solverow">
+                <button class="ggbs__btn ggbs__btn--ai" :disabled="solving" @click="solveAndDraw">{{ solving ? "解题作图中…" : "解题并作图" }}</button>
+                <span class="ggbs__solvehint">按步骤自动切工具（点 → 圆 → 交点 …），跑完自动清掉上一次的图</span>
+              </div>
+              <div v-if="solution" class="ggbs__solution">
+                <div class="ggbs__solvet">解题过程</div>
+                <div class="ggbs__soltext">{{ solution }}</div>
+              </div>
+              <div v-if="solveLog.length" class="ggbs__solvelog">
+                <div v-for="(l, i) in solveLog" :key="i">{{ l }}</div>
+              </div>
+            </div>
+            <input ref="solveFile" type="file" accept="image/*" multiple style="display:none" @change="onSolvePick" />
+            <ScreenshotCapture v-if="solveShot" attach @close="solveShot = false" @done="onSolveShot" />
             <div class="ggbs__ai">
               <span class="ggbs__aiicon">🤖</span>
               <textarea v-model="aiDesc" class="ggbs__aiinput" rows="2" wrap="soft" placeholder="AI 作图（每行一句，回车执行）：
@@ -731,5 +884,19 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
 .ggbs__helpempty { color: var(--danger); font-size: 12.5px; }
 .ggbs__helphint { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border-strong); font-size: 11.5px; color: var(--muted); line-height: 1.7; }
 .ggbs__helphint code { font-family: ui-monospace, Menlo, Consolas, monospace; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; }
+
+/* 【v1711】贴图解题作图 ✓ */
+.ggbs__solve { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: var(--brand-50); border: 1px solid var(--brand-100); border-radius: 8px; }
+.ggbs__solvehead { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.ggbs__solvet { font-size: 12.5px; font-weight: 700; color: var(--text); }
+.ggbs__solves { font-size: 11px; color: var(--muted); }
+.ggbs__solverow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ggbs__solveimgs { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.ggbs__solveimgs img { max-height: 44px; max-width: 68px; border: 1px solid var(--border-strong); border-radius: 5px; cursor: pointer; }
+.ggbs__solveinput { width: 100%; box-sizing: border-box; border: 1px solid var(--border-strong); border-radius: 7px; padding: 5px 8px; font: inherit; font-size: 12px; resize: vertical; }
+.ggbs__solvehint { font-size: 11px; color: var(--muted); flex: 1 1 120px; min-width: 0; }
+.ggbs__solution { background: #fff; border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; max-height: 220px; overflow: auto; }
+.ggbs__soltext { font-size: 12px; line-height: 1.7; color: var(--text); white-space: pre-wrap; word-break: break-word; user-select: text; }
+.ggbs__solvelog { font-size: 11px; line-height: 1.6; color: #2f6b45; max-height: 120px; overflow: auto; }
 
 </style>
