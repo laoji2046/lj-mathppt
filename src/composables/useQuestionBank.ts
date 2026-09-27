@@ -11,6 +11,7 @@ import { fbItems, fbMergeMeta, fbRemove } from './useLibrary'
 import type { LibItem } from './useLibrary'
 import type { QuestionImage } from './parseQuestions'
 import { dispNoOf, figLabelOf, placeFigures } from './mineruImages'
+import { stripOptionLabel } from './optionLabel'
 
 export interface QFacets {
   ok?: boolean
@@ -402,7 +403,8 @@ export function stemWithOptions(it: QItem): string {
   const m = metaOf(it)
   let stem = String(m.stem || it.body || it.title || '')
   const opts = Array.isArray(m.options) ? (m.options as unknown[]).map((x) => String(x)) : []
-  if (opts.length) stem += '\n' + opts.map((o, i) => 'ABCDEFGH'[i] + '．' + o).join('\n')
+  // 【v1702】选项去重编号 ✓（题库里的选项也可能自带 "A. " 前缀 ✗ 再加一次就重复 ✗）
+  if (opts.length) stem += '\n' + opts.map((o, i) => 'ABCDEFGH'[i] + '．' + stripOptionLabel(o, i)).join('\n')
   return stem
 }
 
@@ -435,7 +437,8 @@ export function questionBlockOf(it: QItem, withAnswer: boolean, no = 0): string 
   if (!stem) return ''
   const opts = Array.isArray(m.options) ? (m.options as unknown[]).map((x) => String(x)) : []
   const lines = ['[题]', (no ? no + '. ' : '') + stem]
-  if (opts.length) lines.push('[选项]', opts.map((o, i) => 'ABCDEFGH'[i] + '．' + o).join('\n'))
+  // 【v1702】同上：题目块里的选项也去重编号 ✓（「加入试卷」走的就是这里 ✓）
+  if (opts.length) lines.push('[选项]', opts.map((o, i) => 'ABCDEFGH'[i] + '．' + stripOptionLabel(o, i)).join('\n'))
   if (withAnswer) {
     const ans = String(m.answer || '').trim()
     const sol = String(m.solution || '').trim()

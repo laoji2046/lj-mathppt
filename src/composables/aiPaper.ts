@@ -11,6 +11,7 @@
  * 纯函数、不碰 Tauri / 不碰 DOM → 探针直接测 ✓（模型调用由 caller 注入 ✓）
  */
 import { normLevel } from '@/composables/aiImport'
+import { stripOptionLabel } from '@/composables/optionLabel'
 import type { AiQuestion } from '@/composables/aiImport'
 
 export interface PaperPlan {
@@ -192,7 +193,8 @@ export function aiQuestionBlockOf(q: AiQuestion, no = 0): string {
   if (!stem) return ''
   const lines = ['[题]', (no ? no + '. ' : '') + stem]
   const opts = (q.options || []).map((x) => String(x)).filter(Boolean)
-  if (opts.length) lines.push('[选项]', opts.map((o, i) => 'ABCDEFGH'[i] + '．' + o).join('\n'))
+  // 【v1702】选项去重编号 ✓（模型给的选项常自带 "A. " 前缀 ✗ 再加一次就成了 "A. A. …" ✗）
+  if (opts.length) lines.push('[选项]', opts.map((o, i) => 'ABCDEFGH'[i] + '．' + stripOptionLabel(o, i)).join('\n'))
   const ans = String((q && q.answer) || '').trim()
   const sol = String((q && q.analysis) || '').trim()
   const body = [ans ? '【答案】' + ans : '', sol].filter(Boolean).join('\n')
