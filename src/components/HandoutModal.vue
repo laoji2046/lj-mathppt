@@ -21,7 +21,7 @@ import {
 import { hdDocText, hdFileName, hdFolderImportDir, hdFolderOpen, hdFolderWrite } from '@/composables/useHandoutFolder'
 import type { HdDoc } from '@/composables/useHandout'
 import { firstUserDir } from '@/composables/useQuestionBank'
-import { importMdFiles } from '@/composables/useHandoutMd'
+import { importMdFiles, mdBlocksOf } from '@/composables/useHandoutMd'
 import { loadAssets, assetSrc, saveAsset } from '@/composables/useAssets'
 /* 【M2.6】把「数学图形」打通进讲义 ✓ —— 与题库那双按钮同一套（v1466 ✓）：面板 sink 给 SVG → svgToPngUrl → 入库 */
 import { openFigPalette } from '@/ui/figPalette'
@@ -499,6 +499,30 @@ function onTitleInput() { h.value.meta.autoTitle = false; void refresh() }   // 
 
 /** 内容一变就重排（深度监听 ✓）—— 加的块、改的公式都会立刻渲染 ✓ */
 watch(() => h.value, () => refresh(), { deep: true })
+/** 【v1710】导入 Markdown 到**当前讲义**（接到选中块后面 ✓；每份变成一个讲义用「讲义库」里的导入 ✓） */
+async function importMdInto(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  input.value = ''
+  if (!files.length) return
+  const all: HdBlock[] = []
+  const notes: string[] = []
+  let title = ''
+  for (const f of files) {
+    try {
+      const r = mdBlocksOf(f.name, await f.text())
+      all.push(...r.blocks)
+      if (!title && r.title) title = r.title
+      for (const n of r.notes) if (notes.indexOf(n) < 0) notes.push(n)
+    } catch (err) {
+      flash('读 ' + f.name + ' 失败：' + String((err as Error)?.message || err))
+    }
+  }
+  if (!all.length) { flash('这几份 md 里没解析出内容 ✗（空文件 / 只有标题？）'); return }
+  if (!String(h.value.meta.title || '').trim() && title) { h.value.meta.title = title; h.value.meta.autoTitle = false }
+  insertBlocks(all, '')
+  flash('已把 ' + files.length + ' 份 md 导成 ' + all.length + ' 块' + (notes.length ? '；' + notes.join('；') : ''))
+}
 /* ---------------- 【v1707】AI 助手：讲义的**全部能力**交给工具（接口见 ui/handout.ts ✓） ----------------
  * 用户口径：「为讲义引入 AI 面板 —— AI 要精通讲义的各种操作和功能」✓
  * 做法与试卷编辑 v1693 完全同一套：能力做成对象（这里）+ 手册（aiHandoutChat.HANDOUT_HELP ✓）
@@ -692,6 +716,17 @@ const handoutOps: HandoutOps = {
     exportText()
     return '已导出纯文本（' + (ver.value === 'student' ? '学生版' : '教师版') + ' ✓）'
   },
+  importMarkdown: (markdown, where, afterNo) => {
+    const r = mdBlocksOf('（贴进来的）.md', String(markdown || ''))
+    if (!r.blocks.length) return '这段 Markdown 里没解析出内容（只有标题？那先补点正文 ✓）'
+    let at = h.value.blocks.length
+    if (where === 'after' && afterNo > 0) at = Math.min(Math.round(afterNo), h.value.blocks.length)
+    else if (where === 'cursor') at = Math.min(selIdx.value + 1, h.value.blocks.length)
+    h.value.blocks.splice(at, 0, ...r.blocks)
+    selIdx.value = at
+    void nextTick(() => refreshNow())
+    return '已把 Markdown 转成 ' + r.blocks.length + ' 块（从第 ' + (at + 1) + ' 块起 ✓）' + (r.notes.length ? '；' + r.notes.join('；') : '')
+  },
   save: async () => {
     await saveToFile()
     return '已存进库目录 ✓（' + (folderDir.value || 'exe 同级的 LJ-讲义') + '）'
@@ -726,6 +761,9 @@ watch(ver, () => { void refreshNow() })
             <button class="hd__btn" title="导出讲义 JSON（可再导入 ✓）" @click="exportJson">导出 JSON</button>
             <label class="hd__btn" title="导入讲义 JSON">
               导入<input type="file" accept="application/json,.json" multiple style="display:none" @change="importJson" />
+            </label>
+            <label class="hd__btn" title="导入 Markdown：把 .md 的章节 / 学习目标 / 例题 / 变式 / 练习 / 小结 / 定义… 变成块，接到**当前讲义**末尾（图片路径读不到会换成一行【图：…】✓；表格按原样进正文 ✓）">
+              导入 MD<input ref="mdInput" type="file" accept=".md,.markdown,.txt" multiple style="display:none" @change="importMdInto" />
             </label>
             <button class="hd__close" title="关闭 (Esc)" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
           </span>
@@ -891,7 +929,7 @@ watch(ver, () => { void refreshNow() })
             </div>
             <div class="hd__drow">
               <label class="hd__btn hd__btn--file hd__btn--half" :title="'导入老师的 Markdown 讲义：文件名形如 1.1-集合的概念.md ✓ 每份变成一个讲义，并按 必修一/第X章/第Y节 归到目录树里 ✓'">
-                {{ importing ? '导入中…' : '导入 MD（可多选）' }}
+                {{ importing ? '导入中…' : '批量导入 MD（每份一份讲义）' }}
                 <input type="file" accept=".md,text/markdown" multiple style="display:none" @change="onImportMd" />
               </label>
               <button class="hd__btn hd__btn--half" title="清空当前这份讲义的全部内容（教材定位与标题保留 ✓）" @click="clearBlocks">清空本讲义</button>

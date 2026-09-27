@@ -47,7 +47,7 @@ export const HANDOUT_TOOL_NAMES = [
   'edit_handout_text', 'arrange_handout_block', 'set_handout_block_render', 'set_handout_meta',
   'set_handout_version', 'insert_bank_question_to_handout', 'draw_bank_questions_to_handout',
   'search_bank', 'insert_handout_figure', 'sync_handout_refs', 'print_handout',
-  'export_handout_text', 'save_handout',
+  'export_handout_text', 'save_handout', 'import_handout_markdown',
 ]
 
 /** 从完整工具表里只挑讲义用得上的（名字认不出就跳过，不炸 ✓） */
@@ -228,6 +228,10 @@ export const HANDOUT_HELP = [
   '【插图】insert_handout_figure（kind + params ✓）—— 会插成 figure 块，注释可选 ✓；',
   '  老师自己传的图：请他点「上传图片」或在「块属性」里改注释 / 位置 / 宽度 ✓；',
   '  图形种类与参数：kind 见 insert_handout_figure 的报错提示 ✓（抛物线 parabola、椭圆 ellipse、双曲线 hyperbola、函数图像 function … ✓）',
+  '【导入 Markdown（import_handout_markdown ✓）】把一整份 md 导成块：',
+  '  # 标题 → 讲义标题 ✓　## 本节目标 → 学习目标 ✓　## 例题精讲 / 变式 / 当堂练习 / 本章小结 → 对应块 ✓',
+  '  ### 2.1 … → 节标题 ✓　**定义：**… → 知识梳理 ✓　> 引用 → 提示 ✓　$…$ → 公式块 ✓',
+  '  ⚠ 图片路径读不到 → 换成一行【图：…】（图请在讲义里重新插 ✓）；表格按原样进正文 ✗（讲义不渲染表格 ✓）',
   '【文件与导出】讲义按 册 → 章 → 节 → 课时 存进 exe 同级的 LJ-讲义 目录（改动会自动落盘 ✓）：',
   '  save_handout 马上存一次 ✓　print_handout 打印 / 另存 PDF（矢量文字 ✓）✓　export_handout_text 导出纯文本（当前版本 ✓）✓',
   '【常见说法 → 用哪个工具】',
@@ -255,6 +259,7 @@ export const HANDOUT_FEWSHOT: string[] = [
   '· 老师：「从题库找一道椭圆的题插成例题」→ search_bank {query:"椭圆"} → insert_bank_question_to_handout {id:123, kind:"example"} ✓',
   '· 老师：「插一张抛物线」→ insert_handout_figure {kind:"parabola", params:{p:2}} ✓（别用文字画 ✗）',
   '· 老师：「打印 / 导出 PDF」→ print_handout ✓；「存一下」→ save_handout ✓',
+  '· 老师贴来一整份 Markdown → import_handout_markdown（别一块一块手抄 ✗）✓',
 ]
 
 /** 示例拼成一段（system 里用 ✓） */

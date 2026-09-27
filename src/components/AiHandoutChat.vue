@@ -75,6 +75,7 @@ function toolLine(name: string, args: Record<string, unknown>, res: { ok: boolea
     insert_handout_figure: '插了一张数学图形（' + String(args.kind || '') + '）',
     sync_handout_refs: '按题库刷新了引用的块',
     print_handout: '打开了打印 / 另存 PDF',
+    import_handout_markdown: '把 Markdown 导成了讲义块',
     export_handout_text: '导出了纯文本',
     save_handout: '把讲义存进了库目录',
   }
@@ -122,6 +123,7 @@ function ctxOf(): AiToolCtx {
       print: () => (handoutOpsSink.value ? handoutOpsSink.value.print() : '讲义没开着 ✗'),
       exportText: () => (handoutOpsSink.value ? handoutOpsSink.value.exportText() : '讲义没开着 ✗'),
       save: async () => (handoutOpsSink.value ? await handoutOpsSink.value.save() : '讲义没开着 ✗'),
+      importMarkdown: (markdown, where, afterNo) => (handoutOpsSink.value ? handoutOpsSink.value.importMarkdown(markdown, where, afterNo) : '讲义没开着 ✗'),
     },
   }
 }

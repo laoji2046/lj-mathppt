@@ -126,3 +126,67 @@ export async function importMdFiles(files: { name: string; text: string }[], wri
   }
   return { added: titles.length, titles, dir, failed }
 }
+/* ---------------- 【v1710】把一份 md 变成**当前讲义**能直接用的块 ---------------- */
+
+/** 把正文按 $$…$$ 拆开（独立公式要单独成块 ✓） */
+function splitFormula(t: string): { kind: 'text' | 'formula'; text: string }[] {
+  const out: { kind: 'text' | 'formula'; text: string }[] = []
+  const re = /\$\$([\s\S]+?)\$\$/g
+  let last = 0
+  let m: RegExpExecArray | null = null
+  while ((m = re.exec(t))) {
+    const pre = t.slice(last, m.index).trim()
+    if (pre) out.push({ kind: 'text', text: pre })
+    out.push({ kind: 'formula', text: m[1].trim() })
+    last = m.index + m[0].length
+  }
+  const rest = t.slice(last).trim()
+  if (rest) out.push({ kind: 'text', text: rest })
+  return out.length ? out : [{ kind: 'text', text: t }]
+}
+
+/** 同类型的另一块（保留原块的显示口径 / 题库引用 / 知识底座标题 ✓） */
+function sameKind(b: HdBlock, text: string): HdBlock {
+  const nb = makeBlock(b.type, text)
+  nb.render = { ...b.render }
+  nb.ref = b.ref
+  nb.kbTitle = b.kbTitle
+  return nb
+}
+
+/**
+ * 【v1710】一份 md → 讲义块（「导入 MD」与 AI 的 import_handout_markdown **共用这一个** ✓）
+ *  · 解析与「讲义库」那套**完全一致**（mdToHandout ✓）：章节 / 目标 / 例题 / 变式 / 练习 / 小结 / 定义… 映射一样 ✓
+ *  · 在这之上只补三件"进当前讲义"才有意义的事：
+ *    ① `$$…$$` 独立公式 → **formula 块** ✓（讲义里独立公式有自己的块 ✓）
+ *    ② `![alt](路径)` → 换成一行【图：alt】✗（本地路径读不到 ✓ 图请在讲义里重新插 ✓）
+ *    ③ Markdown 表格 → 原样进正文 + 说明 ✓（讲义渲染暂不支持表格 ✓）
+ */
+export function mdBlocksOf(fileName: string, text: string): { blocks: HdBlock[]; title: string; notes: string[] } {
+  const src = String(text == null ? '' : text).replace(/\r\n?/g, '\n')
+  const { meta, blocks } = mdToHandout(fileName, src)
+  const notes: string[] = []
+  const out: HdBlock[] = []
+  for (const b of blocks) {
+    const t = String(b.text || '')
+    if (b.type === 'para' || b.type === 'knowledge' || b.type === 'note' || b.type === 'warn') {
+      const parts = splitFormula(t)
+      if (parts.length > 1) {
+        for (const p of parts) out.push(p.kind === 'formula' ? makeBlock('formula', p.text) : sameKind(b, p.text))
+        continue
+      }
+    }
+    out.push(b)
+  }
+  for (const b of out) {
+    if (!b.text || b.text.indexOf('![') < 0) continue
+    b.text = b.text.replace(/!\[([^\]]*)\]\([^)]*\)/g, (_m, alt) => '【图：' + (String(alt || '').trim() || '未命名') + '】')
+  }
+  if (/!\[[^\]]*\]\(/.test(src)) notes.push('md 里的图片路径读不到（本地文件 ✓）→ 已换成一行【图：…】✗ 图请在讲义里用「上传图片 / 数学图形」重新插 ✓')
+  if (/^\s*\|.*\|\s*$/m.test(src)) notes.push('md 里有 Markdown 表格 → 已按原样放进正文 ✓（讲义渲染暂不支持表格 ✗）')
+  // 【v1710c】标题优先用 md 里的 # 标题 ✓（meta.title 是教材定位自动生成的口径 ✓ 库里那份不动 ✓）
+  const h1 = (/^#\s+(.+)$/m.exec(src) || [])[1]
+  const title = h1 ? String(h1).replace(/^§\s*/, '').trim() : String(meta.title || '')
+  return { blocks: out, title, notes }
+}
+

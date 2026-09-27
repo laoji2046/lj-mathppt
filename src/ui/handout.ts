@@ -53,6 +53,8 @@ export interface HandoutOps {
   exportText: () => string
   /** 保存进库目录（exe 同级的 LJ-讲义 ✓） */
   save: () => Promise<string>
+  /** 【v1710】把一段 Markdown 导成讲义块（与工具栏「导入 MD」**同一个解析器** ✓） */
+  importMarkdown: (markdown: string, where: string, afterNo: number) => string
 }
 
 /** HandoutModal 打开时登记；关掉时清掉 ✓ */

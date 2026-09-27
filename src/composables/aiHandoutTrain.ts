@@ -238,6 +238,12 @@ export const HANDOUT_TRAIN_CASES: HandoutTrainCase[] = [
   { id: 'c26', ask: '讲义都支持哪些块类型？', tool: 'get_handout_help', why: '写细节前先查手册 ✓' },
   { id: 'c27', ask: '第 3 块是什么内容？', tool: 'get_handout_outline', args: {}, why: '按块号办事先看大纲 ✓' },
   { id: 'c28', ask: '导出一份纯文本给我', tool: 'export_handout_text', why: '导出纯文本 ✓' },
+  {
+    id: 'c29',
+    ask: '把这份 md 导进讲义：' + String.fromCharCode(10) + '# 椭圆的切线' + String.fromCharCode(10) + '## 本节目标' + String.fromCharCode(10) + '- 会用切线长处理问题' + String.fromCharCode(10) + '## 例题精讲' + String.fromCharCode(10) + '例1 已知椭圆 C…',
+    tool: 'import_handout_markdown', altTools: ['add_handout_blocks'],
+    why: '整份 md → import_handout_markdown ✓（一块一块手抄也算达标 ✓ 但优先用导入 ✓）',
+  },
 ]
 
 export interface HandoutTrainCall { name: string; args?: Record<string, unknown> }

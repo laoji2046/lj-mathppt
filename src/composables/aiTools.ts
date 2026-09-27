@@ -72,6 +72,7 @@ export interface AiToolCtx {
     print: () => string
     exportText: () => string
     save: () => Promise<string>
+    importMarkdown: (markdown: string, where: string, afterNo: number) => string
   }
   /** 题库（可缺：探针/没装库时不影响别的工具 ✓） */
   bank?: {
@@ -711,6 +712,22 @@ export const AI_TOOLS: unknown[] = [
       description: '把讲义存进库目录（exe 同级的 LJ-讲义\<标题>.json ✓；平时改动会自动落盘，这个是"马上存一次" ✓）',
       parameters: { type: 'object', properties: {} },
     },
+  },  {
+    type: 'function',
+    function: {
+      name: 'import_handout_markdown',
+      description: '把一段 **Markdown** 导成讲义块（章节 / 学习目标 / 例题 / 变式 / 练习 / 小结 / 定义… 自动认 ✓；'
+        + '$…$ 变成公式块 ✓；图片路径读不到会换成一行【图：…】✗）—— 老师给你一整份 md 时用它 ✓',
+      parameters: {
+        type: 'object',
+        properties: {
+          markdown: { type: 'string', description: '要导入的 Markdown 原文（整份 ✓）' },
+          where: { type: 'string', description: 'end 末尾（默认）| after 第 after_no 块之后 | cursor 当前选中块之后' },
+          after_no: { type: 'number', description: 'where=after 时的块号（先 get_handout_outline ✓）' },
+        },
+        required: ['markdown'],
+      },
+    },
   },
 ]
 
@@ -727,7 +744,7 @@ export function aiToolGuide(): string {
     '数学图形一律用 insert_math_figure（kind + params），不要用 TikZ 画图、也不要只给 LaTeX 让老师自己画。',
 '要动「数学讲义」里的讲义：先 get_handout_state 看有什么，再用 add_handout_blocks 加块（type + text ✓ 讲义是**块**结构，不认 [题] / [分页] / {c:red} 那些试卷语法 ✗）；',
     '老师说「第 N 块 / 第几节」时先 get_handout_outline 拿块号 ✓ → 再 arrange_handout_block / set_handout_block_render / edit_handout_text ✓；',
-    '讲义还能改教材定位（set_handout_meta）、切学生版/教师版（set_handout_version）、插数学图形（insert_handout_figure）、从题库取题（insert_bank_question_to_handout / draw_bank_questions_to_handout）、打印导出（print_handout / export_handout_text / save_handout ✓）；块类型与字段先查 get_handout_help ✓。',
+    '讲义还能改教材定位（set_handout_meta）、切学生版/教师版（set_handout_version）、插数学图形（insert_handout_figure）、从题库取题（insert_bank_question_to_handout / draw_bank_questions_to_handout）、打印导出（print_handout / export_handout_text / save_handout ✓）；块类型与字段先查 get_handout_help ✓；老师给你一整份 Markdown 时用 import_handout_markdown（章节 / 目标 / 例题 / 练习 / 小结会自动认 ✓）。',
     '老师说「字太小、放大一点」就用 update_elements 传 fontSize（例如 {"fontSize":36}）；',
     '说「图形线条换个颜色、坐标轴变灰」就用 set_figure_style（curveColor / axisColor / lineColors / pointColors）。',
   ].join('\n')
@@ -1168,6 +1185,17 @@ case 'get_handout_state': {
       const h = ctx.handout
       if (!h || !h.save) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
       return { ok: true, result: { note: await h.save() } }
+    }
+    case 'import_handout_markdown': {
+      const h = ctx.handout
+      if (!h || !h.importMarkdown) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
+      const md = str(args.markdown)
+      if (!md.trim()) return { ok: false, error: '缺 markdown（要导入的原文 ✓）' }
+      const where = ['end', 'after', 'cursor'].indexOf(str(args.where)) >= 0 ? str(args.where) : 'end'
+      const note = h.importMarkdown(md, where, Math.round(num(args.after_no) ?? 0))
+      if (!note) return { ok: false, error: '没导进去（原因不明）' }
+      if (note.indexOf('没解析出内容') >= 0) return { ok: false, error: note }
+      return { ok: true, result: { note } }
     }
     default:
         return { ok: false, error: '没有这个功能：' + name }
