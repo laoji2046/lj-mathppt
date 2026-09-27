@@ -13,6 +13,7 @@ import { vectorizeSink, openVectorize } from '@/ui/vectorize'
 import { paperAppendSink, paperInsertSink, paperPending, paperTextSink } from '@/ui/paper'
 import type { PaperInsertPayload } from '@/ui/paper'
 import ColorSwatches from './ColorSwatches.vue'
+import AiPaperChat from './AiPaperChat.vue'
 
 /**
  * 试卷编辑（A4 分页 + 题号识别），移植自参考版 LJ-PPT 的 PaperMode。
@@ -766,11 +767,31 @@ async function addImageFromFile(file: File) {
     const kb1 = Math.round((out.length * 0.75) / 1024)
     const size = kb1 < kb0 ? '（' + kb0 + ' KB → ' + kb1 + ' KB）' : ''
     paperMsg.value = '已插入 ' + (file.name || '图片') + '：' + w0 + '×' + h0 + (w !== w0 ? ' → 缩到 ' + w + '×' + h : '') + size
+    return '[图' + n + ']'   // 【v1692】给 AI 侧栏回执（其它调用方忽略返回值 ✓）
   } catch (err: any) {
     paperMsg.value = '插入图片失败：' + (err && err.message ? err.message : String(err))
   }
 }
 
+/** 【v1692】AI 侧栏要用的三件事 —— 都走**已有路径** ✓（不另起一套排版/图片逻辑 ✗） */
+
+/** 追加 AI 写好的正文（与题库「加入试卷」同一套收尾：render + 存草稿 ✓） */
+function appendByAi(text: string, pageBreak: boolean) {
+  const cur = input.value
+  const sep = cur && !cur.endsWith('\n') ? '\n\n' : ''
+  input.value += sep + (pageBreak ? '[分页]\n' : '') + String(text || '') + '\n'
+  render()
+  saveDraftSoon()
+  paperMsg.value = 'AI 已追加到试卷末尾 ✓'
+}
+
+/** 把聊天里的图插进试卷：转成 File → **复用 addImageFromFile**（等比缩放 + 进图片库 + 给 [图N] ✓） */
+async function insertImageDataUrl(dataUrl: string, name = 'AI 附件.png'): Promise<string> {
+  const blob = await (await fetch(dataUrl)).blob()
+  const f = new File([blob], name, { type: blob.type || 'image/png' })
+  const tag = await addImageFromFile(f)
+  return tag || ''
+}
 /** 拖拽进编辑区：一次可以拖多张 ✓ */
 function onDropImages(e: DragEvent) {
   const fs = e.dataTransfer && e.dataTransfer.files
@@ -1764,6 +1785,13 @@ watch([headerText, footerText], () => render())
               </div>
               <p class="pm__hint">题号/标题自动识别、$...$ 公式、[图N] 图片、[换页] 分页、页眉页脚 {page}/{total}。点「<b>帮助</b>」看全部语法与示例。</p>
             </div>
+            <!-- 【v1692】AI 聊天侧栏：就放在**输入区与预览之间**（用户要求 ✓） -->
+            <AiPaperChat
+              class="pm__chat"
+              :read-text="() => input"
+              :append="appendByAi"
+              :insert-image="insertImageDataUrl"
+            />
             <div class="pm__right">
               <div class="pm__zoom">
                 <button @click="zoomBy(-0.1)"><AppIcon name="minus" :size="14" /></button>
@@ -1827,16 +1855,20 @@ watch([headerText, footerText], () => render())
 <style scoped>
 .pm { position: fixed; inset: 0; z-index: 2000; }
 .pm__backdrop { position: fixed; inset: 0; background: rgba(20, 24, 34, 0.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+/* 【v1692】用户要求：试卷窗口**满屏** ✓ —— 给中间的 AI 侧栏和右边预览腾地方（原来 1180px/92vh ✗）；
+   顺带去掉了 translate 居中（那会让 .pm__box 成为 fixed 子孙的包含块，浮层容易被框住/裁掉 ✗） */
 .pm__box {
-  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  width: min(1180px, 96vw); height: 92vh; display: flex; flex-direction: column;
-  background: #fff; border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); overflow: hidden;
+  position: fixed; inset: 0; width: 100vw; height: 100vh; border-radius: 0;
+  display: flex; flex-direction: column; background: #fff; overflow: hidden;
 }
 .pm__head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 700; color: var(--text); font-size: 15px; }
 .pm__x { border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--muted); }
 .pm__x:hover { color: var(--text); }
 .pm__body { flex: 1; min-height: 0; padding: 10px 14px; overflow: hidden; display: flex; flex-direction: column; }
-.pm__split { flex: 1; min-height: 0; display: flex; gap: 14px; }
+.pm__split { flex: 1; min-height: 0; display: flex; gap: 12px; }
+/* 【v1692】三列：输入区 | **AI 聊天侧栏** | A4 预览（用户要求把 AI 放在中间 ✓）；
+   聊天列固定 340px、窗口窄了会缩到 260px ✓ */
+.pm__chat { flex: 0 0 340px; min-width: 260px; min-height: 0; display: flex; }
 /* 【v1592】属性上移后，左侧只剩"编辑区 + 按钮" ✓ 不再需要 42% 那么宽 ✓ */
 .pm__left { flex: 1 1 50%; display: flex; flex-direction: column; gap: 8px; min-width: 300px; min-height: 0; overflow: auto; }
 /* 【v1593】`position: relative` 给缩放栏做定位基准 ✓ —— 它改成**浮层**后不占高度 ✓
@@ -2114,7 +2146,9 @@ watch([headerText, footerText], () => render())
 @media print {
   .app { display: none !important; }
   .pm { position: static !important; }
-  .pm__backdrop, .pm__head, .pm__left, .pm__zoom { display: none !important; }
+  /* 【v1692】聊天列是**新加的界面**，打印/导出 PDF 时必须隐藏 ✗（否则会印在卷子上 ✗）；
+     顺带把一直漏在外面的控制栏 .pm__controls 也补上 ✓ */
+  .pm__backdrop, .pm__head, .pm__controls, .pm__chat, .pm__left, .pm__zoom { display: none !important; }
   .pm__box { box-shadow: none !important; width: auto !important; max-height: none !important; padding: 0 !important; }
   .pm__body { padding: 0 !important; }
   .pm__right, .pm__a4 { overflow: visible !important; background: #fff !important; padding: 0 !important; }
