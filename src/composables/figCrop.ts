@@ -340,3 +340,58 @@ export function previewToPics(items: CropPreview[] | null | undefined): { src: s
   return out
 }
 
+/* ---------------------------------------------------------------------------
+ * 【v1703】「切图」的批量口径 —— 右侧「AI 助手」侧栏与试卷编辑侧栏**共用一份** ✓
+ *   为什么抽出来：同一个功能搬到第二处时，最怕"两处各写一遍、以后只改一处" ✗
+ *   （本项目真实教训：题库与试卷两套选项格式化各写一遍 → 一处修好了另一处照旧出错 ✗）
+ * -------------------------------------------------------------------------*/
+
+export interface CropBatch {
+  items: CropPreview[]
+  /** 真按"图形区域"裁好的张数 */
+  cropped: number
+  /** 只去掉了四周白边的张数 */
+  trimmed: number
+  /** 认不出图形、原样保留的张数 */
+  kept: number
+}
+
+/**
+ * 一批图按"只切图形"开关裁好，**每张都给一份预览条目**（尺寸/原因齐全，直接交给预览对话框 ✓）
+ *  · onlyFigure=false（老师选了"整张图"）→ 全给原图，条目照样给全，调用方不用写分支 ✓
+ *  · 认不出图形的单张 → mode='raw' + 原图原样（绝不乱裁 ✓）
+ */
+export async function cropPicsToPreviews(pics: string[], onlyFigure = true): Promise<CropBatch> {
+  const list = pics || []
+  if (!onlyFigure || !list.length) {
+    return {
+      items: list.map((src) => ({ cut: src, cw: 0, ch: 0, raw: src, rw: 0, rh: 0, mode: 'raw' as const, why: '整张可用' })),
+      cropped: 0, trimmed: 0, kept: list.length,
+    }
+  }
+  const items: CropPreview[] = []
+  let cropped = 0, trimmed = 0
+  for (const p of list) {
+    const r = await cropToFigure(p)
+    // 【v1665】只去掉白边（mode=trim）也算处理过了 → 尺寸按结果图走 ✓（图片比例排版要用它 ✓）
+    const useCut = r.cropped || r.mode === 'trim'
+    items.push({
+      cut: useCut ? r.src : p, cw: useCut ? r.w : r.ow, ch: useCut ? r.h : r.oh,
+      raw: p, rw: r.ow, rh: r.oh, mode: r.mode, why: r.why,
+    })
+    if (r.cropped) cropped++
+    else if (r.mode === 'trim') trimmed++
+  }
+  return { items, cropped, trimmed, kept: items.length - cropped - trimmed }
+}
+
+/** 切图结果的一句话说明（"2 张只留了图形部分；1 张只去掉了白边；3 张认不出图形，整张插了" ✓）
+ *  什么都没切 / 没传 → 空串（不印一对空括号 ✗） */
+export function cropNoteText(cut: { cropped?: number; trimmed?: number; kept?: number } | null | undefined): string {
+  const c = cut || {}
+  const bits: string[] = []
+  if (c.cropped) bits.push(c.cropped + ' 张只留了图形部分')
+  if (c.trimmed) bits.push(c.trimmed + ' 张只去掉了白边')
+  if (c.kept) bits.push(c.kept + ' 张认不出图形，整张插了')
+  return bits.length ? '（' + bits.join('；') + '）' : ''
+}

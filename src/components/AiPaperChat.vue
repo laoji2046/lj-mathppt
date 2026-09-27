@@ -28,6 +28,8 @@ import {
 import { typesetMixed } from '@/composables/useMathJax'
 import { escapeHtml } from '@/types'
 import ScreenshotCapture from './ScreenshotCapture.vue'
+import FigureCropDialog from './FigureCropDialog.vue'
+import { cropNoteText, cropPicsToPreviews, previewToPics, type CropPreview } from '@/composables/figCrop'
 
 const props = defineProps<{
   /** 读试卷正文（PaperModal 传进来 ✓） */
@@ -312,6 +314,67 @@ function onShot(dataUrl: string) {
     : '截图已当附件，但还没配「视觉模型」—— 可能读不出图（设置 → AI 助手 ✓）'
 }
 
+/* ---------------- 【v1703】切图 → 试卷（从右侧「AI 助手」侧栏移植过来 ✓） ---------------- */
+
+/** 「只切图形」开关 —— 与侧栏**共用同一个 localStorage 键**：在哪边关的，两边都关 ✓ */
+const ONLY_KEY = 'lj-mathslides:fig-only'
+const onlyFigure = ref(true)
+try { const v = localStorage.getItem(ONLY_KEY); if (v === '0') onlyFigure.value = false } catch { /* 忽略 */ }
+function toggleOnly() {
+  onlyFigure.value = !onlyFigure.value
+  try { localStorage.setItem(ONLY_KEY, onlyFigure.value ? '1' : '0') } catch { /* 忽略 */ }
+}
+
+/** 插入前先看一眼（与侧栏共用"以后不再问"这个设置 ✓）；返回 null = 老师点了取消 → 什么都不插 ✓ */
+const PREVIEW_KEY = 'lj-mathslides:fig-preview'
+const previewOpen = ref(false)
+const previewItems = ref<CropPreview[]>([])
+let previewDone: ((v: CropPreview[] | null) => void) | null = null
+function previewWanted(): boolean {
+  try { return localStorage.getItem(PREVIEW_KEY) !== '0' } catch { return true }
+}
+function askPreview(items: CropPreview[]): Promise<CropPreview[] | null> {
+  if (!items.length || !previewWanted()) return Promise.resolve(items)
+  previewItems.value = items.map((it) => ({ ...it, useRaw: false }))
+  previewOpen.value = true
+  return new Promise((res) => { previewDone = res })
+}
+function onPreviewDone(sel: CropPreview[] | null, noMore: boolean) {
+  previewOpen.value = false
+  if (noMore) { try { localStorage.setItem(PREVIEW_KEY, '0') } catch { /* 忽略 */ } }
+  const fn = previewDone
+  previewDone = null
+  if (fn) fn(sel)
+}
+
+/**
+ * 【v1703】「切图 → 试卷」：**不调 AI**，把附件图切出图形部分、插进试卷（用户要求：从侧栏移植 ✓）
+ *   与侧栏「切图 → 幻灯片」同一套口径：切 → 预览确认（哪张不满意就单张改成"用整张原图"）→ 插；取消就什么都不插 ✓
+ *   附件**继续留着**：原图还有用 —— 接着可以直接说「把图里的题目也录进试卷」✓
+ */
+async function cutToPaper() {
+  const pics = atts.value.map((a) => a.src)
+  if (!pics.length) { note.value = '先在下面点「＋ 图」选一张（或「截图」/ Ctrl+V 粘一张），再点这个'; return }
+  busy.value = true
+  try {
+    const cut = await cropPicsToPreviews(pics, onlyFigure.value)
+    const chosen = await askPreview(cut.items)
+    if (!chosen) { note.value = '已取消，什么都没插'; return }
+    const out = previewToPics(chosen)
+    if (!out.length) { note.value = '这些图读不出尺寸，没插（换一张再试 ✓）'; return }
+    const tags: string[] = []
+    for (const p of out) {
+      const tag = await props.insertImage(p.src, '切图.png')
+      if (tag) tags.push(tag)
+    }
+    note.value = '已把 ' + tags.length + ' 张图插进试卷' +
+      (tags.length ? '（' + tags.join('、') + '，排在正文末尾，想挪位置就把这个 [图N] 标记剪到别处 ✓）' : '') + cropNoteText(cut) +
+      '；附件还留着，可以接着说「把图里的题目也录进来」'
+  } catch (e) {
+    note.value = '切图插入失败：' + String((e as Error)?.message || e)
+  } finally { busy.value = false }
+}
+
 /* ---------------- 发送 ---------------- */
 
 async function send() {
@@ -350,7 +413,7 @@ async function send() {
   <div class="apc" @dragover.prevent @drop.prevent="onDrop">
     <header class="apc__head">
       <span class="apc__title">AI 助手</span>
-      <span class="apc__sub">说一句就改这份卷子（可带图 / 文档 / 截图）</span>
+      <span class="apc__sub">说一句就改这份卷子（可带图 / 文档 / 截图；截图后能「切图 → 试卷」）</span>
     </header>
 
     <div ref="listEl" class="apc__list">
@@ -361,6 +424,7 @@ async function send() {
         · 把解答题改成墨绿色（改现有的，不会多出一份）<br />
         · 这道题（粘图 / 截图）帮我录进试卷<br />
         · 这个文档里的题（＋文档）挑几道进试卷
+· 截图 / 粘图后点「切图 → 试卷」，只把图形部分插进卷子（题目文字不切）
       </div>
       <div v-for="(m, i) in msgs" :key="i" class="apc__msg" :class="'apc__msg--' + m.role">
         <template v-if="m.role === 'user'">
@@ -407,6 +471,9 @@ async function send() {
         <button class="apc__btn" title="加图（也可以直接粘进来 / 拖进来）" @click="fileInput && fileInput.click()">＋ 图</button>
         <button class="apc__btn" title="加文档：.pdf / .pptx / .txt / .md —— 本地抽文本当参考材料（不会自动写进卷子 ✓）" @click="docInput && docInput.click()">＋ 文档</button>
         <button class="apc__btn" title="截图：截完直接当附件（能选窗口 / 拖选区；也可以 Ctrl+V 粘 Snipaste 的图）" @click="shotOpen = true">截图</button>
+<span class="apc__brk" />
+        <button class="apc__btn apc__btn--cut" :disabled="busy" title="不调 AI：把上面的附件图切出图形部分（只留图形，题目文字不切），确认后插进试卷" @click="cutToPaper">切图 → 试卷</button>
+        <button class="apc__btn apc__btn--chip" :class="{ 'apc__btn--on': onlyFigure }" :title="onlyFigure ? '当前：只切图形部分（题目文字不切）—— 点一下改成整张图' : '当前：整张图都插——点一下改成只切图形'" @click="toggleOnly">{{ onlyFigure ? '只切图形' : '整张图' }}</button>
         <span v-if="note" class="apc__note">{{ note }}</span>
         <button class="apc__btn apc__btn--main" :disabled="busy" @click="send">{{ busy ? '处理中…' : '发送' }}</button>
       </div>
@@ -415,6 +482,8 @@ async function send() {
     <input ref="fileInput" class="apc__file" type="file" accept="image/*" multiple @change="onPick" />
     <input ref="docInput" class="apc__file" type="file" accept=".pdf,.pptx,.txt,.md,.json,.csv" multiple @change="onPickDoc" />
     <ScreenshotCapture v-if="shotOpen" attach @close="shotOpen = false" @done="onShot" />
+<!-- 【v1703】插入前的切图预览（与侧栏同一个对话框 ✓） -->
+    <FigureCropDialog v-if="previewOpen" :items="previewItems" @done="onPreviewDone" />
   </div>
 </template>
 
@@ -449,4 +518,11 @@ async function send() {
 .apc__btn:disabled { opacity: .5; cursor: not-allowed; }
 .apc__note { font-size: 11px; color: var(--muted); }
 .apc__file { display: none; }
+/* 【v1703】切图那两枚按钮 + 强制换行（从侧栏那套搬过来：先"怎么给图"，再"切图动作" ✓） */
+.apc__brk { flex: 1 0 100%; height: 0; }
+.apc__btn--cut { border-color: #ded7ff; background: #f4f2ff; color: #4a3b8f; font-weight: 600; }
+.apc__btn--cut:hover:not(:disabled) { background: #ece7ff; }
+.apc__btn--chip { height: 24px; padding: 0 8px; font-size: 11.5px; }
+.apc__btn--chip.apc__btn--on { border-color: #bfe6cf; background: #eefaf3; color: #2f7d5b; }
+.apc__note { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 </style>

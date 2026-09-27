@@ -16,7 +16,7 @@ import { deckToPlainText } from '@/composables/deckToText'
 import { firstUserDir, writeTextFile, pickImages, qSearch, questionBlockOf, questionTextOf, type QItem } from '@/composables/useQuestionBank'
 import { markdownToDeck } from '@/composables/mdDeck'
 import { attachTikzFigures, flowDeckElements, picElementItems, tikzSolver, type PicInput } from '@/composables/figureRender'
-import { cropToFigure, previewToPics, type CropPreview } from '@/composables/figCrop'
+import { cropNoteText, cropPicsToPreviews, previewToPics, type CropBatch, type CropPreview } from '@/composables/figCrop'
 import ScreenshotCapture from './ScreenshotCapture.vue'
 import FigureCropDialog from './FigureCropDialog.vue'
 import { runAiTool, AI_TOOLS, aiToolGuide, type AiToolCtx } from '@/composables/aiTools'
@@ -77,30 +77,11 @@ function toggleOnly() {
   try { localStorage.setItem(ONLY_KEY, onlyFigure.value ? '1' : '0') } catch { /* 忽略 */ }
 }
 
-/** 按开关把附件图裁成"只有图形"（认不出就原样返回 ✓），并回报每张的**结果与尺寸**（预览要用 ✓） */
-async function cutFigures(pics: string[]): Promise<{ items: CropPreview[]; cropped: number; trimmed: number; kept: number }> {
-  if (!onlyFigure.value || !pics.length) {
-    return {
-      items: pics.map((src) => ({ cut: src, cw: 0, ch: 0, raw: src, rw: 0, rh: 0, mode: 'raw' as const, why: '整张可用' })),
-      cropped: 0, trimmed: 0, kept: pics.length,
-    }
-  }
-  const items: CropPreview[] = []
-  let cropped = 0, trimmed = 0
-  for (const p of pics) {
-    const r = await cropToFigure(p)
-    // 【v1665】只去掉白边（mode=trim）也算处理过了 → 尺寸按结果图走 ✓（图片比例排版要用它 ✓）
-    const useCut = r.cropped || r.mode === 'trim'
-    items.push({
-      cut: useCut ? r.src : p, cw: useCut ? r.w : r.ow, ch: useCut ? r.h : r.oh,
-      raw: p, rw: r.ow, rh: r.oh, mode: r.mode, why: r.why,
-    })
-    if (r.cropped) cropped++
-    else if (r.mode === 'trim') trimmed++
-  }
-  return { items, cropped, trimmed, kept: items.length - cropped - trimmed }
+/** 按开关把附件图裁成"只有图形"（认不出就原样返回 ✓），并回报每张的**结果与尺寸**（预览要用 ✓）
+ *  【v1703】实现搬到 figCrop.cropPicsToPreviews —— 试卷编辑侧栏也要用它，两边**共用一份** ✓ */
+async function cutFigures(pics: string[]): Promise<CropBatch> {
+  return cropPicsToPreviews(pics, onlyFigure.value)
 }
-
 /** 【v1666】插入前先看一眼（用户要求）：把切好的结果摆出来，确认了才插 ✓
  *  · 不想每次都看 → 对话框里勾"以后不再问"，记住设置 ✓
  *  · 返回 null = 用户点了取消（那就什么都不插 ✓） */
@@ -177,13 +158,8 @@ function freeArea() {
 }
 /** 切图结果的说明（只留图形 / 只去白边 / 认不出图形整张插）✓ */
 function cutNote(cut: { cropped: number; trimmed: number; kept: number }): string {
-  const bits: string[] = []
-  if (cut.cropped) bits.push(cut.cropped + ' 张只留了图形部分')
-  if (cut.trimmed) bits.push(cut.trimmed + ' 张只去掉了白边')
-  if (cut.kept) bits.push(cut.kept + ' 张认不出图形，整张插了')
-  return bits.length ? '（' + bits.join('；') + '）' : ''
-}
-/** 插进去的实际尺寸（老师一眼就能看出图和版面配不配 ✓） */
+  return cropNoteText(cut)
+}/** 插进去的实际尺寸（老师一眼就能看出图和版面配不配 ✓） */
 function sizeNote(rects: { w?: number; h?: number }[]): string {
   const bits = rects.map((r) => (Number(r.w) || 0) + '×' + (Number(r.h) || 0))
   return bits.length ? '，尺寸 ' + bits.join('、') : ''
