@@ -868,11 +868,11 @@ watch(ver, () => { void refreshNow() })
             <div class="hd__t1">讲义信息</div>
             <label>标题
               <span class="hd__titleline">
-                <input v-model="h.meta.title" :readonly="h.meta.autoTitle !== false" :title="h.meta.autoTitle !== false ? '按教材自动生成中（改这里会切成手动 ✓）' : '手动标题 ✓'" @input="onTitleInput" />
+                <input v-model="h.meta.title" placeholder="授课题目（例：椭圆外点切线的轨迹）" :title="h.meta.autoTitle !== false ? '现在是按教材定位自动生成的 —— 直接在这里写授课题目就会切成手动 ✓' : '手动标题 ✓'" @input="onTitleInput" />
                 <button class="hd__mini" title="按教材重新生成标题" @click="regenTitle">↻</button>
               </span>
             </label>
-            <div v-if="h.meta.autoTitle !== false" class="hd__hint2">自动生成中：{{ autoTitleOf(h) || '（把教材定位填上就会生成 ✓）' }}</div>
+            <div v-if="h.meta.autoTitle !== false" class="hd__hint2">自动生成的是**教材定位**（{{ autoTitleOf(h) || '（章节课时一个都没填，所以不生成）' }}）—— 想写授课题目，直接在上面改 ✓</div>
             <label>副标题<input v-model="h.meta.subtitle" /></label>
             <div class="hd__row2">
               <label>学校<input v-model="h.meta.school" /></label>

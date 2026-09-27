@@ -418,17 +418,20 @@ export function sampleHandout(): Handout {
  *    选择性必修一 / 第 3 章 / 第 1 节 ✓ 内容也是真的 ✓）—— 于是老师点了「清空讲义库」之后，
  *    列表里**还是**站着一份「椭圆外点切线的轨迹」✗，看着就像"清不掉"✓（用户实报 ✓）
  */
+/** 【v1716】一份**空白**讲义（不是那份示例讲义 ✗）—— 库里被清空时用 ✓
+ *  【v1718】标题留空 + **默认手动**：抬头那个大字该是**授课题目** ✓（以前 auto 会印成「人教版·必修二」✗，
+ *    而且 auto 时输入框是 readonly ✗ 老师写不进去 ✗）
+ */
 export function blankHandout(): Handout {
   return {
     meta: {
-      school: '', subject: '数学', title: '未命名讲义', subtitle: '', grade: '', teacher: '',
+      school: '', subject: '数学', title: '', subtitle: '', grade: '', teacher: '',
       date: new Date().toISOString().slice(0, 10),
-      press: '人教版', book: '必修一', chapter: '', section: '', period: '', autoTitle: true,
+      press: '人教版', book: '必修一', chapter: '', section: '', period: '', autoTitle: false,
     },
     blocks: [],
   }
 }
-
 function normalize(h: unknown): Handout {
   const o = (h || {}) as Partial<Handout>
   const meta: HandoutMeta = {
@@ -574,9 +577,10 @@ export function outlineOf(h: Handout): HdOutlineNode[] {
 }
 
 /**
- * 【v1476】按教材**自动生成讲义标题** ✓
- *   例：人教版·选择性必修一 第 3 章 第 1 节（第 2 课时）✓
- *   —— 章/节/课时缺哪个就省哪个 ✓；全空就回退到「未命名讲义」✓
+ * 【v1476】按教材定位**自动生成标题** ✓（例：人教版·选择性必修一 第 3 章 第 1 节（第 2 课时）✓）
+ * 【v1718】⚠ 修正：**只有版本 / 册时返回空串** ✗ —— 用户实报：抬头那儿印成了「人教版·必修二」✗，
+ *   那是**教材名**，不是**授课题目** ✓（章节课时一个都没填时，标题就该留给老师自己写课题 ✓）
+ *   教材定位照样进抬头那一行（见 handoutPathOf ✓）✓
  */
 export function autoTitleOf(h: Handout): string {
   const m = h.meta
@@ -589,12 +593,15 @@ export function autoTitleOf(h: Handout): string {
   }
   const parts = [num(m.chapter, '章'), num(m.section, '节')].filter(Boolean).join(' ')
   const per = String(m.period || '').trim() ? '（第 ' + String(m.period).replace(/^第\s*/, '') + ' 课时）' : ''
+  /** 【v1718】章 / 节 / 课时**全空** → 不生成（别把教材名当标题 ✗） */
+  if (!String(m.chapter || '').trim() && !String(m.section || '').trim() && !String(m.period || '').trim()) return ''
   const body = [head, parts].filter(Boolean).join(' ')
   if (!body) return ''
   return body + per
 }
 
 /** 自动标题开着时，把标题同步成生成值 ✓（改教材定位 → 标题跟着变 ✓） */
+
 
 /* ---------------- 【M2.5】讲义库（多份）+ 图片块 ---------------- */
 
