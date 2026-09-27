@@ -187,7 +187,8 @@ export function buildHandoutChatSystem(): string {
     '从题库取题：先 search_bank 拿 id ✓ → insert_bank_question_to_handout（kind = example 例题 / exercise 练习 / variant 变式 ✓）→ 会插成「题干 + 解析 + 答案」三块 ✓。',
     '要写具体块类型 / 教材定位 / 版本口径 / 显示方式时，先查 get_handout_help ✓（手册里有全部类型与字段 ✓）。',
     '⚠ **回复要短**：老师只看讲义结果 ✓ —— 改完只回一句「改了哪几块」（30 字内 ✓），不要复述正文、不要讲步骤、不要列工具 ✗。',
-    '看不到的东西（块号 / 题号 / 图号）不要猜 ✓ 先查。',
+'看不到的东西（块号 / 题号 / 图号）不要猜 ✓ 先查。',
+    ...HANDOUT_FEWSHOT,
   ].join(String.fromCharCode(10))
 }
 
@@ -240,3 +241,23 @@ export const HANDOUT_HELP = [
   '  · 「插一张抛物线」→ insert_handout_figure（kind: parabola，params: {p: 2} ✓）',
   '  · 「打印 / 导出 PDF」→ print_handout ✓　「存一下」→ save_handout ✓',
 ].join(String.fromCharCode(10))
+/* ---------------- 【v1708】few-shot 示例（写进 system ✓ 模型照抄最省事 ✓） ---------------- */
+
+/** 8 组「老师说的话 → 调什么工具、传什么」——放进 system ✓（探针盯着每条都提到真工具 ✓） */
+export const HANDOUT_FEWSHOT: string[] = [
+  '【照着这些例子做】',
+  '· 老师：「加一节二、椭圆的定义」→ add_handout_blocks {blocks:[{type:"h2", text:"二、椭圆的定义"}]} ✓',
+  '· 老师：「写个学习目标」→ add_handout_blocks {blocks:[{type:"goal", text:"1. …；2. …"}]} ✓',
+  '· 老师：「这道例题的条件里加上 a=3」→ 先 get_handout_state 看原文 → edit_handout_text {find:"…", replace:"…"} ✓（**不要**再加一块 ✗）',
+  '· 老师：「第 4 块删掉」→ 先 get_handout_outline 拿块号 → arrange_handout_block {no:4, action:"remove"} ✓',
+  '· 老师：「学生版把答案藏起来」→ set_handout_block_render {no:12, render:"endnote", version:"student"} ✓（**绝不删块** ✗）',
+  '· 老师：「这节定位到必修一第 3 章第 1 节」→ set_handout_meta {book:"必修一", chapter:"3", section:"1"} ✓',
+  '· 老师：「从题库找一道椭圆的题插成例题」→ search_bank {query:"椭圆"} → insert_bank_question_to_handout {id:123, kind:"example"} ✓',
+  '· 老师：「插一张抛物线」→ insert_handout_figure {kind:"parabola", params:{p:2}} ✓（别用文字画 ✗）',
+  '· 老师：「打印 / 导出 PDF」→ print_handout ✓；「存一下」→ save_handout ✓',
+]
+
+/** 示例拼成一段（system 里用 ✓） */
+export function handoutFewshotText(): string {
+  return HANDOUT_FEWSHOT.join(String.fromCharCode(10))
+}

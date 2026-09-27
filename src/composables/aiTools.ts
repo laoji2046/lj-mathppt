@@ -19,7 +19,8 @@ import { MATH_FIGURE_OPTIONS, createElement } from '@/types'
 import type { SlideElement } from '@/types'
 import { CONICS, withParams } from '@/composables/mathPlot'
 import { PAPER_HELP } from '@/composables/aiPaperChat'
-import { HANDOUT_HELP, handoutBlockSpecs, handoutMetaPatch } from '@/composables/aiHandoutChat'
+import { HANDOUT_HELP, handoutMetaPatch } from '@/composables/aiHandoutChat'
+import { guessAction, guessKind, guessRender, guessVersion, handoutBlockSpecsLoose } from '@/composables/aiHandoutTrain'
 
 /** 面板传进来的「应用能力」适配器（探针里可以用假的 ✓） */
 export interface AiToolCtx {
@@ -1046,16 +1047,18 @@ case 'get_handout_state': {
     case 'add_handout_blocks': {
       const h = ctx.handout
       if (!h || !h.addBlocks) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
-      const parsed = handoutBlockSpecs(args.blocks)
+      // 【v1708】先用**宽松**校验把模型爱写的样子捋顺（中文块名 / 单对象 / content / Markdown # ✓）
+      const parsed = handoutBlockSpecsLoose(args.blocks)
       if (!parsed.specs.length) {
         return { ok: false, error: '没有能加的块：' + (parsed.errors.join('；') || '（blocks 给空了 ✓）') }
       }
       const where = ['end', 'after', 'cursor'].indexOf(str(args.where)) >= 0 ? str(args.where) : 'end'
       const note = h.addBlocks(parsed.specs, where, Math.round(num(args.after_no) ?? 0))
+      const warn = parsed.errors.concat(parsed.fixed)
       return {
         ok: true,
-        result: parsed.errors.length
-          ? { note, added: parsed.specs.length, warnings: parsed.errors }
+        result: warn.length
+          ? { note, added: parsed.specs.length, warnings: warn }
           : { note, added: parsed.specs.length },
       }
     }
@@ -1074,7 +1077,7 @@ case 'get_handout_state': {
       if (!h || !h.block) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
       const no = num(args.no)
       if (!no) return { ok: false, error: '缺 no（第几块，1 起 ✓ 先 get_handout_outline ✓）' }
-      const act = str(args.action).trim()
+      const act = guessAction(args.action)
       if (['remove', 'up', 'down', 'select'].indexOf(act) < 0) return { ok: false, error: 'action 只能是 remove / up / down / select ✓' }
       const note = h.block(Math.round(no), act)
       if (!note) return { ok: false, error: '没动成（原因不明）' }
@@ -1086,7 +1089,7 @@ case 'get_handout_state': {
       if (!h || !h.setRender) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
       const no = num(args.no)
       if (!no) return { ok: false, error: '缺 no（第几块，1 起 ✓）' }
-      const note = h.setRender(Math.round(no), str(args.render), str(args.version))
+      const note = h.setRender(Math.round(no), guessRender(args.render), guessVersion(args.version))
       if (!note) return { ok: false, error: '没改到（原因不明）' }
       if (note.indexOf('没有第') >= 0 || note.indexOf('认不出') >= 0) return { ok: false, error: note }
       return { ok: true, result: { note } }
@@ -1103,7 +1106,7 @@ case 'get_handout_state': {
     case 'set_handout_version': {
       const h = ctx.handout
       if (!h || !h.version) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
-      const v = str(args.version).trim()
+      const v = guessVersion(args.version)
       if (v !== 'student' && v !== 'teacher') return { ok: false, error: 'version 只能是 student 或 teacher ✓' }
       return { ok: true, result: { note: h.version(v) } }
     }
@@ -1111,7 +1114,8 @@ case 'get_handout_state': {
       const h = ctx.handout
       if (!h || !h.insertQuestion) return { ok: false, error: '讲义没开着：先让老师打开「数学讲义」窗口 ✓' }
       if (!args.q) return { ok: false, error: '这道题还没查到：先 search_bank 搜一次拿到 id，再插 ✓' }
-      const kind = ['example', 'exercise', 'variant'].indexOf(str(args.kind)) >= 0 ? str(args.kind) : 'example'
+      const gk = guessKind(args.kind)
+      const kind = ['example', 'exercise', 'variant'].indexOf(gk) >= 0 ? gk : 'example'
       const note = h.insertQuestion(args.q, kind, args.with_answer !== false)
       if (!note) return { ok: false, error: '没插进去（题库里没有这道题？先 search_bank ✓）' }
       return { ok: true, result: { note } }
@@ -1122,7 +1126,7 @@ case 'get_handout_state': {
       const filter: Record<string, unknown> = {}
       for (const k of ['section', 'kp', 'level']) if (str(args[k]).trim()) filter[k] = str(args[k]).trim()
       const n = Math.max(1, Math.min(20, Math.round(num(args.n) ?? 3)))
-      const pool = String(args.pool || '')
+      const pool = guessKind(args.pool)
       const note = await h.draw(filter, n, pool)
       if (!note) return { ok: false, error: '没抽到（原因不明）' }
       if (note.indexOf('没有题') >= 0) return { ok: false, error: note }
