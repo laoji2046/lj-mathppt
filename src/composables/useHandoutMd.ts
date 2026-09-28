@@ -50,7 +50,7 @@ function headKind(title: string): 'h1' | 'example' | 'exercise' | 'variant' | 's
   if (/(知识梳理|知识清单|必备知识|自主学习|知识回顾|考点整合)/.test(t)) return 'knowledge'
   if (/(典型例|例题|精讲|典例|母题|考点突破|热点题型)/.test(t)) return 'example'
   if (/变式/.test(t)) return 'variant'
-  if (/(预习|课前)/.test(t)) return 'preview'
+  if (/(预习|课前|知识链接)/.test(t)) return 'preview'
   if (/(易错|错因|警示|提醒)/.test(t)) return 'warn'
   if (/(方法|技巧|规律|点拨|提炼)/.test(t)) return 'method'
   if (/(参考答案|答案与|参考解答|解析与)/.test(t)) return 'answer'
@@ -172,12 +172,19 @@ export function mdToHandout(fileName: string, text: string): { meta: HandoutMeta
     period: section ? '1' : '',
     autoTitle: true,
   }
-  if (section) {
+  /** 【v1720】md 里的 `# 标题` 就是**课题** ✓ 优先用它 —— 以前有节号时会被「人教版·必修一 第 1 章 第 1 节」盖掉 ✗
+   *  （用户口径：抬头要写授课题目 ✓）✓ 自动标题只在 md 没写 # 标题时才用 ✓
+   */
+  if (h1Title) {
+    meta.title = h1Title
+    meta.autoTitle = false
+  } else if (section) {
     meta.title = autoTitleOf({ meta, blocks } as never) || name
   } else {
     meta.autoTitle = false
-    meta.title = h1Title || name
+    meta.title = name
   }
+
   for (const b of blocks) if (b.type === 'goal' && !String(b.text || '').trim()) b.text = '（学习目标见 md 原文 ✓）'
   return { meta, blocks }
 }
