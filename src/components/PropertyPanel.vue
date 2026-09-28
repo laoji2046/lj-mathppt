@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { MASK_SHAPES } from '@/composables/figureCrop'
 import { computed, nextTick, ref, watch } from 'vue'
 import { saveFigureToLibrary } from '@/composables/useFigureLibrary'
 import AppIcon from './AppIcon.vue'
@@ -2167,6 +2168,21 @@ function layerTypeLabel(type: string) {
             <input type="checkbox" :checked="!!mathfig.noPrint"
               @change="patch({ noPrint: !mathfig.noPrint } as Partial<SlideElement>)" />
           </label>
+          <label v-if="mathfig && mathfig.kind === 'cover'" class="field"><span>遮罩形状</span>
+            <select :value="mathfig.coverShape || 'rect'"
+              @change="patch({ coverShape: ($event.target as HTMLSelectElement).value } as Partial<SlideElement>)">
+              <option value="rect">矩形（默认）</option>
+              <option value="ellipse">椭圆 / 圆</option>
+              <option value="round">圆角矩形</option>
+            </select>
+          </label>
+          <label v-if="mathfig" class="field"><span>遮罩（只显示形状内）</span>
+            <select :value="mathfig.mask?.shape || 'none'"
+              @change="patch({ mask: { shape: ($event.target as HTMLSelectElement).value } } as Partial<SlideElement>)">
+              <option v-for="m in MASK_SHAPES" :key="m.v" :value="m.v">{{ m.label }}</option>
+            </select>
+          </label>
+          <p v-if="mathfig && mathfig.mask && mathfig.mask.shape !== 'none'" class="panel__hint">遮罩：**只显示**这个形状里的部分，外面整块隐藏 —— 想用别的图形当窗口，就在那个图形上选「用它自己的形状」。</p>
           <p class="panel__hint">裁剪是**非破坏性**的：只记四边比例、随时改回完整图形。「打印时隐藏」常见用法：遮罩块讲课时盖着，打印讲义时不出现。</p>
         </template>
         <p class="panel__hint">裁剪是**非破坏性**的：只记比例、不重编码图片，随时能改回来。（「图片编辑器」里那种裁剪会把结果烤进图片数据，两者用途不同。）</p>

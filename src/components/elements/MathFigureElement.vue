@@ -182,8 +182,21 @@ const innerHtml = computed(() => {
       return `<path d="M 0 ${h} A ${w / 2} ${h} 0 0 1 ${w} ${h}" ${strokeAttrs} fill="${fillColor}"/>`
     // ---- 常见平面几何 ----
     // 【v1724】遮罩块：一块盖住图形的矩形（默认白底、无边框；设了 dash 就画虚线框，方便自己看位置）
-    case 'cover':
-      return '<rect x="' + (w * 0.01) + '" y="' + (h * 0.01) + '" width="' + (w * 0.98) + '" height="' + (h * 0.98) + '" fill="' + (fillColor || '#ffffff') + '" stroke="' + (dash ? stroke : 'none') + '" stroke-width="' + (dash ? s : 0) + '"' + (dash ? ' stroke-dasharray="6 5"' : '') + '/>'
+    case 'cover': {
+      // 【v1726】遮罩块三种形状：rect（默认）/ ellipse（椭圆、圆）/ round（圆角矩形）
+      const cs = (props.el as { coverShape?: string }).coverShape
+      const cFill = fillColor || '#ffffff'
+      const cStroke = dash ? stroke : 'none'
+      const cSw = dash ? s : 0
+      const cDashAttr = dash ? ' stroke-dasharray="6 5"' : ''
+      if (cs === 'ellipse') {
+        return '<ellipse cx="' + (w / 2) + '" cy="' + (h / 2) + '" rx="' + (w * 0.49) + '" ry="' + (h * 0.49) +
+          '" fill="' + cFill + '" stroke="' + cStroke + '" stroke-width="' + cSw + '"' + cDashAttr + '/>'
+      }
+      const rx = cs === 'round' ? ' rx="' + (Math.min(w, h) * 0.12) + '" ry="' + (Math.min(w, h) * 0.12) + '"' : ''
+      return '<rect x="' + (w * 0.01) + '" y="' + (h * 0.01) + '" width="' + (w * 0.98) + '" height="' + (h * 0.98) + '"' + rx +
+        ' fill="' + cFill + '" stroke="' + cStroke + '" stroke-width="' + cSw + '"' + cDashAttr + '/>'
+    }
     case 'triangle':
       return `<polygon points="0,${h} ${w},${h} ${w * 0.42},0" ${strokeAttrs} fill="${fillColor}"/>`
     case 'rectangle':

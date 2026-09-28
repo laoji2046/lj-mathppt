@@ -19,7 +19,7 @@ import LineElement from './elements/LineElement.vue'
 import ArrowElement from './elements/ArrowElement.vue'
 import PenElement from './elements/PenElement.vue'
 import MathFigureElement from './elements/MathFigureElement.vue'
-import { figCropCss, figNoPrint } from '@/composables/figureCrop'
+import { figCropCss, figMaskCss, figNoPrint } from '@/composables/figureCrop'
 import ChartElement from './elements/ChartElement.vue'
 import TableElement from './elements/TableElement.vue'
 import IconElement from './elements/IconElement.vue'
@@ -124,7 +124,7 @@ function onDblClick() {
           : animEditorClass(animPreview.kind))
         : '',
     ]"
-    :style="[frameStyle, figCropCss(el) ? { clipPath: figCropCss(el) } : '', animPreview && animPreview.id === el.id ? animTimingStyle(el) : '']"
+    :style="[frameStyle, (figMaskCss(el) || figCropCss(el)) ? { clipPath: figMaskCss(el) || figCropCss(el) } : '', animPreview && animPreview.id === el.id ? animTimingStyle(el) : '']"
     @pointerdown.stop="onPointerDown"
     @dblclick.stop="onDblClick"
     @contextmenu.stop.prevent="onElCtx"

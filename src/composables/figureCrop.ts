@@ -28,3 +28,39 @@ export function figCropCss(el: unknown): string {
 export function figNoPrint(el: unknown): boolean {
   return !!(el as { noPrint?: boolean } | null | undefined)?.noPrint
 }
+/** 遮罩可选形状 ✓（只显示形状内的部分，外面全隐藏 ✓ —— 跟「裁剪」相反：裁剪是减法、遮罩是只留窗口 ✓） */
+export const MASK_SHAPES: { v: string; label: string }[] = [
+  { v: 'none', label: '不遮罩（默认）' },
+  { v: 'circle', label: '圆形窗口' },
+  { v: 'ellipse', label: '椭圆窗口' },
+  { v: 'round', label: '圆角矩形窗口' },
+  { v: 'self', label: '用它自己的形状（多边形图形 ✓）' },
+]
+
+/**
+ * 【v1727】遮罩 → CSS clip-path ✓
+ *   circle / ellipse / round：按元素外框算 ✓
+ *   self：用元素自己的归一化顶点（points ✓ 扁平 0~1）拼 polygon ✓ —— 落在轮廓外的部分整块消失 ✓
+ * 返回空串 = 不遮罩 ✓
+ */
+export function maskClipCss(mask?: { shape?: string } | null, points?: number[] | null): string {
+  const sh = String((mask && mask.shape) || '')
+  if (!sh || sh === 'none') return ''
+  if (sh === 'circle') return 'circle(50% at 50% 50%)'
+  if (sh === 'ellipse') return 'ellipse(50% 50% at 50% 50%)'
+  if (sh === 'round') return 'inset(0 round 14%)'
+  if (sh === 'self') {
+    const p = points || []
+    if (p.length < 6) return 'circle(50% at 50% 50%)'   // 没有顶点 → 退回圆形，别把图形整块藏没了 ✓
+    const out: string[] = []
+    for (let i = 0; i + 1 < p.length; i += 2) out.push((p[i] * 100).toFixed(2) + '% ' + (p[i + 1] * 100).toFixed(2) + '%')
+    return 'polygon(' + out.join(', ') + ')'
+  }
+  return ''
+}
+
+/** 从元素上取遮罩 → clip-path 值 ✓（模板里 figMaskCss(el) 直接用 ✓） */
+export function figMaskCss(el: unknown): string {
+  const e = el as { mask?: { shape?: string }; points?: number[] } | null | undefined
+  return maskClipCss(e?.mask, e?.points)
+}

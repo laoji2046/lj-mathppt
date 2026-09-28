@@ -659,6 +659,10 @@ export interface MathFigureElement extends ElementBase {
   crop?: { l: number; r: number; t: number; b: number }
   /** 【v1725】打印/导出时隐藏（遮罩块用 ✓）：讲课时盖着、发讲义时干净 ✓ */
   noPrint?: boolean
+  /** 【v1726】遮罩块形状：rect 矩形（默认）/ ellipse 椭圆 / round 圆角矩形 ✓ */
+  coverShape?: 'rect' | 'ellipse' | 'round'
+  /** 【v1727】遮罩：只显示形状内的部分（外面全隐藏 ✓ 与 crop 相反 ✓；self = 用它自己的顶点当窗口 ✓） */
+  mask?: { shape?: 'none' | 'circle' | 'ellipse' | 'round' | 'self' }
   kind: MathFigureKind
   fill: string
   stroke: string

@@ -1837,6 +1837,26 @@ const CASE59 = (async () => {
   ok(PP.indexOf("setFigCrop") > 0 && PP.indexOf("noPrint") > 0, "★属性面板上有裁剪与「打印时隐藏」两个控件");
 })();
 
+console.log("=== 用例 60：遮罩（只显示形状内，外面全隐藏 ✓ v1727）===");
+const CASE60 = (async () => {
+  const FC = loadBundled("figureCrop.ts", "_c60f.cjs");
+  ok(FC.maskClipCss({ shape: "circle" }) === "circle(50% at 50% 50%)", "★圆形窗口（" + FC.maskClipCss({ shape: "circle" }) + "）");
+  ok(FC.maskClipCss({ shape: "ellipse" }).indexOf("ellipse") === 0, "椭圆窗口");
+  ok(FC.maskClipCss({ shape: "round" }).indexOf("inset(0 round") === 0, "圆角矩形窗口");
+  ok(FC.maskClipCss({ shape: "none" }) === "" && FC.maskClipCss(undefined) === "" && FC.maskClipCss({ shape: "??" }) === "", "不遮罩 / 认不出的形状 → 空串（不动图形 ✓）");
+  const poly = FC.maskClipCss({ shape: "self" }, [0, 0, 1, 0, 0.5, 1]);
+  ok(poly === "polygon(0.00% 0.00%, 100.00% 0.00%, 50.00% 100.00%)", "★用它自己的形状当遮罩（" + poly + "）");
+  ok(FC.maskClipCss({ shape: "self" }, null) === "circle(50% at 50% 50%)", "没顶点时退回圆形（不会把图形整块藏没 ✓）");
+  ok(FC.MASK_SHAPES.length === 5, "遮罩形状清单 5 项（" + FC.MASK_SHAPES.map(function (x) { return x.v }).join("/") + "）");
+  ok(FC.figMaskCss({ mask: { shape: "circle" }, points: [] }) === "circle(50% at 50% 50%)", "figMaskCss 从元素取遮罩");
+  const T = fs.readFileSync(path.join(ROOT, "src", "types", "index.ts"), "utf8");
+  ok(T.indexOf("mask?: { shape?:") > 0 || T.indexOf("mask?:") > 0, "★mathfig 元素类型加了 mask");
+  const EF = fs.readFileSync(path.join(ROOT, "src", "components", "ElementFrame.vue"), "utf8");
+  ok(EF.indexOf("figMaskCss") > 0, "★元素外框接上了遮罩");
+  const PP = fs.readFileSync(path.join(ROOT, "src", "components", "PropertyPanel.vue"), "utf8");
+  ok(PP.indexOf("遮罩（只显示形状内）") > 0 || PP.indexOf("maskShape") > 0, "★属性面板有遮罩下拉");
+})();
+
 console.log("=== 用例 34：样式闭合标签容错（用户实报：改完色每行后面印出 {/c} ✗ v1695）===");
 {
   const ST = loadBundled("paperStyle.ts", "_c34.cjs");
@@ -2301,7 +2321,7 @@ console.log("=== 用例 24：模板静态体检（属性掉成正文 = 界面上
 }
 
 // 用例 24 是**同步块**（同用例 20 / 22）：加载时就跑完了，不进这条异步链 ✗（挂进来会 CASE24 未定义 ✗）
-CASE15.then(() => CASE16).then(() => CASE19).then(() => CASE21).then(() => CASE23).then(() => CASE35).then(() => CASE41).then(() => CASE43).then(() => CASE44).then(() => CASE45).then(() => CASE46).then(() => CASE47).then(() => CASE48).then(() => CASE49).then(() => CASE50).then(() => CASE51).then(() => CASE52).then(() => CASE53).then(() => CASE54).then(() => CASE55).then(() => CASE56).then(() => CASE57).then(() => CASE58).then(() => CASE59).then(() => {
+CASE15.then(() => CASE16).then(() => CASE19).then(() => CASE21).then(() => CASE23).then(() => CASE35).then(() => CASE41).then(() => CASE43).then(() => CASE44).then(() => CASE45).then(() => CASE46).then(() => CASE47).then(() => CASE48).then(() => CASE49).then(() => CASE50).then(() => CASE51).then(() => CASE52).then(() => CASE53).then(() => CASE54).then(() => CASE55).then(() => CASE56).then(() => CASE57).then(() => CASE58).then(() => CASE59).then(() => CASE60).then(() => {
 console.log("=== 渲染检查：竖直弦在 SVG 里是不是真竖线 ===");
 for (const R of results) {
   if (!R.spec.lines.some((L) => L.vertical)) continue;
