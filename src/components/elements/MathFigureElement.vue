@@ -181,6 +181,9 @@ const innerHtml = computed(() => {
     case 'semicircle':
       return `<path d="M 0 ${h} A ${w / 2} ${h} 0 0 1 ${w} ${h}" ${strokeAttrs} fill="${fillColor}"/>`
     // ---- 常见平面几何 ----
+    // 【v1724】遮罩块：一块盖住图形的矩形（默认白底、无边框；设了 dash 就画虚线框，方便自己看位置）
+    case 'cover':
+      return '<rect x="' + (w * 0.01) + '" y="' + (h * 0.01) + '" width="' + (w * 0.98) + '" height="' + (h * 0.98) + '" fill="' + (fillColor || '#ffffff') + '" stroke="' + (dash ? stroke : 'none') + '" stroke-width="' + (dash ? s : 0) + '"' + (dash ? ' stroke-dasharray="6 5"' : '') + '/>'
     case 'triangle':
       return `<polygon points="0,${h} ${w},${h} ${w * 0.42},0" ${strokeAttrs} fill="${fillColor}"/>`
     case 'rectangle':

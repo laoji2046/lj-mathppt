@@ -147,6 +147,9 @@ function figureInner(
     }
     case 'semicircle':
       return `<path d="M 0 ${h} A ${w / 2} ${h} 0 0 1 ${w} ${h}" ${sa} fill="${fc}"/>`
+    // 【v1724】遮罩块（与画布同一套外观）
+    case 'cover':
+      return '<rect x="' + (w * 0.01) + '" y="' + (h * 0.01) + '" width="' + (w * 0.98) + '" height="' + (h * 0.98) + '" fill="' + (fc === 'none' ? '#ffffff' : fc) + '" stroke="none"/>'
     case 'triangle':
       return `<polygon points="0,${h} ${w},${h} ${w * 0.42},0" ${sa} fill="${fc}"/>`
     case 'rectangle':

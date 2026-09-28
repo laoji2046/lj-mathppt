@@ -1798,6 +1798,25 @@ const CASE58 = (async () => {
   ok(REV.indexOf("vectorFigureSvg") > 0, "★打印/导出的兜底渲染器也接上了（不会屏幕上有一打印空白）");
   const MP = fs.readFileSync(path.join(ROOT, "src", "composables", "mathPlot.ts"), "utf8");
   ok(MP.indexOf("vecTriangle") > 0, "插入尺寸（viewAspect）给了向量图 1.55 的宽高比");
+  // ★【v1724】遮罩块（盖住图形 / 遮答案）
+  ok(T.indexOf("v: " + Q1 + "cover" + Q1) > 0, "★图形库里有「遮罩块」");
+  ok(T.indexOf("| " + Q1 + "cover" + Q1) > 0, "★kind 类型里加了 cover");
+  ok(MFE.indexOf("case " + Q1 + "cover" + Q1 + ":") > 0, "画布渲染器认遮罩块");
+  ok(REV.indexOf("case " + Q1 + "cover" + Q1 + ":") > 0, "打印/导出兜底渲染器也认遮罩块");
+  // ★【v1724】三条平行线必须等长、等距、平行（用户实报「有点儿错位」✗）
+  const vOf = function (tag, key) { const seg = tag.split(key + String.fromCharCode(61) + String.fromCharCode(34))[1]; return seg ? Number(seg.split(String.fromCharCode(34))[0]) : NaN };
+  const fam = (s3.match(/<line[^>]*stroke="(?:#6b7280|#dc2626)"[^>]*>/g) || []).filter(function (t) { return t.indexOf("2 3") < 0 }).map(function (tag) {
+    return { x1: vOf(tag, "x1"), y1: vOf(tag, "y1"), x2: vOf(tag, "x2"), y2: vOf(tag, "y2") };
+  });
+  ok(fam.length === 3, "★等和线的平行线族正好 3 条（" + fam.length + "）");
+  const lens = fam.map(function (l) { return Math.round(Math.hypot(l.x2 - l.x1, l.y2 - l.y1) * 10) / 10 });
+  ok(Math.max.apply(null, lens) - Math.min.apply(null, lens) < 1.5, "★三条等长（" + lens.join(" / ") + "）");
+  const dirs = fam.map(function (l) { return Math.round(Math.atan2(l.y2 - l.y1, l.x2 - l.x1) * 1000) / 1000 });
+  ok(dirs.every(function (d) { return Math.abs(d - dirs[0]) < 0.01 }), "★三条平行（方向 " + dirs.join(" / ") + "）");
+  const mids = fam.map(function (l) { return { x: (l.x1 + l.x2) / 2, y: (l.y1 + l.y2) / 2 } }).sort(function (a, b) { return (a.x - b.x) || (a.y - b.y) });
+  const d01 = Math.hypot(mids[1].x - mids[0].x, mids[1].y - mids[0].y);
+  const d12 = Math.hypot(mids[2].x - mids[1].x, mids[2].y - mids[1].y);
+  ok(Math.abs(d01 - d12) < 1.5, "★三条等距（间距 " + d01.toFixed(1) + " / " + d12.toFixed(1) + "）");
 })();
 
 console.log("=== 用例 34：样式闭合标签容错（用户实报：改完色每行后面印出 {/c} ✗ v1695）===");

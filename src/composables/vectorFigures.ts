@@ -117,9 +117,9 @@ function equalSum(w: number, h: number, lw: number, base: string): string {
     return [{ x: c.x - dir.x * f0, y: c.y - dir.y * f0 }, { x: c.x + dir.x * f1, y: c.y + dir.y * f1 }]
   }
   let out = ''
-  const [h1a, h1b] = ext(0.55, 0.10, 0.95)
-  const [l1a, l1b] = ext(1.00, 0.16, 1.05)
-  const [h2a, h2b] = ext(1.45, 0.06, 0.72)
+  const [h1a, h1b] = ext(0.50, 0.14, 0.98)
+  const [l1a, l1b] = ext(1.00, 0.14, 0.98)
+  const [h2a, h2b] = ext(1.50, 0.14, 0.98)
   out += line(h1a, h1b, C_G, lw * 0.75, '5 4')
   out += line(h2a, h2b, C_G, lw * 0.75, '5 4')
   out += line(l1a, l1b, C_B, lw * 1.3, '')
@@ -137,9 +137,9 @@ function equalSum(w: number, h: number, lw: number, base: string): string {
   out += vec((O.x + A.x) / 2 - 10, (O.y + A.y) / 2 + 18, 'a', C_A, 14)
   out += vec((O.x + B.x) / 2 - 24, (O.y + B.y) / 2, 'b', C_A, 14)
   out += vec((O.x + Pt1.x) / 2, (O.y + Pt1.y) / 2 - 12, 'OP', C_S, 14)
-  out += txt(l1b.x - 4, l1b.y + 20, 'x+y=1（等和线）', C_B, 12.5, 'end')
-  out += txt(h1b.x - 4, h1b.y + 18, 'x+y=0.5', C_G, 12, 'end')
-  out += txt(h2b.x + 6, h2b.y + 16, 'x+y=1.5', C_G, 12, 'start')
+  out += txt(l1b.x - 8, l1b.y + 20, 'x+y=1（等和线）', C_B, 12.5, 'end')
+  out += txt(h1b.x - 8, h1b.y + 20, 'x+y=0.5', C_G, 12, 'end')
+  out += txt(h2b.x - 8, h2b.y + 20, 'x+y=1.5', C_G, 12, 'end')
   out += txt(w * 0.5, h * 0.985, 'x + y = k 的点都在与 AB 平行的直线上（k = 1 即直线 AB）', C_G, 12.5)
   return out
 }

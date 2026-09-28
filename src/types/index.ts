@@ -446,6 +446,8 @@ export type MathFigureKind =
   | 'parallelogram' | 'trapezoid' | 'star' | 'bezier' | 'polygon'
   // ---- 【v1723】向量（图形库新增分类 ✓） ----
   | 'vecTriangle' | 'vecParallelogram' | 'vecEqualSum'
+  // ---- 【v1724】遮罩（盖住图形 / 遮答案） ----
+  | 'cover'
   | 'arcAngle' | 'arc3pt' | 'circleR' | 'ellipseArc' | 'ellipseAB'
   // ---- 3D 立体几何 ----
   | 'cube' | 'cubeOblique' | 'cuboid' | 'cuboidOblique' | 'cylinder' | 'cone' | 'sphere'
@@ -580,6 +582,7 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   { v: 'parallelMark', label: '平行标记', cat: '辅助标注' },
   { v: 'angleArc', label: '角标记', cat: '辅助标注' },
   { v: 'section', label: '截面', cat: '辅助标注' },
+  { v: 'cover', label: '遮罩块（盖住图形 / 遮答案，可拖可改色）', cat: '辅助标注' },
 ]
 
 /** 数学符号面板：点击插入为文本元素 */
