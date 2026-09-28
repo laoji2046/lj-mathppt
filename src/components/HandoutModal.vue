@@ -33,6 +33,7 @@ import type { QItem } from '@/composables/useQuestionBank'
 import { blocksFromQuestion, drawQuestions, kbBlockOf, loadKb, refreshRefBlocks, saveKbCustom, stemTextOf } from '@/composables/useHandoutLibrary'
 import type { KbItem } from '@/composables/useHandoutLibrary'
 import { handoutOpsSink } from '@/ui/handout'
+import { HD_TOC_NOTE, hdChapterOptions, hdSectionOptions } from '@/composables/hdTextbook'
 import type { HandoutOps } from '@/ui/handout'
 import { HANDOUT_RENDERS, handoutOutlineText } from '@/composables/aiHandoutChat'
 import { normalizeSvgForRaster } from '@/composables/svgNormalize'
@@ -47,6 +48,10 @@ const msg = ref('')
 const pageHost = ref<HTMLElement | null>(null)
 const outline = computed(() => outlineOf(h.value))
 const path = computed(() => handoutPathOf(h.value))
+
+/** 【v1719】章 / 节 的候选：内置教材目录（人教A版 2019）+ 讲义库里已有的 ✓ */
+const chapOptions = computed(() => hdChapterOptions(h.value.meta.press, h.value.meta.book, lib.value))
+const secOptions = computed(() => hdSectionOptions(h.value.meta.press, h.value.meta.book, h.value.meta.chapter, lib.value))
 
 const ADD: { t: HdBlockType; label: string }[] = [
   { t: 'h1', label: '章' }, { t: 'h2', label: '节' }, { t: 'para', label: '正文' }, { t: 'formula', label: '公式' },
@@ -856,14 +861,16 @@ watch(ver, () => { void refreshNow() })
               </label>
             </div>
             <div class="hd__row2">
-              <label>第几章<input v-model="h.meta.chapter" placeholder="3" /></label>
-              <label>第几节<input v-model="h.meta.section" placeholder="1" /></label>
+              <label>第几章<input v-model="h.meta.chapter" list="hd-chaps" placeholder="6（或从目录里选 ✓）" /></label>
+              <label>第几节<input v-model="h.meta.section" list="hd-secs" placeholder="1（或从目录里选 ✓）" /></label>
+            <datalist id="hd-chaps"><option v-for="c in chapOptions" :key="c" :value="c"></option></datalist>
+            <datalist id="hd-secs"><option v-for="s in secOptions" :key="s" :value="s"></option></datalist>
             </div>
             <div class="hd__row2">
               <label>第几课时<input v-model="h.meta.period" placeholder="2" /></label>
               <label class="hd__chk hd__chk--t"><input v-model="h.meta.autoTitle" type="checkbox" @change="h.meta.autoTitle && regenTitle()" /> 标题自动生成</label>
             </div>
-            <div class="hd__hint2">抬头显示：{{ path || '（未填）' }} ✓ 目录树按章 / 节块自动长 ✓</div>
+            <div class="hd__hint2">抬头显示：{{ path || '（未填）' }} ✓ {{ HD_TOC_NOTE }} ✓</div>
 
             <div class="hd__t1">讲义信息</div>
             <label>标题
