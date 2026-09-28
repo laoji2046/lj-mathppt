@@ -348,9 +348,14 @@ export function hdTableHtml(rows: string[]): string {
   const isSep = (cs: string[]) => cs.length > 0 && cs.every((c) => /^:?-{2,}:?$/.test(c))
   const list = (rows || []).map(cells)
   if (list.length < 2 || !isSep(list[1])) return ''
-  const head = list[0].map((c) => '<th>' + c + '</th>').join('')
-  const rest = list.slice(2).map((cs) => '<tr>' + cs.map((c) => '<td>' + c + '</td>').join('') + '</tr>').join('')
+  const head = list[0].map((c) => '<th>' + hdBold(c) + '</th>').join('')
+  const rest = list.slice(2).map((cs) => '<tr>' + cs.map((c) => '<td>' + hdBold(c) + '</td>').join('') + '</tr>').join('')
   return '<table class="hd-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + rest + '</tbody></table>'
+}
+
+/** 【v1721】正文里的 `**粗体**` → `<b>` —— 不处理的话会原样印出两个星号 ✗（用户实报：标题里不想看到 **xxxx** ✗） */
+export function hdBold(s: string): string {
+  return String(s == null ? '' : s).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
 }
 
 /** 正文（已转义）→ HTML：连续竖线表成表格、其余行里的图片变图 ✓ */
@@ -365,10 +370,10 @@ export function hdRichHtml(escaped: string): string {
       while (i < lines.length && lines[i].trim().charAt(0) === '|') { rows.push(lines[i]); i++ }
       const tbl = hdTableHtml(rows)
       if (tbl) { out.push(tbl); continue }
-      for (const r of rows) out.push(hdInlineFigures(r))
+      for (const r of rows) out.push(hdBold(hdInlineFigures(r)))
       continue
     }
-    out.push(hdInlineFigures(lines[i]))
+    out.push(hdBold(hdInlineFigures(lines[i])))
     i++
   }
   return out.join(NL)

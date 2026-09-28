@@ -12,6 +12,7 @@
  *   其余段落             → 正文块 ✓
  *   --- 分隔线忽略 ✓；表格原样留在正文里 ✓（讲义渲染暂不支持表格 ✓）
  */
+import { hdChapterLabel, hdGuessBook, hdMainNo, hdSectionLabel, hdTocBook } from '@/composables/hdTextbook'
 import { hdDocText, hdFileName, hdFolderDir, hdFolderWrite } from '@/composables/useHandoutFolder'
 import { autoTitleOf, folderFiles, hdId, lib, makeBlock } from '@/composables/useHandout'
 import type { HdBlock, HdDoc, HandoutMeta } from '@/composables/useHandout'
@@ -165,13 +166,24 @@ export function mdToHandout(fileName: string, text: string): { meta: HandoutMeta
   }
   flush()
 
+  /** 【v1721】教材定位写成**带名字**的目录树口子：人教版 → 册 → 第 X 章 <章名> → 第 X 节 <节名> → 第 X 课时 ✓
+   *  （章 / 节的**名字**从内置目录表查 ✓ 用户口径：要完整的讲义目录树 ✓）
+   */
+  const headText = String(text || '').slice(0, 500)
+  const book = hdGuessBook(headText) || '必修一'
+  const toc = hdTocBook('人教版', book)
+  const chHit = toc ? toc.chapters.filter((c) => c.no === hdMainNo(chapter))[0] : undefined
+  const seHit = chHit ? chHit.secs.filter((s) => s.no === hdMainNo(section))[0] : undefined
   const meta: HandoutMeta = {
     school: '', subject: '数学', title: '', subtitle: '', grade: '高一', teacher: '',
     date: new Date().toISOString().slice(0, 10),
-    press: '人教版', book: '必修一', chapter, section,
+    press: '人教版', book,
+    chapter: chHit ? hdChapterLabel(chHit.no, chHit.name) : chapter,
+    section: seHit ? hdSectionLabel(seHit.no, seHit.name) : section,
     period: section ? '1' : '',
     autoTitle: true,
   }
+
   /** 【v1720】md 里的 `# 标题` 就是**课题** ✓ 优先用它 —— 以前有节号时会被「人教版·必修一 第 1 章 第 1 节」盖掉 ✗
    *  （用户口径：抬头要写授课题目 ✓）✓ 自动标题只在 md 没写 # 标题时才用 ✓
    */

@@ -135,3 +135,14 @@ export function hdSectionOptions(press: string, book: string, chapter: string, d
   }
   return out
 }
+/** 【v1721】从 md 开头那几行猜「哪一册」（老师那份 md 会写「教材：人教A版 必修第一册 …」✓） */
+export function hdGuessBook(text: string): string {
+  const t = String(text == null ? '' : text).slice(0, 500)
+  const pairs: [string, string][] = [
+    ['选择性必修第一册', '选择性必修一'], ['选择性必修第二册', '选择性必修二'], ['选择性必修第三册', '选择性必修三'],
+    ['选择性必修一', '选择性必修一'], ['选择性必修二', '选择性必修二'], ['选择性必修三', '选择性必修三'],
+    ['必修第一册', '必修一'], ['必修第二册', '必修二'], ['必修一', '必修一'], ['必修二', '必修二'],
+  ]
+  for (const p of pairs) if (t.indexOf(p[0]) >= 0) return p[1]
+  return ''
+}
