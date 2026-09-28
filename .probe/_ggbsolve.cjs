@@ -118,6 +118,59 @@ const RU = G.ggbRepairUser([{ cmd: "Intersect(c,f)", err: "unknown command" }], 
 ok(RU.indexOf("绘图板已有对象") >= 0 && RU.indexOf("Intersect(c,f)") >= 0 && RU.indexOf("unknown command") >= 0,
   "★回灌带上了题干 + 现成对象名 + 错指令与报错原文");
 ok(G.ggbRepairUser([], [], "").indexOf("（无）") >= 0, "没有错步骤时也不炸");
+console.log(NL + "=== 静态：题图预处理 + 图形识别（v1730）===");
+const IP = load("imgPrep.ts", "_imgprep.cjs");
+const FS = load("figScan.ts", "_figscan.cjs");
+function hist2(a, b) { const h = new Array(256).fill(0); h[a] = 100; h[b] = 100; return h }
+function grayOf(W, H, dark) { const g = new Array(W * H).fill(255); (dark || []).forEach(function (p) { g[p[1] * W + p[0]] = 0 }); return g }
+/* ① 预处理：Otsu / 墨迹包围盒 / 留白 / 缩放计划（都是纯函数 ✓） */
+const lv = IP.otsuLevel(hist2(20, 220));
+ok(lv >= 20 && lv < 220, "★Otsu 阈值落在两峰之间（含下峰；" + lv + "）");
+ok(IP.otsuLevel([]) === 200 && IP.otsuLevel(new Array(256).fill(0)) === 200, "空直方图 → 保守的 200（不炸 ✓）");
+const bb = IP.inkBox(grayOf(10, 10, [[3, 4], [4, 4], [3, 5], [4, 5]]), 10, 10, 128);
+ok(bb[0] === 3 && bb[1] === 4 && bb[2] === 5 && bb[3] === 6, "★墨迹包围盒 = [3,4,5,6)（" + bb.join(",") + "）");
+const bb2 = IP.inkBox(grayOf(10, 10, []), 10, 10, 128);
+ok(bb2[0] === 0 && bb2[2] === 10 && bb2[3] === 10, "整张没墨迹 → 返回整幅（不裁成 0 ✗）");
+const pb = IP.padBox([3, 4, 5, 6], 2, 10, 10);
+ok(pb[0] === 1 && pb[1] === 2 && pb[2] === 7 && pb[3] === 8, "留白 2px → [1,2,7,8]");
+const pb2 = IP.padBox([0, 0, 10, 10], 5, 10, 10);
+ok(pb2[0] === 0 && pb2[2] === 10, "留白夹进原图（不越界 ✓）");
+const f1 = IP.fitPlan(300, 200, 900, 3);
+ok(Math.abs(f1.scale - 3) < 1e-6 && f1.outW === 900 && f1.outH === 600, "★短边不足 → 放大 3×（300×200 → 900×600）");
+ok(Math.abs(IP.fitPlan(100, 100, 900, 3).scale - 3) < 1e-6, "放大倍率封顶 maxScale（100 → 300 ✓）");
+ok(IP.fitPlan(2000, 1500, 900, 3).scale === 1, "已经够大 → 不放大（2000×1500 原样 ✓）");
+const f2 = IP.fitPlan(4000, 3000, 900, 3);
+ok(f2.outW === 2400 && Math.abs(f2.scale - 0.6) < 1e-6, "★长边超上限 → 缩回 2400（不把巨图原样发出去 ✗）");
+/* ② 图 → 几何要素（用假的识别结果，纯函数 ✓） */
+const fake = {
+  W: 100, H: 100, box: [0, 0, 100, 100], imgW: 100, imgH: 100,
+  points: [0, 0, 1, 0, 0.5, 1],
+  edges: [[0, 1, 0], [1, 2, 0], [2, 0, 0]],
+  anchors: [{ x: 0.5, y: 1.02, text: "A", conf: 0.9 }, { x: 0.02, y: 0.02, text: "B", conf: 0.9 }],
+  arcs: [{ cx: 0.5, cy: 0.5, rx: 0.5, ry: 0.5 }],
+  stats: {},
+};
+const SF = FS.scanFromResult(fake);
+ok(SF.points.length === 3 && SF.edges.length === 3, "3 个顶点 / 3 条线段");
+ok(SF.points[2].name === "A" && SF.points[0].name === "B", "★最近的字母标注贴到顶点上（A、B）");
+ok(SF.labelled === 2, "记下贴上了 2 个标注（" + SF.labelled + "）");
+ok(SF.circles.length === 1 && Math.abs(SF.circles[0].rx - 0.5) < 1e-6, "★arcs → 圆（圆心 / 半径拿到）");
+const badE = FS.scanFromResult({ points: [0, 0, 1, 0], edges: [[0, 1, 0], [0, 5, 0]], anchors: [], arcs: [] });
+ok(badE.edges.length === 1, "★越界的边丢掉（0→5 不认）");
+ok(FS.scanFromResult(null).points.length === 0, "null 不炸");
+ok(FS.describeScan({ points: [], edges: [], circles: [], labelled: 0 }).join("").indexOf("没认出") >= 0, "没元素时给一句话（不返回空数组 ✗）");
+const L1 = FS.describeScan(SF).join("|");
+ok(L1.indexOf("A(") >= 0 && L1.indexOf("0.50") >= 0, "描述里有顶点名与归一化坐标");
+ok(L1.indexOf("水平") >= 0, "★认出一条水平边");
+ok(L1.indexOf("A 在圆上") >= 0, "★A 在圆上（半径容差内 ✓）");
+ok(L1.indexOf("⊥") < 0, "这个三角形没有直角 → 不许瞎报 ⊥");
+const sq = FS.scanFromResult({ points: [0, 0, 1, 0, 1, 1, 0, 1], edges: [[0, 1, 0], [1, 2, 0], [2, 3, 0], [3, 0, 0]], anchors: [], arcs: [] });
+const L2 = FS.describeScan(sq).join("|");
+ok(L2.indexOf("水平") >= 0 && L2.indexOf("竖直") >= 0, "★正方形：认出一条水平 + 一条竖直");
+ok(L2.indexOf("⊥") >= 0, "★正方形：认出垂直");
+ok(L2.indexOf("=") >= 0, "★正方形：认出等长");
+ok(FS.scanToBrief(SF).indexOf("【图形（自动识别") >= 0 && FS.scanToBrief(SF).indexOf("以**题干**为准") >= 0,
+  "★写进校对框时标明是自动识别、以题干为准");
 function pickKey() {
   const direct = String(process.env.LJ_AI_KEY || process.env.DEEPSEEK_API_KEY || "").trim();
   if (direct) return direct;

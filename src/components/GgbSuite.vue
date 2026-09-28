@@ -7,6 +7,9 @@ import { hasLocalEngine, loadGeoGebra } from '@/composables/useGeoGebra'
 import { describeToCommands } from '@/composables/ggbAI'
 import { ggbBriefText, ggbReadBrief, ggbReadSystem, ggbRepairSystem, ggbRepairUser, ggbSolvePlan, ggbSolveSystem, ggbSolveUser, ggbToolOf, ggbValidatePlan, ggbVisionGuard, type GgbSolveStep } from '@/composables/ggbSolve'
 import { settingsOpen } from '@/ui/menus'
+import { loadImg, prepImageEl } from '@/composables/imgPrep'
+import { scanFromResult, scanToBrief } from '@/composables/figScan'
+import { vectorizeInWorker } from '@/composables/figScanRun'
 import { licensed } from '@/composables/useLicense'
 import { invoke } from '@/composables/useTauri'
 import ScreenshotCapture from './ScreenshotCapture.vue'
@@ -218,8 +221,9 @@ async function solveChat(opts: { system: string; content: unknown; model: string
 /** 【v1729】① 读图：把题图**转写成文字**（不许解题 ✓ 不许猜 ✓），结果放进可编辑的校对框 ✓ */
 async function readProblemInner() {
   if (!licensed("ai-assistant")) { toaster("AI 助手要先激活：工具栏「激活 / 序列号」"); return }
-  const imgs = solveImgs.value.slice(0, MAX_SOLVE_IMG)
-  if (imgs.length && solveVisionWarn.value) { toaster("带图要先配视觉模型：设置 → AI 助手 → 视觉模型"); return }
+  const raw = solveImgs.value.slice(0, MAX_SOLVE_IMG)
+  if (raw.length && solveVisionWarn.value) { toaster("带图要先配视觉模型：设置 → AI 助手 → 视觉模型"); return }
+  const imgs = raw.length ? await prepSolveImages() : raw   // 【v1730】先预处理：去白边 + 放大 ✓ 视觉模型看得更清 ✓
   reading.value = true
   solveLog.value = []
   try {
@@ -235,13 +239,13 @@ async function readProblemInner() {
       solveLog.value.push("已读图：题干 " + b.text.length + " 字、已知 " + b.given.length + " 条、图形要素 " + b.figure.length + " 条")
       for (const u of b.unsure) solveLog.value.push("· ⚠ 待确认：" + u)
       toaster(b.unsure.length
-        ? "读好了 —— 有 " + b.unsure.length + " 处拿不准，改完再点「② 解题并作图」✓"
-        : "读好了 ✓ 核对一下校对框里的文字，再点「② 解题并作图」✓")
+        ? "读好了 —— 有 " + b.unsure.length + " 处拿不准，改完再点「③ 解题并作图」✓"
+        : "读好了 ✓ 核对一下校对框里的文字，再点「③ 解题并作图」✓")
     } else {
       const t = solveSay.value.trim()
       if (!t) { toaster("先贴一张题目图（点「＋ 题目图 / 截图」），或直接写一句题干 ✓"); return }
       solveBrief.value = "【题干】" + t
-      toaster("没贴图：把写的题干放进校对框了，直接点「② 解题并作图」✓")
+      toaster("没贴图：把写的题干放进校对框了，直接点「③ 解题并作图」✓")
     }
   } finally { reading.value = false }
 }
@@ -282,6 +286,57 @@ function missingObjects(a: any, steps: GgbSolveStep[]): string[] {
   if (!list) return []
   return names.filter((n) => list.indexOf(n) < 0)
 }
+/* ---------------- 【v1730】第 4 层：题图预处理 + 复用「矢量识别」认图形 ----------------
+ * ① 读图前先把题图**预处理**一遍（去白边 / 放大 / 灰度对比 ✓）→ 视觉模型看得更清 ✓
+ * ② 「认图形」把同一张图交给**已有的矢量识别**（点 / 线段 / 圆 + 字母标注 ✓）
+ *   → 结构描述写进校对框 ✓ —— 让模型看图"估坐标"是最不准的一环 ✗ 认出来的真点真线稳得多 ✓
+ */
+const scanning = ref(false)
+const scanNote = ref("")
+
+/** 【v1730】把贴的题图逐张预处理（失败就用原图 ✓ 不拦流程 ✓） */
+async function prepSolveImages(): Promise<string[]> {
+  const raw = solveImgs.value.slice(0, MAX_SOLVE_IMG)
+  const out: string[] = []
+  for (const u of raw) {
+    try {
+      const el = await loadImg(u)
+      const r = await prepImageEl(el, { target: 900, maxScale: 3 })
+      out.push(r.dataUrl)
+      solveLog.value.push("· 预处理：去白边 " + r.info.before[0] + "×" + r.info.before[1] + " → " + r.info.after[0] + "×" + r.info.after[1] + "（缩放 " + r.info.scale.toFixed(2) + "×）")
+    } catch (e) {
+      solveLog.value.push("· 预处理没成（就用原图）：" + String((e as Error)?.message || e))
+      out.push(u)
+    }
+  }
+  return out.length ? out : raw
+}
+
+/** 【v1730】② 认图形：矢量识别 → 几何要素 → 结构描述写进校对框 ✓（可选，但很值 ✓） */
+async function scanFigureInner() {
+  if (!licensed("ai-assistant")) { toaster("AI 助手要先激活：工具栏「激活 / 序列号」"); return }
+  const src = solveImgs.value[0] || ""
+  if (!src) { toaster("先贴一张题目图（点「＋ 题目图 / 截图」）✓"); return }
+  scanning.value = true
+  try {
+    const raw = await loadImg(src)
+    const pr = await prepImageEl(raw, { target: 900, maxScale: 3 })
+    const el = await loadImg(pr.dataUrl)
+    const res = await vectorizeInWorker(el, {})
+    const fig = scanFromResult(res)
+    scanNote.value = "认出 " + fig.points.length + " 个顶点（带字母标注 " + fig.labelled + " 个）、" + fig.edges.length + " 条线段、" + fig.circles.length + " 个圆/弧"
+    solveLog.value.push("· ② 认图形：" + scanNote.value)
+    // 上一次自动识别的那一段换掉（别越堆越多 ✓）
+    const at = solveBrief.value.indexOf("【图形（自动识别")
+    if (at >= 0) solveBrief.value = solveBrief.value.slice(0, at).replace(/\s+$/, "")
+    solveBrief.value = (solveBrief.value ? solveBrief.value + String.fromCharCode(10, 10) : "") + scanToBrief(fig)
+    if (fig.points.length < 2) {
+      solveLog.value.push("· ⚠ 认出来的顶点太少 —— 这张图可能不是线稿（照片 / 阴影 / 手写），或者图形太小；按题干自己判断就行 ✓")
+      toaster("没认出多少图形元素（见日志）—— 不影响照常解题 ✓")
+    } else toaster("认出来了：" + scanNote.value + " ✓ 结构已写进校对框")
+  } finally { scanning.value = false }
+}
+function scanFigure() { quietErrors(scanFigureInner) }
 /** AI Key / 视觉模型：与其它 AI 面板同一口径（键名不写死，设置里存的哪个就用哪个） */
 function solveAiKey(): string {
   try {
@@ -775,7 +830,7 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
               <div class="ggbs__solvehead">
                 <span class="ggbs__aiicon">🧠</span>
                 <span class="ggbs__solvet">贴图解题作图</span>
-                <span class="ggbs__solves">① 读图转文字（可校对）→ ② 解题并作图（自动切工具 ✓ 报错自动修一轮 ✓）</span>
+                <span class="ggbs__solves">① 读图转文字（可校对）→ ② 认图形（可选）→ ③ 解题并作图（自动切工具 ✓ 报错自动修一轮 ✓）</span>
               </div>
               <div class="ggbs__solverow">
                 <button class="ggbs__btn ggbs__btn--tiny" title="导入题目图片（也可以 Ctrl+V 粘贴 / 直接拖进来）" @click="solveFile && solveFile.click()">＋ 题目图</button>
@@ -791,11 +846,12 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
                 <button class="ggbs__btn ggbs__btn--tiny" @click="openAiSettings">去设置</button>
               </div>
               <textarea v-if="solveBrief" v-model="solveBrief" class="ggbs__solveinput" rows="6" wrap="soft"
-                title="① 读图的结果 —— 就在这里改（看不清的地方看【待确认】）✓ 改完点「② 解题并作图」✓"
+                title="① 读图的结果 —— 就在这里改（看不清的地方看【待确认】）✓ 改完点「③ 解题并作图」✓"
                 placeholder="① 读图的结果会出现在这里，可直接改…"></textarea>
               <div class="ggbs__solverow">
                 <button class="ggbs__btn ggbs__btn--tiny" :disabled="reading" @click="readProblem">{{ reading ? "读图中…" : "① 读图（转成文字）" }}</button>
-                <button class="ggbs__btn ggbs__btn--ai" :disabled="solving" @click="solveAndDraw">{{ solving ? "解题作图中…" : "② 解题并作图" }}</button>
+                <button class="ggbs__btn ggbs__btn--tiny" :disabled="scanning" @click="scanFigure" title="把题图里的几何图形认出来（复用「矢量识别」那套：点 / 线段 / 圆 + 字母标注 ✓）→ 结构写进校对框。线稿 / 截图效果最好；照片可能认不出多少 ✓">{{ scanning ? "认图形中…" : "② 认图形（可选）" }}</button>
+                <button class="ggbs__btn ggbs__btn--ai" :disabled="solving" @click="solveAndDraw">{{ solving ? "解题作图中…" : "③ 解题并作图" }}</button>
                 <label class="ggbs__check" title="作图时有命令报错，就把**报错的那几步**回灌给模型改一轮（只改错的，不动没报错的 ✓）"><input v-model="repairOn" type="checkbox" /> 失败自动修一轮</label>
               </div>
               <div v-if="solution" class="ggbs__solution">
