@@ -1819,6 +1819,24 @@ const CASE58 = (async () => {
   ok(Math.abs(d01 - d12) < 1.5, "★三条等距（间距 " + d01.toFixed(1) + " / " + d12.toFixed(1) + "）");
 })();
 
+console.log("=== 用例 59：图形裁剪显示 + 打印时隐藏（v1725）===");
+const CASE59 = (async () => {
+  const FC = loadBundled("figureCrop.ts", "_c59f.cjs");
+  ok(FC.cropInsetCss({ l: 0.1, r: 0.2, t: 0.3, b: 0.4 }) === "inset(30% 20% 40% 10%)", "★四边比例 → clip-path inset（" + FC.cropInsetCss({ l: 0.1, r: 0.2, t: 0.3, b: 0.4 }) + "）");
+  ok(FC.cropInsetCss({ l: 0, r: 0, t: 0, b: 0 }) === "" && FC.cropInsetCss(undefined) === "", "没裁就返回空串（不留 clip-path）");
+  ok(FC.cropInsetCss({ l: 2, r: -1, t: 0, b: 0 }) === "inset(0% 0% 0% 90%)", "越界值夹到 0~90%（" + FC.cropInsetCss({ l: 2, r: -1, t: 0, b: 0 }) + "）");
+  ok(FC.figNoPrint({ noPrint: true }) && !FC.figNoPrint({}) && !FC.figNoPrint(null), "figNoPrint 判定正确");
+  ok(FC.figCropCss({ crop: { l: 0.05, r: 0, t: 0, b: 0 } }) === "inset(0% 0% 0% 5%)", "figCropCss 从元素上取 crop");
+  const T = fs.readFileSync(path.join(ROOT, "src", "types", "index.ts"), "utf8");
+  ok(T.indexOf("【v1725】裁剪显示") > 0 && T.indexOf("noPrint?: boolean") > 0, "★mathfig 元素类型加了 crop 与 noPrint");
+  const EF = fs.readFileSync(path.join(ROOT, "src", "components", "ElementFrame.vue"), "utf8");
+  ok(EF.indexOf("data-noprint") > 0 && EF.indexOf("figCropCss(el)") > 0, "★元素外框接上打印隐藏与裁剪");
+  const CSS = fs.readFileSync(path.join(ROOT, "src", "styles", "main.css"), "utf8");
+  ok(CSS.indexOf("[data-noprint=" + String.fromCharCode(34) + "1" + String.fromCharCode(34) + "]") > 0, "★打印 CSS 会隐藏 data-noprint 元素");
+  const PP = fs.readFileSync(path.join(ROOT, "src", "components", "PropertyPanel.vue"), "utf8");
+  ok(PP.indexOf("setFigCrop") > 0 && PP.indexOf("noPrint") > 0, "★属性面板上有裁剪与「打印时隐藏」两个控件");
+})();
+
 console.log("=== 用例 34：样式闭合标签容错（用户实报：改完色每行后面印出 {/c} ✗ v1695）===");
 {
   const ST = loadBundled("paperStyle.ts", "_c34.cjs");
@@ -2283,7 +2301,7 @@ console.log("=== 用例 24：模板静态体检（属性掉成正文 = 界面上
 }
 
 // 用例 24 是**同步块**（同用例 20 / 22）：加载时就跑完了，不进这条异步链 ✗（挂进来会 CASE24 未定义 ✗）
-CASE15.then(() => CASE16).then(() => CASE19).then(() => CASE21).then(() => CASE23).then(() => CASE35).then(() => CASE41).then(() => CASE43).then(() => CASE44).then(() => CASE45).then(() => CASE46).then(() => CASE47).then(() => CASE48).then(() => CASE49).then(() => CASE50).then(() => CASE51).then(() => CASE52).then(() => CASE53).then(() => CASE54).then(() => CASE55).then(() => CASE56).then(() => CASE57).then(() => CASE58).then(() => {
+CASE15.then(() => CASE16).then(() => CASE19).then(() => CASE21).then(() => CASE23).then(() => CASE35).then(() => CASE41).then(() => CASE43).then(() => CASE44).then(() => CASE45).then(() => CASE46).then(() => CASE47).then(() => CASE48).then(() => CASE49).then(() => CASE50).then(() => CASE51).then(() => CASE52).then(() => CASE53).then(() => CASE54).then(() => CASE55).then(() => CASE56).then(() => CASE57).then(() => CASE58).then(() => CASE59).then(() => {
 console.log("=== 渲染检查：竖直弦在 SVG 里是不是真竖线 ===");
 for (const R of results) {
   if (!R.spec.lines.some((L) => L.vertical)) continue;

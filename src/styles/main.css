@@ -236,3 +236,9 @@ body.is-panning {
   .pm__a4, .paper-page { margin-left: 0 !important; margin-right: 0 !important; }
   .paper-page { width: 210mm !important; }
 }
+
+/* 【v1725】打印/导出时隐藏：带 data-noprint 的元素不进纸面 ✓（数学图形里的遮罩块等 ✓） */
+@media print {
+  [data-noprint="1"] { display: none !important; }
+  [data-noprint="1"] * { display: none !important; }
+}

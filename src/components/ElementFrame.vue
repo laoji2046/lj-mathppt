@@ -19,6 +19,7 @@ import LineElement from './elements/LineElement.vue'
 import ArrowElement from './elements/ArrowElement.vue'
 import PenElement from './elements/PenElement.vue'
 import MathFigureElement from './elements/MathFigureElement.vue'
+import { figCropCss, figNoPrint } from '@/composables/figureCrop'
 import ChartElement from './elements/ChartElement.vue'
 import TableElement from './elements/TableElement.vue'
 import IconElement from './elements/IconElement.vue'
@@ -114,6 +115,7 @@ function onDblClick() {
   <div
     class="el-frame"
     :data-el-id="el.id"
+    :data-noprint="figNoPrint(el) ? '1' : undefined"
     :class="[
       { 'el-frame--selected': selected && !isLineLike, 'el-frame--locked': !!el.locked },
       animPreview && animPreview.id === el.id
@@ -122,7 +124,7 @@ function onDblClick() {
           : animEditorClass(animPreview.kind))
         : '',
     ]"
-    :style="[frameStyle, animPreview && animPreview.id === el.id ? animTimingStyle(el) : '']"
+    :style="[frameStyle, figCropCss(el) ? { clipPath: figCropCss(el) } : '', animPreview && animPreview.id === el.id ? animTimingStyle(el) : '']"
     @pointerdown.stop="onPointerDown"
     @dblclick.stop="onDblClick"
     @contextmenu.stop.prevent="onElCtx"

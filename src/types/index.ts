@@ -655,6 +655,10 @@ export interface FigureArc {
 
 export interface MathFigureElement extends ElementBase {
   type: 'mathfig'
+  /** 【v1725】裁剪显示：四边各裁掉的比例（0~0.9）✓ 只露中间那块 ✓ 不碰源数据 ✓ 随时改回 ✓ */
+  crop?: { l: number; r: number; t: number; b: number }
+  /** 【v1725】打印/导出时隐藏（遮罩块用 ✓）：讲课时盖着、发讲义时干净 ✓ */
+  noPrint?: boolean
   kind: MathFigureKind
   fill: string
   stroke: string

@@ -58,6 +58,15 @@ const hasCrop = computed(() => {
   return !!c && (c.l > 0 || c.r > 0 || c.t > 0 || c.b > 0)
 })
 
+/** 【v1725】数学图形的裁剪（四边比例 0~0.9 ✓）与「打印时隐藏」 */
+function setFigCrop(side: 'l' | 'r' | 't' | 'b', percent: number) {
+  const cur = mathfig.value?.crop || { l: 0, r: 0, t: 0, b: 0 }
+  patch({ crop: { ...cur, [side]: Math.max(0, Math.min(90, percent)) / 100 } } as Partial<SlideElement>)
+}
+const hasFigCrop = computed(() => {
+  const c = mathfig.value?.crop
+  return !!c && (c.l > 0 || c.r > 0 || c.t > 0 || c.b > 0)
+})
 /** 选阴影预设时把该预设的四个数字一并写进去（PPT 就是这个行为：预设会带出参数） */
 function applyShadowPreset(v: string) {
   const p = IMAGE_SHADOWS.find((s) => s.v === v)
@@ -2133,6 +2142,33 @@ function layerTypeLabel(type: string) {
         </label>
         <button v-if="hasCrop" class="quick__btn" style="width:100%;margin-top:4px"
           @click="patch({ crop: undefined } as Partial<SlideElement>)">重置裁剪</button>
+        <!-- 【v1725】数学图形：裁剪显示（只露指定区域）+ 打印时隐藏 -->
+        <template v-if="mathfig">
+          <h3 class="panel__title">图形裁剪 / 打印</h3>
+          <label class="field"><span>左 {{ cropPct(mathfig.crop?.l) }}%</span>
+            <input type="range" :value="cropPct(mathfig.crop?.l)" min="0" max="90" step="1"
+              @input="setFigCrop('l', num(($event.target as HTMLInputElement).value, 0))" />
+          </label>
+          <label class="field"><span>右 {{ cropPct(mathfig.crop?.r) }}%</span>
+            <input type="range" :value="cropPct(mathfig.crop?.r)" min="0" max="90" step="1"
+              @input="setFigCrop('r', num(($event.target as HTMLInputElement).value, 0))" />
+          </label>
+          <label class="field"><span>上 {{ cropPct(mathfig.crop?.t) }}%</span>
+            <input type="range" :value="cropPct(mathfig.crop?.t)" min="0" max="90" step="1"
+              @input="setFigCrop('t', num(($event.target as HTMLInputElement).value, 0))" />
+          </label>
+          <label class="field"><span>下 {{ cropPct(mathfig.crop?.b) }}%</span>
+            <input type="range" :value="cropPct(mathfig.crop?.b)" min="0" max="90" step="1"
+              @input="setFigCrop('b', num(($event.target as HTMLInputElement).value, 0))" />
+          </label>
+          <button v-if="hasFigCrop" class="quick__btn" style="width:100%;margin-top:4px"
+            @click="patch({ crop: undefined } as Partial<SlideElement>)">重置图形裁剪</button>
+          <label class="field"><span>打印时隐藏</span>
+            <input type="checkbox" :checked="!!mathfig.noPrint"
+              @change="patch({ noPrint: !mathfig.noPrint } as Partial<SlideElement>)" />
+          </label>
+          <p class="panel__hint">裁剪是**非破坏性**的：只记四边比例、随时改回完整图形。「打印时隐藏」常见用法：遮罩块讲课时盖着，打印讲义时不出现。</p>
+        </template>
         <p class="panel__hint">裁剪是**非破坏性**的：只记比例、不重编码图片，随时能改回来。（「图片编辑器」里那种裁剪会把结果烤进图片数据，两者用途不同。）</p>
 
         <h3 class="panel__title">图片特效（PowerPoint 风格）</h3>
