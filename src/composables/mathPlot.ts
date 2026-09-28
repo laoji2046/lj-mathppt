@@ -2333,6 +2333,7 @@ export function viewAspect(kind: string): number | null {
   if (kind === 'vennFigure') return 1.5                        // 【M2.14】集合 ✓
   if (kind === 'setNumberline') return 2.4
   if (kind === 'arcAngle' || kind === 'arc3pt' || kind === 'circleR' || kind === 'ellipseArc' || kind === 'ellipseAB') return 1.2
+  if (kind === 'vecTriangle' || kind === 'vecParallelogram' || kind === 'vecEqualSum') return 1.55   // 【v1723】向量三图 ✓
   return null
 }
 

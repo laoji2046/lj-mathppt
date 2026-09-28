@@ -6,6 +6,7 @@ import { shapeEdit } from '@/ui/shapeEditor'
 import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg, vertexDotsSvg, type PointStyle } from '@/composables/solid3d'
 import { CONIC_KINDS, DEFAULT_PIECEWISE, FUNCTION_KINDS, conicFigure, conicLineDrag, conicLineHandles, conicPointDrag, conicPointHandles, customFigure, freqLineFigure, freqTableFigure, functionFigure, histogramFigure, piecewiseFigure, scatterFigure, setNumberlineFigure, vennFigure } from '@/composables/mathPlot'
 import { isPlaneCtrlKind, planeDrag, planeHandles, planeSvg } from '@/composables/planeCtrl'
+import { isVectorFigKind, vectorFigureSvg } from '@/composables/vectorFigures'
 import { solidSel, selectSolidVertex, selectSolidEdge, selectSolidFace, clearSolidSel } from '@/composables/solidSel'
 
 const props = defineProps<{ el: MathFigureElement; selected?: boolean; /** 预览用：等比缩放（contain）而不是拉伸（stretch） */ fit?: 'stretch' | 'contain' }>()
@@ -83,6 +84,8 @@ const innerHtml = computed(() => {
   }
   // 带控制点的平面图形：平行四边形（边长/夹角）、圆弧（圆心+圆心角 / 过三点）、指定半径的圆。
   // 没有 ctrl 时用默认控制点 —— 默认值与老版"平行四边形"的顶点**完全一致**，老图元外观不变。
+  // 【v1723】向量分类：三角形法则 / 平行四边形法则 / 等和线（纯函数出 SVG ✓ 与兜底渲染器同一份实现 ✓）
+  if (isVectorFigKind(kind)) return vectorFigureSvg(kind, w, h, stroke, s)
   if (isPlaneCtrlKind(kind)) {
     return planeSvg(kind, w, h, props.el.ctrl, {
       stroke, sw: s, dash, fill: kind === 'parallelogram' || kind === 'circleR' ? fillColor : 'none',

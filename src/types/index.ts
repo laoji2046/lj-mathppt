@@ -444,6 +444,8 @@ export type MathFigureKind =
   | 'coordinate' | 'numberline' | 'venn' | 'righttriangle' | 'angle' | 'semicircle'
   | 'triangle' | 'rectangle' | 'circle' | 'pentagon' | 'hexagon' | 'rhombus' | 'kite' | 'angledrect'
   | 'parallelogram' | 'trapezoid' | 'star' | 'bezier' | 'polygon'
+  // ---- 【v1723】向量（图形库新增分类 ✓） ----
+  | 'vecTriangle' | 'vecParallelogram' | 'vecEqualSum'
   | 'arcAngle' | 'arc3pt' | 'circleR' | 'ellipseArc' | 'ellipseAB'
   // ---- 3D 立体几何 ----
   | 'cube' | 'cubeOblique' | 'cuboid' | 'cuboidOblique' | 'cylinder' | 'cone' | 'sphere'
@@ -460,8 +462,8 @@ export type MathFigureKind =
   | 'vennFigure' | 'vennIntersect' | 'vennUnion' | 'vennComplement' | 'setNumberline'
 
 /** 数学图形分类（面板按这个分组显示） */
-export type MathFigureCat = '平面图形' | '立体几何' | '图形重建' | '函数图像' | '圆锥曲线' | '辅助标注' | '统计图表' | '集合'
-export const MATH_FIGURE_CATS: MathFigureCat[] = ['函数图像', '圆锥曲线', '平面图形', '立体几何', '图形重建', '统计图表', '集合', '辅助标注']
+export type MathFigureCat = '平面图形' | '立体几何' | '图形重建' | '函数图像' | '圆锥曲线' | '辅助标注' | '统计图表' | '集合' | '向量'
+export const MATH_FIGURE_CATS: MathFigureCat[] = ['函数图像', '圆锥曲线', '平面图形', '向量', '立体几何', '图形重建', '统计图表', '集合', '辅助标注']
 
 export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathFigureCat }[] = [
   // ---- 统计图（【M2.11】） ----
@@ -476,6 +478,10 @@ export const MATH_FIGURE_OPTIONS: { v: MathFigureKind; label: string; cat: MathF
   { v: 'vennFigure', label: '韦恩图（交/并/补/子集/相离/三集）', cat: '集合' },
   { v: 'setNumberline', label: '数轴上的集合（区间）', cat: '集合' },
   // ---- 函数图像 ----
+    // ---- 【v1723】向量 ----
+    { v: 'vecTriangle', label: '向量的三角形法则', cat: '向量' },
+    { v: 'vecParallelogram', label: '向量的平行四边形法则', cat: '向量' },
+    { v: 'vecEqualSum', label: '向量的等和线（x+y=k）', cat: '向量' },
   { v: 'linear', label: '一次函数 y=x+1', cat: '函数图像' },
   { v: 'parabola', label: '二次函数 y=x²', cat: '函数图像' },
   { v: 'cubic', label: '三次函数 y=x³', cat: '函数图像' },

@@ -1,4 +1,5 @@
 import type { Deck, Slide, SlideElement, TableElement, TextElement } from '@/types'
+import { isVectorFigKind, vectorFigureSvg } from '@/composables/vectorFigures'
 import { inlineFiguresInText, renderFigureSvg } from '@/composables/figureRender'
 import { layoutTable } from '@/composables/tableLayout'
 import { animRevealClass, animTimingStyle, bulletMarker, fitCap, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
@@ -79,6 +80,8 @@ function figureInner(
     }
     return a.join(' ')
   }
+  // 【v1723】向量分类（与画布共用同一份实现 ✓）
+  if (isVectorFigKind(kind)) return vectorFigureSvg(kind, w, h, stroke, s)
   if (SOLID_VCOUNT[kind]) {
     // 顶点数判定必须和画布（MathFigureElement.vue）一致：
     // **带 mesh 的图形顶点数是任意的**（「图片转图形」/复刻图都是），不能再要求等于该类型的默认顶点数 ——
