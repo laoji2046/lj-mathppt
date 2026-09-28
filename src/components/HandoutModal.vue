@@ -13,7 +13,7 @@ import AppIcon from './AppIcon.vue'
 import { typesetMixed } from '@/composables/useMathJax'
 import {
   HD_BOOKS, HD_LABEL, HD_NUMBERED, HD_PRESSES, HD_SKELETONS, handout, hdVersion, hdPlain, makeBlock, outlineOf, pageHtmlOf, skeletonBlocks, skeletonById,
-  rendered, saveHandout, handoutToText, handoutPathOf, syncAutoTitle, autoTitleOf,
+  rendered, saveHandout, handoutToText, handoutPathOf, syncAutoTitle, autoTitleOf, hdUnitLabel,
   initHandoutLib, openHandout, newHandout, deleteHandout, handoutTree, lib, curId, currentSaved,
   /* 【M4】库目录（exe 同级 LJ-讲义）：真身 ✓ */
   syncHandoutFolder, saveDocToFolder, folderDir, folderFiles, folderError,
@@ -1053,7 +1053,7 @@ watch(ver, () => { void refreshNow() })
             </div>
             <div class="hd__dlist">
               <div v-for="item in kbFiltered" :key="item.id" class="hd__ditem hd__ditem--kb" @click="pickKb(item)">
-                <div class="hd__dtitle">{{ item.book }}<template v-if="item.chapter"> 第 {{ item.chapter }} 章</template> · {{ item.kind === 'knowledge' ? '知识' : item.kind === 'note' ? '提示' : '易错' }}<span v-if="item.custom"> · 自定义</span></div>
+                <div class="hd__dtitle">{{ item.book }}<template v-if="item.chapter"> {{ hdUnitLabel(item.chapter, '章') }}</template> · {{ item.kind === 'knowledge' ? '知识' : item.kind === 'note' ? '提示' : '易错' }}<span v-if="item.custom"> · 自定义</span></div>
                 <div class="hd__dstem"><b>{{ item.title }}</b> —— {{ item.text.replace(/\$/g, '').slice(0, 46) }}</div>
               </div>
               <div v-if="!kbFiltered.length" class="hd__dhint">没搜到 ✓ 换个词，或把讲义里的块「+存」进去 ✓</div>

@@ -749,9 +749,9 @@ export async function saveDocToFolder(id: string): Promise<{ ok: boolean; path?:
  * 对账规则：先按文件名认，再按标题认（第一次搬家时 file 还没写上 ✓）；
  * 同一份两边都有 → **谁新用谁**（工作副本通常更新 ✓，文件那份是"上次保存的"✓）。
  */
-export async function syncHandoutFolder(): Promise<{ files: number; added: number; kept: number }> {
+export async function syncHandoutFolder(): Promise<{ files: number; added: number; kept: number; pruned: number }> {
   const dir = await hdFolderDir()
-  if (!dir) return { files: 0, added: 0, kept: 0 }
+  if (!dir) return { files: 0, added: 0, kept: 0, pruned: 0 }
   folderDir.value = dir
   const files = await hdFolderList()
   folderFiles.value = files.map((x) => x.name)
@@ -779,7 +779,14 @@ export async function syncHandoutFolder(): Promise<{ files: number; added: numbe
     hit.file = f.name
   }
   writeLib()
-  return { files: files.length, added, kept }
+  /** 【v1722】对账完再**去重**：库目录里没了的丢掉、同一讲重复的只留新的 ✓
+   *  （用户实报：删了讲义 + 重建之后，每一讲都在库里出现两份 ✗）
+   */
+  const alive = new Set(files.map((x) => x.name))
+  const beforeN = lib.value.length
+  lib.value = dedupeLibDocs(lib.value, files.length ? alive : undefined)
+  const pruned = beforeN - lib.value.length
+  return { files: files.length, added, kept, pruned }
 }
 
 /** 库目录里是否有这个文件（界面判断"未保存"用 ✓） */
@@ -844,6 +851,43 @@ export function deleteHandout(id: string) {
   }
 }
 
+/** 【v1722】章 / 节可能已经是「第 1 章 集合与常用逻辑用语」这种**全称** ✓（内置目录 / md 导入写的就是全称 ✓）
+ *  —— 别再套一层「第 … 章」✗（用户实报：树里显示成「第 第 1 章 … 章」✗）
+ */
+export function hdUnitLabel(s: unknown, unit: string): string {
+  const t = String(s == null ? '' : s).trim()
+  if (!t) return ''
+  return t.charAt(0) === '第' || t.charAt(0) === '（' ? t : '第 ' + t + ' ' + unit
+}
+
+/** 一份讲义的去重键：册 | 章 | 节 | 课时 | 课题 ✓ */
+function hdDedupeKey(d: HdDoc): string {
+  const m = d.meta
+  return [m.book, m.chapter, m.section, m.period, m.title]
+    .map((x) => String(x == null ? '' : x).trim()).join('|')
+}
+
+/** 【v1722】库对账（纯函数 ✓ 探针能测 ✓）：
+ *   ① 库目录里**已经没有这个文件**的（被挪进 .deleted\ 或外面删了）→ 丢掉 ✗
+ *      —— 只丢**有 file 名字**的 ✓；没 file 的是「还没保存的新讲义」✓ 不能丢 ✗
+ *   ② **同一讲重复**的（库目录 + 应用工作副本两边都在 ✓ 删了又重建之后经常出现 ✗）→ 只留新的 ✓
+ *  用户实报：删了讲义 + 重建之后，讲义库里每一讲都出现两份 ✗
+ */
+export function dedupeLibDocs(docs: HdDoc[], alive?: Set<string>): HdDoc[] {
+  const out: HdDoc[] = []
+  const at = new Map<string, number>()
+  for (const d of docs) {
+    if (d.file && alive && alive.size && !alive.has(d.file)) continue
+    const k = hdDedupeKey(d)
+    const i = at.get(k)
+    if (i === undefined) { at.set(k, out.length); out.push(d); continue }
+    const prev = out[i]
+    const tn = String(d.updatedAt || ''), tp = String(prev.updatedAt || '')
+    if (tn > tp || (tn === tp && !!d.file && !prev.file)) out[i] = d
+  }
+  return out
+}
+
 /** 讲义库目录树：册 → 章 → 节 → 课时（讲义）✓ —— 左侧「讲义库」用它 ✓ */
 export interface HdLibNode { key: string; label: string; docs: HdDoc[]; kids: HdLibNode[] }
 export function handoutTree(): HdLibNode[] {
@@ -865,9 +909,9 @@ export function handoutTree(): HdLibNode[] {
     for (const [cp, secs] of chs) {
       const skids: HdLibNode[] = []
       for (const [sc, docs] of secs) {
-        skids.push({ key: bk + '/' + cp + '/' + sc, label: sc === '未分节' ? sc : '第 ' + sc + ' 节', docs: docs.slice().sort((a, b) => (a.meta.period || '').localeCompare(b.meta.period || '')), kids: [] })
+        skids.push({ key: bk + '/' + cp + '/' + sc, label: sc === '未分节' ? sc : hdUnitLabel(sc, '节'), docs: docs.slice().sort((a, b) => (a.meta.period || '').localeCompare(b.meta.period || '')), kids: [] })
       }
-      kids.push({ key: bk + '/' + cp, label: cp === '未分章' ? cp : '第 ' + cp + ' 章', docs: [], kids: skids })
+      kids.push({ key: bk + '/' + cp, label: cp === '未分章' ? cp : hdUnitLabel(cp, '章'), docs: [], kids: skids })
     }
     out.push({ key: bk, label: bk, docs: [], kids })
   }
@@ -885,8 +929,8 @@ export function handoutPathOf(h: Handout): string {
   const m = h.meta
   const chap = String(m.chapter || '').trim()
   const sec = String(m.section || '').trim()
-  const ch = chap ? (chap.charAt(0) === '第' || chap.charAt(0) === '（' ? chap : '第 ' + chap + ' 章') : ''
-  const se = sec ? (sec.charAt(0) === '第' || sec.charAt(0) === '（' ? sec : '第 ' + sec + ' 节') : ''
+  const ch = hdUnitLabel(chap, '章')
+  const se = hdUnitLabel(sec, '节')
   return [m.press, m.book, ch, se].filter(Boolean).join(' · ')
 }
 
