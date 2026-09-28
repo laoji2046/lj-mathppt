@@ -1847,7 +1847,7 @@ const CASE60 = (async () => {
   const poly = FC.maskClipCss({ shape: "self" }, [0, 0, 1, 0, 0.5, 1]);
   ok(poly === "polygon(0.00% 0.00%, 100.00% 0.00%, 50.00% 100.00%)", "★用它自己的形状当遮罩（" + poly + "）");
   ok(FC.maskClipCss({ shape: "self" }, null) === "circle(50% at 50% 50%)", "没顶点时退回圆形（不会把图形整块藏没 ✓）");
-  ok(FC.MASK_SHAPES.length === 5, "遮罩形状清单 5 项（" + FC.MASK_SHAPES.map(function (x) { return x.v }).join("/") + "）");
+  ok(FC.MASK_SHAPES.length === 6, "遮罩形状清单 6 项（" + FC.MASK_SHAPES.map(function (x) { return x.v }).join("/") + "）");
   ok(FC.figMaskCss({ mask: { shape: "circle" }, points: [] }) === "circle(50% at 50% 50%)", "figMaskCss 从元素取遮罩");
   const T = fs.readFileSync(path.join(ROOT, "src", "types", "index.ts"), "utf8");
   ok(T.indexOf("mask?: { shape?:") > 0 || T.indexOf("mask?:") > 0, "★mathfig 元素类型加了 mask");
@@ -1855,6 +1855,28 @@ const CASE60 = (async () => {
   ok(EF.indexOf("figMaskCss") > 0, "★元素外框接上了遮罩");
   const PP = fs.readFileSync(path.join(ROOT, "src", "components", "PropertyPanel.vue"), "utf8");
   ok(PP.indexOf("遮罩（只显示形状内）") > 0 || PP.indexOf("maskShape") > 0, "★属性面板有遮罩下拉");
+})();
+
+console.log("=== 用例 61：用另一个图形当遮罩（取轮廓 → 套到目标 ✓ v1728）===");
+const CASE61 = (async () => {
+  const FC = loadBundled("figureCrop.ts", "_c61f.cjs");
+  const tri = { x: 100, y: 50, w: 200, h: 100, points: [0, 0, 1, 0, 0.5, 1] };
+  const par = { x: 120, y: 60, w: 400, h: 300, points: [0, 0.5, 1, 0.5] };
+  ok(FC.takeOutline(tri) === 3, "★三角形轮廓取到 3 个点（" + FC.takeOutline(tri) + "）");
+  ok(FC.pendingOutlineCount() === 3, "暂存里有 3 个点");
+  const pts = FC.applyOutline(par);
+  ok(pts.length === 6, "换算到目标得到 6 个数（" + pts.length + "）");
+  ok(Math.abs(pts[0] + 0.05) < 0.001 && Math.abs(pts[1] + 0.0333) < 0.01, "第一个点换算对（" + pts[0].toFixed(3) + ", " + pts[1].toFixed(3) + "）");
+  ok(Math.abs(pts[2] - 0.45) < 0.001 && Math.abs(pts[3] + 0.0333) < 0.01, "第二个点换算对（" + pts[2].toFixed(3) + ", " + pts[3].toFixed(3) + "）");
+  ok(FC.maskClipCss({ shape: "poly", points: [0, 0, 1, 0, 0.5, 1] }).indexOf("polygon(0.00% 0.00%") === 0, "★poly 形状用 mask.points 出 polygon");
+  FC.clearOutline();
+  ok(FC.pendingOutlineCount() === 0 && FC.applyOutline(par).length === 0, "清掉之后取不到（不会乱套 ✓）");
+  ok(FC.takeOutline({ x: 0, y: 0, w: 10, h: 10 }) === 0, "没顶点的图形取不了轮廓（返回 0 ✓）");
+  ok(FC.MASK_SHAPES.some(function (m) { return m.v === "poly" }), "遮罩形状清单里有「取来的轮廓」");
+  const T = fs.readFileSync(path.join(ROOT, "src", "types", "index.ts"), "utf8");
+  ok(T.indexOf("points?: number[]") > 0, "★types 里 mask 带上 points");
+  const PP = fs.readFileSync(path.join(ROOT, "src", "components", "PropertyPanel.vue"), "utf8");
+  ok(PP.indexOf("takeOutline") > 0 && PP.indexOf("applyOutline") > 0, "★属性面板有「取轮廓 / 套轮廓」两个按钮");
 })();
 
 console.log("=== 用例 34：样式闭合标签容错（用户实报：改完色每行后面印出 {/c} ✗ v1695）===");
@@ -2321,7 +2343,7 @@ console.log("=== 用例 24：模板静态体检（属性掉成正文 = 界面上
 }
 
 // 用例 24 是**同步块**（同用例 20 / 22）：加载时就跑完了，不进这条异步链 ✗（挂进来会 CASE24 未定义 ✗）
-CASE15.then(() => CASE16).then(() => CASE19).then(() => CASE21).then(() => CASE23).then(() => CASE35).then(() => CASE41).then(() => CASE43).then(() => CASE44).then(() => CASE45).then(() => CASE46).then(() => CASE47).then(() => CASE48).then(() => CASE49).then(() => CASE50).then(() => CASE51).then(() => CASE52).then(() => CASE53).then(() => CASE54).then(() => CASE55).then(() => CASE56).then(() => CASE57).then(() => CASE58).then(() => CASE59).then(() => CASE60).then(() => {
+CASE15.then(() => CASE16).then(() => CASE19).then(() => CASE21).then(() => CASE23).then(() => CASE35).then(() => CASE41).then(() => CASE43).then(() => CASE44).then(() => CASE45).then(() => CASE46).then(() => CASE47).then(() => CASE48).then(() => CASE49).then(() => CASE50).then(() => CASE51).then(() => CASE52).then(() => CASE53).then(() => CASE54).then(() => CASE55).then(() => CASE56).then(() => CASE57).then(() => CASE58).then(() => CASE59).then(() => CASE60).then(() => CASE61).then(() => {
 console.log("=== 渲染检查：竖直弦在 SVG 里是不是真竖线 ===");
 for (const R of results) {
   if (!R.spec.lines.some((L) => L.vertical)) continue;

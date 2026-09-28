@@ -35,22 +35,25 @@ export const MASK_SHAPES: { v: string; label: string }[] = [
   { v: 'ellipse', label: '椭圆窗口' },
   { v: 'round', label: '圆角矩形窗口' },
   { v: 'self', label: '用它自己的形状（多边形图形 ✓）' },
+  { v: 'poly', label: '取来的轮廓（用别的图形当窗口 ✓）' },
 ]
 
 /**
  * 【v1727】遮罩 → CSS clip-path ✓
  *   circle / ellipse / round：按元素外框算 ✓
  *   self：用元素自己的归一化顶点（points ✓ 扁平 0~1）拼 polygon ✓ —— 落在轮廓外的部分整块消失 ✓
+ *   poly：【v1728】用别的图形取来的轮廓（mask.points ✓ 已换算进本元素框 ✓）拼 polygon ✓
  * 返回空串 = 不遮罩 ✓
  */
-export function maskClipCss(mask?: { shape?: string } | null, points?: number[] | null): string {
+export function maskClipCss(mask?: { shape?: string; points?: number[] } | null, points?: number[] | null): string {
   const sh = String((mask && mask.shape) || '')
   if (!sh || sh === 'none') return ''
   if (sh === 'circle') return 'circle(50% at 50% 50%)'
   if (sh === 'ellipse') return 'ellipse(50% 50% at 50% 50%)'
   if (sh === 'round') return 'inset(0 round 14%)'
-  if (sh === 'self') {
-    const p = points || []
+  const usePts = sh === 'poly' ? ((mask && mask.points) || null) : points
+  if (sh === 'self' || sh === 'poly') {
+    const p = usePts || []
     if (p.length < 6) return 'circle(50% at 50% 50%)'   // 没有顶点 → 退回圆形，别把图形整块藏没了 ✓
     const out: string[] = []
     for (let i = 0; i + 1 < p.length; i += 2) out.push((p[i] * 100).toFixed(2) + '% ' + (p[i + 1] * 100).toFixed(2) + '%')
@@ -64,3 +67,40 @@ export function figMaskCss(el: unknown): string {
   const e = el as { mask?: { shape?: string }; points?: number[] } | null | undefined
   return maskClipCss(e?.mask, e?.points)
 }
+/** 取轮廓用：只要有框和归一化顶点就够 ✓（x/y/w/h + points） */
+export interface OutlineSrc { x: number; y: number; w: number; h: number; points?: number[] }
+
+/** 【v1728】取来的轮廓（**画布坐标** xyxy… ✓ 模块级暂存 ✓ 不写进元素 ✓） */
+let pendingOutline: number[] | null = null
+
+/** 取当前图形的轮廓（画布坐标 ✓）；返回点数（0 = 这个图形没有顶点，取不了 ✓） */
+export function takeOutline(el: OutlineSrc | null | undefined): number {
+  const p = (el && el.points) || []
+  if (!el || p.length < 6) { pendingOutline = null; return 0 }
+  const out: number[] = []
+  for (let i = 0; i + 1 < p.length; i += 2) {
+    out.push(el.x + p[i] * el.w)
+    out.push(el.y + p[i + 1] * el.h)
+  }
+  pendingOutline = out
+  return out.length / 2
+}
+
+/** 取到的轮廓有几个点（0 = 还没取 ✓） */
+export function pendingOutlineCount(): number {
+  return pendingOutline ? pendingOutline.length / 2 : 0
+}
+
+/** 把取来的轮廓**换算到目标图形的框里**（归一化 0~1 ✓）；取不到返回空数组 ✓ */
+export function applyOutline(target: OutlineSrc | null | undefined): number[] {
+  if (!target || !pendingOutline || target.w <= 0 || target.h <= 0) return []
+  const out: number[] = []
+  for (let i = 0; i + 1 < pendingOutline.length; i += 2) {
+    out.push((pendingOutline[i] - target.x) / target.w)
+    out.push((pendingOutline[i + 1] - target.y) / target.h)
+  }
+  return out
+}
+
+/** 清掉暂存的轮廓 ✓ */
+export function clearOutline(): void { pendingOutline = null }
