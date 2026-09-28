@@ -5,7 +5,8 @@ import type { SlideElement } from '@/types'
 import { useDeckStore } from '@/stores/deck'
 import { hasLocalEngine, loadGeoGebra } from '@/composables/useGeoGebra'
 import { describeToCommands } from '@/composables/ggbAI'
-import { ggbSolvePlan, ggbSolveSystem, ggbToolOf } from '@/composables/ggbSolve'
+import { ggbBriefText, ggbReadBrief, ggbReadSystem, ggbRepairSystem, ggbRepairUser, ggbSolvePlan, ggbSolveSystem, ggbSolveUser, ggbToolOf, ggbValidatePlan, ggbVisionGuard, type GgbSolveStep } from '@/composables/ggbSolve'
+import { settingsOpen } from '@/ui/menus'
 import { licensed } from '@/composables/useLicense'
 import { invoke } from '@/composables/useTauri'
 import ScreenshotCapture from './ScreenshotCapture.vue'
@@ -186,6 +187,101 @@ const solveShot = ref(false)
 const solveFile = ref<HTMLInputElement | null>(null)
 const MAX_SOLVE_IMG = 3
 
+/* ---------------- 【v1729】识图解题三段式：① 读图（只转写）→ ② 校对（可编辑）→ ③ 解题作图（校验 + 自愈）-------
+ * 为什么拆：原来一步里让模型同时「读图 + 推理 + 写 GeoGebra 语法」✗ —— 三件事捆一起，
+ *   看错了 / 算错了 / 写错了根本分不清 ✓ 现在：读图只转写（不猜、不解题 ✓）→ 老师校对文字（最便宜的纠错点 ✓）
+ *   → 文本模型解题作图（不带图 ✓ 便宜又准 ✓）→ 执行前静态校验 → 报错的步骤回灌修一轮 ✓
+ */
+const solveBrief = ref("")
+const reading = ref(false)
+const repairOn = ref(true)
+
+/** 【v1729】带图但没配视觉模型 → 面板上一直挂着这句（原来会**静默**把图发给纯文本模型 ✗） */
+const solveVisionWarn = computed(() => ggbVisionGuard(solveImgs.value.length > 0, solveVisionModel()))
+function openAiSettings() { settingsOpen.value = true }
+
+/** 【v1729】调模型（读图 / 解题 / 修错共用 ✓）—— 失败把原话抛出来，别吞 ✗ */
+async function solveChat(opts: { system: string; content: unknown; model: string; baseUrl: string }): Promise<string> {
+  const key = solveAiKey()
+  if (!key) throw new Error("还没填 AI Key：设置 → AI 助手")
+  const r = await invoke<{ ok?: boolean; json?: unknown; error?: string }>("ai_chat_raw", {
+    baseUrl: opts.baseUrl, apiKey: key,
+    body: { model: opts.model, temperature: 0, messages: [{ role: "system", content: opts.system }, { role: "user", content: opts.content }] },
+  })
+  if (!r || r.ok === false) throw new Error(String((r && r.error) || "工具通道调用失败"))
+  const j = (r.json || {}) as { choices?: { message?: { content?: string } }[] }
+  const text = String((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || "")
+  if (!text.trim()) throw new Error("模型返回了空内容（端点或模型名可能不对）")
+  return text
+}
+
+/** 【v1729】① 读图：把题图**转写成文字**（不许解题 ✓ 不许猜 ✓），结果放进可编辑的校对框 ✓ */
+async function readProblemInner() {
+  if (!licensed("ai-assistant")) { toaster("AI 助手要先激活：工具栏「激活 / 序列号」"); return }
+  const imgs = solveImgs.value.slice(0, MAX_SOLVE_IMG)
+  if (imgs.length && solveVisionWarn.value) { toaster("带图要先配视觉模型：设置 → AI 助手 → 视觉模型"); return }
+  reading.value = true
+  solveLog.value = []
+  try {
+    if (imgs.length) {
+      const ask = "请转写这张题图。" + (solveSay.value.trim() ? String.fromCharCode(10) + "补充：" + solveSay.value.trim() : "")
+      const text = await solveChat({
+        system: ggbReadSystem(),
+        content: [{ type: "text", text: ask }, ...imgs.map((u) => ({ type: "image_url", image_url: { url: u } }))],
+        model: solveVisionModel(), baseUrl: solveVisionBase(),
+      })
+      const b = ggbReadBrief(text)
+      solveBrief.value = ggbBriefText(b)
+      solveLog.value.push("已读图：题干 " + b.text.length + " 字、已知 " + b.given.length + " 条、图形要素 " + b.figure.length + " 条")
+      for (const u of b.unsure) solveLog.value.push("· ⚠ 待确认：" + u)
+      toaster(b.unsure.length
+        ? "读好了 —— 有 " + b.unsure.length + " 处拿不准，改完再点「② 解题并作图」✓"
+        : "读好了 ✓ 核对一下校对框里的文字，再点「② 解题并作图」✓")
+    } else {
+      const t = solveSay.value.trim()
+      if (!t) { toaster("先贴一张题目图（点「＋ 题目图 / 截图」），或直接写一句题干 ✓"); return }
+      solveBrief.value = "【题干】" + t
+      toaster("没贴图：把写的题干放进校对框了，直接点「② 解题并作图」✓")
+    }
+  } finally { reading.value = false }
+}
+function readProblem() { quietErrors(readProblemInner) }
+
+/** 【v1729】跑一串步骤：切工具 → evalCommand；失败收进 fails ✓ 返回成功条数 */
+async function runSolveSteps(a: any, steps: GgbSolveStep[], fails: { cmd: string; err: string }[]): Promise<number> {
+  let ok = 0
+  for (const s of steps) {
+    if (s.tool) {
+      try { a.setMode(s.mode); solveLog.value.push("切换工具：" + (ggbToolOf(s.tool)?.label || s.tool)) } catch { /* 切不动就跳过 ✓ */ }
+      await new Promise((res) => window.setTimeout(res, 140))
+    }
+    try {
+      a.evalCommand(s.cmd)
+      ok++
+      solveLog.value.push(s.cmd + (s.say ? "　// " + s.say : "") + " ✓")
+    } catch (err) {
+      const msg = String((err as Error)?.message || err)
+      fails.push({ cmd: s.cmd, err: msg })
+      solveLog.value.push(s.cmd + " ✗ " + msg)
+    }
+    await new Promise((res) => window.setTimeout(res, 90))
+  }
+  return ok
+}
+
+/** 【v1729】执行后校验：`X=…` 的对象是否真建出来了（拿不到对象表就不下结论 ✓ 免得误报 ✗） */
+function missingObjects(a: any, steps: GgbSolveStep[]): string[] {
+  const names: string[] = []
+  for (const s of steps) {
+    const m = /^\s*([A-Za-z][A-Za-z0-9_']*)\s*(?:\([^)]*\))?\s*=/.exec(s.cmd)
+    if (m) names.push(m[1])
+  }
+  if (!names.length) return []
+  let list: string[] | null = null
+  try { if (typeof a.getAllObjectNames === "function") list = a.getAllObjectNames() as string[] } catch { list = null }
+  if (!list) return []
+  return names.filter((n) => list.indexOf(n) < 0)
+}
 /** AI Key / 视觉模型：与其它 AI 面板同一口径（键名不写死，设置里存的哪个就用哪个） */
 function solveAiKey(): string {
   try {
@@ -241,52 +337,46 @@ function solveAndDraw() { quietErrors(solveAndDrawInner) }
 async function solveAndDrawInner() {
   const a = liveApplet()
   if (!a || typeof a.evalCommand !== "function") { toaster("作图器尚未就绪"); return }
-  if (!solveImgs.value.length && !solveSay.value.trim()) { toaster("先贴一张题目图（或写一句题目）✓"); return }
+  const brief = solveBrief.value.trim()
+  if (!brief && !solveImgs.value.length && !solveSay.value.trim()) { toaster("先贴一张题目图（点「① 读图」），或直接写一句题干 ✓"); return }
+  if (!brief) { toaster(solveImgs.value.length ? "先点「① 读图」把题图转成文字、核对一遍，再解题 ✓" : "先写一句题干，或点「① 读图」✓"); return }
   if (!licensed("ai-assistant")) { toaster("AI 助手要先激活：工具栏「激活 / 序列号」"); return }
-  const key = solveAiKey()
-  if (!key) { toaster("还没填 AI Key：设置 → AI 助手 ✓"); return }
+  if (!solveAiKey()) { toaster("还没填 AI Key：设置 → AI 助手 ✓"); return }
   solving.value = true
   solveLog.value = []
   solution.value = ""
   try {
-    const imgs = solveImgs.value.slice(0, MAX_SOLVE_IMG)
-    const ask = "请解这道题，并按格式给出作图步骤。" + (solveSay.value.trim() ? String.fromCharCode(10) + "补充：" + solveSay.value.trim() : "")
-    const content: unknown = imgs.length
-      ? [{ type: "text", text: ask }, ...imgs.map((u) => ({ type: "image_url", image_url: { url: u } }))]
-      : ask
-    const model = imgs.length && solveVisionModel() ? solveVisionModel() : "deepseek-chat"
-    const baseUrl = imgs.length ? solveVisionBase() : ""
-    const r = await invoke<{ ok?: boolean; json?: unknown; error?: string }>("ai_chat_raw", {
-      baseUrl, apiKey: key,
-      body: { model, temperature: 0, messages: [{ role: "system", content: ggbSolveSystem() }, { role: "user", content }] },
-    })
-    if (!r || r.ok === false) throw new Error(String((r && r.error) || "工具通道调用失败"))
-    const j = (r.json || {}) as { choices?: { message?: { content?: string } }[] }
-    const text = String((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || "")
+    // 【v1729】解题这一步**只用文本**（题干已读成文字、老师也校对过 ✓）—— 便宜、且不再依赖视觉模型 ✓
+    const text = await solveChat({ system: ggbSolveSystem(), content: ggbSolveUser(brief, solveSay.value.trim()), model: "deepseek-chat", baseUrl: "" })
     const plan = ggbSolvePlan(text)
     solution.value = plan.solution
     for (const n of plan.notes) solveLog.value.push("· " + n)
     if (!plan.steps.length) { toaster("它没给出作图步骤 —— 解题过程放在下面了 ✓"); return }
+    // 【v1729】执行前静态校验：全角标点 / 一行多条 / 括号配平 / 依赖顺序（纯函数 ✓）
+    const chk = ggbValidatePlan(plan.steps)
+    if (chk.fixes.length) solveLog.value.push("· 执行前自动修正 " + chk.fixes.length + " 处：" + chk.fixes.slice(0, 4).join("；"))
+    for (const it of chk.issues) solveLog.value.push("· ⚠ " + it)
     const beforeDefs = defSnapshot()
     const prev = lastCreated.value.slice()
-    let ok = 0
-    let switched = 0
-    for (const s of plan.steps) {
-      if (s.tool) {
-        try { a.setMode(s.mode); switched++; solveLog.value.push("切换工具：" + (ggbToolOf(s.tool)?.label || s.tool)) } catch { /* 切不动就跳过 ✓ */ }
-        await new Promise((res) => window.setTimeout(res, 140))
-      }
+    const fails: { cmd: string; err: string }[] = []
+    const ok = await runSolveSteps(a, chk.steps, fails)
+    // 【v1729】自愈：只把**报错的那几步**回灌给模型改一轮 ✓（默认勾上 ✓）
+    let fixed = 0
+    if (fails.length && repairOn.value) {
       try {
-        a.evalCommand(s.cmd)
-        ok++
-        solveLog.value.push(s.cmd + (s.say ? "　// " + s.say : "") + " ✓")
-      } catch (err) {
-        solveLog.value.push(s.cmd + " ✗ " + String((err as Error)?.message || err))
-      }
-      await new Promise((res) => window.setTimeout(res, 90))
+        const objs = (typeof a.getAllObjectNames === "function" ? (a.getAllObjectNames() as string[]) : []).slice(0, 80)
+        const rt = await solveChat({ system: ggbRepairSystem(), content: ggbRepairUser(fails, objs, brief), model: "deepseek-chat", baseUrl: "" })
+        const rp = ggbValidatePlan(ggbSolvePlan(rt).steps)
+        if (rp.steps.length) {
+          solveLog.value.push("· 自愈：模型给了 " + rp.steps.length + " 步修正，重跑一遍 ✓")
+          fixed = await runSolveSteps(a, rp.steps, [])
+        } else solveLog.value.push("· 自愈：模型没给出可用的修正步骤")
+      } catch (e) { solveLog.value.push("· 自愈没跑成：" + String((e as Error)?.message || e)) }
     }
     finishRun(beforeDefs, prev)
-    toaster("🤖 已解题并作图：" + ok + "/" + plan.steps.length + " 条命令，切了 " + switched + " 次工具 ✓")
+    const miss = missingObjects(a, chk.steps)
+    if (miss.length) solveLog.value.push("· ⚠ 有 " + miss.length + " 个对象没建出来：" + miss.slice(0, 6).join("、"))
+    toaster("🤖 已解题并作图：" + ok + "/" + chk.steps.length + " 条" + (fails.length ? "，失败 " + fails.length + " 步" : "") + (fixed ? "，自愈修好 " + fixed + " 步" : "") + " ✓")
   } finally {
     solving.value = false
   }
@@ -685,7 +775,7 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
               <div class="ggbs__solvehead">
                 <span class="ggbs__aiicon">🧠</span>
                 <span class="ggbs__solvet">贴图解题作图</span>
-                <span class="ggbs__solves">贴题目图 / 截图 → 自动解题 + 自动作图 + 自动换工具</span>
+                <span class="ggbs__solves">① 读图转文字（可校对）→ ② 解题并作图（自动切工具 ✓ 报错自动修一轮 ✓）</span>
               </div>
               <div class="ggbs__solverow">
                 <button class="ggbs__btn ggbs__btn--tiny" title="导入题目图片（也可以 Ctrl+V 粘贴 / 直接拖进来）" @click="solveFile && solveFile.click()">＋ 题目图</button>
@@ -696,9 +786,17 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
                 </span>
               </div>
               <textarea v-model="solveSay" class="ggbs__solveinput" rows="1" wrap="soft" placeholder="补充一句（可空）：比如「只画第一问」「用参数方程」" @paste="onSolvePaste"></textarea>
+              <div v-if="solveVisionWarn" class="ggbs__solverow">
+                <span class="ggbs__solvewarn">⚠ {{ solveVisionWarn }}</span>
+                <button class="ggbs__btn ggbs__btn--tiny" @click="openAiSettings">去设置</button>
+              </div>
+              <textarea v-if="solveBrief" v-model="solveBrief" class="ggbs__solveinput" rows="6" wrap="soft"
+                title="① 读图的结果 —— 就在这里改（看不清的地方看【待确认】）✓ 改完点「② 解题并作图」✓"
+                placeholder="① 读图的结果会出现在这里，可直接改…"></textarea>
               <div class="ggbs__solverow">
-                <button class="ggbs__btn ggbs__btn--ai" :disabled="solving" @click="solveAndDraw">{{ solving ? "解题作图中…" : "解题并作图" }}</button>
-                <span class="ggbs__solvehint">按步骤自动切工具（点 → 圆 → 交点 …），跑完自动清掉上一次的图</span>
+                <button class="ggbs__btn ggbs__btn--tiny" :disabled="reading" @click="readProblem">{{ reading ? "读图中…" : "① 读图（转成文字）" }}</button>
+                <button class="ggbs__btn ggbs__btn--ai" :disabled="solving" @click="solveAndDraw">{{ solving ? "解题作图中…" : "② 解题并作图" }}</button>
+                <label class="ggbs__check" title="作图时有命令报错，就把**报错的那几步**回灌给模型改一轮（只改错的，不动没报错的 ✓）"><input v-model="repairOn" type="checkbox" /> 失败自动修一轮</label>
               </div>
               <div v-if="solution" class="ggbs__solution">
                 <div class="ggbs__solvet">解题过程</div>
@@ -890,6 +988,7 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
 .ggbs__solvehead { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
 .ggbs__solvet { font-size: 12.5px; font-weight: 700; color: var(--text); }
 .ggbs__solves { font-size: 11px; color: var(--muted); }
+.ggbs__solvewarn { flex: 1 1 100%; font-size: 11.5px; line-height: 1.6; color: #b45309; }
 .ggbs__solverow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .ggbs__solveimgs { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .ggbs__solveimgs img { max-height: 44px; max-width: 68px; border: 1px solid var(--border-strong); border-radius: 5px; cursor: pointer; }

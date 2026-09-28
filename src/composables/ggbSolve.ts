@@ -165,3 +165,180 @@ export function ggbStepLines(plan: GgbSolvePlan): string[] {
   }
   return out
 }
+/* ---------------- 【v1729】识图解题三段式：读图 → 校对 → 解题作图 ----------------
+ * 为什么拆：原来一步里让模型同时「读图 + 推理 + 写 GeoGebra 语法」✗ —— 三件事捆在一起，
+ *   看错了 / 算错了 / 写错了根本分不清 ✗ 现在：
+ *   ① 读图：只**转写**（题干逐字 + 已知 + 求什么 + 图形要素 + 看不清的地方 ✓），不许解题、不许猜 ✗
+ *   ② 校对：老师在这段文字上直接改 ✓ —— 最便宜的纠错点 ✓
+ *   ③ 解题作图：文本模型基于校对后的题干想 → 静态校验 → 执行 → 报错的步骤回灌修一轮 ✓
+ */
+
+/** 【v1729】带图但没配视觉模型 → 返回要说清的那句（null = 没问题 ✓）—— 纯函数，探针能盯 */
+export function ggbVisionGuard(hasImages: boolean, visionModel: string): string | null {
+  if (!hasImages) return null
+  if (String(visionModel || "").trim()) return null
+  return "带图要用**视觉模型**：设置 → AI 助手 → 视觉模型（填模型名，必要时填端点）—— 没填的话，图根本送不进模型"
+}
+
+/** 【v1729】读图阶段的 system：**只转写、不解题、不猜** */
+export function ggbReadSystem(): string {
+  const NL2 = String.fromCharCode(10)
+  return [
+    "你是题目**转写员**（不是解题人）：老师会贴一道题的图片（题目照片 / 截图），你只做一件事 ——",
+    "把图里的信息**逐字转写**成结构化 JSON。",
+    "铁律：",
+    "· 数字、字母、下标、单位**必须照抄原图**（x²/9+y²/4=1 就写这个，别换算、别化简、别补全 ✗）；",
+    "· 题干文字尽量逐字写全（含小题号（1）（2）与「求…」「证明…」）；",
+    "· 图里的几何要素分开列：点（点名 + 位置，如「A 在原点」）、线段 / 直线 / 射线、圆 / 曲线，",
+    "  以及图上**标出来的关系**（垂直、平行、相切、相等、直角、中点、角平分线…）；",
+    "· **看不清就不猜** ✗ —— 把拿不准的写进 unsure，并说清是哪个位置的什么内容；",
+    "· 不许解题、不许给答案、不许写作图步骤 ✗（那些是下一步的事）。",
+    "输出格式（**只输出 JSON**，别加解释、别包代码块）：",
+    "{\"text\":\"题干逐字\",\"given\":[\"已知条件 1\",\"已知条件 2\"],\"ask\":\"求（1）…（2）…\",\"figure\":[\"点 A 在原点\",\"圆 c 过 B、C\"],\"unsure\":[\"图中角标注疑似 60°，也可能是 50°\"]}",
+  ].join(NL2)
+}
+
+export interface GgbBrief { text: string; given: string[]; ask: string; figure: string[]; unsure: string[]; raw: string }
+
+/** 小工具：字符串 / 数组 / 对象都收拢成字符串数组（有条数上限与单条长度上限 ✓） */
+function strList(v: unknown, max: number, each: number): string[] {
+  const arr = Array.isArray(v) ? v : (v == null || v === "" ? [] : [v])
+  const out: string[] = []
+  for (const x of arr) {
+    const s = (typeof x === "string"
+      ? x
+      : (x && typeof x === "object"
+        ? Object.keys(x as Record<string, unknown>).map((k) => k + "：" + String((x as Record<string, unknown>)[k])).join("；")
+        : String(x == null ? "" : x))).trim()
+    if (s) out.push(s.slice(0, each))
+    if (out.length >= max) break
+  }
+  return out
+}
+
+/** 【v1729】读图回答 → 结构化题干（纯函数 ✓ 容错：JSON 抠取 / 字段类型 / 条数上限 ✓） */
+export function ggbReadBrief(raw: unknown): GgbBrief {
+  const text = String(raw == null ? "" : raw)
+  const obj = pickJson(text) as Record<string, unknown> | null
+  if (!obj) {
+    // 没给出 JSON：把原文当题干 ✓ —— 宁可让老师看到东西，也别给个空框 ✗
+    return { text: text.trim().slice(0, 8000), given: [], ask: "", figure: [], unsure: [], raw: text }
+  }
+  return {
+    text: String(obj.text == null ? "" : obj.text).trim().slice(0, 8000),
+    given: strList(obj.given, 20, 200),
+    ask: String(obj.ask == null ? "" : obj.ask).trim().slice(0, 500),
+    figure: strList(obj.figure, 30, 200),
+    unsure: strList(obj.unsure, 12, 200),
+    raw: text,
+  }
+}
+
+/** 【v1729】结构化题干 → 老师可编辑的一段文字（也是送去解题的那段 ✓） */
+export function ggbBriefText(b: GgbBrief): string {
+  const NL2 = String.fromCharCode(10)
+  const out: string[] = []
+  if (b.text) out.push("【题干】" + b.text)
+  if (b.given.length) out.push("【已知】" + b.given.map((x, i) => (i + 1) + ") " + x).join("　"))
+  if (b.ask) out.push("【求/证】" + b.ask)
+  if (b.figure.length) out.push("【图形要素】" + b.figure.join("；"))
+  if (b.unsure.length) out.push("【待确认（请先核对这里）】" + b.unsure.map((x) => "⚠ " + x).join("；"))
+  return out.join(NL2)
+}
+
+/** 【v1729】解题阶段的 user 内容：**不带图** ✓（用校对后的文字 ✓ 便宜、且不依赖视觉模型 ✓） */
+export function ggbSolveUser(briefText: string, extra: string): string {
+  const NL2 = String.fromCharCode(10)
+  return "请解下面这道题（题干已由老师核对过），并按格式给出作图步骤。" + NL2 + NL2 +
+    String(briefText || "").trim() +
+    (String(extra || "").trim() ? NL2 + NL2 + "补充要求：" + String(extra).trim() : "")
+}
+
+export interface GgbPlanCheck { steps: GgbSolveStep[]; issues: string[]; fixes: string[] }
+
+/** 全角 → 半角：只换指令里会用到的那几个（GeoGebra 不认全角括号逗号 ✗ 模型却常写 ✗） */
+function halfWidth(s: string): string {
+  return s
+    .replace(/（/g, "(").replace(/）/g, ")").replace(/，/g, ",").replace(/；/g, ";")
+    .replace(/：/g, ":").replace(/＋/g, "+").replace(/－/g, "-").replace(/＝/g, "=")
+}
+
+/** 括号 / 方括号 / 大括号是否配平 ✓ */
+function balanced(s: string): boolean {
+  let p = 0, q = 0, r = 0
+  for (const ch of s) {
+    if (ch === "(") p++
+    else if (ch === ")") p--
+    else if (ch === "[") q++
+    else if (ch === "]") q--
+    else if (ch === "{") r++
+    else if (ch === "}") r--
+    if (p < 0 || q < 0 || r < 0) return false
+  }
+  return p === 0 && q === 0 && r === 0
+}
+
+/**
+ * 【v1729】执行前的静态校验（纯函数 ✓ 探针盯着）：
+ *  ① 全角标点 → 半角 ✓
+ *  ② 一行用 ; 串了好几条 → 拆成多步 ✓（GeoGebra 一次一条最稳 ✓）
+ *  ③ 括号不配平 → 记一条 issue ✓
+ *  ④ **依赖顺序**：用到 A / B / c 这类对象名，前面却没有 `X=…` 定义过 → 记一条 ⚠
+ *     （只认「单个大写字母（可带数字/下标/撇）」这种点名 ✓ —— 免得把 AB、Segment 也当成引用 ✗ 误报 ✗）
+ *  只报不改（不拦执行 ✓）—— 真正的修复交给「回灌自愈」✓
+ */
+export function ggbValidatePlan(steps: GgbSolveStep[]): GgbPlanCheck {
+  const out: GgbSolveStep[] = []
+  const issues: string[] = []
+  const fixes: string[] = []
+  const defined = new Set<string>()
+  for (const s of steps) {
+    if (out.length >= 60) { issues.push("步骤超过 60 步，多的没收"); break }
+    const half = halfWidth(String(s.cmd || "").trim()).replace(/;+$/, "")
+    if (half !== String(s.cmd || "").trim()) fixes.push("全角标点已换成半角：" + half.slice(0, 40))
+    if (!half) { issues.push("空指令（已跳过）"); continue }
+    if (!balanced(half)) issues.push("括号不配平：" + half.slice(0, 50))
+    const parts = half.split(";").map((x) => x.trim()).filter(Boolean)
+    const list = parts.length ? parts : [half]
+    if (parts.length > 1) fixes.push("一行 " + parts.length + " 条已拆成多步：" + half.slice(0, 40))
+    for (const one of list) {
+      const m = /^\s*([A-Za-z][A-Za-z0-9_']*)\s*(?:\([^)]*\))?\s*=/.exec(one)
+      if (m) defined.add(m[1])
+      const ids = one.match(/[A-Za-z_][A-Za-z0-9_']*/g) || []
+      for (const id of ids) {
+        const isPoint = /^[A-Z][0-9]?$/.test(id) || /^[A-Z](_\{?[0-9]+\}?|')$/.test(id)
+        if (!isPoint || defined.has(id)) continue
+        if (issues.some((x) => x.indexOf("用到还没定义的 " + id) >= 0)) continue
+        issues.push("第 " + (out.length + 1) + " 步用到还没定义的 " + id + "（前面没有 " + id + "=… 的定义）")
+      }
+      out.push({ tool: s.tool, mode: s.mode, cmd: one, say: s.say })
+    }
+  }
+  return { steps: out, issues, fixes }
+}
+
+/** 【v1729】回灌自愈的 system：**只改错的那几步** ✓ */
+export function ggbRepairSystem(): string {
+  const NL2 = String.fromCharCode(10)
+  return [
+    "你是 GeoGebra 作图的**修错员**：老师执行作图时，有几步报错了。",
+    "你会拿到：题干 + 绘图板里**已有的对象名** + 出错的步骤（原指令 + 报错原文）。",
+    "只做一件事：给出**修正后的那几步**（能跑通为止 ✓）。",
+    "铁律：",
+    "· 只给错的那几步，别重写全部、别动没报错的步骤 ✗；",
+    "· 指令用 GeoGebra **原生语法**（不是 JS）；",
+    "· 只引用**已有对象名**或你自己在前面几步新建的对象 ✗ 别引用不存在的对象；",
+    "· 给的步数与出错步数一一对应（错了 3 步就给 3 步 ✓）。",
+    "输出格式（**只输出 JSON**，别加解释、别包代码块）：",
+    "{\"steps\":[{\"tool\":\"point\",\"cmd\":\"A=(0,0)\",\"say\":\"重建点 A\"}]}",
+  ].join(NL2)
+}
+
+/** 【v1729】回灌自愈的 user 内容：题干 + 现成对象名 + 报错步骤 ✓ */
+export function ggbRepairUser(failed: { cmd: string; err: string }[], objects: string[], briefText: string): string {
+  const NL2 = String.fromCharCode(10)
+  const fl = (failed || []).slice(0, 20).map((f, i) => (i + 1) + ". " + String(f.cmd || "") + "　→ 报错：" + String(f.err || "")).join(NL2)
+  return "【题干】" + NL2 + String(briefText || "").trim() + NL2 + NL2 +
+    "【绘图板已有对象】" + NL2 + ((objects || []).slice(0, 80).join("、") || "（还没有对象）") + NL2 + NL2 +
+    "【出错的步骤】" + NL2 + (fl || "（无）")
+}
