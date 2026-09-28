@@ -662,7 +662,7 @@ export interface MathFigureElement extends ElementBase {
   /** 【v1726】遮罩块形状：rect 矩形（默认）/ ellipse 椭圆 / round 圆角矩形 ✓ */
   coverShape?: 'rect' | 'ellipse' | 'round'
   /** 【v1727】遮罩：只显示形状内的部分（外面全隐藏 ✓ 与 crop 相反 ✓；self = 用它自己的顶点当窗口 ✓） */
-  mask?: { shape?: 'none' | 'circle' | 'ellipse' | 'round' | 'self' | 'poly'; /** 【v1728】取来的轮廓（归一化到本元素框 ✓） */ points?: number[] }
+  mask?: { shape?: 'none' | 'circle' | 'ellipse' | 'round' | 'self' }
   kind: MathFigureKind
   fill: string
   stroke: string

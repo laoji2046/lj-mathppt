@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { MASK_SHAPES, applyOutline, takeOutline } from '@/composables/figureCrop'
+import { MASK_SHAPES } from '@/composables/figureCrop'
 import { computed, nextTick, ref, watch } from 'vue'
 import { saveFigureToLibrary } from '@/composables/useFigureLibrary'
 import AppIcon from './AppIcon.vue'
@@ -59,18 +59,6 @@ const hasCrop = computed(() => {
   return !!c && (c.l > 0 || c.r > 0 || c.t > 0 || c.b > 0)
 })
 
-/** 【v1728】取轮廓 / 套轮廓（用另一个图形当遮罩 ✓） */
-function takeOl() {
-  const n = takeOutline(mathfig.value as never)
-  olMsg.value = n > 0 ? ("已取轮廓：" + n + " 个点 ✓ 现在去选要被遮的图形，点「套上取的轮廓」") : "这个图形没有顶点，取不了轮廓（多边形/三角形/自定义图形才行 ✓）"
-}
-function applyOl() {
-  const arr = applyOutline(mathfig.value as never)
-  if (!arr.length) { olMsg.value = "还没取到轮廓：先去当窗口的那个图形上点「取这个图形的轮廓」"; return }
-  patch({ mask: { shape: "poly", points: arr } } as Partial<SlideElement>)
-  olMsg.value = "已套上（" + (arr.length / 2) + " 个点 ✓）只显示轮廓里的部分"
-}
-const olMsg = ref("")
 /** 【v1725】数学图形的裁剪（四边比例 0~0.9 ✓）与「打印时隐藏」 */
 function setFigCrop(side: 'l' | 'r' | 't' | 'b', percent: number) {
   const cur = mathfig.value?.crop || { l: 0, r: 0, t: 0, b: 0 }
@@ -2194,15 +2182,7 @@ function layerTypeLabel(type: string) {
               <option v-for="m in MASK_SHAPES" :key="m.v" :value="m.v">{{ m.label }}</option>
             </select>
           </label>
-          <p v-if="mathfig && mathfig.mask && mathfig.mask.shape !== 'none'" class="panel__hint">遮罩：**只显示**这个形状里的部分，外面整块隐藏 —— 想用别的图形当窗口：先选**当窗口的图形** → 下面点「取这个图形的轮廓」；再选**要被遮的图形** →「套上取的轮廓」✓</p>
-          <label v-if="mathfig" class="field"><span>取轮廓当遮罩</span>
-            <span style="display:flex;gap:6px">
-              <button class="quick__btn" style="flex:1" @click="takeOl">取这个图形的轮廓</button>
-              <button class="quick__btn" style="flex:1" @click="applyOl">套上取的轮廓</button>
-            </span>
-          </label>
-          <p v-if="olMsg" class="panel__hint">{{ olMsg }}</p>
-          <p class="panel__hint">用法：先选**当窗口的图形**（三角形等）→「取这个图形的轮廓」；再选**要被遮的图形** →「套上取的轮廓」→ 只显示轮廓里的部分 ✓（轮廓是按当时的框换算的，之后挪动窗口图形不会自动跟着变，重取一次即可）。</p>
+          <p v-if="mathfig && mathfig.mask && mathfig.mask.shape !== 'none'" class="panel__hint">遮罩：**只显示**这个形状里的部分，外面整块隐藏 —— 想用别的图形当窗口，就在那个图形上选「用它自己的形状」。</p>
           <p class="panel__hint">裁剪是**非破坏性**的：只记四边比例、随时改回完整图形。「打印时隐藏」常见用法：遮罩块讲课时盖着，打印讲义时不出现。</p>
         </template>
         <p class="panel__hint">裁剪是**非破坏性**的：只记比例、不重编码图片，随时能改回来。（「图片编辑器」里那种裁剪会把结果烤进图片数据，两者用途不同。）</p>
