@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ISO_RATIO, coneTangentSides } from '@/composables/solidProjection'
+import { ISO_RATIO, coneTangentSides, frustumGeom } from '@/composables/solidProjection'
 import type { MathFigureElement, SlideElement } from '@/types'
 import { lineDashCss } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
@@ -308,14 +308,14 @@ const innerHtml = computed(() => {
         '<line ' + dashed + ' x1="' + p0 + '" x2="' + p2 + '"/><line ' + dashed + ' x1="' + p1 + '" x2="' + p2 + '"/><line ' + dashed + ' x1="' + p3 + '" x2="' + p2 + '"/></g>'
     }
     case 'frustum': {
-      const mm = Math.min(w, h), rB = mm * 0.4, rT = mm * 0.24, ryB = rB / ISO_RATIO, ryT = rT / ISO_RATIO, cx = w / 2, topY = h * 0.28, botY = h * 0.76   /* 【v1754】正等测 ✓ */
-      const frB = 'M ' + (cx - rB) + ' ' + botY + ' A ' + rB + ' ' + ryB + ' 0 0 0 ' + (cx + rB) + ' ' + botY
+      /* 【v1761】母线照圆锥一样走**虚拟顶点的切点** ✓（原来连两边椭圆端点 ✗ 会露出来 ✓）*/
+      const F = frustumGeom(w, h)
       return '<g ' + strokeAttrs + ' fill="' + fillColor + '">' +
-        '<line x1="' + (cx - rB) + '" y1="' + botY + '" x2="' + (cx - rT) + '" y2="' + topY + '"/>' +
-        '<line x1="' + (cx + rB) + '" y1="' + botY + '" x2="' + (cx + rT) + '" y2="' + topY + '"/>' +
-        '<path ' + dashed + ' d="M ' + (cx - rB) + ' ' + botY + ' A ' + rB + ' ' + ryB + ' 0 0 1 ' + (cx + rB) + ' ' + botY + '"/>' +
-        '<path d="' + frB + '"/>' +
-        '<ellipse cx="' + cx + '" cy="' + topY + '" rx="' + rT + '" ry="' + ryT + '"/></g>'
+        '<line x1="' + F.LB.x + '" y1="' + F.LB.y + '" x2="' + F.LT.x + '" y2="' + F.LT.y + '"/>' +
+        '<line x1="' + F.RB.x + '" y1="' + F.RB.y + '" x2="' + F.RT.x + '" y2="' + F.RT.y + '"/>' +
+        '<path ' + dashed + ' d="M ' + F.LB.x + ' ' + F.LB.y + ' A ' + F.rB + ' ' + F.ryB + ' 0 0 1 ' + F.RB.x + ' ' + F.RB.y + '"/>' +
+        '<path d="M ' + F.LB.x + ' ' + F.LB.y + ' A ' + F.rB + ' ' + F.ryB + ' 0 1 0 ' + F.RB.x + ' ' + F.RB.y + '"/>' +
+        '<ellipse cx="' + F.cx + '" cy="' + F.topY + '" rx="' + F.rT + '" ry="' + F.ryT + '"/></g>'
     }
     case 'pyraFrustum': {
       const mm = Math.min(w, h), d = (dep ?? 0.4) * mm * 0.4, dx = d, dy = -d * 0.8

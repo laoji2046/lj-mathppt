@@ -214,3 +214,40 @@ export function frustumApex(botY: number, topY: number, rBot: number, rTop: numb
   if (!(rBot > rTop)) return botY - (botY - topY) * 4     // 退化：接近圆柱就放很远 ✓
   return (botY - topY) * (rBot / (rBot - rTop))
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   【v1761】圆台（frustum）的轮廓 —— 同样是**从虚拟顶点引切线** ✓
+
+   原来两个渲染器都是把母线直接连到"两边椭圆的端点"✗（(cx±rB, botY) → (cx±rT, topY)）
+   ⇒ 底面椭圆两侧会**露出来** ✗ 而且是斜的、不贴着曲面 ✗（与圆锥 v1759/v1760 是同一个 bug 家族 ✓）
+
+   正确做法：两个底面椭圆是同一个圆锥被截出来的 ✓ ⇒ 母线是**同一个虚拟顶点**引出的切线 ✓
+     · 虚拟顶点：`D = H·rB/(rB − rT)` ✓（`frustumApex` 已给 ✓）
+     · 两个椭圆上各自的切点：`coneTangentSides(...)` ✓（同一条切线同时切两个椭圆 ✓）
+     · 两切点与顶点**共线** ✓（探针会核这条 ✓）
+   ⚠ 端点一离开长轴两端 ⇒ 下弧的 `large-arc-flag` 必须改成 **1** ✓（v1760 踩过 ✓）
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/** 圆台渲染要用的全部几何（纯函数 ✓ 两个渲染器共用 ✓ 免得又"改一处忘一处" ✗） */
+export function frustumGeom(
+  w: number,
+  h: number,
+  /** 默认比例与原来一致 ✓（rB = 0.4·min、rT = 0.24·min ✓ 上下底中心 h·0.76 / h·0.28 ✓）*/
+  k = { rB: 0.4, rT: 0.24, topY: 0.28, botY: 0.76 },
+) {
+  const mm = Math.min(w, h)
+  const rB = mm * k.rB
+  const rT = mm * k.rT
+  const ryB = rB / ISO_RATIO
+  const ryT = rT / ISO_RATIO
+  const cx = w / 2
+  const topY = h * k.topY
+  const botY = h * k.botY
+  const apexY = botY - frustumApex(botY, topY, rB, rT)
+  const tb = coneTangentSides(cx, botY, rB, ryB, apexY)
+  const tt = coneTangentSides(cx, topY, rT, ryT, apexY)
+  return {
+    cx, topY, botY, rB, rT, ryB, ryT, apexY,
+    LB: tb[0], RB: tb[1], LT: tt[0], RT: tt[1],
+  }
+}

@@ -2681,6 +2681,7 @@ for (const k of KINDS72) {
 }
 console.log("=== 用例 73：旋转体照讲义重绘（正等测 + 椭圆比例 √3）（v1754）===");
 const SP73 = loadBundled("solidProjection.ts", "_c73sp.cjs");
+const SP73s = fs.readFileSync(path.join(ROOT, "src", "composables", "solidProjection.ts"), "utf8");
 /* ① 正等测公式与讲义一字不差 ✓ 手算三组 ✓ */
 const K73 = Math.sqrt(3) / 2;
 ok(Math.abs(SP73.ISO_K - K73) < 1e-12, "★ISO_K = √3/2 ✓（与讲义 `ISO_K = math.sqrt(3)/2` 同值 ✓）");
@@ -2712,7 +2713,8 @@ const RR73 = fs.readFileSync(path.join(ROOT, "src", "reveal", "renderer.ts"), "u
 const re73 = /[rR][xBT]? \/ ISO_RATIO|r \/ ISO_RATIO/g;
 const nMJ73 = (MJ73.match(re73) || []).length;
 const nRR73 = (RR73.match(re73) || []).length;
-ok(nMJ73 === 5 && nRR73 === 5, "★画布 " + nMJ73 + " 处 / 放映 " + nRR73 + " 处都用 ISO_RATIO ✓（圆柱·圆锥·球赤道·圆台上下底 ✓ 共 5 ✓ 两边一致 ✓）");
+ok(nMJ73 === 3 && nRR73 === 3, "★画布 " + nMJ73 + " 处 / 放映 " + nRR73 + " 处直接用 ISO_RATIO ✓（圆柱·圆锥·球赤道 ✓ 两边一致 ✓）");
+ok(SP73s.indexOf("ryB = rB / ISO_RATIO") > 0 && SP73s.indexOf("ryT = rT / ISO_RATIO") > 0, "★圆台那两处已搬进 frustumGeom() ✓（在纯函数里算 ✓ 两个渲染器共用 ✓ 比原来各写一遍更稳 ✓）");
 ok(MJ73.indexOf("ry = m * 0.12") < 0 && RR73.indexOf("ry = m * 0.12") < 0 && MJ73.indexOf("ry = r * 0.34") < 0,
   "★旧的扁比例没留残留 ✓（0.12 / 0.13 / 0.34 都清掉了 ✓ 那是「手写的」✗ 现在统一按正等测 ✓）");
 console.log("=== 用例 74：正方体（等边同构）+ 长方体宽改真值（v1755）===");
@@ -2875,6 +2877,58 @@ ok((coneOf(MJ78).match(/0 1 0/g) || []).length === 1 && (coneOf(MJ78).match(/0 0
   "★画布：实线弧标志 = 1 0 ✓ 虚线弧 = 0 0 1 ✓（各一处 ✓）");
 ok((coneOf(RR78).match(/0 1 0/g) || []).length === 1 && (coneOf(RR78).match(/0 0 1/g) || []).length === 1,
   "★放映/导出：同上 ✓（⚠ 改一处必须改两处 ✓）");
+console.log("=== 用例 79：圆台母线也走虚拟顶点切点（v1761）===");
+const SP79 = loadBundled("solidProjection.ts", "_c79sp.cjs");
+/* 与渲染同式：300×200 ⇒ mm=200、rB=80、rT=48、topY=56、botY=152 ✓ */
+const F79 = SP79.frustumGeom(300, 200);
+ok(Math.abs(F79.rB - 80) < 1e-9 && Math.abs(F79.rT - 48) < 1e-9 && Math.abs(F79.botY - 152) < 1e-9 && Math.abs(F79.topY - 56) < 1e-9,
+  "★几何取值与原来一致 ✓（rB=80 ✓ rT=48 ✓ botY=152 ✓ topY=56 ✓ 只换画法 ✓ 不换尺寸 ✓）");
+const D79 = F79.botY - F79.apexY;
+ok(Math.abs(D79 - (152 - 56) * (80 / 32)) < 1e-6, "★虚拟顶点 = H·rB/(rB−rT) ✓（D = 96×2.5 = " + D79.toFixed(1) + " ✓ 顶点在底面上方 " + D79.toFixed(1) + " ✓）");
+/* ① 两切点与虚拟顶点**共线** ✓（同一条切线 ✓ 这是"母线"的几何定义 ✓）*/
+const apex79 = { x: F79.cx, y: F79.apexY };
+const cross79 = (p, q) => (q.x - apex79.x) * (p.y - apex79.y) - (q.y - apex79.y) * (p.x - apex79.x);
+ok(Math.abs(cross79(F79.LB, F79.LT)) < 1e-6, "★底切点与顶切点**与顶点共线** ✓（叉积 " + Math.abs(cross79(F79.LB, F79.LT)).toExponential(1) + " ≈ 0 ✓ 这就是同一条母线 ✓）");
+ok(Math.abs(cross79(F79.RB, F79.RT)) < 1e-6, "★右侧同理 ✓（叉积 " + Math.abs(cross79(F79.RB, F79.RT)).toExponential(1) + " ✓）");
+/* ② 两个椭圆各自的切线条件 ✓（极线关系 ty·D = ry² ✓）*/
+const polar79 = (P, cy, ry, D) => Math.abs((cy - P.y) * D - ry * ry);
+ok(polar79(F79.LB, F79.botY, F79.ryB, D79) < 1e-6, "★切点在**下底椭圆**上满足切线条件 ✓（(botY−y)·D = ryB² ✓ 残差 " + polar79(F79.LB, F79.botY, F79.ryB, D79).toExponential(1) + " ✓）");
+ok(polar79(F79.LT, F79.topY, F79.ryT, D79 - 96) < 1e-6, "★切点在**上底椭圆**上也满足 ✓（顶点到上底中心的距离 = D−96 ✓ 残差 " + polar79(F79.LT, F79.topY, F79.ryT, D79 - 96).toExponential(1) + " ✓ 同一条线同时切两个椭圆 ✓）");
+/* ③ 切点都在长轴端点**之内** ✓（这正是原来错的地方 ✗）*/
+ok(F79.LB.x > F79.cx - F79.rB + 0.5 && F79.LT.x > F79.cx - F79.rT + 0.5, "★两个切点都在长轴端点**之内** ✓（下底 " + F79.LB.x.toFixed(1) + " > " + (F79.cx - F79.rB) + " ✓ 上底 " + F79.LT.x.toFixed(1) + " > " + (F79.cx - F79.rT) + " ✓ 原来连端点 ⇒ 椭圆两侧露出来 ✗）");
+/* ④ 采样验底弧：实线弧（large=1 sweep=0）必须走到椭圆最低点 ✓ */
+function arcPts79(x1, y1, rx0, ry0, large, sweep, x2, y2, n) {
+  const x1p = (x1 - x2) / 2, y1p = (y1 - y2) / 2;
+  const sign = large !== sweep ? 1 : -1;
+  const num = rx0 * rx0 * ry0 * ry0 - rx0 * rx0 * y1p * y1p - ry0 * ry0 * x1p * x1p;
+  const den = rx0 * rx0 * y1p * y1p + ry0 * ry0 * x1p * x1p;
+  const co = sign * Math.sqrt(Math.max(0, num / den));
+  const cxp = (co * rx0 * y1p) / ry0, cyp = (-co * ry0 * x1p) / rx0;
+  const ccx = cxp + (x1 + x2) / 2, ccy = cyp + (y1 + y2) / 2;
+  const ang = (ux, uy, vx, vy) => {
+    let a = Math.acos(Math.min(1, Math.max(-1, (ux * vx + uy * vy) / (Math.hypot(ux, uy) * Math.hypot(vx, vy)))));
+    if (ux * vy - uy * vx < 0) a = -a;
+    return a;
+  };
+  const th1 = ang(1, 0, (x1p - cxp) / rx0, (y1p - cyp) / ry0);
+  let dth = ang((x1p - cxp) / rx0, (y1p - cyp) / ry0, (-x1p - cxp) / rx0, (-y1p - cyp) / ry0);
+  if (!sweep && dth > 0) dth -= 2 * Math.PI;
+  if (sweep && dth < 0) dth += 2 * Math.PI;
+  const out = [];
+  for (let i = 0; i <= n; i++) { const t = th1 + (dth * i) / n; out.push({ x: rx0 * Math.cos(t) + ccx, y: ry0 * Math.sin(t) + ccy, deg: Math.abs(dth) * 180 / Math.PI }) }
+  return out;
+}
+const sol79 = arcPts79(F79.LB.x, F79.LB.y, F79.rB, F79.ryB, 1, 0, F79.RB.x, F79.RB.y, 400);
+ok(Math.abs(Math.max(...sol79.map((p) => p.y)) - (F79.botY + F79.ryB)) < 0.05, "★实线底弧走到椭圆最低点 ✓（" + Math.max(...sol79.map((p) => p.y)).toFixed(2) + " = botY+ryB = " + (F79.botY + F79.ryB).toFixed(2) + " ✓ large-arc 已经改成 1 ✓）");
+ok(sol79[0].deg > 180, "★它同样**是大弧** ✓（跨度 " + sol79[0].deg.toFixed(1) + "° > 180° ✓ 端点离开长轴两端后 large-arc 就开始起作用 ✓ v1760 的教训 ✓）");
+/* ⑤ 两个渲染器用法一致 ✓ */
+const MJ79 = fs.readFileSync(path.join(ROOT, "src", "components", "elements", "MathFigureElement.vue"), "utf8");
+const RR79 = fs.readFileSync(path.join(ROOT, "src", "reveal", "renderer.ts"), "utf8");
+const fr79 = (f) => f.slice(f.indexOf("case 'frustum': {"), f.indexOf("case 'pyraFrustum': {"));
+ok((MJ79.match(/frustumGeom\(/g) || []).length === 1 && (RR79.match(/frustumGeom\(/g) || []).length === 1,
+  "★画布与放映都用同一个 frustumGeom() ✓（各 1 处 ✓ 不再各算一遍 ✗）");
+ok(fr79(MJ79).indexOf("0 1 0") > 0 && fr79(RR79).indexOf("0 1 0") > 0 && fr79(MJ79).indexOf("A ' + F.rB") > 0,
+  "★两边的底弧都用**切点 + large=1** ✓（各一处 ✓）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);
