@@ -15,6 +15,8 @@ import AppIcon from './AppIcon.vue'
 import { useDeckStore } from '@/stores/deck'
 import type { MathFigureElement, SlideElement, FigureArc } from '@/types'
 import { loadImageElement, type VectorizeOpt, type VectorizeResult } from '@/composables/vectorize'
+import { parseVecAi, vecAiSummary, VEC_AI_SYSTEM } from '@/composables/vecAi'
+import { invoke } from '@/composables/useTauri'
 import { labelFontSize, labelGap, labelSvg, arcPolyline } from '@/composables/solid3d'
 import { renderFigureSvg } from '@/composables/figureRender'
 import { figureBox } from '@/composables/mathPlot'
@@ -1934,6 +1936,68 @@ onMounted(async () => {
   }
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+/* ---------------- 【v1741】AI 读图：把这个窗口从"纯算法"扩成"算法 + 视觉模型" ----------------
+ * 为什么：试卷里的图（有标注、辅助线、线粗细不均、印刷噪点）纯算法常常认不全 ✗，
+ *   而"这是哪类图 / 哪条是棱 / 哪个字母配哪个点"正是**视觉模型擅长、算法不擅长**的部分 ✓
+ * 纪律（与三维那边同一条）：模型**只回 JSON 数据** ✓ 白名单过滤 + 坐标夹到 0~1 ✓
+ *   拿回来的草稿**先留快照**再替换 → 老师 Ctrl+Z 就能撤回 ✓（AI 出错不至于毁掉手上的活 ✓）
+ */
+const AI_KEY_LS = 'lj-mathslides:ai-key'
+const VISION_MODEL_LS = 'lj-mathslides:vision-model'
+const VISION_BASE_LS = 'lj-mathslides:vision-base'
+const aiBusy = ref(false)
+const aiMsg = ref('')
+const aiSay = ref('')
+function lsOf(k: string): string { try { return String(localStorage.getItem(k) || '').trim() } catch { return '' } }
+async function aiRead() {
+  if (aiBusy.value) return
+  const key = lsOf(AI_KEY_LS)
+  if (!key) { aiMsg.value = '先在「设置 → AI 助手」填一次 API Key（只存本机 ✓）'; return }
+  const vm = lsOf(VISION_MODEL_LS)
+  if (!vm) { aiMsg.value = '读图要用**视觉模型**：设置 → AI 助手 → 视觉模型（没配的话纯文本模型看不懂图 ✗）'; return }
+  aiBusy.value = true
+  aiMsg.value = 'AI 正在读这张图…（约 10~20 秒）'
+  try {
+    const r = await invoke<{ ok?: boolean; json?: unknown; error?: string }>('ai_chat_raw', {
+      baseUrl: lsOf(VISION_BASE_LS),
+      apiKey: key,
+      body: {
+        model: vm,
+        temperature: 0,
+        messages: [
+          { role: 'system', content: VEC_AI_SYSTEM },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: '请把这张图读成几何描述。' + (aiSay.value.trim() ? String.fromCharCode(10) + '补充：' + aiSay.value.trim() : '') },
+              { type: 'image_url', image_url: { url: props.src } },
+            ],
+          },
+        ],
+      },
+    })
+    if (!r || r.ok === false) throw new Error(String((r && r.error) || '调用失败'))
+    const j = (r.json || {}) as { choices?: { message?: { content?: string } }[] }
+    const text = String((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '')
+    if (!text.trim()) throw new Error('模型返回了空内容（端点或模型名可能不对）')
+    const ps = parseVecAi(text)
+    if (ps.error || !ps.draft) throw new Error(ps.error || '没解析出几何描述')
+    pushUndo()                       // 先留一份快照 ✓（AI 的结果不满意就 Ctrl+Z ✓）
+    const d = ps.draft
+    pts.value = d.pts.slice()
+    edges.value = d.edges.map((e) => [e[0], e[1], e[2]] as [number, number, number])
+    labels.value = d.labels.slice()
+    lconf.value = d.labels.map((x) => (x ? 1 : 0))
+    offs.value = d.offs.map((o) => ({ ...o }))
+    arcs.value = d.arcs.map((a) => ({ cx: a.cx, cy: a.cy, rx: a.rx, ry: a.ry }))
+    selVs.value = []
+    selE.value = null
+    selArc.value = null
+    aiMsg.value = '✓ ' + vecAiSummary(d) + (d.note ? '（' + d.note + '）' : '') + ' —— 已替换当前草稿，Ctrl+Z 可撤销 ✓ 接着手动微调就行 ✓'
+  } catch (e) {
+    aiMsg.value = '✗ ' + String((e as Error)?.message || e)
+  } finally { aiBusy.value = false }
+}
 </script>
 
 <template>
@@ -1950,6 +2014,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         </div>
         <button class="vd__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </header>
+
+      <div class="vd__airow">
+        <button
+          class="vd__aibtn"
+          :disabled="aiBusy"
+          title="把这张图交给**视觉模型**读成点线（只回 JSON、坐标归一化 ✓）；读出来会替换当前草稿，Ctrl+Z 可撤销 ✓ 手动微调照旧 ✓"
+          @click="aiRead()"
+        >{{ aiBusy ? 'AI 读图中…' : '🤖 AI 读图' }}</button>
+        <input v-model="aiSay" class="vd__aiinp" placeholder="补充说明（可选）：例如「这是正方体，请标出 A–D、A₁–D₁ 与体对角线 AC₁」">
+        <span v-if="aiMsg" class="vd__aimsg">{{ aiMsg }}</span>
+      </div>
 
       <div class="vd__body">
         <div class="vd__left">
@@ -2238,7 +2313,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 <style scoped>
 .vd { position: fixed; inset: 0; z-index: 3200; /* 必须高于试卷弹层(.pm 是 2000) —— 与三维窗口一致 */ background: rgba(20, 24, 34, 0.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; }
-.vd__box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: 92vw; max-width: 1000px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
+.vd__box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: 96vw; max-width: 1400px; max-height: 94vh; display: flex; flex-direction: column; overflow: hidden; }
 .vd__head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .vd__title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; color: var(--text); }
 .vd__badge { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: var(--radius-sm); background: var(--brand-soft); color: var(--brand-800); font-size: 13px; }
@@ -2246,7 +2321,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .vd__close:hover { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); }
 .vd__body { display: flex; gap: 14px; padding: 14px; overflow: auto; }
 .vd__left { flex: none; }
-.vd__viewport { width: 560px; height: 450px; overflow: auto; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: #fff; touch-action: none; }
+.vd__viewport { width: min(66vw, 900px); height: min(64vh, 680px); overflow: auto; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: #fff; touch-action: none; }
 .vd__vp--crop { cursor: crosshair; }
 .vd__vp--link { cursor: copy; }
 .vd__vp--pan { cursor: grab; }
@@ -2259,8 +2334,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .vd__viewbar { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .vd__pct { min-width: 42px; text-align: center; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .vd__viewtip { font-size: 12px; color: var(--gray-500); }
-.vd__hint { margin: 8px 0 0; font-size: 12px; color: var(--muted); max-width: 560px; line-height: 1.5; }
-.vd__right { flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 8px; }
+.vd__airow { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-bottom: 1px solid var(--border); background: var(--brand-soft); flex-wrap: wrap; }
+.vd__aibtn { padding: 5px 10px; font-size: 12px; cursor: pointer; background: var(--panel); border: 1px solid var(--brand-800); border-radius: var(--radius-sm); color: var(--brand-800); font-weight: 600; }
+.vd__aibtn:disabled { opacity: .6; cursor: default; }
+.vd__aiinp { flex: 1; min-width: 200px; padding: 5px 8px; font-size: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: #fff; color: var(--text); }
+.vd__aimsg { font-size: 12px; color: var(--brand-800); }
+.vd__hint { margin: 8px 0 0; font-size: 12px; color: var(--muted); max-width: 900px; line-height: 1.5; }
+.vd__right { flex: 1; min-width: 320px; display: flex; flex-direction: column; gap: 8px; }
 .vd__stat { font-size: 13px; color: var(--muted); }
 .vd__stat b { color: var(--text); }
 .vd__clip { font-size: 12px; line-height: 1.55; color: #8a5a00; background: #fff7e6; border: 1px solid #e8c07a; border-radius: var(--radius-sm); padding: 6px 8px; }
