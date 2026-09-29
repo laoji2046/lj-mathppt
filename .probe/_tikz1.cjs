@@ -1410,7 +1410,9 @@ const CASE46 = (async () => {
   const ui = fs.readFileSync(path.join(ROOT, "src", "components", "GgbSuite.vue"), "utf8");
   ok(ui.indexOf("贴图解题作图") > 0 && ui.indexOf("solveAndDraw") > 0, "★面板 + 按钮都在 ✓");
   ok(ui.indexOf("＋ 题目图") > 0 && ui.indexOf("onSolvePaste") > 0 && ui.indexOf("ScreenshotCapture") > 0, "★导入图 / 粘贴 / 截图 三条路都有 ✓");
-  ok(ui.indexOf("a.setMode(s.mode)") > 0 && ui.indexOf("a.evalCommand(s.cmd)") > 0, "★真切工具 + 真作图 ✓");
+  const execSrc = fs.readFileSync(path.join(ROOT, "src", "composables", "ggbExec.ts"), "utf8");
+  ok(execSrc.indexOf("setMode(s.mode)") > 0 && execSrc.indexOf("evalCommand(s.cmd)") > 0, "★真切工具 + 真作图（v1735 起在 ggbExec.ts ✓）");
+  ok(ui.indexOf("execSolveSteps(") > 0, "★面板确实走执行层（execSolveSteps ✓）");
   ok(ui.indexOf("ai_chat_raw") > 0 && ui.indexOf("solveVisionModel()") > 0, "走 AI 通道，带图用视觉模型 ✓");
   ok(ui.indexOf("解题过程") > 0 && ui.indexOf("solveLog") > 0, "界面上有解题过程与步骤日志 ✓");
 })();

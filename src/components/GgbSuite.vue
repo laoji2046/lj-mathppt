@@ -5,10 +5,11 @@ import type { SlideElement } from '@/types'
 import { useDeckStore } from '@/stores/deck'
 import { hasLocalEngine, loadGeoGebra } from '@/composables/useGeoGebra'
 import { describeToCommands } from '@/composables/ggbAI'
-import { GGB_QUERY_TMP, ggbAutoQueries, ggbBriefText, ggbCheckResult, ggbCheckSystem, ggbCheckUser, ggbDeleteClosure, ggbDeleteTargets, ggbPlanGraph, ggbQueryCmd, ggbReadBrief, ggbReadPlan, ggbReadSystem, ggbRepairSystem, ggbRepairUser, ggbSolvePlan, ggbSolveSystem, ggbSolveUser, ggbToolOf, ggbValidatePlan, ggbVisionGuard, type GgbReadout, type GgbSolveStep } from '@/composables/ggbSolve'
+import { ggbAutoQueries, ggbBriefText, ggbCheckResult, ggbCheckSystem, ggbCheckUser, ggbReadBrief, ggbReadSystem, ggbRepairSystem, ggbRepairUser, ggbSolvePlan, ggbSolveSystem, ggbSolveUser, ggbValidatePlan, ggbVisionGuard, type GgbReadout } from '@/composables/ggbSolve'
+import { defsOf, execQueryExprs, execSolveSteps, liveObjects, missingObjects, readTrack } from '@/composables/ggbExec'
 import { settingsOpen } from '@/ui/menus'
 import { loadImg, prepImageEl } from '@/composables/imgPrep'
-import { buildTrack, trackLines, type TrackItem } from '@/composables/canvasTrack'
+import { trackLines, type TrackItem } from '@/composables/canvasTrack'
 import { scanFromResult, scanToBrief } from '@/composables/figScan'
 import { vectorizeInWorker } from '@/composables/figScanRun'
 import { licensed } from '@/composables/useLicense'
@@ -187,6 +188,7 @@ const solveSay = ref("")
 const solving = ref(false)
 const solution = ref("")
 const solveLog = ref<string[]>([])
+const solveLogPush = (l: string) => solveLog.value.push(l)   // 【v1735】ggbExec 的日志回调 ✓
 const solveShot = ref(false)
 const solveFile = ref<HTMLInputElement | null>(null)
 const MAX_SOLVE_IMG = 3
@@ -199,23 +201,14 @@ const MAX_SOLVE_IMG = 3
  */
 const track = ref<TrackItem[]>([])
 
-/** 【v1734】样式摘要（颜色 / 粗细 / 是否隐藏 ✓ 拿不到就不写 ✗ 绝不因此报错 ✓） */
-function styleOf(a: any, n: string): string | undefined {
-  const bits: string[] = []
-  try {
-    if (typeof a.getColor === "function") { const c = a.getColor(n); if (c) bits.push(String(c)) }
-    if (typeof a.getLineThickness === "function") { const w = Number(a.getLineThickness(n)); if (Number.isFinite(w) && w > 0) bits.push(w + "px") }
-    if (typeof a.getVisible === "function" && a.getVisible(n) === false) bits.push("已隐藏")
-  } catch { /* 拿不到就算了 ✓ */ }
-  return bits.length ? bits.join(" ") : undefined
-}
+
 
 /** 【v1734】刷新"板上有啥" ✓（beforeDefs = 运行前快照 → 用来分「这次 AI / 上次 AI / 你手画」✓） */
 function refreshTrack(beforeDefs: Record<string, string> = {}, prevAi: string[] = lastCreated.value) {
   const a = liveApplet()
   if (!a || typeof a.getAllObjectNames !== "function") { track.value = []; return }
   try {
-    track.value = buildTrack(liveObjects(a), defSnapshot(), prevAi, beforeDefs, (n) => styleOf(a, n))
+    track.value = readTrack(a, beforeDefs, prevAi)   // 【v1735】实现挪到 ggbExec.ts（探针能拿它喂假绘图板 / 真引擎 ✓）
   } catch { track.value = [] }
 }
 
@@ -239,18 +232,7 @@ function snapXml(a: any): string {
   try { return typeof a.getXML === "function" ? String(a.getXML()) : "" } catch { return "" }
 }
 
-/** 【v1732】问绘图板：这些对象各自依赖了谁（拿不到就返回空 → 调用方用 plan 图兜底 ✓） */
-function depsOfApi(a: any, names: string[]): string[] {
-  const out: string[] = []
-  try {
-    if (typeof a.getDependentObjects !== "function") return out
-    for (const n of names) {
-      const ds = a.getDependentObjects(n) as string[] | undefined
-      for (const d of ds || []) if (d && out.indexOf(d) < 0) out.push(d)
-    }
-  } catch { /* 拿不到就算了 ✓ */ }
-  return out
-}
+
 
 /** 【v1732】一键回滚到「本次作图前」✓（整块画布 + 视图一起恢复 ✗ 这之后手改的也会没 ✓ 提示里写清 ✓） */
 function rollbackRunInner() {
@@ -278,37 +260,9 @@ function rollbackRun() { quietErrors(rollbackRunInner) }
 const checkNote = ref("")
 const checkOn = ref(true)
 
-/** 画布现在的对象名（读数要拿它自查"这个名字认不认" ✓） */
-function liveObjects(a: any): string[] {
-  try { return typeof a.getAllObjectNames === "function" ? (a.getAllObjectNames() as string[]) : [] } catch { return [] }
-}
 
-/** 【v1731】量一组只读表达式 → 读数表 ✓（临时对象 + 立刻删除 ✓ 单条失败不影响其它 ✓） */
-async function runQueryExprs(a: any, exprs: string[], say: string): Promise<GgbReadout[]> {
-  const out: GgbReadout[] = []
-  for (const raw of exprs) {
-    const q = ggbReadPlan(raw, liveObjects(a))
-    if (!q.ok) {
-      out.push({ expr: String(raw || ""), value: "", ok: false, err: q.why })
-      solveLog.value.push("读数 ✗ " + String(raw || "") + "（" + (q.why || "不合法") + "）")
-      continue
-    }
-    try {
-      a.evalCommand(ggbQueryCmd(q.expr))
-      const v = typeof a.getValue === "function" ? Number(a.getValue(GGB_QUERY_TMP)) : NaN
-      const val = Number.isFinite(v) ? String(Math.round(v * 1e6) / 1e6) : ""
-      out.push({ expr: q.expr, value: val, ok: !!val })
-      solveLog.value.push("读数 " + q.expr + " = " + (val || "（取不到）") + (say ? "　// " + say : ""))
-    } catch (e) {
-      const msg = String((e as Error)?.message || e)
-      out.push({ expr: q.expr, value: "", ok: false, err: msg })
-      solveLog.value.push("读数 ✗ " + q.expr + "：" + msg)
-    } finally {
-      try { if (typeof a.deleteObject === "function") a.deleteObject(GGB_QUERY_TMP) } catch { /* 删不掉也无所谓：下次同名覆盖 ✓ */ }
-    }
-  }
-  return out
-}
+
+
 /* ---------------- 【v1729】识图解题三段式：① 读图（只转写）→ ② 校对（可编辑）→ ③ 解题作图（校验 + 自愈）-------
  * 为什么拆：原来一步里让模型同时「读图 + 推理 + 写 GeoGebra 语法」✗ —— 三件事捆一起，
  *   看错了 / 算错了 / 写错了根本分不清 ✓ 现在：读图只转写（不猜、不解题 ✓）→ 老师校对文字（最便宜的纠错点 ✓）
@@ -370,73 +324,9 @@ async function readProblemInner() {
 }
 function readProblem() { quietErrors(readProblemInner) }
 
-/** 【v1729】跑一串步骤：切工具 → evalCommand；失败收进 fails ✓ 返回成功条数 */
-async function runSolveSteps(a: any, steps: GgbSolveStep[], fails: { cmd: string; err: string }[], readouts?: GgbReadout[]): Promise<number> {
-  let ok = 0
-  for (const s of steps) {
-    // 【v1731】读一步：量一下（临时对象 → 立刻删 ✓ 不留垃圾 ✓ 不切工具 ✓）
-    if (s.query) {
-      const rs = await runQueryExprs(a, [s.cmd], s.say)
-      if (readouts) for (const r of rs) readouts.push(r)
-      continue
-    }
-    // 【v1732】删一步：先算出「连带会掉哪些依赖」→ 执行 → 日志里报出来 ✓
-    if (s.tool === "delete") {
-      const tg = ggbDeleteTargets(s.cmd)
-      // 【v1734】依赖来源分三档：绘图板自己的 getDependentObjects（权威 ✓）→ **板上真实定义的依赖图**（CanvasTracker ✓）→ plan 图（兜底 ✓）
-      const graph = ggbPlanGraph(steps)
-      const planDep: string[] = []
-      for (const t of tg) for (const n of ggbDeleteClosure(t, graph)) if (n !== t && planDep.indexOf(n) < 0) planDep.push(n)
-      const liveEdges = buildTrack(liveObjects(a), defSnapshot(), lastCreated.value).map((it) => ({ name: it.name, refs: it.refs }))
-      const liveDep: string[] = []
-      for (const t of tg) {
-        if (!liveEdges.some((e) => e.name === t)) continue
-        for (const n of ggbDeleteClosure(t, liveEdges)) if (n !== t && liveDep.indexOf(n) < 0) liveDep.push(n)
-      }
-      const apiDep = depsOfApi(a, tg)
-      const extra = (apiDep.length ? apiDep : (liveDep.length ? liveDep : planDep)).filter((n) => tg.indexOf(n) < 0)
-      try {
-        a.evalCommand(s.cmd)
-        ok++
-        solveLog.value.push("删 " + (tg.join("、") || s.cmd) + (extra.length ? "（连带依赖 " + extra.slice(0, 8).join("、") + (extra.length > 8 ? " …" : "") + "）" : "") + (s.say ? "　// " + s.say : "") + " ✓")
-      } catch (err) {
-        const msg = String((err as Error)?.message || err)
-        fails.push({ cmd: s.cmd, err: msg })
-        solveLog.value.push(s.cmd + " ✗ " + msg)
-      }
-      continue
-    }
-    if (s.tool) {
-      try { a.setMode(s.mode); solveLog.value.push("切换工具：" + (ggbToolOf(s.tool)?.label || s.tool)) } catch { /* 切不动就跳过 ✓ */ }
-      await new Promise((res) => window.setTimeout(res, 140))
-    }
-    try {
-      a.evalCommand(s.cmd)
-      ok++
-      solveLog.value.push(s.cmd + (s.say ? "　// " + s.say : "") + " ✓")
-    } catch (err) {
-      const msg = String((err as Error)?.message || err)
-      fails.push({ cmd: s.cmd, err: msg })
-      solveLog.value.push(s.cmd + " ✗ " + msg)
-    }
-    await new Promise((res) => window.setTimeout(res, 90))
-  }
-  return ok
-}
 
-/** 【v1729】执行后校验：`X=…` 的对象是否真建出来了（拿不到对象表就不下结论 ✓ 免得误报 ✗） */
-function missingObjects(a: any, steps: GgbSolveStep[]): string[] {
-  const names: string[] = []
-  for (const s of steps) {
-    const m = /^\s*([A-Za-z][A-Za-z0-9_']*)\s*(?:\([^)]*\))?\s*=/.exec(s.cmd)
-    if (m) names.push(m[1])
-  }
-  if (!names.length) return []
-  let list: string[] | null = null
-  try { if (typeof a.getAllObjectNames === "function") list = a.getAllObjectNames() as string[] } catch { list = null }
-  if (!list) return []
-  return names.filter((n) => list.indexOf(n) < 0)
-}
+
+
 /* ---------------- 【v1730】第 4 层：题图预处理 + 复用「矢量识别」认图形 ----------------
  * ① 读图前先把题图**预处理**一遍（去白边 / 放大 / 灰度对比 ✓）→ 视觉模型看得更清 ✓
  * ② 「认图形」把同一张图交给**已有的矢量识别**（点 / 线段 / 圆 + 字母标注 ✓）
@@ -567,7 +457,7 @@ async function solveAndDrawInner() {
     const prev = lastCreated.value.slice()
     const fails: { cmd: string; err: string }[] = []
     const readouts: GgbReadout[] = []   // 【v1731】读数（模型主动问的 + 跑完自动量的 ✓）
-    const ok = await runSolveSteps(a, chk.steps, fails, readouts)
+    const ok = await execSolveSteps(a, chk.steps, fails, readouts, solveLogPush)
     // 【v1729】自愈：只把**报错的那几步**回灌给模型改一轮 ✓（默认勾上 ✓）
     let fixed = 0
     if (fails.length && repairOn.value) {
@@ -577,7 +467,7 @@ async function solveAndDrawInner() {
         const rp = ggbValidatePlan(ggbSolvePlan(rt).steps, objs)
         if (rp.steps.length) {
           solveLog.value.push("· 自愈：模型给了 " + rp.steps.length + " 步修正，重跑一遍 ✓")
-          fixed = await runSolveSteps(a, rp.steps, [], readouts)
+          fixed = await execSolveSteps(a, rp.steps, [], readouts, solveLogPush)
         } else solveLog.value.push("· 自愈：模型没给出可用的修正步骤")
       } catch (e) { solveLog.value.push("· 自愈没跑成：" + String((e as Error)?.message || e)) }
     }
@@ -588,7 +478,7 @@ async function solveAndDrawInner() {
     checkNote.value = ""
     const autoQ = ggbAutoQueries(chk.steps)
     if (autoQ.length) {
-      const ar = await runQueryExprs(a, autoQ, "自动读数")
+      const ar = await execQueryExprs(a, autoQ, "自动读数", solveLogPush)
       for (const r of ar) readouts.push(r)
     }
     if (readouts.length) solveLog.value.push("· 读数 " + readouts.length + " 条（" + readouts.filter((r) => r.ok).length + " 条取到值）")
@@ -602,7 +492,7 @@ async function solveAndDrawInner() {
           const b2 = defSnapshot()
           const p2 = lastCreated.value.slice()
           const f2: { cmd: string; err: string }[] = []
-          const ok2 = await runSolveSteps(a, ck.steps, f2, [])
+          const ok2 = await execSolveSteps(a, ck.steps, f2, [], solveLogPush)
           finishRun(b2, p2)
           solveLog.value.push("· 核对后改了 " + ok2 + "/" + ck.steps.length + " 步" + (f2.length ? "（失败 " + f2.length + " 步）" : "") + " ✓")
         }
@@ -863,15 +753,10 @@ const lastCreated = ref<string[]>([])
 function persistClear() {
   try { localStorage.setItem(CLEAR_PREF, clearBefore.value ? '1' : '0') } catch { /* 忽略 */ }
 }
-/** 板上每个对象的"定义"快照 —— 用来分辨「这次运行新画/改动的」和「上次留下的」✓ */
+/** 板上每个对象的"定义"快照 —— 用来分辨「这次运行新画/改动的」和「上次留下的」✓
+ *  【v1735】实现挪到 ggbExec.ts 的 defsOf（探针能把它喂给假绘图板 / 真引擎 ✓） */
 function defSnapshot(): Record<string, string> {
-  const a = liveApplet()
-  const map: Record<string, string> = {}
-  if (!a || typeof a.getAllObjectNames !== 'function') return map
-  let names: string[] = []
-  try { names = (a.getAllObjectNames() as string[]) || [] } catch { return map }
-  names.forEach((n) => { try { map[n] = String(a.getDefinitionString(n) ?? '') } catch { map[n] = '' } })
-  return map
+  return defsOf(liveApplet())
 }
 /**
  * 跑完收尾：记下这次"新画出来 / 改过定义"的对象 ✓；
