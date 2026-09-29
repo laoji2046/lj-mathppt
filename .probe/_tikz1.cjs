@@ -2714,6 +2714,39 @@ const nRR73 = (RR73.match(re73) || []).length;
 ok(nMJ73 === 5 && nRR73 === 5, "★画布 " + nMJ73 + " 处 / 放映 " + nRR73 + " 处都用 ISO_RATIO ✓（圆柱·圆锥·球赤道·圆台上下底 ✓ 共 5 ✓ 两边一致 ✓）");
 ok(MJ73.indexOf("ry = m * 0.12") < 0 && RR73.indexOf("ry = m * 0.12") < 0 && MJ73.indexOf("ry = r * 0.34") < 0,
   "★旧的扁比例没留残留 ✓（0.12 / 0.13 / 0.34 都清掉了 ✓ 那是「手写的」✗ 现在统一按正等测 ✓）");
+console.log("=== 用例 74：正方体（等边同构）+ 长方体宽改真值（v1755）===");
+const SP74 = loadBundled("solidProjection.ts", "_c74sp.cjs");
+const S3_74 = loadBundled("solid3d.ts", "_c74s3.cjs");
+/* 参照：3D 真值（与源码里写的一致 ✓ 这里独立重建 ✓ 好核对"表里到底存了什么"✓） */
+const cube74 = [[0, 0, 0], [1.5, 0, 0], [1.5, 1.5, 0], [0, 1.5, 0], [0, 0, 1.5], [1.5, 0, 1.5], [1.5, 1.5, 1.5], [0, 1.5, 1.5]];
+const cubeF74 = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [3, 2, 6, 7], [0, 3, 7, 4], [1, 2, 6, 5]];
+const cub74 = [[0, 0, 0], [3, 0, 0], [3, 2, 0], [0, 2, 0], [0, 0, 1.5], [3, 0, 1.5], [3, 2, 1.5], [0, 2, 1.5]];
+const g74 = SP74.solidTo2d(cube74, cubeF74);
+/* ① 正方体：12 条棱在 3D 里**全等** ✓（1.5 ✓） */
+const edges74 = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]];
+const len3d74 = edges74.map(([a, b]) => Math.hypot(cube74[a][0] - cube74[b][0], cube74[a][1] - cube74[b][1], cube74[a][2] - cube74[b][2]));
+ok(len3d74.every((v) => Math.abs(v - 1.5) < 1e-9), "★正方体 12 条棱 3D 全等 ✓（都 = 1.5 ✓ 这才是正方体 ✓）");
+/* ② 斜二测的"招牌"：x 向与 z 向**照画** ✓ y 向**画成一半** ✓ */
+const plen74 = edges74.map(([a, b]) => Math.hypot(g74.raw[a][0] - g74.raw[b][0], g74.raw[a][1] - g74.raw[b][1]));
+const xEdges74 = [0, 2, 4, 6], zEdges74 = [8, 9, 10, 11], yEdges74 = [1, 3, 5, 7];
+ok(xEdges74.every((i) => Math.abs(plen74[i] - 1.5) < 1e-9), "★x 向（长）照画 1.5 ✓（实测 " + plen74[0].toFixed(3) + " ✓）");
+ok(zEdges74.every((i) => Math.abs(plen74[i] - 1.5) < 1e-9), "★z 向（高）照画 1.5 ✓（实测 " + plen74[8].toFixed(3) + " ✓）");
+ok(yEdges74.every((i) => Math.abs(plen74[i] - 0.75) < 1e-9), "★y 向（宽）**画成一半** 0.75 ✓（实测 " + plen74[yEdges74[0]].toFixed(3) + " = 1.5 × K ✓ 这就是教材斜二测的招牌 ✓）");
+/* ③ 长方体（教材例2）：宽 2 → 画成 1 ✓ 与讲义注释「宽 2 画成 1」**完全一致** ✓ */
+const glen74 = (a, b) => Math.hypot(SP74.oblique(cub74[a])[0] - SP74.oblique(cub74[b])[0], SP74.oblique(cub74[a])[1] - SP74.oblique(cub74[b])[1]);
+const lx = glen74(0, 1), ly = glen74(1, 2), lz = glen74(0, 4);
+ok(Math.abs(lx - 3) < 1e-9 && Math.abs(lz - 1.5) < 1e-9, "★长方体：长画 3 ✓ 高画 1.5 ✓（实测 " + lx.toFixed(3) + " / " + lz.toFixed(3) + " ✓）");
+ok(Math.abs(ly - 1) < 1e-9, "★宽 2 **画成 1** ✓（实测 " + ly.toFixed(3) + " ✓ 与讲义注释一字不差 ✓ 改之前只有 0.5 ✗）");
+ok(Math.abs(ly / lx - 1 / 3) < 1e-9, "★宽/长 = " + (ly / lx).toFixed(3) + " = 1/3 ✓（教材例 2 的比例 ✓ 之前是 1/6 ✗ 太浅 ✓）");
+/* ④ 接进渲染 ✓（正方体现在也走 3D 现算 ✓ 边数与线条数必须一致 ✓） */
+const VC74 = S3_74.solidVerts("cubeOblique", 300, 200);
+const EC74 = S3_74.solidEdges("cubeOblique");
+const svg74 = S3_74.renderSolid("cubeOblique", VC74, 300, 200, "#111827", 2, "none", "") || "";
+const segs74 = (svg74.match(/<line\b/g) || []).length;
+const out74 = [];
+svg74.replace(/([xy]1|y2|x2)="(-?[\d.]+)"/g, (m, t, v) => { out74.push(+v); return m });
+ok(VC74.length === 16 && EC74.length === 12 && segs74 === 12, "★cubeOblique 走进 3D 现算 ✓（8 顶点 12 边 ✓ 渲染出 " + segs74 + " 条线 ✓）");
+ok(out74.length > 0 && out74.every((v) => v >= -6 && v <= 306), "★正方体渲染坐标都在框内 ✓（" + out74.length + " 个坐标 ✓ 越界 0 ✓）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);
