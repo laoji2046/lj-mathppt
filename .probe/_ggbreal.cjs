@@ -98,8 +98,9 @@ try {
     }).outputFiles[0].text;
     await ev(bundle("ggbExec.ts", "LJEx"));
     await ev(bundle("ggbSolve.ts", "LJSv"));
-    ok((await ev("!!(window.LJEx && window.LJEx.execSolveSteps && window.LJSv && window.LJSv.ggbAutoQueries)")) === true,
-      "★把真执行器（ggbExec.ts）与纯函数（ggbSolve.ts）注入页面 ✓");
+    await ev(bundle("ggbNorm.ts", "LJNm"));
+    ok((await ev("!!(window.LJEx && window.LJEx.execSolveSteps && window.LJSv && window.LJSv.ggbAutoQueries && window.LJNm && window.LJNm.ggbCmdName)")) === true,
+      "★把真执行器（ggbExec.ts）+ 纯函数（ggbSolve.ts）+ 命令名归一（ggbNorm.ts）注入页面 ✓");
 
     const S = (tool, cmd, say) => ({ tool, cmd, say: say || "", mode: 1 });
     const plan = JSON.stringify([
@@ -192,6 +193,30 @@ try {
     })()`);
     ok((o7.fails || []).length === 1 && o7.n === 0, "★真引擎返回 false 时，我们的执行器把它算成失败（fails=" + ((o7.fails || [])[0] ? String(o7.fails[0].err).slice(0, 44) : 0) + "）");
     ok(o7.ret === false, "★（顺带记下）真引擎 evalCommand 失败就是返回 false：JSON=" + JSON.stringify(o7.ret));
+
+    /* ⑧【v1736】拖动测试（真引擎）：把驱动点挪开，真约束该跟着走 ✓ 中文命令串该认得出 ✓ */
+    const o8 = await evj(`(async function(){
+      if (typeof ggbApi.reset === "function") ggbApi.reset();
+      var log = []; var push = function(l){ log.push(String(l)) };
+      ggbApi.evalCommand("A=(0,0)"); ggbApi.evalCommand("B=(3,0)");
+      ggbApi.evalCommand("c=Circle(A,B)"); ggbApi.evalCommand("D=Point(c)"); ggbApi.evalCommand("M=Midpoint(A,B)");
+      await new Promise(function(r){ setTimeout(r, 400) });
+      var cmds = { c: String(ggbApi.getCommandString("c")), D: String(ggbApi.getCommandString("D")), M: String(ggbApi.getCommandString("M")) };
+      var names = { c: LJNm.ggbCmdName(cmds.c), D: LJNm.ggbCmdName(cmds.D), M: LJNm.ggbCmdName(cmds.M) };
+      var r = await LJEx.runDragTest(ggbApi, push, { step: 0 }, { maxDrivers: 2, dx: 0.7, dy: 0.45 });
+      var after = ggbApi.getAllObjectNames();
+      return JSON.stringify({ cmds: cmds, names: names, drivers: r.drivers, checks: r.checks, broken: r.broken,
+        alreadyBad: r.alreadyBad, unchecked: r.unchecked, restored: r.restored, after: after, log: log.slice(-4) });
+    })()`);
+    const n8 = o8.names || {};
+    ok(n8.c === "Circle" && n8.D === "Point" && n8.M === "Midpoint",
+      "★真引擎的中文命令串归一：" + (o8.cmds || {}).c + "→" + n8.c + "、" + (o8.cmds || {}).D + "→" + n8.D + "、" + (o8.cmds || {}).M + "→" + n8.M);
+    ok((o8.drivers || []).length === 2, "★真引擎上认出 " + (o8.drivers || []).length + " 个驱动点（" + (o8.drivers || []).join("、") + "）");
+    ok((o8.checks || 0) >= 2, "★" + o8.checks + " 条可查关系（描点 + 中点 ✓）");
+    ok((o8.broken || []).length === 0, "★真约束在真引擎上拖动后仍成立（没被拖坏 ✓ 假约束才会露馅 ✓）");
+    ok(o8.restored === true && (o8.after || []).indexOf("D") >= 0, "★跑完整块还原（D 还在板上 ✓ 老师的图没动 ✓）");
+    ok((o8.unchecked || []).indexOf("c") >= 0, "★如实报「没查的」（圆本身没查 ✓ 不假装全查了 ✗）");
+    ok((o8.log || []).some((l) => l.indexOf("挪到") >= 0), "★日志写清把谁挪到哪儿 ✓");
 
     console.log(bad ? "\n[XX] 真引擎有 " + bad + " 处问题" : "\n[ok] 真引擎全过 ✓（本地 GeoGebra 5.2 + 真执行器 ✓）");
     ws.close();

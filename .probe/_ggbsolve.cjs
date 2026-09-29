@@ -169,6 +169,14 @@ const L2 = FS.describeScan(sq).join("|");
 ok(L2.indexOf("水平") >= 0 && L2.indexOf("竖直") >= 0, "★正方形：认出一条水平 + 一条竖直");
 ok(L2.indexOf("⊥") >= 0, "★正方形：认出垂直");
 ok(L2.indexOf("=") >= 0, "★正方形：认出等长");
+const SF2 = FS.scanFromResult({ points: [0, 0, 1, 0, 0.5, 1], edges: [[0, 1, 0], [1, 2, 0], [2, 0, 0]], anchors: [], arcs: [] });
+const meas = FS.scanMeasures(SF2).join("|");
+ok(meas.indexOf("实测边长比") >= 0 && meas.indexOf("=1.000") >= 0, "★实测边长比（最长边 = 1）—— 不让模型目测 ✓");
+ok(meas.indexOf("实测角") >= 0 && meas.indexOf("°") >= 0, "★实测角（共享顶点夹角）✓");
+const warns = FS.scanWarnings(FS.scanFromResult({ points: [0, 0, 0.005, 0.005, 1, 1], edges: [[0, 1, 0], [1, 2, 0]], anchors: [], arcs: [] }));
+ok(warns.length >= 1 && warns.join("").indexOf("几乎重合") >= 0, "★重合顶点 → 如实报存疑（不假装全对 ✗）");
+ok(FS.scanWarnings(SF2).length === 0, "好图不瞎报 ✓");
+ok(FS.scanToBrief(FS.scanFromResult({ points: [0, 0, 0.005, 0.005], edges: [[0, 1, 0]], anchors: [], arcs: [] })).indexOf("识别存疑") >= 0, "★校对框里带「识别存疑」那一段 ✓");
 ok(FS.scanToBrief(SF).indexOf("【图形（自动识别") >= 0 && FS.scanToBrief(SF).indexOf("以题干为准") >= 0,
   "★写进校对框时标明是自动识别、以题干为准");
 console.log(NL + "=== 静态：读数（query）与核对（v1731）===");

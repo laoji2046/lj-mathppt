@@ -21,6 +21,8 @@ import {
   type GgbSolveStep,
 } from './ggbSolve'
 import { buildTrack, type TrackItem } from './canvasTrack'
+import { ggbCmdName } from './ggbNorm'
+import { checkExprs, dragMoveCmd, freeDrivers, judgeDrag, residualChecks, type DragVerdict } from './ggbDrag'
 
 /** 我们用到的那部分 GeoGebra Apps API（**可选方法都写成可选** ✓ 拿不到就走兜底 ✓） */
 export interface GgbAppletLike {
@@ -224,4 +226,98 @@ export function missingObjects(a: GgbAppletLike, steps: GgbSolveStep[]): string[
   const list = liveObjects(a)
   if (!list.length) return []
   return names.filter((n) => list.indexOf(n) < 0)
+}
+/* ---------------- 【v1736】拖动测试：把驱动点挪开，看约束还成不成立 ----------------
+ * 判据来自 Math2GGB：**拖一下**才算验证过 ✓ —— 手打坐标凑出来的关系，拖动前残差 0 ✓ 拖动后立刻露馅 ✓
+ * 本函数**自己负责还原**（getXML → 拖 → 读数 → setXML ✓）：老师的图一根毛都不动 ✓
+ * ⚠ 诚实边界：它只能验**定义里写明的派生关系**（描点/中点/交点/旋转/反射 ✓）
+ *    —— "本该在圆上、却被写成自由点"这种**意图错误**它查不出来 ✗（那要靠人核对 ✓ 所以本函数会如实报"没查的" ✓）
+ */
+
+/** 读一组只读表达式的数值（静默 ✓ 用临时对象 ✓ 量完就删 ✓ 取不到给 NaN ✓） */
+async function readNumbers(a: GgbAppletLike, exprs: string[]): Promise<number[]> {
+  const out: number[] = []
+  for (const raw of exprs) {
+    const q = ggbReadPlan(raw, liveObjects(a))
+    if (!q.ok) { out.push(NaN); continue }
+    try {
+      if (a.evalCommand(ggbQueryCmd(q.expr)) === false) { out.push(NaN); continue }
+      const v = typeof a.getValue === 'function' ? Number(a.getValue(GGB_QUERY_TMP)) : NaN
+      out.push(Number.isFinite(v) ? v : NaN)
+    } catch { out.push(NaN) } finally {
+      try { if (typeof a.deleteObject === 'function') a.deleteObject(GGB_QUERY_TMP) } catch { /* 忽略 */ }
+    }
+  }
+  return out
+}
+
+/** 读一个点的坐标（"到底拖没拖动"就看它 ✓ —— SetCoords 返回值不可信 ✗） */
+async function readPointXY(a: GgbAppletLike, name: string): Promise<[number, number] | null> {
+  const v = await readNumbers(a, ['x(' + name + ')', 'y(' + name + ')'])
+  return Number.isFinite(v[0]) && Number.isFinite(v[1]) ? [v[0], v[1]] : null
+}
+
+export interface DragTestResult extends DragVerdict { drivers: string[]; checks: number; restored: boolean }
+
+/**
+ * 【v1736】拖动测试 ✓
+ *  · 驱动点 = 板上**自由点**（定义就是一对坐标 ✓）
+ *  · 逐个挪开：`SetCoords(点, x, y)` ⚠ 真引擎实测**返回 false 但真的会动** ✗ → **看位置有没有变** ✓
+ *  · 每挪一次读一遍残差 ✓ 取**最坏值**当"拖动后" ✓
+ *  · 跑完 `setXML` 整块还原 ✓（失败也不报错，只在结果里说清 ✓）
+ */
+export async function runDragTest(
+  a: GgbAppletLike,
+  log: ExecLog = () => {},
+  wait: ExecWait = {},
+  opt: { maxDrivers?: number; dx?: number; dy?: number; tol?: number } = {},
+): Promise<DragTestResult> {
+  const maxDrivers = opt.maxDrivers == null ? 3 : opt.maxDrivers
+  const dx = opt.dx == null ? 0.7 : opt.dx
+  const dy = opt.dy == null ? 0.45 : opt.dy
+  const tol = opt.tol == null ? 0.02 : opt.tol
+  const wStep = wait.step == null ? 90 : wait.step
+  const sleep = (ms: number) => (ms > 0 ? new Promise((res) => window.setTimeout(res, ms)) : Promise.resolve())
+  const xml = a.getXML ? String(a.getXML() || '') : ''
+  const track = readTrack(a, {}, [])
+  const drivers = freeDrivers(track).slice(0, maxDrivers)
+  const checks = residualChecks(track)
+  const unchecked = track.filter((it) => ggbCmdName(it.def) !== '' && !checks.some((c) => c.name === it.name)).map((it) => it.name)
+  const exprs = checkExprs(checks)
+  const restore = (): boolean => {
+    if (!xml || typeof a.setXML !== 'function') return false
+    try { a.setXML(xml); return true } catch { return false }
+  }
+  if (!drivers.length || !checks.length) {
+    log('拖动测试：' + (drivers.length ? '没有认得准的关系可查（定义认不出 ✓）' : '板上没有自由点（都用约束定义 ✓）'))
+    return { ...judgeDrag(checks, [], [], tol, unchecked), drivers: drivers.map((d) => d.name), checks: checks.length, restored: restore() }
+  }
+  const before = await readNumbers(a, exprs)
+  const perDriver: number[][] = []
+  const moved: string[] = []
+  for (const d of drivers) {
+    const r = a.evalCommand(dragMoveCmd(d.name, d.x + dx, d.y + dy))
+    await sleep(wStep)
+    const xy = await readPointXY(a, d.name)
+    if (!xy) { log('拖动测试：' + d.name + ' 拖不动（可能是固定点 ✓ 跳过）'); continue }
+    moved.push(d.name)
+    perDriver.push(await readNumbers(a, exprs))
+    log('拖动测试：把 ' + d.name + ' 从 (' + d.x + ', ' + d.y + ') 挪到 (' + (d.x + dx) + ', ' + (d.y + dy) + ')'
+      + (r === false ? '（引擎返回 false，但位置确实变了 → 按成功算 ✓）' : '') + '，读数第 ' + perDriver.length + ' 组')
+  }
+  if (!moved.length) log('拖动测试：一个都没拖动（都是固定点？✓）')
+  const after = exprs.map((_, i) => {
+    let worst = 0
+    for (const row of perDriver) {
+      const v = row[i]
+      if (!Number.isFinite(v)) { worst = Infinity; break }
+      if (v > worst) worst = v
+    }
+    return worst
+  })
+  const restored = restore()
+  const verdict = judgeDrag(checks, before, after, tol, unchecked)
+  for (const l of verdict.lines) log('· ' + l)
+  if (restored) log('· 画布已还原（拖动只是测试 ✓ 你的图没动 ✓）')
+  return { ...verdict, drivers: moved, checks: checks.length, restored }
 }

@@ -6,7 +6,7 @@ import { useDeckStore } from '@/stores/deck'
 import { hasLocalEngine, loadGeoGebra } from '@/composables/useGeoGebra'
 import { describeToCommands } from '@/composables/ggbAI'
 import { ggbAutoQueries, ggbBriefText, ggbCheckResult, ggbCheckSystem, ggbCheckUser, ggbReadBrief, ggbReadSystem, ggbRepairSystem, ggbRepairUser, ggbSolvePlan, ggbSolveSystem, ggbSolveUser, ggbValidatePlan, ggbVisionGuard, type GgbReadout } from '@/composables/ggbSolve'
-import { defsOf, execQueryExprs, execSolveSteps, liveObjects, missingObjects, readTrack } from '@/composables/ggbExec'
+import { defsOf, execQueryExprs, execSolveSteps, liveObjects, missingObjects, readTrack, runDragTest } from '@/composables/ggbExec'
 import { settingsOpen } from '@/ui/menus'
 import { loadImg, prepImageEl } from '@/composables/imgPrep'
 import { trackLines, type TrackItem } from '@/composables/canvasTrack'
@@ -193,6 +193,23 @@ const solveShot = ref(false)
 const solveFile = ref<HTMLInputElement | null>(null)
 const MAX_SOLVE_IMG = 3
 
+/* ---------------- 【v1736】拖动测试：把驱动点挪一下，看约束还成不成立 ----------------
+ * Math2GGB 的判据：**拖一下**才算验证过 ✓ —— 手打坐标凑出来的关系，拖动前残差 0、拖动后露馅 ✓
+ * 跑完自己还原（getXML/setXML ✓）—— 老师的图不动 ✓
+ */
+const dragTesting = ref(false)
+async function dragTestRunInner() {
+  const a = liveApplet()
+  if (!a || typeof a.evalCommand !== "function") { toaster("作图器尚未就绪"); return }
+  dragTesting.value = true
+  try {
+    const r = await runDragTest(a, solveLogPush, { step: 0 }, { maxDrivers: 3 })
+    toaster(r.broken.length
+      ? "🧲 拖动测试：" + r.broken.length + " 条关系没经受住拖动 ✗（见日志）" + (r.restored ? "；画布已还原 ✓" : "")
+      : "🧲 拖动测试：" + r.checks + " 条关系都经受住了拖动 ✓" + (r.restored ? "（画布已还原 ✓）" : ""))
+  } finally { dragTesting.value = false }
+}
+function dragTestRun() { quietErrors(dragTestRunInner) }
 /* ---------------- 【v1734】CanvasTracker：板上有什么、谁画的、依赖谁、长什么样 ----------------
  * 依据 Draw2Think 的 L4（Memory）= 画布状态 + 轨迹（对象 / 依赖图 / 样式 ✓）
  * 回答两个老师一定会问的问题：
@@ -919,6 +936,7 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
                 <label class="ggbs__check" title="跑完把画布上的精确读数（点坐标 / 线段长 / 半径 / 面积）交给模型核对：解题过程与图形自不自洽 ✓ 不一致就给出修正步骤 ✓"><input v-model="checkOn" type="checkbox" /> 跑完自动核对</label>
                 <button class="ggbs__btn ggbs__btn--tiny" :disabled="!runSnap" @click="rollbackRun" title="把画布恢复到你点「③ 解题并作图」之前的样子（整块画布 + 视图一起恢复 ✓ 这一步之后手画、手改的也会没 ✗）">↩ 回滚到作图前</button>
                 <button class="ggbs__btn ggbs__btn--tiny" @click="boardPeek" title="列出绘图板上现在有哪些对象：谁画的（这次 AI / 上次 AI / 你手画）、依赖谁、颜色粗细 —— 写在下面的日志里 ✓">🔍 看板上有啥</button>
+                <button class="ggbs__btn ggbs__btn--tiny" :disabled="dragTesting" @click="dragTestRun" title="把每个自由点都挪一下，看约束还成不成立：真约束（点在圆上、中点、交点…）拖完仍成立 ✓；手打坐标凑出来的假约束会立刻露馅 ✗。跑完整块还原，不动你的图 ✓">{{ dragTesting ? "拖动测试中…" : "🧲 拖动测试" }}</button>
               </div>
               <div v-if="solution" class="ggbs__solution">
                 <div class="ggbs__solvet">解题过程</div>

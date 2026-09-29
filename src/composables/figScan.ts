@@ -118,6 +118,7 @@ export function describeScan(f: ScanFig): string[] {
       if (c.rx > 0.02 && Math.abs(d / c.rx - 1) <= 0.06) rel.push(P[i].name + " 在圆上")
     }
   }
+  for (const m of scanMeasures(f)) out.push(m)   // 【v1736】实测尺寸（比值 / 角度）—— 让模型有数可依，不靠目测 ✓
   if (rel.length) out.push("关系（按识别结果推算，有容差 ✓）：" + rel.slice(0, 14).join("；"))
   return out
 }
@@ -125,6 +126,74 @@ export function describeScan(f: ScanFig): string[] {
 /** 【v1730】结构描述 → 写进校对框的那一段（**先说清是自动识别的、与题干冲突以题干为准** ✓） */
 export function scanToBrief(f: ScanFig): string {
   const NL2 = String.fromCharCode(10)
+  const w = scanWarnings(f)   // 【v1736】识别存疑的地方**如实标出来** ✓ 别让老师以为全对 ✗
   return "【图形（自动识别，可能有个别偏差 —— 与题干冲突时以题干为准）】" + NL2 +
-    describeScan(f).map((x) => "- " + x).join(NL2)
+    describeScan(f).map((x) => "- " + x).join(NL2) +
+    (w.length ? NL2 + "⚠ 识别存疑（请核对）：" + NL2 + w.map((x) => "- " + x).join(NL2) : "")
+}
+/** 【v1736】把数值**量出来**（Math2GGB 第一条规矩：不许目测 ✗）—— 纯函数 ✓ 探针盯着
+ *  · 实测边长比（最长边 = 1）→ 模型可以拿去核对题给的比值 ✓ 老师也能一眼核 ✓
+ *  · 实测角（共享顶点的两边夹角 ✓）
+ */
+export function scanMeasures(f: ScanFig): string[] {
+  const P = (f && f.points) || []
+  const out: string[] = []
+  const edges = ((f && f.edges) || []).map((e) => ({ e, len: dist(f, e.a, e.b) })).filter((x) => x.len > 0.0005)
+  if (!edges.length) return out
+  const maxLen = Math.max(...edges.map((x) => x.len))
+  if (maxLen > 0.02) {
+    out.push("实测边长比（最长边 = 1，可用来核对题给比例）：" +
+      edges.slice(0, 12).map((x) => edgeName(f, x.e) + "=" + (x.len / maxLen).toFixed(3)).join("、"))
+  }
+  const angs: string[] = []
+  for (let i = 0; i < edges.length; i++) {
+    for (let j = i + 1; j < edges.length; j++) {
+      const A = edges[i]
+      const B = edges[j]
+      const v = sharedVertexOf(f, A.e, B.e)
+      if (v < 0 || A.len < 0.03 || B.len < 0.03) continue
+      const a = angleAtVertex(f, v, otherEndOf(A.e, v), otherEndOf(B.e, v))
+      if (Number.isFinite(a)) angs.push("∠" + P[v].name + "=" + a.toFixed(1) + "°")
+    }
+  }
+  if (angs.length) out.push("实测角（共享顶点的两边夹角）：" + angs.slice(0, 10).join("、"))
+  return out
+}
+
+/** 【v1736】识别存疑：重合顶点 / 极短边 —— **如实说出来** ✓（别让老师以为全对 ✗） */
+export function scanWarnings(f: ScanFig): string[] {
+  const P = (f && f.points) || []
+  const out: string[] = []
+  for (let i = 0; i < P.length; i++) {
+    for (let j = i + 1; j < P.length; j++) {
+      const d = Math.sqrt((P[i].x - P[j].x) * (P[i].x - P[j].x) + (P[i].y - P[j].y) * (P[i].y - P[j].y))
+      if (d < 0.02) out.push("顶点 " + P[i].name + " 与 " + P[j].name + " 几乎重合（可能把一个点认成了两个 ✗ 请核对）")
+    }
+  }
+  for (const e of (f && f.edges) || []) {
+    const d = dist(f, e.a, e.b)
+    if (d > 0 && d < 0.02) out.push("线段 " + edgeName(f, e) + " 太短（" + d.toFixed(3) + "）—— 可能是把一小段误当成一条边 ✗")
+  }
+  return out.slice(0, 6)
+}
+
+function sharedVertexOf(_f: ScanFig, x: ScanEdge, y: ScanEdge): number {
+  if (x.a === y.a || x.a === y.b) return x.a
+  if (x.b === y.a || x.b === y.b) return x.b
+  return -1
+}
+
+function otherEndOf(e: ScanEdge, v: number): number { return e.a === v ? e.b : e.a }
+
+/** 顶点处的夹角（度 ✓） */
+function angleAtVertex(f: ScanFig, v: number, p: number, q: number): number {
+  const V = f.points[v]
+  const P1 = f.points[p]
+  const Q1 = f.points[q]
+  if (!V || !P1 || !Q1) return NaN
+  const a1 = Math.atan2(P1.y - V.y, P1.x - V.x)
+  const a2 = Math.atan2(Q1.y - V.y, Q1.x - V.x)
+  let d = (Math.abs(a1 - a2) * 180) / Math.PI
+  if (d > 180) d = 360 - d
+  return d
 }

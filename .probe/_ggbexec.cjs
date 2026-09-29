@@ -50,6 +50,9 @@ function makeMock(opts) {
     const def = String(objs.get(n) || "").trim();
     const t2 = tuple(def);
     if (t2) return t2;
+    // 【v1736】点在路径上（描点）：跟着宿主走 ✓（真约束 ✓ —— 拖动测试靠的就是这个行为）
+    const pd = /^Point\s*\(\s*([^)]+?)\s*\)$/i.exec(def);
+    if (pd) { const c = circleOf(pd[1]); if (c) return [c.c[0] + c.r, c.c[1]] }
     const md = /^Midpoint\s*\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)$/i.exec(def);
     if (md) { const a = pt(md[1]), b = pt(md[2]); return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }
     const cd = /^Circle\s*\(\s*(.+?)\s*,\s*(.+?)\s*\)$/i.exec(def);
@@ -67,7 +70,13 @@ function makeMock(opts) {
   }
   function dist(a, b) { return Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) }
   function evalDef(def) {
-    let m = /^Distance\s*\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)$/i.exec(def);
+    let m;
+    // 【v1736】拖动测试的残差表达式（挑认得准的三种 ✓ 别的返回 NaN = 取不到 ✓）
+    m = /^abs\(\s*Distance\(\s*Center\(([^)]+?)\)\s*,\s*([^,)]+?)\s*\)\s*-\s*Radius\(([^)]+?)\)\s*\)$/i.exec(def);
+    if (m) { const c = circleOf(m[3]); const p = pt(m[2]); return c ? Math.abs(dist(c.c, p) - c.r) : NaN }
+    m = /^abs\(\s*Distance\(\s*([^,)]+?)\s*,\s*([^,)]+?)\s*\)\s*-\s*Distance\(\s*\2\s*,\s*([^,)]+?)\s*\)\s*\)$/i.exec(def);
+    if (m) return Math.abs(dist(pt(m[1]), pt(m[2])) - dist(pt(m[2]), pt(m[3])));
+    m = /^Distance\s*\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)$/i.exec(def);
     if (m) return dist(pt(m[1]), pt(m[2]));
     m = /^Radius\s*\(\s*([^)]+?)\s*\)$/i.exec(def);
     if (m) { const c = circleOf(m[1]); return c ? c.r : NaN }
@@ -105,6 +114,9 @@ function makeMock(opts) {
       if (o.boom && c.indexOf(o.boom) >= 0) throw new Error("mock：不认这条指令");
       const asg = /^([A-Za-z][A-Za-z0-9_']*)\s*=\s*(.+)$/.exec(c);
       if (asg) { objs.set(asg[1], asg[2].trim()); return true }
+      // 【v1736】拖动：SetCoords(点, x, y) —— 真引擎**返回 false 但真的拖动成功** ✗ 所以调用方看结果 ✓
+      const sc = /^SetCoords\s*\(\s*([A-Za-z][A-Za-z0-9_']*)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)$/i.exec(c);
+      if (sc) { objs.set(sc[1], "(" + sc[2] + ", " + sc[3] + ")"); return o.dragFalse === false ? true : false }
       const d = /^Delete\s*\(([^)]*)\)$/i.exec(c);
       if (d) { for (const n of d[1].split(",").map((s) => s.trim())) if (n) del(n); return o.deleteFalse ? false : true }   // 真引擎：删掉了也返回 false ✗
       // 【v1735】跟真引擎一致：**认不出的指令返回 false（不抛异常 ✗）**✓
@@ -113,6 +125,7 @@ function makeMock(opts) {
     getValue(n) { const def = objs.get(String(n)); return def == null ? NaN : evalDef(def) },
     getAllObjectNames() { return [...objs.keys()] },
     getDefinitionString(n) { return objs.get(String(n)) || "" },
+    getCommandString(n) { return objs.get(String(n)) || "" },
     deleteObject(n) { del(n); return true },
     setMode() { modeCalls++ },
     getXML() { return JSON.stringify([...objs.entries()]) },
@@ -244,6 +257,32 @@ console.log(NL + "=== 执行层：作图步骤（真执行器 + 假绘图板 v17
   const f14 = [];
   const n14 = await X.execSolveSteps(m14, [{ tool: "delete", mode: 23, cmd: "Delete(A)", say: "" }], f14, [], () => {}, { mode: 0, step: 0 });
   ok(n14 === 1 && f14.length === 0 && m14.getAllObjectNames().indexOf("A") < 0, "★返回 false 但对象确实没了 → 按成功算（不许记成失败 ✗）");
+
+  /* ⑮ 【v1736】命令名规范化（真引擎实测：中文界面给的是「线段(A, B)」「圆周(A, B)」「描点(c)」✗） */
+  const NM = load("ggbNorm.ts", "_ggbnorm.cjs");
+  ok(NM.ggbCmdName("线段(A, B)") === "Segment" && NM.ggbCmdName("圆周(A, B)") === "Circle", "★中文命令名归一：线段→Segment、圆周→Circle");
+  ok(NM.ggbCmdName("描点(c)") === "Point" && NM.ggbCmdName("中点(A, B)") === "Midpoint" && NM.ggbCmdName("交点(c, l, 1)") === "Intersect", "★描点 / 中点 / 交点都认得 ✓");
+  ok(NM.ggbCmdName("(0, 0)") === "" && NM.ggbFreePointXY("(1.5, -2)") !== null, "自由点没有命令名、但坐标读得出来 ✓（这正是 driver 的判据 ✓）");
+  ok(NM.ggbCmdArgs("交点(c, l, 1)").join(",") === "c,l,1" && NM.ggbCmdArgs("Distance(Center(c), D)").length === 2, "★参数按顶层逗号切（嵌套括号不会切错 ✓）");
+  ok(NM.ggbNormalizeNames("中点(A, B)") === "Midpoint(A, B)", "整条命令名归一 ✓");
+  /* ⑯ 拖动测试的判定逻辑（纯函数 ✓ 三种情形都要分清） */
+  const DR = load("ggbDrag.ts", "_ggbdrag.cjs");
+  const oneCheck = [{ name: "D", def: "Point(c)", exprs: ["abs(D)"] }];
+  ok(DR.judgeDrag(oneCheck, [0.001], [0.5]).broken.length === 1, "★拖动前 0、拖动后 0.5 → **被判为拖坏**（假约束露馅 ✓）");
+  ok(DR.judgeDrag(oneCheck, [0.5], [0.5]).alreadyBad.length === 1 && DR.judgeDrag(oneCheck, [0.5], [0.9]).broken.length === 0, "★拖动前就 >容差 → 记成「本来就不成立」，不算拖坏 ✓");
+  ok(DR.judgeDrag(oneCheck, [0.001], [0.002]).broken.length === 0 && DR.judgeDrag(oneCheck, [0.001], [NaN]).broken.length === 1, "★残差保持 0 → 通过 ✓；拖动后取不到值 → 也算坏 ✓");
+  ok(DR.dragMoveCmd("A", 1.5, -2) === "SetCoords(A, 1.5, -2)", "拖动指令 = SetCoords(点, x, y) ✓");
+  /* ⑰ 拖动测试**跑起来**（假绘图板：真约束拖完仍成立 ✓ 画布还原 ✓ SetCoords 返回 false 但生效 ✓） */
+  const dm = makeMock();
+  dm.evalCommand("A=(0,0)"); dm.evalCommand("B=(3,0)"); dm.evalCommand("c=Circle(A,B)");
+  dm.evalCommand("D=Point(c)"); dm.evalCommand("M=Midpoint(A,B)");
+  const dlog = [];
+  const dr = await X.runDragTest(dm, (l) => dlog.push(l), { step: 0 }, { maxDrivers: 2, dx: 0.7, dy: 0.45 });
+  ok(dr.drivers.length === 2 && dr.checks >= 2, "★认出 2 个驱动点、" + dr.checks + " 条可查关系（描点 + 中点 ✓）");
+  ok(dr.broken.length === 0, "★真约束拖完仍成立（没被拖坏 ✓）");
+  ok(dr.restored === true && dm.getAllObjectNames().length === 5, "★跑完整块还原（板上还是 5 个对象 ✓ 老师的图没动 ✓）");
+  ok(dlog.join("|").indexOf("拖不动") < 0, "★SetCoords 返回 false 但位置确实变了 → 不误报「拖不动」✓");
+  ok(dr.unchecked.indexOf("c") >= 0, "★如实报「没查的」（圆本身没查 ✓ 不假装全查了 ✗）");
 
   console.log(bad ? NL + "[XX] 执行层有 " + bad + " 处问题" : NL + "[ok] 执行层全过");
   process.exit(bad ? 1 : 0);
