@@ -194,6 +194,49 @@ export function arcsSvg(arcs: FigureArc[] | undefined, w: number, h: number, str
   return out
 }
 
+import { solidTo2d } from '@/composables/solidProjection'
+import type { V3 } from '@/composables/solidProjection'
+
+/**
+ * 【v1751】用**讲义绘图脚本的 3D 几何**重绘的立体（斜二测 ✓）
+ * 出处：高中数学讲义/scripts/plot_ch08_14.py ✓（顶点与面表照抄 ✓，投影/虚实现算 ✓）
+ * ⚠ 只放「斜二测」这一族 kind ✓ —— `cube` / `prism` 那些是「正面真形」的另一套约定 ✗ 不要混 ✓
+ */
+const SOLID_3D: Record<string, { verts: V3[]; faces: number[][] }> = {
+  /* 教材图 8.1-5：六棱柱（正六边形底面 r=1、高 1.55 ✓）*/
+  hexPrismOblique: {
+    verts: [
+      [1.0, 0.0, 0.0], [0.5, 0.8660254, 0.0], [-0.5, 0.8660254, 0.0],
+      [-1.0, 0.0, 0.0], [-0.5, -0.8660254, 0.0], [0.5, -0.8660254, 0.0],
+      [1.0, 0.0, 1.55], [0.5, 0.8660254, 1.55], [-0.5, 0.8660254, 1.55],
+      [-1.0, 0.0, 1.55], [-0.5, -0.8660254, 1.55], [0.5, -0.8660254, 1.55],
+    ],
+    faces: [[5, 4, 3, 2, 1, 0], [6, 7, 8, 9, 10, 11],
+      [0, 1, 7, 6], [1, 2, 8, 7], [2, 3, 9, 8], [3, 4, 10, 9], [4, 5, 11, 10], [5, 0, 6, 11]],
+  },
+  /* 教材图 8.1-6②：斜三棱柱（顶面平移 (0.35, 0.30) ✓ 侧棱不 ⊥ 底面 ✓）*/
+  prismOblique: {
+    verts: [
+      [0.80, -0.95, 0.0], [2.05, 0.40, 0.0], [-0.05, 0.62, 0.0],
+      [1.15, -0.65, 1.50], [2.40, 0.70, 1.50], [0.30, 0.92, 1.50],
+    ],
+    faces: [[2, 1, 0], [3, 4, 5], [0, 1, 4, 3], [1, 2, 5, 4], [2, 0, 3, 5]],
+  },
+  /* 教材图 8.1-6④：平行六面体（底面平行四边形 ✓ 侧棱同向平移 ✓）*/
+  obliquePrism: {
+    verts: [
+      [0.20, -0.95, 0.0], [1.70, -0.40, 0.0], [1.15, 0.80, 0.0], [-0.35, 0.25, 0.0],
+      [0.60, -0.65, 1.25], [2.10, -0.10, 1.25], [1.55, 1.10, 1.25], [0.05, 0.55, 1.25],
+    ],
+    faces: [[3, 2, 1, 0], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]],
+  },
+  /* 教材图 8.1-7：四棱锥 S-ABCD（底面矩形 ✓ 顶点 S 在底面中心上方 ✓）*/
+  pyramidOblique: {
+    verts: [[0.0, 0.0, 0.0], [1.60, 0.0, 0.0], [2.00, 0.95, 0.0], [0.40, 0.95, 0.0], [1.00, 0.475, 1.80]],
+    faces: [[3, 2, 1, 0], [0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]],
+  },
+}
+
 export const SOLID_KINDS = ['cube', 'cubeOblique', 'cuboid', 'cuboidOblique', 'pyramid', 'pyramidOblique', 'prism', 'prismOblique', 'tetrahedron', 'pyraFrustum', 'octahedron', 'hexPrism', 'obliquePrism', 'triFrustum', 'hexPrismOblique',
   // 必修二 立体几何定理图形（线面平行判定/性质、面面垂直判定/性质）
   'thmLinePlanePara', 'thmLinePlaneProp', 'thmPlanePlanePerp', 'thmPlanePlaneProp'] as const
@@ -254,7 +297,12 @@ const FOP: Record<string, number[]> = {
   thmPlanePlaneProp: [0.22, 0.16],
 }
 /** 某立体的边表 [起,止,隐藏(1=图形中被遮挡)] —— 编辑器命中检测与渲染共用 */
-export function solidEdges(kind: string): Edge[] { return EDGES[kind] || [] }
+export function solidEdges(kind: string): Edge[] {
+  /* 【v1751】有 3D 真值的（讲义重绘 ✓）→ 边的虚实**现算** ✓；其余仍用原来的表 ✓ */
+  const S3 = SOLID_3D[kind]
+  if (S3) return solidTo2d(S3.verts, S3.faces).edges as Edge[]
+  return EDGES[kind] || []
+}
 /** 某立体的面表（顶点索引环）—— 面命中检测与渲染共用 */
 export function solidFaces(kind: string): number[][] { return FACES[kind] || [] }
 /** 自由建模用的“完整面表”（含被遮挡的面），仅用于初始化 mesh；渲染仍按 mesh */
@@ -371,6 +419,12 @@ export const THM_LABELS: Record<string, (string | null)[]> = {
 
 /** 生成某立体在当前 w/h/depth 下的默认归一化顶点（与原几何一致） */
 export function solidVerts(kind: string, w: number, h: number, depth?: number): number[] {
+  /* 【v1751】讲义重绘的那 4 个：3D 顶点 → 斜二测投影 → 归一化 → 乘元素尺寸 ✓ */
+  const S3 = SOLID_3D[kind]
+  if (S3) {
+    const g = solidTo2d(S3.verts, S3.faces)
+    return g.points.map((v, i) => +((i % 2 ? h : w) * v).toFixed(3))
+  }
   let c: number[][] = []
   if (kind === 'cubeOblique') {
     // **斜二测画法**：正面画成**真实边长**的正方形；深度方向严格 **45°**、长度取边长的**一半**

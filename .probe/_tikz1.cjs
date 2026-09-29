@@ -2564,6 +2564,48 @@ ok(/\.lcard\s*\{[^}]*flex-direction:\s*column/.test(fi69), "★卡片是**两行
 ok(/\.lcard__pv\s*\{[^}]*width:\s*100%/.test(fi69), "★预览框占**整行宽** ✓（实测 168px → 343px ✓）");
 ok(/\.lcard__pv\s*\{[^}]*height:\s*54px/.test(fi69), "★预览框加高到 54px ✓（嵌套分式少缩一点 ✓）");
 ok(fi69.indexOf("width: 168px") < 0 && fi69.indexOf(".lcard__pv { width: 120px; }") < 0, "★旧的窄预览宽度没留残留 ✓（168px / 120px 都清掉了 ✓）");
+console.log("=== 用例 70：用讲义脚本重绘的立体几何（斜二测）（v1751）===");
+const SP70 = loadBundled("solidProjection.ts", "_c70sp.cjs");
+/* ① 投影公式与讲义一字不差（K=0.5、α=45° ✓）—— 手算两组对一下 ✓ */
+const C70 = 0.5 * Math.cos(Math.PI / 4);
+ok(Math.abs(SP70.OBLIQUE_K - 0.5) < 1e-12 && Math.abs(SP70.OBLIQUE_A - Math.PI / 4) < 1e-12, "★斜二测常数与讲义一致（K=0.5、α=45° ✓）");
+const p1_70 = SP70.oblique([1, 0, 0]);
+ok(Math.abs(p1_70[0] - 1) < 1e-9 && Math.abs(p1_70[1]) < 1e-9, "★proj({1,0,0}) = (1, 0) ✓（y 为 0 时不偏移 ✓）");
+const p2_70 = SP70.oblique([0.5, Math.sqrt(3) / 2, 0]);
+ok(Math.abs(p2_70[0] - (0.5 + C70 * Math.sqrt(3) / 2)) < 1e-9 && Math.abs(p2_70[1] - C70 * Math.sqrt(3) / 2) < 1e-9,
+  "★proj({0.5, √3/2, 0}) = (0.8062, 0.3062) ✓（y 方向 45° 斜、长度减半 ✓ 与讲义 proj 同式 ✓）");
+/* ② 虚实判定：视线 W=(K·cosα, −1, K·sinα) ✓ —— 顶面可见、底面不可见 ✓ */
+const hex70 = [
+  [1, 0, 0], [0.5, Math.sqrt(3) / 2, 0], [-0.5, Math.sqrt(3) / 2, 0],
+  [-1, 0, 0], [-0.5, -Math.sqrt(3) / 2, 0], [0.5, -Math.sqrt(3) / 2, 0],
+  [1, 0, 1.55], [0.5, Math.sqrt(3) / 2, 1.55], [-0.5, Math.sqrt(3) / 2, 1.55],
+  [-1, 0, 1.55], [-0.5, -Math.sqrt(3) / 2, 1.55], [0.5, -Math.sqrt(3) / 2, 1.55],
+];
+ok(SP70.faceVisible(hex70, [6, 7, 8, 9, 10, 11]) === true, "★六棱柱**顶面可见** ✓（法向 +z 与视线点积 = K·sinα > 0 ✓）");
+ok(SP70.faceVisible(hex70, [5, 4, 3, 2, 1, 0]) === false, "★六棱柱**底面不可见** ✓（它与顶面法向相反 ✓ 一实一虚正是教材那个样子 ✓）");
+/* ③ solidTo2d：归一化 + 边数 + 虚实混合 ✓ */
+const g70 = SP70.solidTo2d(hex70, [[5, 4, 3, 2, 1, 0], [6, 7, 8, 9, 10, 11],
+  [0, 1, 7, 6], [1, 2, 8, 7], [2, 3, 9, 8], [3, 4, 10, 9], [4, 5, 11, 10], [5, 0, 6, 11]]);
+ok(g70.points.every((v) => v >= 0 && v <= 1), "★投影点全部归一化到 [0,1] ✓（直接能当 MathFigureElement.points 用 ✓）");
+ok(g70.edges.length === 18, "★六棱柱 18 条边 ✓（6 上 + 6 下 + 6 侧棱 ✓ 实测 " + g70.edges.length + "）");
+const dash70 = g70.edges.filter((e) => e[2] === 1).length;
+ok(dash70 >= 4 && dash70 <= 8, "★虚线边 " + dash70 + " 条 ✓（背面那几条 ✓ 全实或全虚都不对 ✗）");
+/* ④ 4 个斜二测 kind 接线 ✓ */
+const S3_70 = loadBundled("solid3d.ts", "_c70s3.cjs");
+const V70 = S3_70.solidVerts("hexPrismOblique", 300, 200);
+ok(V70.length === 24 && V70.every((v) => v >= -1 && v <= 301), "★hexPrismOblique 现算布局 ✓（12 个顶点 = 24 个数 ✓ 都在框内 ✓）");
+const E70 = S3_70.solidEdges("hexPrismOblique");
+ok(E70.length === 18 && E70.some((e) => e[2] === 1) && E70.some((e) => e[2] === 0), "★hexPrismOblique 现算虚实 ✓（18 条边、有虚有实 ✓）");
+const P70 = S3_70.solidVerts("pyramidOblique", 300, 200);
+const PE70 = S3_70.solidEdges("pyramidOblique");
+ok(P70.length === 10 && PE70.length === 8, "★pyramidOblique = 四棱锥 S-ABCD ✓（5 顶点 10 个数 ✓ 8 条边 ✓ 实测 " + P70.length + "/" + PE70.length + "）");
+ok(S3_70.solidVerts("prismOblique", 300, 200).length === 12 && S3_70.solidVerts("obliquePrism", 300, 200).length === 16,
+  "★斜三棱柱 6 顶点 / 平行六面体 8 顶点 ✓（都走 3D 现算 ✓）");
+/* ⑤ 没误伤：非斜二测的那套仍是老布局 ✓ */
+ok(S3_70.solidVerts("cube", 300, 200).length === 16 && S3_70.solidEdges("cube").length === 12,
+  "★cube（正面真形那套）没被动 ✓（仍 8 顶点 12 条边 ✓）");
+ok(S3_70.solidVerts("hexPrism", 300, 200).length === 24 && S3_70.solidEdges("hexPrism").length === 18,
+  "★hexPrism（非斜二测那个）也照旧 ✓（18 条边 ✓）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);
