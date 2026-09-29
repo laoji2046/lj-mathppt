@@ -25,6 +25,7 @@ import { ggbCmdName } from './ggbNorm'
 import { checkExprs, dragMoveCmd, freeDrivers, judgeDrag, residualChecks, type DragVerdict } from './ggbDrag'
 import { animDescribe, animNextValue, animParseSpec, animPlan, type GgbAnimDrive } from './ggbAnim'
 import { aidsDescribe, aidsPlan } from './ggbTeach'
+import { skDiff, skFromBoard, skLines, type SkDiff, type Skeleton } from './figRound'
 
 /** 我们用到的那部分 GeoGebra Apps API（**可选方法都写成可选** ✓ 拿不到就走兜底 ✓） */
 export interface GgbAppletLike {
@@ -410,4 +411,39 @@ async function driveAnim(a: GgbAppletLike, dr: GgbAnimDrive, log: ExecLog, wait:
   } catch (e) {
     return { ok: false, err: String((e as Error)?.message || e) }
   }
+}
+/**
+ * 【v1738】把**绘图板上的真身**读成骨架（点 / 边 / 圆 ✓）—— 供「复刻核对」比对
+ *  ⚠ 只对**像点**的对象去读坐标（自由点 / 描点 / 中点 / 交点 / 旋转… ✓）；
+ *    线段、直线、圆不读坐标（`x(线段)` 那种调用没意义 ✗）
+ */
+export async function boardSkeleton(a: GgbAppletLike): Promise<Skeleton> {
+  const POINTISH = ['', 'Point', 'Midpoint', 'Intersect', 'Rotate', 'Reflect', 'Translate', 'Dilate', 'Extremum', 'Root', 'Center']
+  const track = readTrack(a, {}, [])
+  const items: { name: string; x?: number; y?: number; def?: string; kind?: string; r?: number }[] = []
+  for (const it of track) {
+    const kind = ggbCmdName(it.def)
+    const rec: { name: string; x?: number; y?: number; def?: string; kind?: string; r?: number } = { name: it.name, def: it.def, kind }
+    if (POINTISH.indexOf(kind) >= 0) {
+      const xy = await readPointXY(a, it.name)
+      if (xy) { rec.x = xy[0]; rec.y = xy[1] }
+    } else if (kind === 'Circle') {
+      const rr = await readNumbers(a, ['Radius(' + it.name + ')'])
+      if (Number.isFinite(rr[0])) rec.r = rr[0]
+    }
+    items.push(rec)
+  }
+  return skFromBoard(items)
+}
+
+/**
+ * 【v1738】复刻核对：原图骨架 ↔ 板上真身 ✓（Math2GGB 那句 "Rendered to Image" 的等价物 ✓）
+ * 归一化后比（保长宽比 ✓）→ 给出 0~1 的对得上比例 ✓ 并把出入写进日志 ✓
+ */
+export async function runBuildCheck(a: GgbAppletLike, want: Skeleton, log: ExecLog = () => {}, tol = 0.06): Promise<SkDiff> {
+  const got = await boardSkeleton(a)
+  const d = skDiff(want, got, tol)
+  log('复刻核对：板上读出 ' + got.points.length + ' 个点、' + got.edges.length + ' 条边、' + got.circles.length + ' 个圆 ✓')
+  for (const l of skLines(d)) log(l)
+  return d
 }

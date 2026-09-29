@@ -250,6 +250,33 @@ try {
     ok(typeof o9.sVal === "number" && o9.sVal >= 0 && o9.sVal <= 10,
       "★我们自己驱动的动画把滑块停在区间内（s = " + o9.sVal + " ✓ 引擎没有振荡 API ✗）");
 
+    /* ⑩【v1738】复刻往返（真引擎）：建出来 → 读回真身骨架 → 与目标骨架比 ✓ */
+    const o10 = await evj(`(async function(){
+      if (typeof ggbApi.reset === "function") ggbApi.reset();
+      var log = []; var push = function(l){ log.push(String(l)) };
+      function build(cx, cy){
+        ggbApi.evalCommand("A=(0,0)"); ggbApi.evalCommand("B=(3,0)"); ggbApi.evalCommand("C=(" + cx + "," + cy + ")");
+        ggbApi.evalCommand("s=Segment(A,B)"); ggbApi.evalCommand("t=Segment(A,C)"); ggbApi.evalCommand("u=Segment(B,C)");
+      }
+      var want = { points: [{name:"A",x:0,y:0},{name:"B",x:40,y:0},{name:"C",x:0,y:53}],
+        edges: [{a:"A",b:"B",dashed:false},{a:"A",b:"C",dashed:false},{a:"B",b:"C",dashed:false}], circles: [] };
+      build(0, 4);
+      await new Promise(function(r){ setTimeout(r, 400) });
+      var gotSk = await LJEx.boardSkeleton(ggbApi);
+      var d1 = await LJEx.runBuildCheck(ggbApi, want, push);
+      if (typeof ggbApi.reset === "function") ggbApi.reset();
+      build(0, 3.3);
+      await new Promise(function(r){ setTimeout(r, 400) });
+      var d2 = await LJEx.runBuildCheck(ggbApi, want, push);
+      return JSON.stringify({ sk: { p: gotSk.points.length, e: gotSk.edges.length, c: gotSk.circles.length },
+        s1: d1.score, moved1: d1.moved.length, miss1: d1.missing.length, edge1: d1.edgeBad.length,
+        s2: d2.score, moved2: d2.moved.length, log: log.slice(-4) });
+    })()`);
+    ok(o10.sk && o10.sk.p === 3 && o10.sk.e === 3, "★板上真身读成骨架：3 个点、" + ((o10.sk || {}).e) + " 条边 ✓（线段从命令串认端点 ✓）");
+    ok(o10.s1 === 1 && o10.moved1 === 0 && o10.miss1 === 0 && o10.edge1 === 0,
+      "★复刻往返：建对的三角形与目标骨架完全一致（" + o10.s1 + " ✓ 归一化后比，单位不同也对得上 ✓）");
+    ok(o10.s2 < 1 && o10.moved2 >= 1, "★把 C 建歪（4 → 3.3）→ 往返比对立刻掉下来（" + o10.s2 + "，偏 " + o10.moved2 + " 个点 ✗）");
+
     console.log(bad ? "\n[XX] 真引擎有 " + bad + " 处问题" : "\n[ok] 真引擎全过 ✓（本地 GeoGebra 5.2 + 真执行器 ✓）");
     ws.close();
   } finally { try { child.kill() } catch (e) { /* 忽略 */ } }

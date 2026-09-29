@@ -365,6 +365,46 @@ ok(st1.indexOf("对得上") >= 0 && st1.indexOf("对不上") < 0 && st1.indexOf(
 const st2 = FS.statedMeasureChecks(tri7, "AB=3，AC=9").join("|");
 ok(st2.indexOf("对不上") >= 0, "★题给 3:9 与实测 3:4 对不上 → 明确报出来 ✗（两处必有一处错 ✓）");
 ok(FS.statedMeasureChecks(FS.scanFromResult({ points: [0, 0, 1, 0], edges: [[0, 1, 0]], anchors: [], arcs: [] }), "AB=3").length === 0, "点没字母标注 → 对不了账（返回空 ✓ 不瞎报 ✗）");
+console.log(NL + "=== 静态：v1738 测量工序 + 复刻往返 ===");
+const FM = load("figMeasure.ts", "_figmeasure.cjs");
+const FR = load("figRound.ts", "_figround.cjs");
+const tri8 = FS.scanFromResult({ points: [0, 0, 0.6, 0, 0, 0.8], edges: [[0, 1, 0], [1, 2, 0], [2, 0, 0]], anchors: [
+  { x: 0, y: 0, text: "A", conf: 1 }, { x: 0.6, y: 0, text: "B", conf: 1 }, { x: 0, y: 0.8, text: "C", conf: 1 }], arcs: [] });
+/* ① 测量工序：基准 / 原点 / 比例 / 坐标 / 残差 ✓ */
+ok(FS.statedLengths("AB=3，BC=5，AC=4").length === 3 && FS.statedLengths("AB:BC=3:4").length === 0, "★题干长度解析：AB=3 认得出、比例式不误认 ✓");
+const ruler8 = FM.pickRuler(tri8, "AB=3，BC=5，AC=4");
+ok(ruler8 && ruler8.stated === 5 && (ruler8.a === "B" || ruler8.b === "B"), "★选基准：挑题给里最长的那条（BC=5 ✓ 精度最好）");
+ok(FM.anchorOf(tri8, ruler8) === "C", "★原点取基准边的左下那个角（C ✓）");
+const plan8 = FM.cleanPlan(tri8, "AB=3，BC=5，AC=4");
+const pt8 = (n) => plan8.points.find((p) => p.name === n) || {};
+ok(plan8.ok && plan8.unit === 5, "★换算比例：1 归一化长度 = " + plan8.unit + " 题目单位 ✓");
+ok(pt8("C").x === 0 && pt8("C").y === 0 && pt8("A").x === 0 && pt8("A").y === 4 && pt8("B").x === 3 && pt8("B").y === 4,
+  "★换算后坐标 A(0,4) B(3,4) C(0,0) ✓（y 已按数学方向翻转 ✓ 可直接拿去作图 ✓）");
+ok(plan8.residuals.length === 3 && plan8.residuals.every((r) => r.ok), "★其它题给长度都对得上（3 / 4 / 5 ✓）");
+ok(plan8.lines.join("|").indexOf("测量换算") >= 0 && plan8.lines.join("|").indexOf("翻转") >= 0, "★换算说明写进了给模型的那段话 ✓");
+const bad8 = FM.cleanPlan(tri8, "AB=3，BC=5，AC=9");
+ok(bad8.residuals.some((r) => !r.ok) && bad8.lines.join("|").indexOf("对不上") >= 0, "★有一条题给长度对不上 → 明确报出来 ✗");
+const vb1 = FM.verifyBuilt(plan8, [{ name: "A", x: 0, y: 4 }, { name: "B", x: 3, y: 4 }, { name: "C", x: 0, y: 0 }]);
+ok(vb1.ok && vb1.bad.length === 0, "★建完再验：板上坐标与计划一致 → 通过 ✓");
+const vb2 = FM.verifyBuilt(plan8, [{ name: "A", x: 0, y: 4 }, { name: "B", x: 3.4, y: 4 }, { name: "C", x: 0, y: 0 }]);
+ok(!vb2.ok && vb2.bad.join("|").indexOf("B") >= 0, "★建完再验：B 偏了 0.4 → 报出来 ✗");
+/* ② 往返骨架：三种来源 + 归一化比对 ✓ */
+const sk8 = FR.skFromScan(tri8);
+ok(sk8.points.length === 3 && sk8.edges.length === 3 && sk8.points[0].name === "A", "★识别结果 → 骨架（3 点 3 边，名字留着 ✓）");
+const n8 = FR.skNormalize(sk8);
+ok(Math.abs(Math.max(Math.max(...n8.points.map((p) => p.x)), Math.max(...n8.points.map((p) => p.y))) - 1) < 1e-9 && Math.abs(Math.min(...n8.points.map((p) => p.x))) < 1e-9 && Math.abs(Math.min(...n8.points.map((p) => p.y))) < 1e-9, "★归一化：最长的那一维到 1、包围盒贴原点 ✓（另一维按比例 < 1 ✓ 保长宽比 ✓）");
+const same = FR.skDiff(sk8, FR.skFromBoard([{ name: "A", x: 0, y: 4, def: "(0, 4)", kind: "" }, { name: "B", x: 3, y: 4, def: "(3, 4)", kind: "" }, { name: "C", x: 0, y: 0, def: "(0, 0)", kind: "" }, { name: "s", def: "Segment(A, B)", kind: "Segment" }, { name: "t", def: "Segment(B, C)", kind: "Segment" }, { name: "u", def: "Segment(C, A)", kind: "Segment" }]));
+ok(same.score === 1 && same.missing.length === 0 && same.edgeBad.length === 0, "★往返：板上的真身与识别骨架完全一致（单位不同也一致 ✓ 归一化比 ✓）");
+const off = FR.skDiff(sk8, FR.skFromBoard([{ name: "A", x: 0, y: 4, def: "", kind: "" }, { name: "B", x: 3, y: 4, def: "", kind: "" }, { name: "C", x: 0.9, y: 0.2, def: "", kind: "" }]));
+ok(off.score < 1 && off.moved.length >= 1, "★板上 C 建歪了 → 往返比对报出（" + off.score.toFixed(3) + " ✗）");
+const miss = FR.skDiff(sk8, FR.skFromBoard([{ name: "A", x: 0, y: 4, def: "", kind: "" }, { name: "B", x: 3, y: 4, def: "", kind: "" }]));
+ok(miss.missing.indexOf("C") >= 0, "★少建了一个点 → 报「缺 C」✗");
+const dash = FR.skDiff({ points: [{ name: "A", x: 0, y: 0 }, { name: "B", x: 1, y: 0 }], edges: [{ a: "A", b: "B", dashed: true }], circles: [] },
+  { points: [{ name: "A", x: 0, y: 0 }, { name: "B", x: 1, y: 0 }], edges: [{ a: "A", b: "B", dashed: false }], circles: [] });
+ok(dash.edgeBad.length === 1 && dash.edgeBad[0].indexOf("虚实") >= 0, "★虚实画反了 → 报出来 ✗");
+const svgSk = FR.skFromSvg('<svg><circle cx="10" cy="20" r="5"/><line x1="0" y1="0" x2="10" y2="0"/><polygon points="0,0 10,0 10,10"/></svg>');
+ok(svgSk.circles.length === 1 && svgSk.edges.length >= 4 && svgSk.points.length >= 5, "★SVG → 骨架（圆 1 个 / 边 " + svgSk.edges.length + " 条 ✓ 模板化复刻的那一半 ✓）");
+ok(FR.skLines(same).join("|").indexOf("复刻往返") >= 0, "★结论写成给老师看的一段话 ✓");
 function pickKey() {
   const direct = String(process.env.LJ_AI_KEY || process.env.DEEPSEEK_API_KEY || "").trim();
   if (direct) return direct;

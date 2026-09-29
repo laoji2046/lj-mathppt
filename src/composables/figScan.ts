@@ -208,6 +208,22 @@ function angleAtVertex(f: ScanFig, v: number, p: number, q: number): number {
  *   · `∠ABC=60°` → 角度是绝对的，直接比 ✓
  * 对不上时**明确写出来** ✓ —— 要么识别错了、要么题干读错了，两处总有一处要改 ✓
  */
+/** 【v1738】从题干里认出"两条字母 + 一个数字"的长度（如 `AB=3`）—— 抽出来给测量工序用 ✓
+ *  · 前面不能是字母/数字/下划线（免得把 `AB:BC=3:4` 里的 `BC=3` 误认成一条边 ✗）
+ *  · 只认**正数** ✓ 认不出的不猜 ✗
+ */
+export function statedLengths(text: unknown): { a: string; b: string; v: number }[] {
+  const t = String(text == null ? '' : text)
+  const out: { a: string; b: string; v: number }[] = []
+  // 【v1738】数字后面紧跟冒号的 = 比例式（`AB:BC=3:4` 里的 `BC=3` ✗）→ 不认 ✓
+  const re = /(?:^|[^A-Za-z0-9_'])([A-Za-z][A-Za-z0-9_']?)([A-Za-z][A-Za-z0-9_']?)\s*=\s*(\d+(?:\.\d+)?)(?![.\d]*\s*[:：])/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(t))) {
+    const v = Number(m[3])
+    if (Number.isFinite(v) && v > 0) out.push({ a: m[1], b: m[2], v })
+  }
+  return out
+}
 export function statedMeasureChecks(f: ScanFig, text: unknown): string[] {
   const t = String(text == null ? '' : text)
   const P = (f && f.points) || []
@@ -221,14 +237,9 @@ export function statedMeasureChecks(f: ScanFig, text: unknown): string[] {
     return Math.sqrt((P[i].x - P[j].x) * (P[i].x - P[j].x) + (P[i].y - P[j].y) * (P[i].y - P[j].y))
   }
   const out: string[] = []
-  /* ① 绝对长度（成对比较比值 ✓） */
-  const lens: { a: string; b: string; v: number }[] = []
-  const re1 = /(?:^|[^A-Za-z0-9_'])([A-Za-z][A-Za-z0-9_']?)([A-Za-z][A-Za-z0-9_']?)\s*=\s*(\d+(?:\.\d+)?)/g
+  /* ① 绝对长度（成对比较比值 ✓）—— 解析抽到 statedLengths 了（测量工序也要用 ✓ v1738）*/
+  const lens = statedLengths(t)
   let m: RegExpExecArray | null
-  while ((m = re1.exec(t))) {
-    const v = Number(m[3])
-    if (Number.isFinite(v) && v > 0) lens.push({ a: m[1], b: m[2], v })
-  }
   for (let i = 0; i < lens.length; i++) {
     for (let j = i + 1; j < lens.length; j++) {
       const A = lens[i]

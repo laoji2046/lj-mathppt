@@ -302,6 +302,18 @@ console.log(NL + "=== 执行层：作图步骤（真执行器 + 假绘图板 v17
   const af2 = [];
   const an2 = await X.execSolveSteps(am, [{ tool: "animate", mode: -1, cmd: "s|loop", say: "", anim: true }], af2, [], () => {}, { step: 0 });
   ok(an2 === 0 && af2.length === 1 && String(af2[0].err).indexOf("起点与终点") >= 0, "★loop 没给范围 → 记成失败（不静默 ✗）");
+  /* ⑲【v1738】复刻往返：原图骨架 ↔ 板上真身（假绘图板 ✓） */
+  const rm = makeMock();
+  rm.evalCommand("A=(0,0)"); rm.evalCommand("B=(3,0)"); rm.evalCommand("C=(0,4)");
+  rm.evalCommand("s=Segment(A,B)"); rm.evalCommand("t=Segment(A,C)");
+  const want8 = { points: [{ name: "A", x: 0, y: 0 }, { name: "B", x: 40, y: 0 }, { name: "C", x: 0, y: 53 }],
+    edges: [{ a: "A", b: "B", dashed: false }, { a: "A", b: "C", dashed: false }], circles: [] };
+  const rd8 = await X.runBuildCheck(rm, want8, () => {});
+  ok(rd8.score >= 0.999 && rd8.missing.length === 0, "★复刻往返：板上真身与目标骨架对得上（" + rd8.score.toFixed(3) + " ✓ 单位不同也对得上 ✓）");
+  ok(rd8.matched.length === 3 && rd8.edgeBad.length === 0, "★三个点 + 两条边全对上 ✓");
+  const want8b = { points: [{ name: "A", x: 0, y: 0 }, { name: "B", x: 40, y: 0 }, { name: "C", x: 60, y: 53 }], edges: want8.edges, circles: [] };
+  const rd8b = await X.runBuildCheck(rm, want8b, () => {});
+  ok(rd8b.score < 0.999 && rd8b.moved.length >= 1, "★目标里 C 一歪 → 往返比对立刻报出（" + rd8b.score.toFixed(3) + " ✗）");
   console.log(bad ? NL + "[XX] 执行层有 " + bad + " 处问题" : NL + "[ok] 执行层全过");
   process.exit(bad ? 1 : 0);
 })().catch((e) => { console.log("[XX] 跑挂了：" + (e && e.message)); process.exit(1) });

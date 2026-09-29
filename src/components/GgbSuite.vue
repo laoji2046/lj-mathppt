@@ -6,11 +6,13 @@ import { useDeckStore } from '@/stores/deck'
 import { hasLocalEngine, loadGeoGebra } from '@/composables/useGeoGebra'
 import { describeToCommands } from '@/composables/ggbAI'
 import { ggbAutoQueries, ggbBriefText, ggbCheckResult, ggbCheckSystem, ggbCheckUser, ggbReadBrief, ggbReadSystem, ggbRepairSystem, ggbRepairUser, ggbSolvePlan, ggbSolveSystem, ggbSolveUser, ggbValidatePlan, ggbVisionGuard, type GgbReadout } from '@/composables/ggbSolve'
-import { defsOf, execQueryExprs, execSolveSteps, liveObjects, missingObjects, readTrack, runDragTest } from '@/composables/ggbExec'
+import { defsOf, execQueryExprs, execSolveSteps, liveObjects, missingObjects, readTrack, runBuildCheck, runDragTest } from '@/composables/ggbExec'
 import { settingsOpen } from '@/ui/menus'
 import { loadImg, prepImageEl } from '@/composables/imgPrep'
 import { trackLines, type TrackItem } from '@/composables/canvasTrack'
 import { scanFromResult, scanToBrief } from '@/composables/figScan'
+import { cleanPlan } from '@/composables/figMeasure'
+import { skFromScan } from '@/composables/figRound'
 import { vectorizeInWorker } from '@/composables/figScanRun'
 import { licensed } from '@/composables/useLicense'
 import { invoke } from '@/composables/useTauri'
@@ -193,6 +195,25 @@ const solveShot = ref(false)
 const solveFile = ref<HTMLInputElement | null>(null)
 const MAX_SOLVE_IMG = 3
 
+/* ---------------- 【v1738】复刻核对：原图骨架 ↔ 板上真身的往返比对 ----------------
+ * Math2GGB 每组例子都做 "Rendered to Image" ✓ —— 我们补上"像不像"这个客观分 ✓
+ * 归一化后比（保长宽比 ✓）：点位置 / 边 / 虚实 / 圆的个数 ✓
+ */
+const checking = ref(false)
+const lastSk = ref<ReturnType<typeof skFromScan> | null>(null)
+async function buildCheckInner() {
+  const a = liveApplet()
+  if (!a || typeof a.evalCommand !== "function") { toaster("作图器尚未就绪"); return }
+  if (!lastSk.value) { toaster("先「＋题目图」认一次图形（原图骨架），再来核对 ✓"); return }
+  checking.value = true
+  try {
+    const d = await runBuildCheck(a, lastSk.value, solveLogPush)
+    toaster(d.score >= 0.999
+      ? "📐 复刻核对：跟原图完全对得上（1.000）✓"
+      : "📐 复刻核对：对得上 " + d.score.toFixed(3) + (d.moved.length || d.missing.length || d.edgeBad.length ? " ✗ 有出入（见日志）" : " ✓"))
+  } finally { checking.value = false }
+}
+function buildCheckRun() { quietErrors(buildCheckInner) }
 /* ---------------- 【v1736】拖动测试：把驱动点挪一下，看约束还成不成立 ----------------
  * Math2GGB 的判据：**拖一下**才算验证过 ✓ —— 手打坐标凑出来的关系，拖动前残差 0、拖动后露馅 ✓
  * 跑完自己还原（getXML/setXML ✓）—— 老师的图不动 ✓
@@ -386,9 +407,13 @@ async function scanFigureInner() {
     solveLog.value.push("· ② 认图形：" + scanNote.value)
     // 上一次自动识别的那一段换掉（别越堆越多 ✓）
     const briefForCheck = solveBrief.value   // 【v1737】对账要用校对口里的题干 → 先留一份 ✓
+    lastSk.value = skFromScan(fig)                                    // 【v1738】留住骨架，供「复刻核对」用 ✓
+    const mplan = cleanPlan(fig, briefForCheck)                       // 【v1738】测量换算：选基准 / 定原点 / 定比例 / 出坐标 ✓
+    if (mplan.lines.length) for (const l of mplan.lines) solveLog.value.push("· " + l)
     const at = solveBrief.value.indexOf("【图形（自动识别")
     if (at >= 0) solveBrief.value = solveBrief.value.slice(0, at).replace(/\s+$/, "")
-    solveBrief.value = (solveBrief.value ? solveBrief.value + String.fromCharCode(10, 10) : "") + scanToBrief(fig, briefForCheck)
+    solveBrief.value = (solveBrief.value ? solveBrief.value + String.fromCharCode(10, 10) : "") + scanToBrief(fig, briefForCheck) +
+      (mplan.lines.length ? String.fromCharCode(10, 10) + mplan.lines.join(String.fromCharCode(10)) : "")   // 【v1738】坐标直接给模型，不让它目测 ✓
     if (fig.points.length < 2) {
       solveLog.value.push("· ⚠ 认出来的顶点太少 —— 这张图可能不是线稿（照片 / 阴影 / 手写），或者图形太小；按题干自己判断就行 ✓")
       toaster("没认出多少图形元素（见日志）—— 不影响照常解题 ✓")
@@ -937,6 +962,7 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
                 <label class="ggbs__check" title="跑完把画布上的精确读数（点坐标 / 线段长 / 半径 / 面积）交给模型核对：解题过程与图形自不自洽 ✓ 不一致就给出修正步骤 ✓"><input v-model="checkOn" type="checkbox" /> 跑完自动核对</label>
                 <button class="ggbs__btn ggbs__btn--tiny" :disabled="!runSnap" @click="rollbackRun" title="把画布恢复到你点「③ 解题并作图」之前的样子（整块画布 + 视图一起恢复 ✓ 这一步之后手画、手改的也会没 ✗）">↩ 回滚到作图前</button>
                 <button class="ggbs__btn ggbs__btn--tiny" @click="boardPeek" title="列出绘图板上现在有哪些对象：谁画的（这次 AI / 上次 AI / 你手画）、依赖谁、颜色粗细 —— 写在下面的日志里 ✓">🔍 看板上有啥</button>
+                <button class="ggbs__btn ggbs__btn--tiny" :disabled="!lastSk || checking" @click="buildCheckRun" title="复刻往返：拿题图识别出的骨架，跟绘图板上真身比一比（点的相对位置 / 边 / 虚实 / 圆的个数 ✓ 归一化后比，保长宽比 ✓）—— 给出 0~1 的对得上的比例 ✓">📐 复刻核对</button>
                 <button class="ggbs__btn ggbs__btn--tiny" :disabled="dragTesting" @click="dragTestRun" title="把每个自由点都挪一下，看约束还成不成立：真约束（点在圆上、中点、交点…）拖完仍成立 ✓；手打坐标凑出来的假约束会立刻露馅 ✗。跑完整块还原，不动你的图 ✓">{{ dragTesting ? "拖动测试中…" : "🧲 拖动测试" }}</button>
               </div>
               <div v-if="solution" class="ggbs__solution">
