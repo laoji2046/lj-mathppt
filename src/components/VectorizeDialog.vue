@@ -16,6 +16,7 @@ import { useDeckStore } from '@/stores/deck'
 import type { MathFigureElement, SlideElement, FigureArc } from '@/types'
 import { loadImageElement, type VectorizeOpt, type VectorizeResult } from '@/composables/vectorize'
 import { parseVecAi, vecAiSummary, VEC_AI_SYSTEM } from '@/composables/vecAi'
+import { addPointAt, addPointOnEdge, pruneCons, resolveConstrained, type Constr } from '@/composables/vecEdit'
 import { invoke } from '@/composables/useTauri'
 import { settingsOpen } from '@/ui/menus'
 import { labelFontSize, labelGap, labelSvg, arcPolyline } from '@/composables/solid3d'
@@ -94,6 +95,15 @@ const labels = ref<string[]>([])
 const lconf = ref<number[]>([])
 /** 字母相对顶点的偏移（识别框归一化坐标）—— 默认取被抹掉的原字母位置 */
 const offs = ref<{ dx: number; dy: number }[]>([])
+/** 【v1744】每个顶点是不是**受约束的点**（钉在某条边上 ✓ 与 labels/offs 同步增删 ✓） */
+const cons = ref<(Constr | null)[]>([])
+/** 【v1744】受约束的点：先**清理失效**（线被删了才解除 ✓）→ 再按 a/b/t 重算位置 ✓（端点一动它就留在线上 ✓） */
+function applyCons() {
+  cons.value = pruneCons(cons.value, edges.value)
+  const rr = resolveConstrained(pts.value, cons.value)
+  pts.value = rr.pts
+  cons.value = rr.cons
+}
 /** 选中的顶点（可多选，最后一个为"主选中"） */
 const selVs = ref<number[]>([])
 const selV = computed(() => (selVs.value.length ? selVs.value[selVs.value.length - 1] : null))
@@ -140,6 +150,8 @@ const boxSel = ref<{ x0: number; y0: number; x1: number; y1: number } | null>(nu
 
 // ---------------- 历史（撤销 / 重做） ----------------
 interface Snap {
+  /** 【v1744】受约束的点（钉在某条边上 ✓） */
+  cons?: (Constr | null)[]
   pts: number[]
   edges: [number, number, number][]
   labels: string[]
@@ -161,6 +173,7 @@ function snap(): Snap {
     labels: labels.value.slice(),
     lconf: lconf.value.slice(),
     offs: offs.value.map((o) => ({ ...o })),
+    cons: cons.value.map((c) => (c ? { ...c } : null)),
     arcs: arcs.value.map((a) => ({ ...a })),
   }
 }
@@ -170,6 +183,7 @@ function applySnap(s: Snap) {
   labels.value = s.labels.slice()
   lconf.value = s.lconf.slice()
   offs.value = s.offs.map((o) => ({ ...o }))
+  cons.value = (s.cons || []).map((c) => (c ? { ...c } : null))
   arcs.value = (s.arcs || []).map((a) => ({ ...a }))
   selVs.value = []
   selE.value = null
@@ -864,6 +878,34 @@ function onDown(e: PointerEvent) {
     drag.value = { x: dragStart.value.x, y: dragStart.value.y, w: 0, h: 0 }
     return
   }
+  // 【v1744】补点模式：点空白 = 加自由点 ✓ 点在线上 = 把那条线劈成两段（点落在线上 ✓）点已有顶点 = 只选中它 ✓
+  if (addPtMode.value) {
+    const p = toCropNorm(e)
+    if (!p || p[0] < 0 || p[0] > 1 || p[1] < 0 || p[1] > 1) return
+    const cx = +p[0].toFixed(4)
+    const cy = +p[1].toFixed(4)
+    // 【v1744】老师口径：**先选中一条线段** → 点就落在**那条线**上（按点击位置投影 ✓ 自动劈成两段 ✓）
+    const r = (selE.value !== null ? addPointOnEdge({ pts: pts.value, edges: edges.value }, selE.value, cx, cy) : null)
+      || addPointAt({ pts: pts.value, edges: edges.value }, cx, cy)
+    if (r.kind === 'vertex') {
+      selVs.value = [r.at]
+      selE.value = null
+      note.value = '这里是已有的顶点 #' + r.at + ' —— 已选中它（不用重复补点 ✓）'
+      return
+    }
+    pushUndo()
+    pts.value = r.pts
+    edges.value = r.edges
+    labels.value.push('')
+    lconf.value.push(0)
+    offs.value.push({ dx: 0, dy: 0 })
+    // 【v1744】落在线上的点记成**受约束的点** ✓（端点动它就留在线上 ✓）
+    cons.value.push(r.a != null && r.b != null && r.t != null ? { a: r.a, b: r.b, t: r.t } : null)
+    selVs.value = [r.at]
+    selE.value = null
+    note.value = r.note
+    return
+  }
   // 补线模式下点空白处 = 新建一个顶点
   if (linkMode.value) {
     const p = toCropNorm(e)
@@ -908,6 +950,24 @@ function onMove(e: PointerEvent) {
       pts.value[d.i * 2] = +clamp01(d.x + dx).toFixed(4)
       pts.value[d.i * 2 + 1] = +clamp01(d.y + dy).toFixed(4)
     }
+    // 【v1744】受约束的点：① 拖的是它自己 → 按新位置更新 t（**沿边滑动** ✓）② 拖的是端点 → 它按 t 自己留在线上 ✓
+    const inDrag = new Set(dragSet.value.map((d) => d.i))
+    for (let i = 0; i < cons.value.length; i++) {
+      const c = cons.value[i]
+      if (!c) continue
+      if (inDrag.has(i) && !inDrag.has(c.a) && !inDrag.has(c.b)) {
+        const ax = pts.value[c.a * 2]
+        const ay = pts.value[c.a * 2 + 1]
+        const bx = pts.value[c.b * 2]
+        const by = pts.value[c.b * 2 + 1]
+        const lx = bx - ax
+        const ly = by - ay
+        const L2 = lx * lx + ly * ly
+        const t = L2 <= 1e-12 ? 0.5 : ((pts.value[i * 2] - ax) * lx + (pts.value[i * 2 + 1] - ay) * ly) / L2
+        cons.value[i] = { a: c.a, b: c.b, t: Math.max(0.02, Math.min(0.98, t)) }
+      }
+    }
+    applyCons()
     return
   }
   if (boxSel.value) {
@@ -1018,6 +1078,13 @@ function connect(a: number, b: number, dash: 0 | 1 = 0): boolean {
   if (edges.value.some((e) => (e[0] === a && e[1] === b) || (e[0] === b && e[1] === a))) return false
   edges.value.push([a, b, dash])
   return true
+}
+/** 【v1744】补点模式：老师要的「＋ 补一个点」✓（与补线 / 画弧 / 抓手 / 框选互斥 ✓） */
+const addPtMode = ref(false)
+function toggleAddPt() {
+  addPtMode.value = !addPtMode.value
+  pendingV.value = null
+  if (addPtMode.value) { panMode.value = false; cropping.value = false; linkMode.value = false; arcMode.value = false; ellipseMode.value = false }
 }
 function toggleLink() {
   linkMode.value = !linkMode.value
@@ -1484,7 +1551,15 @@ function delSelectedVertices() {
 }
 function delEdge(i: number) {
   pushUndo()
+  const e = edges.value[i]
   edges.value.splice(i, 1)
+  // 【v1744】这条边没了 → 钉在它上面的点**解除约束**（点保留 ✓ 别静默删人东西 ✗）
+  if (e) {
+    for (let k = 0; k < cons.value.length; k++) {
+      const c = cons.value[k]
+      if (c && ((c.a === e[0] && c.b === e[1]) || (c.a === e[1] && c.b === e[0]))) cons.value[k] = null
+    }
+  }
   selE.value = null
 }
 
@@ -1507,6 +1582,7 @@ function removeVerts(ids: number[], mergedInto: number | null): (k: number) => n
     labels.value.splice(i, 1)
     lconf.value.splice(i, 1)
     offs.value.splice(i, 1)
+    cons.value.splice(i, 1)
   }
   const mi = mergedInto === null ? null : fix(mergedInto)
   arcs.value = arcs.value.flatMap((a) => {
@@ -2113,7 +2189,7 @@ async function aiRead(force = false) {
                   />
                   <circle
                     :cx="px(i - 1)" :cy="py(i - 1)" :r="pendingV === i - 1 ? 6.5 : 4.5"
-                    :fill="pendingV === i - 1 ? '#12b76a' : (selVs.includes(i - 1) ? '#ff8f1f' : (arcEnds.has(i - 1) ? '#12b76a' : '#e02020'))"
+                    :fill="pendingV === i - 1 ? '#12b76a' : (selVs.includes(i - 1) ? '#ff8f1f' : (cons[i - 1] ? '#1668e0' : (arcEnds.has(i - 1) ? '#12b76a' : '#e02020')))"
                     stroke="#fff" stroke-width="1.2"
                     style="pointer-events:none"
                   />
@@ -2272,6 +2348,10 @@ async function aiRead(force = false) {
               <button class="vd__btn" :class="{ 'vd__btn--on': linkMode }" @click="toggleLink">
                 {{ linkMode ? '结束补线' : '＋ 补一条线' }}
               </button>
+              <button class="vd__btn" :class="{ 'vd__btn--on': addPtMode }" @click="toggleAddPt"
+                title="先点选一条线段 → 再点这里，点就落在那条线上（自动劈成两段 ✓）。没选线时：点空白 = 自由点；点在线附近 = 顺手劈开那条线；点在已有顶点上 = 只选中它 ✓（补的点字母留空，右侧填 ✓）">
+                {{ addPtMode ? '结束补点' : '＋ 补一个点' }}
+              </button>
               <button class="vd__btn" :class="{ 'vd__btn--on': arcMode }" @click="toggleArc">
                 {{ arcMode ? '结束画弧' : '＋ 画一段弧' }}
               </button>
@@ -2284,6 +2364,14 @@ async function aiRead(force = false) {
                 @click="makeStdEllipse()">○ 拟合成标准椭圆</button>
               <button v-if="selE !== null" class="vd__btn" @click="toggleDash">实线 / 虚线 切换</button>
             </div>
+            <p class="vd__tip">要合并：先点选顶点（画布上框选，或按住 Shift 逐个加点 ✓）—— 选中 <b>2 个以上</b>会多出「合并成一个点」(M)；
+              选中同一条边上<b>中间那些点</b>再点「拉成一条边」(L) 就是线合并 ✓（这两个按钮在选中顶点后出现在上面的选区行里 ✓）</p>
+            <div class="vd__row" style="display:none">
+            </div>
+            <p v-if="addPtMode" class="vd__tip vd__tip--on">
+              补点：先在画布上点选一条线段 → 再点画布，点就落在那条线上并受约束（蓝点 ✓ 端点动它自己留在线上 ✓ 拖它可以沿边滑动 ✓）；没选线时：点空白 = 自由点 ✓ 点在线附近 = 劈开那条线 ✓ 点已有顶点 = 只选中它 ✓
+              —— 可以连着补好几个，点「结束补点」退出 ✓（补的点字母空着，右侧填 ✓）
+            </p>
             <p v-if="linkMode" class="vd__tip vd__tip--on">
               {{ pendingV === null
                 ? '补线中：点一个顶点作为起点；点空白处会新建一个顶点'

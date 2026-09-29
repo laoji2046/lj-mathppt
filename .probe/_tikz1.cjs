@@ -2420,6 +2420,57 @@ const g3v3 = fs.readFileSync(path.join(ROOT, "src", "components", "Geom3DDialog.
 ok((g3v3.match(/aiMsg\.value\s*=\s*['"][^'"]*\*\*/g) || []).length === 0 && (g3v3.match(/checkMsg\.value\s*=\s*['"][^'"]*\*\*/g) || []).length === 0, "★三维窗口给用户看的提示里没有 ** ✓");
 const vdlab = fs.readFileSync(path.join(ROOT, "src", "components", "VectorizeDialog.vue"), "utf8");
 ok(vdlab.indexOf(".vd__lab, .vd__lab * { pointer-events: none; }") >= 0, "★顶点字母层对指针透明（用户实报：字母盖住点、点选不中 ✗ v1743 修 ✓）");
+console.log("=== 用例 64：自图形重建的「补一个点」+ 点合并/线合并入口（v1744）===");
+const VE = loadBundled("vecEdit.ts", "_c64v.cjs");
+/* ① 补自由点：加在末尾、边不动 */
+const d0 = { pts: [0, 0, 1, 0], edges: [[0, 1, 0]] };
+const r1 = VE.addPointAt(d0, 0.5, 0.5);
+ok(r1.kind === "point" && r1.at === 2 && r1.pts.length === 6 && r1.edges.length === 1 && r1.split === -1, "★补一个自由点：顶点 +1、边不变 ✓");
+ok(d0.pts.length === 4 && d0.edges.length === 1, "★纯函数：**不改入参**（原草稿没被动过 ✓ 撤销才有意义 ✓）");
+/* ② 点在线上：把那条线劈成两段，新点落在线上 */
+const r2 = VE.addPointAt({ pts: [0, 0, 1, 0], edges: [[0, 1, 0]] }, 0.5, 0.002);
+ok(r2.kind === "point" && r2.split === 0 && r2.edges.length === 2, "★点在线上 → 那条线**劈成两段** ✓（" + JSON.stringify(r2.edges) + "）");
+ok(r2.edges.some((e) => e[0] === 0 && e[1] === 2) && r2.edges.some((e) => e[0] === 2 && e[1] === 1), "★两段是 0–新点 与 新点–1 ✓（新点确实落在那条线上 ✓）");
+/* ③ 虚线也保持 */
+const r3 = VE.addPointAt({ pts: [0, 0, 1, 0], edges: [[0, 1, 1]] }, 0.5, 0.002);
+ok(r3.edges.every((e) => e[2] === 1), "★劈出来的两段**虚线也保持** ✓（原来虚的不会变实 ✗）");
+/* ④ 点在已有顶点上：不加，只让调用方选中它 */
+ok(VE.addPointAt({ pts: [0, 0, 1, 0], edges: [] }, 0.004, 0.003).kind === "vertex", "★贴在已有顶点上 → **不重复加** ✓（返回那个顶点让界面选中它 ✓）");
+/* ⑤ 点到线段的距离（判"贴着这条线"用 ✓） */
+ok(Math.abs(VE.segDist(0.5, 0.1, 0, 0, 1, 0) - 0.1) < 1e-9 && Math.abs(VE.segDist(2, 0, 0, 0, 1, 0) - 1) < 1e-9, "★点到线段距离 ✓（垂直 0.1 ✓ 越过端点按端点算 1 ✓）");
+/* ⑥ 界面接线：按钮 + 模式 + 纯模块 + 原有的合并入口都在 */
+const vdsrc64 = fs.readFileSync(path.join(ROOT, "src", "components", "VectorizeDialog.vue"), "utf8");
+ok(vdsrc64.indexOf("addPointAt(") > 0 && vdsrc64.indexOf("const addPtMode = ref(false)") > 0, "★弹窗接上了补点（模式 + 调用纯函数 ✓）");
+ok(vdsrc64.indexOf("＋ 补一个点") > 0 && vdsrc64.indexOf("结束补点") > 0, "★工具栏有「＋ 补一个点」按钮 ✓（点一下进入/退出 ✓）");
+ok(vdsrc64.indexOf("mergeSelectedVertices") > 0 && vdsrc64.indexOf("straightenSelected") > 0, "★点合并 / 拉成一条边（=线合并）的入口都在 ✓（M / L ✓）");
+ok(vdsrc64.indexOf("合并成一个点") > 0 && vdsrc64.indexOf("拉成一条边") > 0, "★两个按钮的文案在 ✓（选中顶点后出现在选区行 ✓）");
+ok(vdsrc64.indexOf("就是线合并") > 0, "★界面上写清了「拉成一条边 = 线合并」✓（以前只有快捷键、找不到 ✓）");
+console.log("=== 用例 65：补的点是受约束的点（v1744）===");
+const VE65 = loadBundled("vecEdit.ts", "_c65v3.cjs");
+/* ① 落在**选中的那条线段**上：给出约束 a/b/t ✓ 并按点击位置投影 ✓ */
+const r65 = VE65.addPointOnEdge({ pts: [0, 0, 1, 1], edges: [[0, 1, 0]] }, 0, 0.25, 0.25);
+ok(!!r65 && r65.a === 0 && r65.b === 1 && Math.abs(r65.t - 0.25) < 1e-9 && r65.pts.length === 6, "★选中线段上加点：带出约束 a/b/t ✓（t = " + (r65 && r65.t) + " ✓）");
+ok(!!r65 && r65.edges.length === 2 && r65.edges.every((e) => e[2] === 0), "★那条线劈成两段且虚实保持 ✓");
+/* ② 端点一动，受约束的点**仍然在线上**（这是"受约束"的定义 ✓） */
+const p65 = r65.pts.slice();
+p65[0] = 0; p65[1] = 1; p65[2] = 2; p65[3] = 2;                  // 把端点 0 挪走
+const rc65 = VE65.resolveConstrained(p65, [null, null, { a: 0, b: 1, t: r65.t }], r65.edges);
+const cross65 = Math.abs((rc65.pts[4] - p65[0]) * (p65[3] - p65[1]) - (rc65.pts[5] - p65[1]) * (p65[2] - p65[0]));
+ok(cross65 < 1e-6, "★端点动了 → 受约束的点仍在线上 ✓（叉积残差 " + cross65.toExponential(1) + " ✓）");
+/* ③ 那条边没了 → **解除约束但不删点** ✓ */
+const gone65 = { pts: p65, cons: VE65.pruneCons([null, null, { a: 0, b: 1, t: r65.t }], []) };
+ok(gone65.cons[0] === null && gone65.pts.length === 6, "★两条半边都没了 → 解除约束、点保留 ✓（不静默删人东西 ✓）");
+const keep65 = VE65.pruneCons([null, null, { a: 0, b: 1, t: r65.t }], r65.edges);
+ok(!!keep65[2] && keep65[2].t === r65.t, "★劈成两段后约束仍然留着 ✓（半边还在 ✓ 上一版正是在这里误杀 ✗）");
+/* ④ 约束点自身不能是那条边的端点（防自环 ✓） */
+ok(VE65.resolveConstrained([0, 0, 1, 0], [{ a: 0, b: 1, t: 0.5 }], [[0, 1, 0]]).cons[0] === null, "★约束点自己是端点 → 解除 ✓（不然是自环 ✗）");
+/* ⑤ 界面接线：约束表 / 拖动重算 / 撤销 / 蓝点 / 删边解除 ✓ */
+const vdc65 = fs.readFileSync(path.join(ROOT, "src", "components", "VectorizeDialog.vue"), "utf8");
+ok(vdc65.indexOf("resolveConstrained(") > 0 && vdc65.indexOf("const cons = ref<") > 0, "★弹窗接上了约束表 + 拖动时重算 ✓");
+ok(vdc65.indexOf("cons: cons.value.map") > 0 && vdc65.indexOf("cons.value = (s.cons || [])") > 0, "★撤销快照带上约束 ✓（撤销能回到「还是约束点」✓）");
+ok(vdc65.indexOf("cons[i - 1] ? ") > 0, "★受约束的点画成蓝点 ✓（一眼看出哪些是钉在边上的 ✓）");
+ok(vdc65.indexOf("cons.value.push(r.a != null") > 0, "★补点时把约束记下来 ✓");
+ok(vdc65.indexOf("cons.value.splice(i, 1)") > 0 && vdc65.indexOf("解除约束") > 0, "★删点同步删约束、删边解除约束 ✓");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);
