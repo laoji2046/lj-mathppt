@@ -2444,7 +2444,7 @@ ok(vdsrc64.indexOf("addPointAt(") > 0 && vdsrc64.indexOf("const addPtMode = ref(
 ok(vdsrc64.indexOf("＋ 补一个点") > 0 && vdsrc64.indexOf("结束补点") > 0, "★工具栏有「＋ 补一个点」按钮 ✓（点一下进入/退出 ✓）");
 ok(vdsrc64.indexOf("mergeSelectedVertices") > 0 && vdsrc64.indexOf("straightenSelected") > 0, "★点合并 / 拉成一条边（=线合并）的入口都在 ✓（M / L ✓）");
 ok(vdsrc64.indexOf("合并成一个点") > 0 && vdsrc64.indexOf("拉成一条边") > 0, "★两个按钮的文案在 ✓（选中顶点后出现在选区行 ✓）");
-ok(vdsrc64.indexOf("就是线合并") > 0, "★界面上写清了「拉成一条边 = 线合并」✓（以前只有快捷键、找不到 ✓）");
+ok(vdsrc64.indexOf("线合并（拉直）") > 0 && vdsrc64.indexOf("合并选中的点") > 0, "★两个按钮都写明了：「合并选中的点」= 点合并 ✓「线合并（拉直）」= 拉直 ✓（不再混为一谈 ✓）");
 console.log("=== 用例 65：补的点是受约束的点（v1744）===");
 const VE65 = loadBundled("vecEdit.ts", "_c65v3.cjs");
 /* ① 落在**选中的那条线段**上：给出约束 a/b/t ✓ 并按点击位置投影 ✓ */

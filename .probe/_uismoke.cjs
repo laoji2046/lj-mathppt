@@ -103,7 +103,7 @@ function makePng(w, h) {
     const send = (method, params = {}) => new Promise((r) => { const i = ++id; pend.set(i, r); ws.send(JSON.stringify({ id: i, method, params })) });
     const ev = async (expr) => {
       const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
-      if (r.result && r.result.exceptionDetails) return "__EXC__" + String(r.result.exceptionDetails.text || "");
+      if (r.result && r.result.exceptionDetails) { const d = r.result.exceptionDetails; return "__EXC__" + String(d.text || "") + " " + String((d.exception && d.exception.description) || "").slice(0, 160); }
       return r.result && r.result.result ? r.result.result.value : undefined;
     };
     await send("Runtime.enable");
@@ -187,7 +187,7 @@ function makePng(w, h) {
           const hasAddPt = await ev('!!([...document.querySelectorAll(".vd__row button")].find(b=>b.textContent.indexOf("补一个点")>=0))');
           ok(hasAddPt === true, "★工具栏有「＋ 补一个点」按钮 ✓");
           const statBefore = await ev('(function(){var s=document.querySelector(".vd__stat"); return s? s.innerText.trim() : ""})()');
-          await ev('[...document.querySelectorAll(".vd__row button")].find(b=>b.textContent.indexOf("补一个点")>=0).click()');
+          await ev('[...document.querySelectorAll(".vd__row button")].find(b=>/补一个点|结束补点/.test(b.textContent)).click()');
           await sleep(250);
           const tipOn = await ev('(function(){var t=document.querySelector(".vd__tip--on"); return t? t.innerText : ""})()');
           ok(String(tipOn).indexOf("补点") >= 0, "★进入补点模式后有提示（实测片段：「" + String(tipOn).replace(/\s+/g, " ").slice(0, 40) + "…」✓）");
@@ -217,9 +217,49 @@ function makePng(w, h) {
           const sp = JSON.parse(String(fired || "{}"));
           ok(Number(sp.d) >= 20, "★落点离最近的顶点 " + sp.d + " px（≥20 ✓ 不会走「只选中已有顶点」那条 ✓ 原始返回：" + String(fired).slice(0, 20) + "）");
           await sleep(400);
+          /* 先把"点一下画布补出 1 个顶点"这条旧断言结掉（它必须在**自己那次点击之后立刻**取状态 ✓
+             不然下面还会再点两下 ✗ 状态就被搅了 ✓） */
           const statAfter = await ev('(function(){var s=document.querySelector(".vd__stat"); return s? s.innerText.trim() : ""})()');
           const numOf = (t) => { const m = /顶点\s*(\d+)/.exec(String(t)); return m ? Number(m[1]) : -1 };
           ok(numOf(statAfter) === numOf(statBefore) + 1, "★点一下画布真的补出了 1 个顶点（" + statBefore + " → " + statAfter + " ✓）");
+          /* 【v1745】① 再验一次"**点线**"那条路：开补点 → 直接点一条线 → 顶点 +1、边 +1 ✓ */
+          const statLine0 = await ev('(function(){var s=document.querySelector(".vd__stat"); return s? s.innerText.trim() : ""})()');
+          const resLine = await ev(`(function(){
+            var ln=document.querySelector('.vd__ov line[stroke="transparent"]');
+            if(!ln) return "no-line";
+            var r=ln.getBoundingClientRect();
+            var ev2=new PointerEvent("pointerdown",{bubbles:true,clientX:r.left+r.width/2,clientY:r.top+r.height/2,pointerId:3,pointerType:"mouse",isPrimary:true,button:0,buttons:1});
+            ln.dispatchEvent(ev2);
+            var ev3=new PointerEvent("pointerup",{bubbles:true,clientX:r.left+r.width/2,clientY:r.top+r.height/2,pointerId:3,pointerType:"mouse",isPrimary:true,button:0,buttons:0});
+            ln.dispatchEvent(ev3);
+            return "clicked";
+          })()`);
+          await sleep(400);
+          const statLine1 = await ev('(function(){var s=document.querySelector(".vd__stat"); return s? s.innerText.trim() : ""})()');
+          const nOf = (t, k) => { const m = new RegExp(k + "\\s*(\\d+)").exec(String(t)); return m ? Number(m[1]) : -1 };
+          ok(nOf(statLine1, "顶点") === nOf(statLine0, "顶点") + 1 && nOf(statLine1, "边") === nOf(statLine0, "边") + 1,
+            "★补点模式下**点线** → 点落在线上并劈成两段（" + statLine0 + " → " + statLine1 + " ✓ 原始：" + resLine + "）");
+          /* 【v1745】② 点合并：Shift 点选两个顶点 → 「合并选中的点」 → 顶点 -1 ✓ */
+          await ev('[...document.querySelectorAll(".vd__row button")].find(b=>/补一个点|结束补点/.test(b.textContent)).click()');
+          await sleep(200);
+          const statM0 = await ev('(function(){var s=document.querySelector(".vd__stat"); return s? s.innerText.trim() : ""})()');
+          const picked = await ev(`(function(){
+            var cs=[].slice.call(document.querySelectorAll('.vd__ov circle[fill="transparent"]'));
+            var uniq=[], seen={};
+            cs.forEach(function(c){ var r=c.getBoundingClientRect(); var k=Math.round(r.left)+"_"+Math.round(r.top); if(!seen[k]){ seen[k]=1; uniq.push(c) } });
+            if(uniq.length<2) return "few:"+uniq.length;
+            function click(el,shift){ var r=el.getBoundingClientRect(); var o={bubbles:true,clientX:r.left+r.width/2,clientY:r.top+r.height/2,pointerId:7,pointerType:"mouse",isPrimary:true,button:0,buttons:1,ctrlKey:!!shift}; el.dispatchEvent(new PointerEvent("pointerdown",o)); el.dispatchEvent(new PointerEvent("pointerup",o)); }
+            click(uniq[0],false); click(uniq[1],true);
+            return "ok:"+uniq.length;
+          })()`);
+          await sleep(250);
+          const selTxt = await ev('(function(){var e=document.querySelector(".vd__row--sel"); return e? e.innerText : ""})()');
+          const mergeBtn = await ev('!!([...document.querySelectorAll(".vd__row button")].find(b=>b.textContent.indexOf("合并选中的点")>=0 && !b.disabled))');
+          ok(String(selTxt).indexOf("2") >= 0 && mergeBtn === true, "★选了两个顶点后「合并选中的点」可点（选中行：「" + String(selTxt).replace(/\s+/g, " ").slice(0, 30) + "」✓ 原始：" + picked + "）");
+          await ev('[...document.querySelectorAll(".vd__row button")].find(b=>b.textContent.indexOf("合并选中的点")>=0).click()');
+          await sleep(350);
+          const statM1 = await ev('(function(){var s=document.querySelector(".vd__stat"); return s? s.innerText.trim() : ""})()');
+          ok(nOf(statM1, "顶点") === nOf(statM0, "顶点") - 1, "★点合并生效：顶点 " + statM0 + " → " + statM1 + "（-1 ✓）");
           ok(/^\d+x\d+$/.test(String(vp)) && parseInt(String(vp).split("x")[0], 10) > 560, "★画布视口也放大了（实测 " + vp + " ✓ 以前固定 560×450 ✗）");
         }
       }

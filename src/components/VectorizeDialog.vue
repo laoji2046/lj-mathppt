@@ -1036,7 +1036,10 @@ function onVertexDown(e: PointerEvent, i: number) {
     return
   }
   // 点在已多选的点上 → 整组一起拖；否则只选它
-  if (!selVs.value.includes(i)) selVs.value = [i]
+  // 【v1745】按住 **Ctrl/Cmd** = **追加选** ✓（用户要「多选几个点 → 点合并」；框选能追加 ✓ 逐个点选也得能 ✓）
+  //   ⚠ 不能用 Shift ✗ —— Shift+点两个顶点在上面那段是**连一条线**（老功能 ✓ 不能抢 ✗）
+  if ((e.ctrlKey || e.metaKey) && !selVs.value.includes(i)) selVs.value = [...selVs.value, i]
+  else if (!selVs.value.includes(i)) selVs.value = [i]
   selE.value = null
   pendingSnap.value = snap()
   dragOrigin.value = toCropNorm(e)
@@ -1049,6 +1052,25 @@ function onVertexDown(e: PointerEvent, i: number) {
 function onEdgeDown(e: PointerEvent, i: number) {
   e.stopPropagation()
   if (panMode.value || linkMode.value || cropping.value) return
+  // 【v1745】补点模式下点线 → 就在这条线上加点 ✓
+  //   （用户实报「选线补点没成功」的真因：命中线 stopPropagation ✗ 根本不走舞台那支 → 只把线选中了 ✗）
+  if (addPtMode.value) {
+    const p = toCropNorm(e)
+    if (!p) return
+    const r = addPointOnEdge({ pts: pts.value, edges: edges.value }, i, +p[0].toFixed(4), +p[1].toFixed(4))
+    if (!r) return
+    pushUndo()
+    pts.value = r.pts
+    edges.value = r.edges
+    labels.value.push('')
+    lconf.value.push(0)
+    offs.value.push({ dx: 0, dy: 0 })
+    cons.value.push(r.a != null && r.b != null && r.t != null ? { a: r.a, b: r.b, t: r.t } : null)
+    selVs.value = [r.at]
+    selE.value = null
+    note.value = r.note
+    return
+  }
   const ed = edges.value[i]
   if (!ed) return
   selE.value = i
@@ -2314,9 +2336,9 @@ async function aiRead(force = false) {
             <div v-if="selVs.length" class="vd__row vd__row--sel">
               <span class="vd__selnum">已选中 {{ selVs.length }} 个顶点</span>
               <button v-if="selVs.length > 1" class="vd__btn" @click="mergeSelectedVertices"
-                      title="并成一个点。保留连线条数最多的那个的位置，其它点的线都接到它身上（快捷键 M）">合并成一个点</button>
+                      title="点合并：把选中的多个顶点合成一个。保留连线条数最多的那个的位置，其它点的线都接到它身上（快捷键 M）">合并成一个点（点合并）</button>
               <button class="vd__btn" @click="straightenSelected"
-                      :title="selVs.length > 1 ? '只留两端、抹掉中间的点，连成一条直边（快捷键 L）' : '自动沿这条折线扩到两端，抹掉中间多余的点（快捷键 L）'">拉成一条边</button>
+                      :title="selVs.length > 1 ? '线合并（拉直）：只留两端、抹掉中间的点，连成一条直边（快捷键 L）—— 这是把折线拉直，不是合并点' : '自动沿这条折线扩到两端，抹掉中间多余的点（快捷键 L）'">线合并（拉直）</button>
               <button v-if="selVs.length > 1" class="vd__btn vd__btn--danger" @click="delSelectedVertices">全部删掉</button>
               <button class="vd__btn" @click="selVs = []">取消选择</button>
             </div>
@@ -2345,11 +2367,13 @@ async function aiRead(force = false) {
               </div>
             </div>
             <div class="vd__row">
+              <button class="vd__btn" :disabled="selVs.length < 2" @click="mergeSelectedVertices"
+                title="点合并：把选中的多个顶点合成一个（在画布上框选，或按住 Ctrl 逐个点选 ✓）。保留连线条数最多的那个、字母继承 ✓（快捷键 M）">合并选中的点</button>
               <button class="vd__btn" :class="{ 'vd__btn--on': linkMode }" @click="toggleLink">
                 {{ linkMode ? '结束补线' : '＋ 补一条线' }}
               </button>
               <button class="vd__btn" :class="{ 'vd__btn--on': addPtMode }" @click="toggleAddPt"
-                title="先点选一条线段 → 再点这里，点就落在那条线上（自动劈成两段 ✓）。没选线时：点空白 = 自由点；点在线附近 = 顺手劈开那条线；点在已有顶点上 = 只选中它 ✓（补的点字母留空，右侧填 ✓）">
+                title="开起来之后直接点画布上的线 → 点就落在那条线上并劈成两段（受约束的蓝点 ✓ 端点动它留在线上 ✓）；点空白 = 自由点；点已有顶点 = 只选中它 ✓">
                 {{ addPtMode ? '结束补点' : '＋ 补一个点' }}
               </button>
               <button class="vd__btn" :class="{ 'vd__btn--on': arcMode }" @click="toggleArc">
@@ -2364,8 +2388,8 @@ async function aiRead(force = false) {
                 @click="makeStdEllipse()">○ 拟合成标准椭圆</button>
               <button v-if="selE !== null" class="vd__btn" @click="toggleDash">实线 / 虚线 切换</button>
             </div>
-            <p class="vd__tip">要合并：先点选顶点（画布上框选，或按住 Shift 逐个加点 ✓）—— 选中 <b>2 个以上</b>会多出「合并成一个点」(M)；
-              选中同一条边上<b>中间那些点</b>再点「拉成一条边」(L) 就是线合并 ✓（这两个按钮在选中顶点后出现在上面的选区行里 ✓）</p>
+            <p class="vd__tip">要合并多点：在画布上<b>框选</b>（从空白处按住拖一个框 ✓）或按住 <b>Ctrl</b> 逐个点选 → 点工具栏的「合并选中的点」✓（快捷键 M）——
+              选中同一条边上<b>中间那些点</b>再点「线合并（拉直）」(L) 就是把折线拉直 ✓（这两个按钮在工具栏与选区行里 ✓）</p>
             <div class="vd__row" style="display:none">
             </div>
             <p v-if="addPtMode" class="vd__tip vd__tip--on">

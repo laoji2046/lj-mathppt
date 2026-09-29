@@ -16,6 +16,20 @@ export type AddPointResult =
   | { kind: 'vertex'; at: number }
   | { kind: 'point'; at: number; pts: number[]; edges: [number, number, number][]; split: number; note: string; a?: number; b?: number; t?: number }
 
+/** 【v1745】"在指定边上加点"**只会**成功成"点"（不会返回 vertex 变体 ✓）—— 单独给它一个窄类型 ✓
+ *  （不然调用方拿到的是联合类型 ✗ 访问 .pts/.a/.t 都报 TS2339 ✗） */
+export interface AddPointOnEdgeResult {
+  kind: 'point'
+  at: number
+  pts: number[]
+  edges: [number, number, number][]
+  split: number
+  note: string
+  a: number
+  b: number
+  t: number
+}
+
 /** 【v1744】受约束的点：钉在一条边上（参数 t ∈ [0,1]，位置**每次现算** ✓） */
 export interface Constr { a: number; b: number; t: number }
 
@@ -142,7 +156,7 @@ export function addPointOnEdge(
   x: number,
   y: number,
   opt: { tMin?: number } = {},
-): AddPointResult | null {
+): AddPointOnEdgeResult | null {
   const tMin = opt.tMin == null ? 0.08 : opt.tMin
   const pts = (d && d.pts ? d.pts : []).slice()
   const edges = (d && d.edges ? d.edges : []).map((e) => [e[0], e[1], e[2]] as [number, number, number])
