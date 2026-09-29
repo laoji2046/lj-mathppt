@@ -142,3 +142,34 @@ export function solidTo2d(verts: V3[], faces: Face[], pad = 0.05): Solid2d {
   }
   return { points, edges, raw }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   【v1754】旋转体：**正等测**与椭圆比例（照讲义 `cabinet.py` ✓）
+
+   讲义约定（`高中数学讲义/scripts/cabinet.py` ✓）：
+     正等测：`iproj(p) = (K(x−y), z − 0.5(x+y))` ✓ `K = √3/2` ✓
+     水平圆 → 屏幕椭圆，**长:短 = √3 : 1** ✓（讲义注释原话 ✓
+       我按公式又独立推了一遍：x 方向半轴 = K·√2·r ✓ z 方向半轴 = (√2/2)·r ✓ ⇒ 比值 = √3 ✓）
+
+   ⚠ 应用里原来的旋转体椭圆是**手写比例** ✗：圆柱 0.36/0.12 ≈ 3 ✓、圆锥 0.38/0.13 ≈ 2.9 ✓、球赤道 0.34 ≈ 2.9 ✓
+     —— 都比 √3 ≈ 1.732 **扁** ✗，看着不像正等测 ✓ ⇒ 统一改成 `ry = rx / ISO_RATIO` ✓（两处渲染器各一行 ✓）
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/** 正等测的比例系数 ✓ K = √3/2 ✓（讲义 `ISO_K` ✓） */
+export const ISO_K = Math.sqrt(3) / 2
+/** 水平圆（半径 r）→ 椭圆半长轴 = ISO_RX · r ✓（= K·√2 ✓） */
+export const ISO_RX = ISO_K * Math.SQRT2
+/** 水平圆（半径 r）→ 椭圆半短轴 = ISO_RY · r ✓（= √2/2 ✓） */
+export const ISO_RY = Math.SQRT2 / 2
+/** 椭圆的长:短 ✓ 恰好 = √3 ✓（讲义注释里那个比值 ✓ 探针会核 ✓） */
+export const ISO_RATIO = ISO_RX / ISO_RY
+
+/** 正等测投影：3D → 2D 屏幕坐标 ✓（与讲义 `iproj` 同式 ✓） */
+export function isometric(p: V3): [number, number] {
+  return [ISO_K * (p[0] - p[1]), p[2] - 0.5 * (p[0] + p[1])]
+}
+
+/** 水平圆（半径 r）投影后的椭圆半轴 ✓（旋转体的底面 / 顶面圆都用它 ✓） */
+export function isoCircle(r: number): { rx: number; ry: number } {
+  return { rx: ISO_RX * r, ry: ISO_RY * r }
+}

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { ISO_RATIO } from '@/composables/solidProjection'
 import type { MathFigureElement, SlideElement } from '@/types'
 import { lineDashCss } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
@@ -243,7 +244,7 @@ const innerHtml = computed(() => {
         '<line ' + dashed + ' x1="' + (fx + dx) + '" y1="' + (fy + fh + dy) + '" x2="' + (fx + dx) + '" y2="' + (fy + dy) + '"/></g>'
     }
     case 'cylinder': {
-      const rx = m * 0.36, ry = m * 0.12, cx = w / 2, topY = h * 0.2, botY = h * 0.78
+      const rx = m * 0.36, ry = rx / ISO_RATIO, cx = w / 2, topY = h * 0.2, botY = h * 0.78   /* 【v1754】照正等测 ✓ 原来 0.12 太扁 ✗ */
       return '<g ' + strokeAttrs + ' fill="' + fillColor + '">' +
         '<line x1="' + (cx - rx) + '" y1="' + topY + '" x2="' + (cx - rx) + '" y2="' + botY + '"/>' +
         '<line x1="' + (cx + rx) + '" y1="' + topY + '" x2="' + (cx + rx) + '" y2="' + botY + '"/>' +
@@ -252,13 +253,13 @@ const innerHtml = computed(() => {
         '<ellipse cx="' + cx + '" cy="' + topY + '" rx="' + rx + '" ry="' + ry + '"/></g>'
     }
     case 'cone': {
-      const rx = m * 0.38, ry = m * 0.13, cx = w / 2, botY = h * 0.8, apexY = h * 0.12
+      const rx = m * 0.38, ry = rx / ISO_RATIO, cx = w / 2, botY = h * 0.8, apexY = h * 0.12
       return '<g ' + strokeAttrs + ' fill="' + fillColor + '">' +
         '<path d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 0 ' + (cx + rx) + ' ' + botY + ' L ' + cx + ' ' + apexY + ' Z"/>' +
         '<path ' + dashed + ' d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 1 ' + (cx + rx) + ' ' + botY + '"/></g>'
     }
     case 'sphere': {
-      const r = m * 0.42, cx = w / 2, cy = h / 2, ry = r * 0.34
+      const r = m * 0.42, cx = w / 2, cy = h / 2, ry = r / ISO_RATIO
       return '<g ' + strokeAttrs + ' fill="' + fillColor + '">' +
         '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '"/>' +
         '<path ' + dashed + ' d="M ' + (cx - r) + ' ' + cy + ' A ' + r + ' ' + ry + ' 0 0 1 ' + (cx + r) + ' ' + cy + '"/>' +
@@ -304,7 +305,7 @@ const innerHtml = computed(() => {
         '<line ' + dashed + ' x1="' + p0 + '" x2="' + p2 + '"/><line ' + dashed + ' x1="' + p1 + '" x2="' + p2 + '"/><line ' + dashed + ' x1="' + p3 + '" x2="' + p2 + '"/></g>'
     }
     case 'frustum': {
-      const mm = Math.min(w, h), rB = mm * 0.4, rT = mm * 0.24, ryB = mm * 0.12, ryT = mm * 0.09, cx = w / 2, topY = h * 0.28, botY = h * 0.76
+      const mm = Math.min(w, h), rB = mm * 0.4, rT = mm * 0.24, ryB = rB / ISO_RATIO, ryT = rT / ISO_RATIO, cx = w / 2, topY = h * 0.28, botY = h * 0.76   /* 【v1754】正等测 ✓ */
       const frB = 'M ' + (cx - rB) + ' ' + botY + ' A ' + rB + ' ' + ryB + ' 0 0 0 ' + (cx + rB) + ' ' + botY
       return '<g ' + strokeAttrs + ' fill="' + fillColor + '">' +
         '<line x1="' + (cx - rB) + '" y1="' + botY + '" x2="' + (cx - rT) + '" y2="' + topY + '"/>' +

@@ -1,4 +1,5 @@
 import type { Deck, Slide, SlideElement, TableElement, TextElement } from '@/types'
+import { ISO_RATIO } from '@/composables/solidProjection'
 import { isVectorFigKind, vectorFigureSvg } from '@/composables/vectorFigures'
 import { inlineFiguresInText, renderFigureSvg } from '@/composables/figureRender'
 import { layoutTable } from '@/composables/tableLayout'
@@ -191,7 +192,7 @@ function figureInner(
         '<line ' + dsh + ' x1="' + (fx + dx) + '" y1="' + (fy + fh + dy) + '" x2="' + (fx + dx) + '" y2="' + (fy + dy) + '"/></g>'
     }
     case 'cylinder': {
-      const m = Math.min(w, h), rx = m * 0.36, ry = m * 0.12, cx = w / 2, topY = h * 0.2, botY = h * 0.78
+      const m = Math.min(w, h), rx = m * 0.36, ry = rx / ISO_RATIO, cx = w / 2, topY = h * 0.2, botY = h * 0.78
       const fc = fill && fill !== 'transparent' ? fill : 'none'
       return '<g ' + sa + ' fill="' + fc + '">' +
         '<line x1="' + (cx - rx) + '" y1="' + topY + '" x2="' + (cx - rx) + '" y2="' + botY + '"/>' +
@@ -201,13 +202,13 @@ function figureInner(
         '<ellipse cx="' + cx + '" cy="' + topY + '" rx="' + rx + '" ry="' + ry + '"/></g>'
     }
     case 'cone': {
-      const m = Math.min(w, h), rx = m * 0.38, ry = m * 0.13, cx = w / 2, botY = h * 0.8, apexY = h * 0.12
+      const m = Math.min(w, h), rx = m * 0.38, ry = rx / ISO_RATIO, cx = w / 2, botY = h * 0.8, apexY = h * 0.12
       const fc = fill && fill !== 'transparent' ? fill : 'none'
       return '<g ' + sa + ' fill="' + fc + '"><path d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 0 ' + (cx + rx) + ' ' + botY + ' L ' + cx + ' ' + apexY + ' Z"/>' +
         '<path ' + dsh + ' d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 1 ' + (cx + rx) + ' ' + botY + '"/></g>'
     }
     case 'sphere': {
-      const m = Math.min(w, h), r = m * 0.42, cx = w / 2, cy = h / 2, ry = r * 0.34
+      const m = Math.min(w, h), r = m * 0.42, cx = w / 2, cy = h / 2, ry = r / ISO_RATIO
       const fc = fill && fill !== 'transparent' ? fill : 'none'
       return '<g ' + sa + ' fill="' + fc + '"><circle cx="' + cx + '" cy="' + cy + '" r="' + r + '"/>' +
         '<path ' + dsh + ' d="M ' + (cx - r) + ' ' + cy + ' A ' + r + ' ' + ry + ' 0 0 1 ' + (cx + r) + ' ' + cy + '"/>' +
@@ -255,7 +256,7 @@ function figureInner(
         '<line ' + dsh + ' x1="' + p0 + '" x2="' + p2 + '"/><line ' + dsh + ' x1="' + p1 + '" x2="' + p2 + '"/><line ' + dsh + ' x1="' + p3 + '" x2="' + p2 + '"/></g>'
     }
     case 'frustum': {
-      const mm = Math.min(w, h), rB = mm * 0.4, rT = mm * 0.24, ryB = mm * 0.12, ryT = mm * 0.09, cx = w / 2, topY = h * 0.28, botY = h * 0.76
+      const mm = Math.min(w, h), rB = mm * 0.4, rT = mm * 0.24, ryB = rB / ISO_RATIO, ryT = rT / ISO_RATIO, cx = w / 2, topY = h * 0.28, botY = h * 0.76
       const fcc = fill && fill !== 'transparent' ? fill : 'none'
       return '<g ' + sa + ' fill="' + fcc + '">' +
         '<line x1="' + (cx - rB) + '" y1="' + botY + '" x2="' + (cx - rT) + '" y2="' + topY + '"/><line x1="' + (cx + rB) + '" y1="' + botY + '" x2="' + (cx + rT) + '" y2="' + topY + '"/>' +

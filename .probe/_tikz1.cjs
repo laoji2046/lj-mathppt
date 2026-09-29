@@ -2678,6 +2678,42 @@ for (const k of KINDS72) {
   const maxIdx = Math.max(...S3_72.solidEdges(k).flatMap((e) => [e[0], e[1]]), ...S3_72.solidFacesAll(k).flat());
   ok(maxIdx < n, "★" + k + "：边表的顶点下标都在范围内 ✓（" + maxIdx + " < " + n + " ✓ 三者同源 ✓）");
 }
+console.log("=== 用例 73：旋转体照讲义重绘（正等测 + 椭圆比例 √3）（v1754）===");
+const SP73 = loadBundled("solidProjection.ts", "_c73sp.cjs");
+/* ① 正等测公式与讲义一字不差 ✓ 手算三组 ✓ */
+const K73 = Math.sqrt(3) / 2;
+ok(Math.abs(SP73.ISO_K - K73) < 1e-12, "★ISO_K = √3/2 ✓（与讲义 `ISO_K = math.sqrt(3)/2` 同值 ✓）");
+const i1 = SP73.isometric([1, 0, 0]);
+ok(Math.abs(i1[0] - K73) < 1e-9 && Math.abs(i1[1] + 0.5) < 1e-9, "★isometric({1,0,0}) = (√3/2, −1/2) ✓（实测 " + i1.map((v) => +v.toFixed(4)).join(", ") + " ✓）");
+const i2 = SP73.isometric([0, 1, 0]);
+ok(Math.abs(i2[0] + K73) < 1e-9 && Math.abs(i2[1] + 0.5) < 1e-9, "★isometric({0,1,0}) = (−√3/2, −1/2) ✓（x、y 对称 ✓ 正等测就该这样 ✓）");
+const i3 = SP73.isometric([0, 0, 1]);
+ok(Math.abs(i3[0]) < 1e-12 && Math.abs(i3[1] - 1) < 1e-9, "★isometric({0,0,1}) = (0, 1) ✓（z 是朝上的 ✓ 与讲义同向 ✓）");
+/* ② 椭圆比例 = √3 ✓（讲义注释的断言 ✓ 这里独立复核 ✓） */
+ok(Math.abs(SP73.ISO_RATIO - Math.sqrt(3)) < 1e-12, "★椭圆长:短 = " + SP73.ISO_RATIO.toFixed(6) + " = √3 ✓（讲义注释原话 ✓ 解析推导也只可能是它 ✓）");
+ok(Math.abs(SP73.ISO_RX - K73 * Math.SQRT2) < 1e-12 && Math.abs(SP73.ISO_RY - Math.SQRT2 / 2) < 1e-12,
+  "★半长轴 K·√2 = " + SP73.ISO_RX.toFixed(6) + " ✓ 半短轴 √2/2 = " + SP73.ISO_RY.toFixed(6) + " ✓");
+/* ③ **采样圆 vs 解析椭圆**：把 300 个圆点投过去，极值必须正好是那两个半轴 ✓ */
+const r73 = 1.7;
+let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+for (let i = 0; i < 300; i++) {
+  const th = (i / 300) * Math.PI * 2;
+  const p = SP73.isometric([r73 * Math.cos(th), r73 * Math.sin(th), 0]);
+  uMin = Math.min(uMin, p[0]); uMax = Math.max(uMax, p[0]);
+  vMin = Math.min(vMin, p[1]); vMax = Math.max(vMax, p[1]);
+}
+const e73 = SP73.isoCircle(r73);
+ok(Math.abs((uMax - uMin) / 2 - e73.rx) < 5e-4, "★采样的横向半宽 = 解析半长轴 ✓（" + ((uMax - uMin) / 2).toFixed(6) + " vs " + e73.rx.toFixed(6) + " ✓ 两条路一致 ✓ 差 ~1e-4 是 300 点采样的离散误差 ✓ 不是公式错 ✓）");
+ok(Math.abs((vMax - vMin) / 2 - e73.ry) < 5e-4, "★采样纵向半宽 = 解析半短轴 ✓（" + ((vMax - vMin) / 2).toFixed(6) + " vs " + e73.ry.toFixed(6) + " ✓）");
+/* ④ 两个渲染器都按它算 ✓（⚠ 这文件有两份渲染器 ✓ 改一处必须改两处 ✓ 探针守住 ✓） */
+const MJ73 = fs.readFileSync(path.join(ROOT, "src", "components", "elements", "MathFigureElement.vue"), "utf8");
+const RR73 = fs.readFileSync(path.join(ROOT, "src", "reveal", "renderer.ts"), "utf8");
+const re73 = /[rR][xBT]? \/ ISO_RATIO|r \/ ISO_RATIO/g;
+const nMJ73 = (MJ73.match(re73) || []).length;
+const nRR73 = (RR73.match(re73) || []).length;
+ok(nMJ73 === 5 && nRR73 === 5, "★画布 " + nMJ73 + " 处 / 放映 " + nRR73 + " 处都用 ISO_RATIO ✓（圆柱·圆锥·球赤道·圆台上下底 ✓ 共 5 ✓ 两边一致 ✓）");
+ok(MJ73.indexOf("ry = m * 0.12") < 0 && RR73.indexOf("ry = m * 0.12") < 0 && MJ73.indexOf("ry = r * 0.34") < 0,
+  "★旧的扁比例没留残留 ✓（0.12 / 0.13 / 0.34 都清掉了 ✓ 那是「手写的」✗ 现在统一按正等测 ✓）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);
