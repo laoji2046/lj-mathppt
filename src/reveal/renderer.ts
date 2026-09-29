@@ -207,7 +207,7 @@ function figureInner(
       /* 【v1759】母线走**真切点** ✓（原来连到长轴两端 ✗ 底面椭圆两侧会露出来 ✓ 用户实报 ✓）*/
       const tg = coneTangentSides(cx, botY, rx, ry, apexY)
       const L = tg[0], R = tg[1]
-      return '<g ' + sa + ' fill="' + fc + '"><path d="M ' + L.x + ' ' + L.y + ' A ' + rx + ' ' + ry + ' 0 0 0 ' + R.x + ' ' + R.y + ' L ' + cx + ' ' + apexY + ' Z"/>' +
+      return '<g ' + sa + ' fill="' + fc + '"><path d="M ' + L.x + ' ' + L.y + ' A ' + rx + ' ' + ry + ' 0 1 0 ' + R.x + ' ' + R.y + ' L ' + cx + ' ' + apexY + ' Z"/>' +
         '<path ' + dsh + ' d="M ' + L.x + ' ' + L.y + ' A ' + rx + ' ' + ry + ' 0 0 1 ' + R.x + ' ' + R.y + '"/></g>'
     }
     case 'sphere': {

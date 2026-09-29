@@ -2821,6 +2821,60 @@ ok((MJ77.match(/coneTangentSides\(/g) || []).length === 1 && (RR77.match(/coneTa
 const coneBlock77 = MJ77.slice(MJ77.indexOf("case 'cone': {"), MJ77.indexOf("case 'sphere': {"));
 ok(coneBlock77.indexOf("coneTangentSides") > 0 && coneBlock77.indexOf("L.x + ' ' + L.y + ' A '") > 0,
   "★**圆锥那块**确实从切点起画 ✓（块内出现 coneTangentSides 与 L.x ✓ 长度 " + coneBlock77.length + " ✓）");
+console.log("=== 用例 78：圆锥底面两条弧**采样验**（v1760）===");
+/* 把 SVG 的 A 弧采样成点 ✓（端点式 → 参数式 ✓）然后在几何上验"画的是哪条弧" ✓ */
+function arcPts78(x1, y1, rx0, ry0, large, sweep, x2, y2, n) {
+  const dx = (x1 - x2) / 2, dy = (y1 - y2) / 2, x1p = dx, y1p = dy;
+  const rx = rx0, ry = ry0;
+  const sign = large !== sweep ? 1 : -1;
+  const num = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
+  const den = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+  const co = sign * Math.sqrt(Math.max(0, num / den));
+  const cxp = (co * rx * y1p) / ry, cyp = (-co * ry * x1p) / rx;
+  const ccx = cxp + (x1 + x2) / 2, ccy = cyp + (y1 + y2) / 2;
+  const ang = (ux, uy, vx, vy) => {
+    let a = Math.acos(Math.min(1, Math.max(-1, (ux * vx + uy * vy) / (Math.hypot(ux, uy) * Math.hypot(vx, vy)))));
+    if (ux * vy - uy * vx < 0) a = -a;
+    return a;
+  };
+  const th1 = ang(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+  let dth = ang((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+  if (!sweep && dth > 0) dth -= 2 * Math.PI;
+  if (sweep && dth < 0) dth += 2 * Math.PI;
+  const out = [];
+  for (let i = 0; i <= n; i++) {
+    const t = th1 + (dth * i) / n;
+    out.push({ x: rx * Math.cos(t) + ccx, y: ry * Math.sin(t) + ccy, deg: Math.abs(dth) * 180 / Math.PI });
+  }
+  return out;
+}
+const SP78 = loadBundled("solidProjection.ts", "_c78sp.cjs");
+/* 与组件同式：300×200 的框 ⇒ m=200、rx=76、ry=76/√3、底面中心 botY=160、顶点 apexY=24 ✓ */
+const w78 = 300, h78 = 200, m78 = 200;
+const rx78 = m78 * 0.38, ry78 = rx78 / SP78.ISO_RATIO, cx78 = w78 / 2, botY78 = h78 * 0.8, apexY78 = h78 * 0.12;
+const tg78 = SP78.coneTangentSides(cx78, botY78, rx78, ry78, apexY78);
+const L78 = tg78[0], R78 = tg78[1];
+/* 实线弧：代码里是 `A rx ry 0 1 0` ✓ */
+const solid78 = arcPts78(L78.x, L78.y, rx78, ry78, 1, 0, R78.x, R78.y, 400);
+const maxY78 = Math.max(...solid78.map((p) => p.y));
+const minY78 = Math.min(...solid78.map((p) => p.y));
+ok(Math.abs(maxY78 - (botY78 + ry78)) < 0.05, "★实线弧**一直画到椭圆最低点** ✓（最低 " + maxY78.toFixed(2) + " ≈ botY+ry = " + (botY78 + ry78).toFixed(2) + " ✓ 改之前只到 " + (botY78 + 0.32 * ry78).toFixed(2) + " ✗ 是条浅弧 ✗）");
+ok(solid78[0].deg > 180, "★实线弧是**大弧** ✓（跨度 " + solid78[0].deg.toFixed(1) + "° > 180° ✓ 浅弧只有 140.6° ✗）");
+ok(Math.abs(minY78 - (botY78 - tg78[0].y * 0 - (botY78 - L78.y))) < 0.05 || Math.abs(minY78 - L78.y) < 0.05, "★大弧的**上界就是切点弦** ✓（" + minY78.toFixed(2) + " = 切点 y " + L78.y.toFixed(2) + " ✓ 它只往下走 ✓ 覆盖整条下弧 ✓）");
+/* 虚线弧：代码里是 `A rx ry 0 0 1` ✓ 应该只是上盖 ✓ */
+const dash78 = arcPts78(L78.x, L78.y, rx78, ry78, 0, 1, R78.x, R78.y, 400);
+const dmin78 = Math.min(...dash78.map((p) => p.y));
+const dmax78 = Math.max(...dash78.map((p) => p.y));
+ok(Math.abs(dmin78 - (botY78 - ry78)) < 0.05 && dash78[0].deg < 180, "★虚线弧是**小弧**（上盖）✓（最高 " + dmin78.toFixed(2) + " = botY−ry ✓ 跨度 " + dash78[0].deg.toFixed(1) + "° < 180° ✓ 虚实分配正确 ✓）");
+ok(Math.abs(dmax78 - L78.y) < 0.05 && Math.abs(dash78[0].x - L78.x) < 0.05, "★两条弧共用**同两个切点**为端点 ✓（虚线弧最低点 " + dmax78.toFixed(2) + " = 切点 y " + L78.y.toFixed(2) + " ✓ y 都是 " + L78.y.toFixed(2) + " ✓ 接缝严丝合缝 ✓ 不会再有小尖刺 ✓）");
+/* 静态锁：两份渲染器的标志位 ✓ */
+const MJ78 = fs.readFileSync(path.join(ROOT, "src", "components", "elements", "MathFigureElement.vue"), "utf8");
+const RR78 = fs.readFileSync(path.join(ROOT, "src", "reveal", "renderer.ts"), "utf8");
+const coneOf = (f) => f.slice(f.indexOf("case 'cone': {"), f.indexOf("case 'sphere': {"));
+ok((coneOf(MJ78).match(/0 1 0/g) || []).length === 1 && (coneOf(MJ78).match(/0 0 1/g) || []).length === 1,
+  "★画布：实线弧标志 = 1 0 ✓ 虚线弧 = 0 0 1 ✓（各一处 ✓）");
+ok((coneOf(RR78).match(/0 1 0/g) || []).length === 1 && (coneOf(RR78).match(/0 0 1/g) || []).length === 1,
+  "★放映/导出：同上 ✓（⚠ 改一处必须改两处 ✓）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);

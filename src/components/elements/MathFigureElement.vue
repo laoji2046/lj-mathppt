@@ -258,7 +258,7 @@ const innerHtml = computed(() => {
       const tg = coneTangentSides(cx, botY, rx, ry, apexY)
       const L = tg[0], R = tg[1]
       return '<g ' + strokeAttrs + ' fill="' + fillColor + '">' +
-        '<path d="M ' + L.x + ' ' + L.y + ' A ' + rx + ' ' + ry + ' 0 0 0 ' + R.x + ' ' + R.y + ' L ' + cx + ' ' + apexY + ' Z"/>' +
+        '<path d="M ' + L.x + ' ' + L.y + ' A ' + rx + ' ' + ry + ' 0 1 0 ' + R.x + ' ' + R.y + ' L ' + cx + ' ' + apexY + ' Z"/>' +
         '<path ' + dashed + ' d="M ' + L.x + ' ' + L.y + ' A ' + rx + ' ' + ry + ' 0 0 1 ' + R.x + ' ' + R.y + '"/></g>'
     }
     case 'sphere': {
