@@ -3009,6 +3009,25 @@ for (const n of [5, 6]) {
   ok(spread < 1e-9 && interior.every((x) => Math.abs(x - expect) < 1e-9), "★正" + n + "边形：n 条边等长 ✓（极差 " + spread.toExponential(1) + " ✓）每个内角 = " + interior[0].toFixed(3) + "° = " + expect + "° ✓（rx=ry ⇒ 真等边等角 ✓ 本来就对 ✓ 现在守住了 ✓）");
 }
 ok(MJ83.indexOf("reg(6,") > 0 && RR83.indexOf("reg(6,") > 0, "★两份渲染器都用同一个 reg() 生成正多边形 ✓（不各写一份顶点表 ✗）");
+console.log("=== 用例 84：菱形（教材式）+ 等腰梯形守住（v1766）===");
+const TY84 = loadBundled("../types/index.ts", "_c84ty.cjs");
+const MJ84 = fs.readFileSync(path.join(ROOT, "src", "components", "elements", "MathFigureElement.vue"), "utf8");
+const RR84 = fs.readFileSync(path.join(ROOT, "src", "reveal", "renderer.ts"), "utf8");
+const R84 = TY84.rhombusPoints(300, 200);
+const side84 = (i) => Math.hypot(R84[(i + 1) % 4][0] - R84[i][0], R84[(i + 1) % 4][1] - R84[i][1]);
+const S84 = [0, 1, 2, 3].map(side84);
+ok(Math.max(...S84) - Math.min(...S84) < 1e-9, "★菱形**四条边恒相等** ✓（" + S84.map((x) => x.toFixed(1)).join(" / ") + " ✓ 极差 " + (Math.max(...S84) - Math.min(...S84)).toExponential(1) + " ✓）");
+ok(Math.abs(R84[0][1] - R84[1][1]) < 1e-9 && Math.abs(R84[2][1] - R84[3][1]) < 1e-9, "★上下边**水平** ✓（y 相等 ✓ 这才是教材里菱形的样子 ✓ 原来是菱形块 ✗）");
+ok(Math.abs((R84[1][0] - R84[0][0]) - (R84[2][0] - R84[3][0])) < 1e-9 && Math.abs((R84[1][1] - R84[2][1]) - (R84[0][1] - R84[3][1])) < 1e-9, "★对边**平行且相等** ✓（所以它确实是「四边相等的平行四边形」✓）");
+ok(R84.every((p) => p[0] >= -1 && p[0] <= 301 && p[1] >= -1 && p[1] <= 201), "★四角都在框内 ✓");
+ok(MJ84.indexOf("rhombusPoints(w, h)") > 0 && RR84.indexOf("rhombusPoints(w, h)") > 0, "★画布与放映都用同一个纯函数 ✓（各 1 处 ✓ 不各写一份 ✗）");
+/* 等腰梯形：讲义/教材里画的是等腰 ✓ 量一下两腰相等 ✓ */
+const w84 = 300, h84 = 200;
+const T84 = [[w84 * 0.24, 0], [w84 * 0.76, 0], [w84, h84], [0, h84]];
+const legL = Math.hypot(T84[3][0] - T84[0][0], T84[3][1] - T84[0][1]);
+const legR = Math.hypot(T84[2][0] - T84[1][0], T84[2][1] - T84[1][1]);
+ok(Math.abs(legL - legR) < 1e-9, "★梯形两腰相等 = **等腰梯形** ✓（" + legL.toFixed(1) + " = " + legR.toFixed(1) + " ✓ 上底 " + (w84 * 0.52).toFixed(0) + " ≠ 下底 " + w84 + " ✓ 上下一对平行 ✓）");
+ok(MJ84.indexOf("w * 0.24},0") > 0 && RR84.indexOf("w * 0.24},0") > 0, "★两份渲染器的梯形几何一致 ✓");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);

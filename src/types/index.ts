@@ -398,6 +398,20 @@ export function angledRectPoints(w: number, h: number, deg = 12): [number, numbe
   return pts.map(([x, y]) => [w / 2 + (x - w / 2) * k, h / 2 + (y - h / 2) * k])
 }
 
+/** 【v1766】教材式**菱形**的四角 ✓ 纯函数 ✓ 两份渲染器共用
+ *  取高 H 与水平错切 off ⇒ 边长 s = √(off²+H²) ✓ ⇒ **四条边恒相等** ✓ 且**上下边水平** ✓
+ *  （原来是轴对齐的「菱形块」✗ 上下边斜 ✓ 看不出「四边相等的平行四边形」这个本质 ✓）*/
+export function rhombusPoints(w: number, h: number): [number, number][] {
+  const H = h * 0.72
+  const off = Math.min(w * 0.22, H * 0.9)
+  const s = Math.hypot(off, H)
+  const k = s + off > w * 0.94 ? (w * 0.94) / (s + off) : 1
+  const s2 = s * k, off2 = off * k, H2 = H * k
+  const yTop = (h - H2) / 2
+  const xL = (w - (s2 + off2)) / 2
+  return [[xL + off2, yTop], [xL + off2 + s2, yTop], [xL + s2, yTop + H2], [xL, yTop + H2]]
+}
+
 export type SvgItemKind =
   | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'ngon' | 'star'
   /** 【v1510】预置四边形：拖一个框就出来（顶点照样能拖 ✓） */

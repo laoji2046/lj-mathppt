@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ISO_RATIO, coneTangentSides, frustumGeom } from '@/composables/solidProjection'
 import type { MathFigureElement, SlideElement } from '@/types'
-import { lineDashCss, STAR_INNER_RATIO, angledRectPoints } from '@/types'
+import { lineDashCss, STAR_INNER_RATIO, angledRectPoints, rhombusPoints } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
 import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg, vertexDotsSvg, type PointStyle } from '@/composables/solid3d'
 import { CONIC_KINDS, DEFAULT_PIECEWISE, FUNCTION_KINDS, conicFigure, conicLineDrag, conicLineHandles, conicPointDrag, conicPointHandles, customFigure, freqLineFigure, freqTableFigure, functionFigure, histogramFigure, piecewiseFigure, scatterFigure, setNumberlineFigure, vennFigure } from '@/composables/mathPlot'
@@ -219,8 +219,11 @@ const innerHtml = computed(() => {
       return `<polygon points="${reg(5, m * 0.44, m * 0.44)}" ${strokeAttrs} fill="${fillColor}"/>`
     case 'hexagon':
       return `<polygon points="${reg(6, m * 0.46, m * 0.46)}" ${strokeAttrs} fill="${fillColor}"/>`
-    case 'rhombus':
-      return `<polygon points="${cx},0 ${w}, ${cy} ${cx},${h} 0,${cy}" ${strokeAttrs} fill="${fillColor}"/>`
+    case 'rhombus': {
+      /* 【v1766】教材式菱形 ✓：上下边**水平** ✓ 四边恒等 ✓（原来是轴对齐的菱形块 ✗ 看不出「四边相等的平行四边形」✓）*/
+      const rp = rhombusPoints(w, h).map((p) => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ')
+      return `<polygon points="${rp}" ${strokeAttrs} fill="${fillColor}"/>`
+    }
     // ⭐ 风筝形：上顶点 / 左右同高 / 下顶点 ✓（参考图里我们缺的那一个 ✓）
     case 'kite':
       return `<polygon points="${cx},0 ${w},${h * 0.38} ${cx},${h} 0,${h * 0.38}" ${strokeAttrs} fill="${fillColor}"/>`
