@@ -125,6 +125,6 @@ export function describeScan(f: ScanFig): string[] {
 /** 【v1730】结构描述 → 写进校对框的那一段（**先说清是自动识别的、与题干冲突以题干为准** ✓） */
 export function scanToBrief(f: ScanFig): string {
   const NL2 = String.fromCharCode(10)
-  return "【图形（自动识别，可能有个别偏差 —— 与题干冲突时以**题干**为准）】" + NL2 +
+  return "【图形（自动识别，可能有个别偏差 —— 与题干冲突时以题干为准）】" + NL2 +
     describeScan(f).map((x) => "- " + x).join(NL2)
 }

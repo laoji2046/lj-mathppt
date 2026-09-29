@@ -950,7 +950,7 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
               <option value="3d">🧊 3D 计算器</option>
             </select>
             <button class="ggbs__btn ggbs__btn--help" title="指令帮助：GeoGebra 指令速查 / JavaScript API / AI 句型；点「填入」直接进编辑框 ✓" @click="openHelp('syntax')">📖 指令帮助</button>
-            <label class="ggbs__check" title="点「▶ 运行」或「🤖 生成」时，自动清掉**上一次运行画出来的**对象 —— 免得新图跟上一次的图叠在一起 ✗。你手画的图形、绘图板里别的东西都不动 ✓；只读脚本（读回信息）什么都没画，也不会清 ✓；想让两次作图叠着看就把它勾掉 ✓（选择会记住）">
+            <label class="ggbs__check" title="点「▶ 运行」或「🤖 生成」时，自动清掉上一次运行画出来的对象 —— 免得新图跟上一次的图叠在一起 ✗。你手画的图形、绘图板里别的东西都不动 ✓；只读脚本（读回信息）什么都没画，也不会清 ✓；想让两次作图叠着看就把它勾掉 ✓（选择会记住）">
               <input v-model="clearBefore" type="checkbox" @change="persistClear" /> 运行前清掉上一次的图
             </label>
           </div>
@@ -986,9 +986,9 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
                 <button class="ggbs__btn ggbs__btn--tiny" :disabled="reading" @click="readProblem">{{ reading ? "读图中…" : "① 读图（转成文字）" }}</button>
                 <button class="ggbs__btn ggbs__btn--tiny" :disabled="scanning" @click="scanFigure" title="把题图里的几何图形认出来（复用「矢量识别」那套：点 / 线段 / 圆 + 字母标注 ✓）→ 结构写进校对框。线稿 / 截图效果最好；照片可能认不出多少 ✓">{{ scanning ? "认图形中…" : "② 认图形（可选）" }}</button>
                 <button class="ggbs__btn ggbs__btn--ai" :disabled="solving" @click="solveAndDraw">{{ solving ? "解题作图中…" : "③ 解题并作图" }}</button>
-                <label class="ggbs__check" title="作图时有命令报错，就把**报错的那几步**回灌给模型改一轮（只改错的，不动没报错的 ✓）"><input v-model="repairOn" type="checkbox" /> 失败自动修一轮</label>
-                <label class="ggbs__check" title="跑完把**画布上的精确读数**（点坐标 / 线段长 / 半径 / 面积）交给模型核对：解题过程与图形自不自洽 ✓ 不一致就给出修正步骤 ✓"><input v-model="checkOn" type="checkbox" /> 跑完自动核对</label>
-                <button class="ggbs__btn ggbs__btn--tiny" :disabled="!runSnap" @click="rollbackRun" title="把画布恢复到你点「③ 解题并作图」**之前**的样子（整块画布 + 视图一起恢复 ✓ 这一步之后手画、手改的也会没 ✗）">↩ 回滚到作图前</button>
+                <label class="ggbs__check" title="作图时有命令报错，就把报错的那几步回灌给模型改一轮（只改错的，不动没报错的 ✓）"><input v-model="repairOn" type="checkbox" /> 失败自动修一轮</label>
+                <label class="ggbs__check" title="跑完把画布上的精确读数（点坐标 / 线段长 / 半径 / 面积）交给模型核对：解题过程与图形自不自洽 ✓ 不一致就给出修正步骤 ✓"><input v-model="checkOn" type="checkbox" /> 跑完自动核对</label>
+                <button class="ggbs__btn ggbs__btn--tiny" :disabled="!runSnap" @click="rollbackRun" title="把画布恢复到你点「③ 解题并作图」之前的样子（整块画布 + 视图一起恢复 ✓ 这一步之后手画、手改的也会没 ✗）">↩ 回滚到作图前</button>
               </div>
               <div v-if="solution" class="ggbs__solution">
                 <div class="ggbs__solvet">解题过程</div>

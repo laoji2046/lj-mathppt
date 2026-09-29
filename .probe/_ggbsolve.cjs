@@ -169,7 +169,7 @@ const L2 = FS.describeScan(sq).join("|");
 ok(L2.indexOf("水平") >= 0 && L2.indexOf("竖直") >= 0, "★正方形：认出一条水平 + 一条竖直");
 ok(L2.indexOf("⊥") >= 0, "★正方形：认出垂直");
 ok(L2.indexOf("=") >= 0, "★正方形：认出等长");
-ok(FS.scanToBrief(SF).indexOf("【图形（自动识别") >= 0 && FS.scanToBrief(SF).indexOf("以**题干**为准") >= 0,
+ok(FS.scanToBrief(SF).indexOf("【图形（自动识别") >= 0 && FS.scanToBrief(SF).indexOf("以题干为准") >= 0,
   "★写进校对框时标明是自动识别、以题干为准");
 console.log(NL + "=== 静态：读数（query）与核对（v1731）===");
 /* ① 怎么用：system 里必须告诉模型可以插只读读数步 */

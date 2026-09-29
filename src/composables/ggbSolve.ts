@@ -185,7 +185,7 @@ export function ggbStepLines(plan: GgbSolvePlan): string[] {
 export function ggbVisionGuard(hasImages: boolean, visionModel: string): string | null {
   if (!hasImages) return null
   if (String(visionModel || "").trim()) return null
-  return "带图要用**视觉模型**：设置 → AI 助手 → 视觉模型（填模型名，必要时填端点）—— 没填的话，图根本送不进模型"
+  return "带图要用视觉模型：设置 → AI 助手 → 视觉模型（填模型名，必要时填端点）—— 没填的话，图根本送不进模型"
 }
 
 /** 【v1729】读图阶段的 system：**只转写、不解题、不猜** */
