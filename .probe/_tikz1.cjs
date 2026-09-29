@@ -2418,6 +2418,8 @@ ok(vd3.indexOf("'读图要用**视觉模型**") < 0 && vd3.indexOf('title="把�
 ok(vdMsgs.length === 0, "★「自图片重建」里再没有用户可见的 ** 字符串 ✓" + (vdMsgs ? "（还有：" + vdMsgs.slice(0, 80) + " ✗）" : ""));
 const g3v3 = fs.readFileSync(path.join(ROOT, "src", "components", "Geom3DDialog.vue"), "utf8");
 ok((g3v3.match(/aiMsg\.value\s*=\s*['"][^'"]*\*\*/g) || []).length === 0 && (g3v3.match(/checkMsg\.value\s*=\s*['"][^'"]*\*\*/g) || []).length === 0, "★三维窗口给用户看的提示里没有 ** ✓");
+const vdlab = fs.readFileSync(path.join(ROOT, "src", "components", "VectorizeDialog.vue"), "utf8");
+ok(vdlab.indexOf(".vd__lab, .vd__lab * { pointer-events: none; }") >= 0, "★顶点字母层对指针透明（用户实报：字母盖住点、点选不中 ✗ v1743 修 ✓）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);

@@ -2384,6 +2384,9 @@ async function aiRead(force = false) {
 .vd__coord input:focus { outline: none; border-color: var(--brand-400); box-shadow: 0 0 0 2px var(--brand-soft); }
 .vd__coordtip { color: var(--gray-500); }
 .vd__label { font-size: 12px; color: var(--muted); margin-top: 2px; }
+/* 【v1743】顶点字母**不吃点击** ✓ —— 用户实报：字母盖在点上，点选不中，只能放大到拉开距离 ✗
+   字母层本来就只是显示（没挂事件 ✓），改字母在右侧「顶点字母」列表里 ✓ 所以透明掉不损失功能 ✓ */
+.vd__lab, .vd__lab * { pointer-events: none; }
 .vd__list { flex: 1; min-height: 90px; max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px; }
 .vd__item { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: var(--radius-sm); border: 1px solid transparent; }
 .vd__item--on { background: var(--brand-soft); border-color: var(--brand-400); }

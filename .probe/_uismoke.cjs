@@ -175,6 +175,13 @@ function makePng(w, h) {
           ok(hasSet === true, "★有一键「去设置填视觉模型」✓（点了直接开设置面板 ✓）");
           const hasTry = await ev('!!([...document.querySelectorAll(".vd__airow button")].find(b=>b.textContent.indexOf("硬试一次")>=0))');
           ok(hasTry === true, "★有「硬试一次」兜底 ✓（没配视觉模型也能真发一次请求 ✓）");
+          /* 【v1743】字母不许抢点击：① 计算样式是 none ② 在字母中心做**命中测试** */
+          const labPe = await ev('(function(){var g=document.querySelector(".vd__lab"); return g? getComputedStyle(g).pointerEvents : "no-label"})()');
+          ok(labPe === "none", "★字母层对指针透明（实测 pointer-events = " + labPe + " ✓）");
+          const labCnt = await ev('document.querySelectorAll(".vd__lab").length');
+          ok(typeof labCnt === "number" && labCnt >= 1, "★字母层真的存在（" + labCnt + " 个 ✓ 上一条断言才有意义 ✓）");
+          const hitLab = await ev('(function(){ var g=document.querySelector(".vd__lab"); if(!g) return "no-label"; var r=g.getBoundingClientRect(); if(!r.width||!r.height) return "no-box"; var el=document.elementFromPoint(r.left+r.width/2, r.top+r.height/2); if(!el) return "none"; if(el.closest && el.closest(".vd__lab")) return "label-top"; var ov=el.closest && el.closest(".vd__ov"); return (ov? "overlay:" : "other:") + el.tagName; })()');
+          ok(String(hitLab) !== "label-top", "★在字母中心做命中测试：最上层不是字母 ✓（实测 " + hitLab + (String(hitLab) === "no-box" ? " —— 测试图没认出字母，这一条退化为\"不适用\" ✓ 上面那条 pointer-events=none 才是硬证据 ✓" : "") + "）");
           const vp = await ev('(function(){var v=document.querySelector(".vd__viewport"); if(!v) return ""; var r=v.getBoundingClientRect(); return Math.round(r.width)+"x"+Math.round(r.height)})()');
           ok(/^\d+x\d+$/.test(String(vp)) && parseInt(String(vp).split("x")[0], 10) > 560, "★画布视口也放大了（实测 " + vp + " ✓ 以前固定 560×450 ✗）");
         }
