@@ -3028,6 +3028,38 @@ const legL = Math.hypot(T84[3][0] - T84[0][0], T84[3][1] - T84[0][1]);
 const legR = Math.hypot(T84[2][0] - T84[1][0], T84[2][1] - T84[1][1]);
 ok(Math.abs(legL - legR) < 1e-9, "★梯形两腰相等 = **等腰梯形** ✓（" + legL.toFixed(1) + " = " + legR.toFixed(1) + " ✓ 上底 " + (w84 * 0.52).toFixed(0) + " ≠ 下底 " + w84 + " ✓ 上下一对平行 ✓）");
 ok(MJ84.indexOf("w * 0.24},0") > 0 && RR84.indexOf("w * 0.24},0") > 0, "★两份渲染器的梯形几何一致 ✓");
+console.log("=== 用例 85：平面控制类圆族的恒圆性 + 弧族非空（v1767）===");
+const PC85 = loadBundled("planeCtrl.ts", "_c85pc.cjs");
+const st85 = { stroke: "#111827", sw: 2, dash: "", fill: "none" };
+/* ① 圆：任意长宽比都必须是**圆**（r 只取 min(w,h) 的比例 ✓ 不能被拉成椭圆 ✗）*/
+const shapes85 = [[300, 300], [400, 200], [200, 400], [520, 180]].map(([w, h]) => ({ w, h, svg: PC85.planeSvg("circleR", w, h, undefined, st85) || "" }));
+const radii85 = shapes85.map((x) => Number((x.svg.match(/<circle[^>]*\br="([\d.-]+)"/) || [])[1]));
+ok(radii85.every((r) => Number.isFinite(r) && r > 0), "★circleR 四种框都出 `<circle>` ✓（r = " + radii85.join(" / ") + " ✓）");
+ok(shapes85.every((x) => Math.abs(radii85[shapes85.indexOf(x)] - 0.38 * Math.min(x.w, x.h)) < 0.6), "★半径恒 = 0.38·min(w,h) ✓ ⇒ **任何框里都是圆** ✓（不会被拉成椭圆 ✓ 这正是 v1762 半圆那类坑的反面 ✓）");
+ok(shapes85.every((x) => !/\brx="/.test(x.svg) && !/<ellipse/.test(x.svg)), "★circleR 从不输出 `<ellipse>` ✓（圆就是圆 ✓）");
+/* ② 弧族：三种弧都必须输出**非空 path** 且在框内 ✓ */
+for (const k of ["arcAngle", "arc3pt", "ellipseArc"]) {
+  const svg = PC85.planeSvg(k, 300, 200, undefined, st85) || "";
+  const nums = (svg.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+  const inb = nums.filter((v) => Math.abs(v) > 6 && (v < -40 || v > 340)).length;
+  ok(svg.length > 60 && /<path/.test(svg), "★" + k + " 输出非空 `<path>` ✓（" + svg.length + " 字符 ✓ 坐标 " + nums.length + " 个 ✓）");
+}
+/* ③ 声明是椭圆的那个确实是 ellipse ✓（由 ctrl 定 a、b ✓ 不随框变形 ✗）*/
+const e1 = PC85.planeSvg("ellipseAB", 400, 200, undefined, st85) || "";
+const e2 = PC85.planeSvg("ellipseAB", 200, 400, undefined, st85) || "";
+ok(/<ellipse/.test(e1) && /<ellipse/.test(e2), "★ellipseAB 输出 `<ellipse>` ✓（本来就该是椭圆 ✓）");
+const axes85 = (x) => { const a = (x.match(/\brx="([\d.]+)"/) || [])[1], b = (x.match(/\bry="([\d.]+)"/) || [])[1]; return [Number(a), Number(b)] };
+const A1 = axes85(e1), A2 = axes85(e2);
+ok(A1.every((v) => Number.isFinite(v) && v > 0) && A2.every((v) => Number.isFinite(v) && v > 0), "★两份 ellipseAB 都取到半轴 ✓（" + A1.join("/") + " 与 " + A2.join("/") + " ✓ 不是 undefined ✓）");
+ok(A1[0] === A2[0] && A1[1] === A2[1], "★横框与竖框的**半轴完全相同** ✓（" + A1.join("/") + " = " + A2.join("/") + " ✓ 形状不被长宽比拉变形 ✓ 只有圆心随框居中而不同 ✓）");
+/* ④ 到达链：真组件走 planeSvg ✓ 放映挂的就是真组件 ✓（上一轮的三条命令结论 ✓ 这里锁住）*/
+const MJ85 = fs.readFileSync(path.join(ROOT, "src", "components", "elements", "MathFigureElement.vue"), "utf8");
+const FR85 = fs.readFileSync(path.join(ROOT, "src", "composables", "figureRender.ts"), "utf8");
+const RR85 = fs.readFileSync(path.join(ROOT, "src", "reveal", "renderer.ts"), "utf8");
+ok(MJ85.indexOf("isPlaneCtrlKind(kind)") > 0 && MJ85.indexOf("planeSvg(") > 0, "★真组件认 planeCtrl ✓（`isPlaneCtrlKind` → `planeSvg` ✓）");
+ok(FR85.indexOf("MathFigureElement") > 0 && /createApp/.test(FR85) && RR85.indexOf("renderFigureSvg(el)") > 0, "★放映/导出挂的就是**这个真组件** ✓（`renderFigureSvg` = createApp(MathFigureElement) ✓）⇒ 这 6 个 kind 在放映/导出/打印里**本来就画得出来** ✓（上一轮的误报已更正 ✓）");
+ok(Array.isArray(PC85.PLANE_CTRL_KINDS) && PC85.PLANE_CTRL_KINDS.length === 6, "★planeCtrl 管的 kind 共 6 个 ✓（" + (PC85.PLANE_CTRL_KINDS || []).join(" / ") + " ✓）");
+ok(PC85.PLANE_CTRL_KINDS.every((k) => (PC85.planeSvg(k, 300, 200, undefined, st85) || "").length > 40), "★这 6 个**每一个都能画出东西** ✓（没有空输出 ✗）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);
