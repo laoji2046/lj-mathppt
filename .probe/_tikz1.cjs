@@ -2793,6 +2793,34 @@ ok(FL76.indexOf("符号面板点着拼") > 0, "★副标题也说明了 ✓（�
 ok(FL76.indexOf("点符号会「追加」") > 0, "★没有把 ** 写进用户可见文案 ✓（写成「追加」✓ 这条老毛病守住了 ✓）");
 const SYM76 = loadBundled("../templates/mathSymbols.ts", "_c76sym.cjs");
 ok(Array.isArray(SYM76.MATH_SYMBOLS) && SYM76.MATH_SYMBOLS.length === 11, "★符号分类仍是 11 组 ✓（与「组合公式」窗口同一个数据源 ✓ 不各写一份 ✓）");
+console.log("=== 用例 77：圆锥母线切点（v1759 用户实报「圆锥还不太对」）===");
+const SP77 = loadBundled("solidProjection.ts", "_c77sp.cjs");
+/* ① 用户那张图实测的椭圆：长半轴 238、短半轴 142、顶点在椭圆中心上方 422 ✓ */
+const rx77 = 238, ry77 = 142, D77 = 422;
+const t77 = SP77.ellipseTangentFrom(rx77, ry77, D77);
+ok(Math.abs(t77.ty - (ry77 * ry77) / D77) < 1e-9, "★切点纵坐标 = ry²/D ✓（" + t77.ty.toFixed(2) + " = 142²/422 ✓ 方向朝顶点那一侧 ✓）");
+const onEllipse77 = Math.abs((t77.tx / rx77) ** 2 + (t77.ty / ry77) ** 2 - 1);
+ok(onEllipse77 < 1e-12, "★切点确实落在椭圆上 ✓（(x/a)²+(y/b)² = 1 ✓ 残差 " + onEllipse77.toExponential(1) + " ✓）");
+ok(Math.abs(t77.ty * D77 - ry77 * ry77) < 1e-6, "★切线条件（极线关系）✓ ty·D = ry² ✓（" + (t77.ty * D77).toFixed(2) + " ≈ " + (ry77 * ry77) + " ✓）");
+ok(t77.tx < rx77 - 1, "★切点在**长轴端点之内** ✓（tx = " + t77.tx.toFixed(1) + " < rx = " + rx77 + " ✓ 这正是原来画错的地方 ✗ 连到 ±238 就把椭圆两侧露出来了 ✗）");
+ok(Math.abs(t77.tx - 224.1) < 0.3 && Math.abs(t77.ty - 47.8) < 0.2, "★与解析解一致：切点 ≈（±224.1，中心上方 47.8）✓（实测 " + t77.tx.toFixed(1) + " / " + t77.ty.toFixed(1) + " ✓ √(1−(ty/ry)²)=0.9417 ✓）");
+const tFar = SP77.ellipseTangentFrom(rx77, ry77, 4000);
+ok(tFar.tx > t77.tx && tFar.tx < rx77, "★顶点越**高**，切点越靠近长轴端点 ✓（D=4000 时 tx=" + tFar.tx.toFixed(1) + " 介于 " + t77.tx.toFixed(1) + " 与 " + rx77 + " 之间 ✓ 趋势对 ✓）");
+/* ② 屏幕坐标版：两个切点对称、都在椭圆中心**上方** ✓ */
+const sides77 = SP77.coneTangentSides(500, 640, rx77, ry77, 218);
+ok(sides77.length === 2 && Math.abs((sides77[0].x + sides77[1].x) / 2 - 500) < 1e-9, "★两个切点关于中轴对称 ✓（" + sides77[0].x.toFixed(1) + " / " + sides77[1].x.toFixed(1) + " ✓）");
+ok(sides77.every((p) => p.y < 640 && p.y > 640 - ry77), "★切点在椭圆中心**上方**、且仍在椭圆范围内 ✓（y = " + sides77[0].y.toFixed(1) + " ✓ 母线从这里出发才贴着椭圆 ✓）");
+/* ③ 圆台的虚拟顶点 ✓ */
+const Df = SP77.frustumApex(640, 300, 238, 120);
+ok(Math.abs(Df - (340 * 238) / 118) < 1e-6, "★圆台虚拟顶点 = H·r下/(r下−r上) ✓（" + Df.toFixed(1) + " ✓ 有了它圆台的切点才算得出 ✓）");
+/* ④ 两个渲染器都接上了 ✓（⚠ 改一处必须改两处 ✓） */
+const MJ77 = fs.readFileSync(path.join(ROOT, "src", "components", "elements", "MathFigureElement.vue"), "utf8");
+const RR77 = fs.readFileSync(path.join(ROOT, "src", "reveal", "renderer.ts"), "utf8");
+ok((MJ77.match(/coneTangentSides\(/g) || []).length === 1 && (RR77.match(/coneTangentSides\(/g) || []).length === 1,
+  "★画布与放映**都**用真切点 ✓（各 1 处 ✓）");
+const coneBlock77 = MJ77.slice(MJ77.indexOf("case 'cone': {"), MJ77.indexOf("case 'sphere': {"));
+ok(coneBlock77.indexOf("coneTangentSides") > 0 && coneBlock77.indexOf("L.x + ' ' + L.y + ' A '") > 0,
+  "★**圆锥那块**确实从切点起画 ✓（块内出现 coneTangentSides 与 L.x ✓ 长度 " + coneBlock77.length + " ✓）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);

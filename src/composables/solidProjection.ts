@@ -173,3 +173,44 @@ export function isometric(p: V3): [number, number] {
 export function isoCircle(r: number): { rx: number; ry: number } {
   return { rx: ISO_RX * r, ry: ISO_RY * r }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   【v1759】圆锥（圆台）的**母线切点** —— 用户实报「圆锥还不太对」✓
+
+   症状：底面椭圆在两侧**露出一小截** ✗（把母线画到了长轴两端 ✗）
+   原因：圆锥的轮廓母线是**从顶点到底面椭圆的切线** ✓ 切点**不是**长轴两端 ✗
+     设椭圆 x²/rx² + y²/ry² = 1 ✓ 顶点在椭圆中心正上方距离 D 处 ✓
+     极线（切点连线）：y·(−D)/ry² = 1 ⇒ 切点纵坐标 = **−ry²/D** ✓（朝顶点那侧 ✓）
+     切点横坐标 = ±rx·√(1 − (ry/D)²) ✓
+   量过的实例（用户截图 ✓）：rx=238、ry=142、D=422 ⇒ 切点 y=47.8、x=±224 ✓
+     —— 而按长轴端点 (±238, 0) 画出来的母线 ✗ 自然会把椭圆两侧露在外面 ✗
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * 从椭圆（半轴 rx、ry）**外部正上方距离 dist 处的点**看过去的切点 ✓（纯函数 ✓）
+ * @returns `{ tx, ty }`：切点相对椭圆中心的坐标 ✓ **ty 朝外部的那个点为正** ✓（调用方自己按屏幕朝向摆 ✓）
+ *          `tx < rx` 且 `ty > 0` ✓（切线只会切在"朝顶点那一侧"，不可能落在长轴端点上 ✗）
+ */
+export function ellipseTangentFrom(rx: number, ry: number, dist: number): { tx: number; ty: number } {
+  if (!(rx > 0) || !(ry > 0) || !(dist > ry)) return { tx: rx, ty: 0 }   // 退化：够不着就退回长轴端点 ✓
+  const ty = (ry * ry) / dist
+  const k = Math.max(0, 1 - (ty / ry) * (ty / ry))
+  return { tx: rx * Math.sqrt(k), ty }
+}
+
+/**
+ * 圆锥 / 圆台轮廓母线的切点（屏幕坐标 ✓）
+ * @param cx 椭圆中心 x ✓ @param cy 椭圆中心 y（屏幕坐标 ✓ 向下为正 ✓）
+ * @param apexY 顶点（或虚拟顶点）的屏幕 y ✓（在椭圆上方 ⇒ apexY < cy ✓）
+ */
+export function coneTangentSides(cx: number, cy: number, rx: number, ry: number, apexY: number): { x: number; y: number }[] {
+  const t = ellipseTangentFrom(rx, ry, cy - apexY)
+  return [{ x: cx - t.tx, y: cy - t.ty }, { x: cx + t.tx, y: cy - t.ty }]
+}
+
+/** 圆台的**虚拟顶点**到两个底面中心的距离 ✓（两个椭圆是同一个锥被截出来的 ✓）
+ *  D_bottom = H·r_bottom/(r_bottom − r_top) ✓ */
+export function frustumApex(botY: number, topY: number, rBot: number, rTop: number): number {
+  if (!(rBot > rTop)) return botY - (botY - topY) * 4     // 退化：接近圆柱就放很远 ✓
+  return (botY - topY) * (rBot / (rBot - rTop))
+}

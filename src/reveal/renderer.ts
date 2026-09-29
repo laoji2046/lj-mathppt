@@ -1,5 +1,5 @@
 import type { Deck, Slide, SlideElement, TableElement, TextElement } from '@/types'
-import { ISO_RATIO } from '@/composables/solidProjection'
+import { ISO_RATIO, coneTangentSides } from '@/composables/solidProjection'
 import { isVectorFigKind, vectorFigureSvg } from '@/composables/vectorFigures'
 import { inlineFiguresInText, renderFigureSvg } from '@/composables/figureRender'
 import { layoutTable } from '@/composables/tableLayout'
@@ -204,8 +204,11 @@ function figureInner(
     case 'cone': {
       const m = Math.min(w, h), rx = m * 0.38, ry = rx / ISO_RATIO, cx = w / 2, botY = h * 0.8, apexY = h * 0.12
       const fc = fill && fill !== 'transparent' ? fill : 'none'
-      return '<g ' + sa + ' fill="' + fc + '"><path d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 0 ' + (cx + rx) + ' ' + botY + ' L ' + cx + ' ' + apexY + ' Z"/>' +
-        '<path ' + dsh + ' d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 1 ' + (cx + rx) + ' ' + botY + '"/></g>'
+      /* 【v1759】母线走**真切点** ✓（原来连到长轴两端 ✗ 底面椭圆两侧会露出来 ✓ 用户实报 ✓）*/
+      const tg = coneTangentSides(cx, botY, rx, ry, apexY)
+      const L = tg[0], R = tg[1]
+      return '<g ' + sa + ' fill="' + fc + '"><path d="M ' + L.x + ' ' + L.y + ' A ' + rx + ' ' + ry + ' 0 0 0 ' + R.x + ' ' + R.y + ' L ' + cx + ' ' + apexY + ' Z"/>' +
+        '<path ' + dsh + ' d="M ' + L.x + ' ' + L.y + ' A ' + rx + ' ' + ry + ' 0 0 1 ' + R.x + ' ' + R.y + '"/></g>'
     }
     case 'sphere': {
       const m = Math.min(w, h), r = m * 0.42, cx = w / 2, cy = h / 2, ry = r / ISO_RATIO

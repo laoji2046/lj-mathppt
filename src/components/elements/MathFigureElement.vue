@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ISO_RATIO } from '@/composables/solidProjection'
+import { ISO_RATIO, coneTangentSides } from '@/composables/solidProjection'
 import type { MathFigureElement, SlideElement } from '@/types'
 import { lineDashCss } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
@@ -254,9 +254,12 @@ const innerHtml = computed(() => {
     }
     case 'cone': {
       const rx = m * 0.38, ry = rx / ISO_RATIO, cx = w / 2, botY = h * 0.8, apexY = h * 0.12
+      /* 【v1759】母线要从**真切点**出发 ✓ 不能连到长轴两端 ✗（不然底面椭圆两侧会露出来 ✓ 用户实报过 ✓）*/
+      const tg = coneTangentSides(cx, botY, rx, ry, apexY)
+      const L = tg[0], R = tg[1]
       return '<g ' + strokeAttrs + ' fill="' + fillColor + '">' +
-        '<path d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 0 ' + (cx + rx) + ' ' + botY + ' L ' + cx + ' ' + apexY + ' Z"/>' +
-        '<path ' + dashed + ' d="M ' + (cx - rx) + ' ' + botY + ' A ' + rx + ' ' + ry + ' 0 0 1 ' + (cx + rx) + ' ' + botY + '"/></g>'
+        '<path d="M ' + L.x + ' ' + L.y + ' A ' + rx + ' ' + ry + ' 0 0 0 ' + R.x + ' ' + R.y + ' L ' + cx + ' ' + apexY + ' Z"/>' +
+        '<path ' + dashed + ' d="M ' + L.x + ' ' + L.y + ' A ' + rx + ' ' + ry + ' 0 0 1 ' + R.x + ' ' + R.y + '"/></g>'
     }
     case 'sphere': {
       const r = m * 0.42, cx = w / 2, cy = h / 2, ry = r / ISO_RATIO
