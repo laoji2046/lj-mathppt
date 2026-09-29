@@ -128,6 +128,45 @@ function makePng(w, h) {
       await sleep(400);
     };
 
+    /* ============ A0. 公式编号（v1748：自己填 ✓ 不自动排号 ✓） ============ */
+    console.log("--- A0. 插入公式 → 填编号 → 看它是不是在公式右侧且居中 ---");
+    let up0 = await openApp();
+    ok(up0, "应用起来了（准备测公式编号 ✓）");
+    if (up0) {
+      await ev('document.querySelector(\'button[title="插入公式"]\').click()');
+      await sleep(300);
+      const clicked0 = await ev('(function(){var b=[...document.querySelectorAll(".dropdown__item")].find(x=>x.textContent.indexOf("空白公式")>=0); if(b)b.click(); return !!b})()');
+      await sleep(900);
+      ok(clicked0 === true && (await ev('!!document.querySelector(".math-el")')) === true, "点「插入公式 → 空白公式」真的插进来了 ✓");
+      const hasInput = await ev('(function(){var l=[...document.querySelectorAll(".panel__section label")].find(x=>x.textContent.indexOf("编号")>=0); return l? !!l.querySelector("input[type=text]") : false})()');
+      ok(hasInput === true, "★右侧属性面板出现「编号（自己填，可空）」输入框 ✓");
+      await ev('(function(){var l=[...document.querySelectorAll(".panel__section label")].find(x=>x.textContent.indexOf("编号")>=0); var i=l&&l.querySelector("input[type=text]"); if(!i) return false; i.value="(1)"; i.dispatchEvent(new Event("input",{bubbles:true})); return true})()');
+      /* ⚠ MathJax 首次要加载 2MB 才排得完 ✗ —— 轮询等它出来再量 ✓（只 sleep 会量到 no-math ✓） */
+      let mathReady = false;
+      for (let i = 0; i < 40; i++) {
+        if ((await ev('!!document.querySelector(".math-el__host svg")')) === true) { mathReady = true; break }
+        await sleep(500);
+      }
+      if (mathReady !== true) {
+        const diag = await ev(`JSON.stringify({ mj: !!window.MathJax, hasTex2svg: !!(window.MathJax && window.MathJax.tex2svg), err: (document.querySelector(".math-el__err") || {}).textContent || "", scripts: [].slice.call(document.querySelectorAll("script[src]")).map(function(s){return s.getAttribute("src")}).filter(function(x){return /mathjax/i.test(x||"")}), nEl: document.querySelectorAll(".math-el").length, hosts: [].slice.call(document.querySelectorAll(".math-el__host")).map(function(h){return h.innerHTML.length}), eq: document.querySelectorAll(".math-el__eq").length, eqTxt: (document.querySelector(".math-el__eq")||{}).textContent||"", titles: [].slice.call(document.querySelectorAll(".panel__title")).map(function(t){return t.textContent.trim()}).slice(0,3), mjContainers: document.querySelectorAll("mjx-container").length, probe: !!document.querySelector(".math-el__host mjx-container"), head: ((document.querySelector(".math-el__host")||{}).innerHTML||"").slice(0,80) })`);
+        console.log("      [诊断] " + String(diag).slice(0, 300));
+      }
+      ok(mathReady === true, "★公式排出来了（等 MathJax 加载完 ✓）");
+      const eq = await ev(`(function(){
+        var lab = document.querySelector(".math-el__eq");
+        var host = document.querySelector(".math-el__host");
+        var mj = host && host.querySelector("svg");   /* 裸 svg ✓ 不是 mjx-container ✗ */
+        if (!lab) return "no-label";
+        if (!mj) return "no-math";
+        var lr = lab.getBoundingClientRect(), mr = mj.getBoundingClientRect();
+        return JSON.stringify({ txt: lab.textContent.trim(), gap: Math.round(lr.left - mr.right), dy: Math.round((lr.top + lr.height/2) - (mr.top + mr.height/2)), fs: Math.round(parseFloat(getComputedStyle(lab).fontSize)) });
+      })()`);
+      let E0 = null; try { E0 = JSON.parse(String(eq)) } catch { /* 见下面的断言 */ }
+      ok(!!E0 && E0.txt === "(1)", "★编号真的显示出来了（实测「" + (E0 && E0.txt) + "」✓ 原始：" + String(eq).slice(0, 40) + "）");
+      ok(!!E0 && E0.gap >= -3, "★编号在公式**右侧**（公式右边缘 → 编号左边 = " + (E0 && E0.gap) + "px ✓）");
+      ok(!!E0 && Math.abs(E0.dy) <= 6, "★编号与公式**垂直居中**（中心差 " + (E0 && E0.dy) + "px ✓ 教材里 (1) 就这么排 ✓）");
+      ok(!!E0 && E0.fs >= 10 && E0.fs <= 40, "★编号字号随公式缩放（实测 " + (E0 && E0.fs) + "px ✓ 公式基准 40px ✓）");
+    }
     /* ============ A. 三维立体图（v1739 就是在这里崩的 ✗） ============ */
     console.log("--- A. 图形库 → 图形重建 → 三维立体图 ---");
     let up = await openApp();

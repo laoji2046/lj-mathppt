@@ -131,7 +131,16 @@ watch(
 -->
 <template>
   <div class="math-el" :style="{ color: el.color }">
-    <div ref="host" class="math-el__host"></div>
+    <!-- 【v1748】公式 + 编号**一行 flex** ✓：编号占右侧固定宽度、公式宿主让位 ✓
+         （原来编号绝对定位钉在右边缘 ✗ 实测会压在公式尾巴上 −15px ✗ —— 探针冒烟量出来的 ✓） -->
+    <div class="math-el__row">
+      <div ref="host" class="math-el__host"></div>
+      <div
+        v-if="el.eqLabel"
+        class="math-el__eq"
+        :style="{ fontSize: Math.max(10, Math.round((el.fontSize || 32) * 0.62)) + 'px' }"
+      >{{ el.eqLabel }}</div>
+    </div>
     <InlineEditor
       v-if="editing"
       title="编辑公式（LaTeX）"
@@ -152,16 +161,38 @@ watch(
   position: relative;
 }
 .math-el__host {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;            /* flex 子项默认 min-width:auto ✗ 会不肯变窄 ✓ 必须显式放开 ✓ */
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
 }
+/* 【v1748】公式 + 编号的一行布局 ✓ */
+.math-el__row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
 .math-el__host :deep(mjx-container) {
   display: inline-flex !important;
   max-width: none;
+}
+/* 【v1748】公式编号：右侧固定宽度 ✓（flex:0 0 auto ✓ 不参与压缩 ✓）
+   · 视觉居中靠 `.math-el__row` 的 align-items:center ✓（实测中心差 0px ✓）
+   · 字号随公式基准缩放 ✓（模板里按 el.fontSize 算 ✓）
+   · 不吃点击 ✓（不挡选中/拖动 ✓） */
+.math-el__eq {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 0 0.4em 0 0.5em;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 0.85;
+  pointer-events: none;
 }
 .math-el__err {
   position: absolute;

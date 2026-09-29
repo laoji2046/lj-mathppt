@@ -1122,6 +1122,13 @@ export interface MathElement extends ElementBase {
   fontSize: number
   /** 水平对齐：影响公式在元素框内的位置 */
   align?: 'left' | 'center' | 'right'
+  /**
+   * 【v1748】公式**编号**（自己填 ✓ 如 `(1)` `(★)` `(2.1)`）—— 渲染在公式**右侧**、垂直居中 ✓（教材式 ✓）
+   *  · 留空 = 不显示 ✓ 不影响任何现有元素 ✓
+   *  ⚠ **故意不做自动编号** ✗（用户 2026-09-29 已定 ✓）：跨元素自动排号要扫页/扫全文再回写 ✓
+   *    元素一增删就得重排 ✓ 改错比手填更烦 ✓ 所以：**号码自己填** ✓ 正文引用（「由(1)得」）也**手打** ✓
+   */
+  eqLabel?: string
 }
 
 export interface GeoGebraElement extends ElementBase {

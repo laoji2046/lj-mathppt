@@ -2325,6 +2325,16 @@ function layerTypeLabel(type: string) {
             @input="patch({ latex: ($event.target as HTMLTextAreaElement).value } as Partial<SlideElement>)"
           ></textarea>
         </label>
+        <label class="field"><span>编号（自己填，可空）</span>
+          <input type="text" :value="math?.eqLabel || ''" placeholder="如 (1) / (★) / (2.1)；留空 = 不显示"
+            @input="patch({ eqLabel: ($event.target as HTMLInputElement).value } as Partial<SlideElement>)" />
+        </label>
+        <!-- 【v1748】一键套常用编号 ✓（不做自动排号 —— 用户已定：号码自己填 ✓ 正文引用手打 ✓） -->
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 4px">
+          <button v-for="t in ['(1)', '(2)', '(3)', '(★)', '(2.1)']" :key="t" class="quick__btn"
+            @click="patch({ eqLabel: t } as Partial<SlideElement>)">{{ t }}</button>
+          <button class="quick__btn" @click="patch({ eqLabel: '' } as Partial<SlideElement>)">不要编号</button>
+        </div>
         <label class="field"><span>字号</span>
           <input type="number" :value="math?.fontSize"
             @input="patch({ fontSize: num(($event.target as HTMLInputElement).value, 40) } as Partial<SlideElement>)" />
