@@ -2929,6 +2929,20 @@ ok((MJ79.match(/frustumGeom\(/g) || []).length === 1 && (RR79.match(/frustumGeom
   "★画布与放映都用同一个 frustumGeom() ✓（各 1 处 ✓ 不再各算一遍 ✗）");
 ok(fr79(MJ79).indexOf("0 1 0") > 0 && fr79(RR79).indexOf("0 1 0") > 0 && fr79(MJ79).indexOf("A ' + F.rB") > 0,
   "★两边的底弧都用**切点 + large=1** ✓（各一处 ✓）");
+console.log("=== 用例 80：平面图形起步（半圆 / 五角星 / 三角形）（v1762）===");
+const TY80 = fs.readFileSync(path.join(ROOT, "src", "types", "index.ts"), "utf8");
+const MJ80 = fs.readFileSync(path.join(ROOT, "src", "components", "elements", "MathFigureElement.vue"), "utf8");
+const RR80 = fs.readFileSync(path.join(ROOT, "src", "reveal", "renderer.ts"), "utf8");
+const ratio80 = 1 / Math.pow((1 + Math.sqrt(5)) / 2, 2);
+ok(Math.abs(ratio80 - 0.381966) < 1e-6, "★正五角星内外比 = 1/φ² = " + ratio80.toFixed(6) + " ✓（黄金比 φ = " + ((1 + Math.sqrt(5)) / 2).toFixed(6) + " ✓）");
+ok(TY80.indexOf("export const STAR_INNER_RATIO = 1 / (((1 + Math.sqrt(5)) / 2) ** 2)") > 0, "★常量放在 @/types ✓（两份渲染器共用一份 ✓ 不各写一遍 ✗）");
+ok((MJ80.match(/m \* 0\.46 \* STAR_INNER_RATIO/g) || []).length === 1 && (RR80.match(/m \* 0\.46 \* STAR_INNER_RATIO/g) || []).length === 1, "★画布与放映的五角星都用 1/φ² ✓（各 1 处 ✓ 旧的 m * 0.2 已无 ✓）");
+const star80 = (f) => f.slice(f.indexOf("case 'star'"), f.indexOf("case 'bezier'") > 0 ? f.indexOf("case 'bezier'") : f.indexOf("case 'pentagon'"));
+ok(!/: m \* 0\.2\b/.test(star80(MJ80)) && !/: m \* 0\.2\b/.test(star80(RR80)), "★**五角星块里**没有 0.2 的残留 ✓（别处有 0.2 是其它图形的 ✓ 不影响 ✓）");
+ok((MJ80.match(/Math\.min\(w \/ 2, h\)/g) || []).length === 1 && (RR80.match(/Math\.min\(w \/ 2, h\)/g) || []).length === 1, "★半圆用**真半径** min(w/2, h) ✓（两份各 1 处 ✓）");
+ok(MJ80.indexOf("A ${w / 2} ${h} 0 0 1") < 0 && RR80.indexOf("A ${w / 2} ${h} 0 0 1") < 0, "★旧的「x 半径 w/2 + y 半径 h」写法没了 ✓（那会画成半椭圆 ✗）");
+const tri80 = (f) => f.slice(f.indexOf("case 'triangle'"), f.indexOf("case 'rectangle'"));
+ok(tri80(MJ80).indexOf("${w / 2},0") > 0 && tri80(RR80).indexOf("${w / 2},0") > 0 && tri80(MJ80).indexOf("0.42") < 0 && tri80(RR80).indexOf("0.42") < 0, "★**三角形块里**顶点居中 w/2 ✓（旧 0.42w 已无 ✓ 菱形里的 ${w/2},0 不算 ✓）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);

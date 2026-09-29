@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ISO_RATIO, coneTangentSides, frustumGeom } from '@/composables/solidProjection'
 import type { MathFigureElement, SlideElement } from '@/types'
-import { lineDashCss } from '@/types'
+import { lineDashCss, STAR_INNER_RATIO } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
 import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg, vertexDotsSvg, type PointStyle } from '@/composables/solid3d'
 import { CONIC_KINDS, DEFAULT_PIECEWISE, FUNCTION_KINDS, conicFigure, conicLineDrag, conicLineHandles, conicPointDrag, conicPointHandles, customFigure, freqLineFigure, freqTableFigure, functionFigure, histogramFigure, piecewiseFigure, scatterFigure, setNumberlineFigure, vennFigure } from '@/composables/mathPlot'
@@ -179,8 +179,11 @@ const innerHtml = computed(() => {
         `<line x1="${ox}" y1="${oy}" x2="${ox}" y2="${oy - len}" ${strokeAttrs}/>` +
         `<path d="M ${ox + len * 0.25} ${oy} A ${len * 0.25} ${len * 0.25} 0 0 1 ${ox} ${oy - len * 0.25}" ${strokeAttrs} fill="none"/>` + '</g>'
     }
-    case 'semicircle':
-      return `<path d="M 0 ${h} A ${w / 2} ${h} 0 0 1 ${w} ${h}" ${strokeAttrs} fill="${fillColor}"/>`
+    case 'semicircle': {
+      /* 【v1762】真半圆 ✓：半径 = min(w/2, h) ✓ 圆心在底边中点 ✓（原来 y 半径写成 h ✗ 会成半椭圆 ✗）*/
+      const sr = Math.min(w / 2, h), sx = w / 2
+      return `<path d="M ${sx - sr} ${h} A ${sr} ${sr} 0 0 1 ${sx + sr} ${h}" ${strokeAttrs} fill="${fillColor}"/>`
+    }
     // ---- 常见平面几何 ----
     // 【v1724】遮罩块：一块盖住图形的矩形（默认白底、无边框；设了 dash 就画虚线框，方便自己看位置）
     case 'cover': {
@@ -199,7 +202,7 @@ const innerHtml = computed(() => {
         ' fill="' + cFill + '" stroke="' + cStroke + '" stroke-width="' + cSw + '"' + cDashAttr + '/>'
     }
     case 'triangle':
-      return `<polygon points="0,${h} ${w},${h} ${w * 0.42},0" ${strokeAttrs} fill="${fillColor}"/>`
+      return `<polygon points="0,${h} ${w},${h} ${w / 2},0" ${strokeAttrs} fill="${fillColor}"/>`
     case 'rectangle':
       return `<rect x="${w * 0.02}" y="${h * 0.02}" width="${w * 0.96}" height="${h * 0.96}" ${strokeAttrs} fill="${fillColor}"/>`
     case 'circle':
@@ -224,7 +227,8 @@ const innerHtml = computed(() => {
       const pts: string[] = []
       for (let i = 0; i < 10; i++) {
         const ang = -Math.PI / 2 + (i * Math.PI) / 5
-        const r = i % 2 === 0 ? m * 0.46 : m * 0.2
+        /* 【v1762】内外比照正五角星 = 1/φ² ✓（原来 0.2/0.46 ≈ 0.435 ✗ 星臂偏胖 ✗）*/
+      const r = i % 2 === 0 ? m * 0.46 : m * 0.46 * STAR_INNER_RATIO
         pts.push((cx + r * Math.cos(ang)).toFixed(1) + ',' + (cy + r * Math.sin(ang)).toFixed(1))
       }
       return `<polygon points="${pts.join(' ')}" ${strokeAttrs} fill="${fillColor}"/>`

@@ -377,12 +377,17 @@ export interface PenElement extends ElementBase {
 /* ---------------- 【v1507】SVG 编辑器：手绘图的"模型" ---------------- */
 
 /** 一笔的形状种类（绘制/形状 → SVG 编辑器） */
+  /** 【v1762】正五角星的内外半径比 = 1/φ² ✓（φ = (1+√5)/2 黄金比 ✓）
+ *  正五角星的内顶点落在**相邻两外顶点的连线**上 ✓ 内外比只能是 1/φ² ≈ 0.381966 ✓
+ *  （原来两份渲染器都写 0.2/0.46 ≈ 0.435 ✗ 画出来的星臂偏胖 ✗）*/
+export const STAR_INNER_RATIO = 1 / (((1 + Math.sqrt(5)) / 2) ** 2)
+
 export type SvgItemKind =
   | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'ngon' | 'star'
   /** 【v1510】预置四边形：拖一个框就出来（顶点照样能拖 ✓） */
   | 'parallelogram' | 'trapezoid'
   | 'line' | 'arrow' | 'poly' | 'polygon' | 'pen' | 'text'
-  /** 【v1508】数学图形里的**平面图形**（坐标系 / 数轴 / Venn / 直角三角形 / 平行四边形…）
+/** 【v1508】数学图形里的**平面图形**（坐标系 / 数轴 / Venn / 直角三角形 / 平行四边形…）
    *  在 SVG 编辑器里也是"一笔"：拖出来放好，落盘成**原生 mathfig 元素** ✓（插完照样能改参数/顶点 ✓） */
   | 'figure'
 

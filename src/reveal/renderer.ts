@@ -3,7 +3,7 @@ import { ISO_RATIO, coneTangentSides, frustumGeom } from '@/composables/solidPro
 import { isVectorFigKind, vectorFigureSvg } from '@/composables/vectorFigures'
 import { inlineFiguresInText, renderFigureSvg } from '@/composables/figureRender'
 import { layoutTable } from '@/composables/tableLayout'
-import { animRevealClass, animTimingStyle, bulletMarker, fitCap, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss } from '@/types'
+import { animRevealClass, animTimingStyle, bulletMarker, fitCap, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss, STAR_INNER_RATIO } from '@/types'
 import { SOLID_VCOUNT, renderSolid, solidVerts, arcsSvg, type EdgeStyle, type FaceStyle, type SolidMesh } from '@/composables/solid3d'
 
 /**
@@ -146,13 +146,16 @@ function figureInner(
         `<line x1="${ox}" y1="${oy}" x2="${ox}" y2="${oy - len}" ${sa}/>` +
         `<path d="M ${ox + len * 0.25} ${oy} A ${len * 0.25} ${len * 0.25} 0 0 1 ${ox} ${oy - len * 0.25}" ${sa} fill="none"/>`
     }
-    case 'semicircle':
-      return `<path d="M 0 ${h} A ${w / 2} ${h} 0 0 1 ${w} ${h}" ${sa} fill="${fc}"/>`
+    case 'semicircle': {
+      /* 【v1762】真半圆 ✓：半径取 min(w/2, h) ✓ 圆心在底边中点 ✓（原来 y 半径写成 h ✗ 框不方就成半椭圆 ✗）*/
+      const sr = Math.min(w / 2, h), sx = w / 2
+      return `<path d="M ${sx - sr} ${h} A ${sr} ${sr} 0 0 1 ${sx + sr} ${h}" ${sa} fill="${fc}"/>`
+    }
     // 【v1724】遮罩块（与画布同一套外观）
     case 'cover':
       return '<rect x="' + (w * 0.01) + '" y="' + (h * 0.01) + '" width="' + (w * 0.98) + '" height="' + (h * 0.98) + '" fill="' + (fc === 'none' ? '#ffffff' : fc) + '" stroke="none"/>'
     case 'triangle':
-      return `<polygon points="0,${h} ${w},${h} ${w * 0.42},0" ${sa} fill="${fc}"/>`
+      return `<polygon points="0,${h} ${w},${h} ${w / 2},0" ${sa} fill="${fc}"/>`
     case 'rectangle':
       return `<rect x="${w * 0.02}" y="${h * 0.02}" width="${w * 0.96}" height="${h * 0.96}" ${sa} fill="${fc}"/>`
     case 'circle':
@@ -172,7 +175,8 @@ function figureInner(
       const pts: string[] = []
       for (let i = 0; i < 10; i++) {
         const ang = -Math.PI / 2 + (i * Math.PI) / 5
-        const rr = i % 2 === 0 ? m * 0.46 : m * 0.2
+        /* 【v1762】内外比照正五角星 = 1/φ² ✓（原来 0.2/0.46 ≈ 0.435 ✗ 星臂偏胖 ✗）*/
+        const rr = i % 2 === 0 ? m * 0.46 : m * 0.46 * STAR_INNER_RATIO
         pts.push((cx + rr * Math.cos(ang)).toFixed(1) + ',' + (cy + rr * Math.sin(ang)).toFixed(1))
       }
       return `<polygon points="${pts.join(' ')}" ${sa} fill="${fc}"/>`
