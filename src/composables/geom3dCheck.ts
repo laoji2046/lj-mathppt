@@ -127,7 +127,7 @@ export function geom3dIssues(raw: unknown): Geom3dCheck {
         if (d > worst) { worst = d; worstName = nm }
       }
       if (worst > tol) {
-        errs.push('第 ' + (i + 1) + ' 个面**不共面**：' + worstName + ' 离这个面 ' + worst.toFixed(3) + '（容差 ' + tol.toFixed(3) + ' ✗）—— 面表写错会让虚实线判错 ✓')
+        errs.push('第 ' + (i + 1) + ' 个面不共面：' + worstName + ' 离这个面 ' + worst.toFixed(3) + '（容差 ' + tol.toFixed(3) + ' ✗）—— 面表写错会让虚实线判错 ✓')
       }
     }
   })

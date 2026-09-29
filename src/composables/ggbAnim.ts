@@ -75,7 +75,7 @@ export function animPlan(spec: GgbAnimSpec, objects: string[] = []): GgbAnimPlan
     cmds.push('StartAnimation(' + target + ', true)')
     notes.push(spec.mode === 'once'
       ? '引擎原生起播 ✓ ' + spec.seconds + ' 秒后自动停 ✓（实测：StartAnimation 返回 false 但真会动 ✗ 所以不看返回值 ✓）'
-      : '引擎原生起播 ✓ 会一直跑到滑块自己的上界为止 ✓（⚠ 引擎**没有**调速/振荡 API ✗ 实测 ✓ 所以「continuous」做不到无限往复 ✓）')
+      : '引擎原生起播 ✓ 会一直跑到滑块自己的上界为止 ✓（⚠ 引擎没有调速/振荡 API ✗ 实测 ✓ 所以「continuous」做不到无限往复 ✓）')
     return { ok: true, cmds, stopAfterMs: spec.mode === 'once' ? Math.round(spec.seconds * 1000) : undefined, notes }
   }
   // loop / ping_pong：引擎没有振荡 API ✗ → 我们自己驱动 ✓
@@ -83,7 +83,7 @@ export function animPlan(spec: GgbAnimSpec, objects: string[] = []): GgbAnimPlan
   const to = spec.to as number
   cmds.push('SetValue(' + target + ', ' + num(from) + ')')
   cmds.push('StartAnimation(' + target + ', false)')   // 先确保它不是引擎在跑（不然两边抢 ✓）
-  notes.push('引擎没有振荡/调速 API（实测 ✗）→ **我们按时间驱动**：' + spec.seconds + ' 秒内 ' +
+  notes.push('引擎没有振荡/调速 API（实测 ✗）→ 我们按时间驱动：' + spec.seconds + ' 秒内 ' +
     (spec.mode === 'loop' ? '从 ' + num(from) + ' 到 ' + num(to) + ' 循环' : '在 ' + num(from) + ' 与 ' + num(to) + ' 之间往返') + ' ✓')
   return { ok: true, cmds, drive: { target, mode: spec.mode, seconds: spec.seconds, from, to }, notes }
 }

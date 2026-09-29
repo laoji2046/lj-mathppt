@@ -17,6 +17,7 @@ import type { MathFigureElement, SlideElement, FigureArc } from '@/types'
 import { loadImageElement, type VectorizeOpt, type VectorizeResult } from '@/composables/vectorize'
 import { parseVecAi, vecAiSummary, VEC_AI_SYSTEM } from '@/composables/vecAi'
 import { invoke } from '@/composables/useTauri'
+import { settingsOpen } from '@/ui/menus'
 import { labelFontSize, labelGap, labelSvg, arcPolyline } from '@/composables/solid3d'
 import { renderFigureSvg } from '@/composables/figureRender'
 import { figureBox } from '@/composables/mathPlot'
@@ -1949,20 +1950,30 @@ const aiBusy = ref(false)
 const aiMsg = ref('')
 const aiSay = ref('')
 function lsOf(k: string): string { try { return String(localStorage.getItem(k) || '').trim() } catch { return '' } }
-async function aiRead() {
+/** 【v1743】把"缺什么"摆在按钮旁边（用户实报：点了"好像没啥作用" ✗ —— 其实缺视觉模型，但只有点了才说 ✓） */
+const aiKeyReady = ref(false)
+const aiVision = ref('')
+function refreshAiState() { aiKeyReady.value = !!lsOf(AI_KEY_LS); aiVision.value = lsOf(VISION_MODEL_LS) }
+function openAiSettings() { refreshAiState(); settingsOpen.value = true }
+onMounted(() => { refreshAiState(); window.addEventListener('focus', refreshAiState) })
+onBeforeUnmount(() => { window.removeEventListener('focus', refreshAiState) })
+async function aiRead(force = false) {
   if (aiBusy.value) return
+  refreshAiState()
   const key = lsOf(AI_KEY_LS)
-  if (!key) { aiMsg.value = '先在「设置 → AI 助手」填一次 API Key（只存本机 ✓）'; return }
+  if (!key) { aiMsg.value = '还没填 AI Key：点右边「去设置填视觉模型」→ AI 助手 → API Key（只存本机 ✓）'; return }
   const vm = lsOf(VISION_MODEL_LS)
-  if (!vm) { aiMsg.value = '读图要用**视觉模型**：设置 → AI 助手 → 视觉模型（没配的话纯文本模型看不懂图 ✗）'; return }
+  if (!vm && !force) { aiMsg.value = '读图要看得见图的模型：点右边「去设置填视觉模型」（填完回来，左边状态会自己更新 ✓）'; return }
+  // 兜底：与其它 AI 面板同一口径（默认 deepseek-chat ✓）—— 但它看不了图 ✗ 所以只在「硬试一次」时用它 ✓
+  const model = vm || 'deepseek-chat'
   aiBusy.value = true
-  aiMsg.value = 'AI 正在读这张图…（约 10~20 秒）'
+  aiMsg.value = 'AI 正在读这张图…（用 ' + model + '，约 10~20 秒）' + (vm ? '' : ' ⚠ 没配视觉模型，它多半看不懂图 ✗')
   try {
     const r = await invoke<{ ok?: boolean; json?: unknown; error?: string }>('ai_chat_raw', {
       baseUrl: lsOf(VISION_BASE_LS),
       apiKey: key,
       body: {
-        model: vm,
+        model: model,
         temperature: 0,
         messages: [
           { role: 'system', content: VEC_AI_SYSTEM },
@@ -2015,16 +2026,21 @@ async function aiRead() {
         <button class="vd__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </header>
 
-      <div class="vd__airow">
+      <div class="vd__airow" @mouseenter="refreshAiState()">
         <button
           class="vd__aibtn"
           :disabled="aiBusy"
-          title="把这张图交给**视觉模型**读成点线（只回 JSON、坐标归一化 ✓）；读出来会替换当前草稿，Ctrl+Z 可撤销 ✓ 手动微调照旧 ✓"
+          title="把这张图交给视觉模型读成点线（只回 JSON、坐标归一化 ✓）；读出来会替换当前草稿，Ctrl+Z 可撤销 ✓ 手动微调照旧 ✓"
           @click="aiRead()"
         >{{ aiBusy ? 'AI 读图中…' : '🤖 AI 读图' }}</button>
+        <span class="vd__aistate" title="AI Key 从设置 → AI 助手来（只存本机 ✓）；读图必须用能看见图的「视觉模型」✗ 纯文本模型看不懂图">
+          {{ aiKeyReady ? 'Key ✓' : 'Key ✗ 没配' }} · {{ aiVision ? '视觉模型 ' + aiVision : '视觉模型 ✗ 没配' }}
+        </span>
+        <button v-if="!aiVision" class="vd__aibtn vd__aibtn--alt" title="打开设置 → AI 助手 → 视觉模型：填模型名（例如 qwen-vl-max / gpt-4o / glm-4v，看你的服务商支持哪个）；换服务商时还要填「视觉 Base URL」" @click="openAiSettings()">去设置填视觉模型</button>
+        <button v-if="!aiVision" class="vd__aibtn vd__aibtn--alt" :disabled="aiBusy" title="没配视觉模型也真的发一次请求（用默认的 deepseek-chat —— 它看不了图 ✗ 多半会失败或胡说 ✓）—— 至少能确认通道通不通 ✓" @click="aiRead(true)">硬试一次</button>
         <input v-model="aiSay" class="vd__aiinp" placeholder="补充说明（可选）：例如「这是正方体，请标出 A–D、A₁–D₁ 与体对角线 AC₁」">
-        <span v-if="aiMsg" class="vd__aimsg">{{ aiMsg }}</span>
       </div>
+      <p v-if="aiMsg" class="vd__aimsg vd__aimsg--row">{{ aiMsg }}</p>
 
       <div class="vd__body">
         <div class="vd__left">
@@ -2339,6 +2355,9 @@ async function aiRead() {
 .vd__aibtn:disabled { opacity: .6; cursor: default; }
 .vd__aiinp { flex: 1; min-width: 200px; padding: 5px 8px; font-size: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: #fff; color: var(--text); }
 .vd__aimsg { font-size: 12px; color: var(--brand-800); }
+.vd__aimsg--row { margin: 0; padding: 6px 14px; border-bottom: 1px solid var(--border); }
+.vd__aistate { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.vd__aibtn--alt { border-color: var(--border-strong); color: var(--gray-700); font-weight: 400; }
 .vd__hint { margin: 8px 0 0; font-size: 12px; color: var(--muted); max-width: 900px; line-height: 1.5; }
 .vd__right { flex: 1; min-width: 320px; display: flex; flex-direction: column; gap: 8px; }
 .vd__stat { font-size: 13px; color: var(--muted); }

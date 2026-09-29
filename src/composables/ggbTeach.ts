@@ -52,9 +52,9 @@ export function aidsPlan(caption: unknown, objs: unknown, objects: string[] = []
 export function aidsDescribe(plan: AidsPlan): string[] {
   if (!plan.ok) return ['辅助开关没做成：' + (plan.why || '认不出')]
   return [
-    '教学辅助已挂到**一个开关**上：' + plan.caption + '（' + plan.items.join('、') + ' ✓）',
+    '教学辅助已挂到一个开关上：' + plan.caption + '（' + plan.items.join('、') + ' ✓）',
     '· 默认关着 ✓（讲课时在画板左上角勾上它，辅助线/标注才出现 ✓ 取消勾选就回到原图 ✓）',
-    '· 这些辅助对象**保留但隐藏**（不是删掉 ✗）—— 真引擎实测：关掉后对象仍在板上、导出也还在 ✓',
+    '· 这些辅助对象保留但隐藏（不是删掉 ✗）—— 真引擎实测：关掉后对象仍在板上、导出也还在 ✓',
   ]
 }
 

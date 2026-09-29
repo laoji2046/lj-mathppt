@@ -169,6 +169,12 @@ function makePng(w, h) {
           ok(/^\d+x\d+$/.test(String(box)) && parseInt(String(box).split("x")[0], 10) >= 1000, "★窗口确实放大了（实测 " + box + " px ✓ 以前上限 1000 ✗）");
           const aiRow = await ev('(function(){var a=document.querySelector(".vd__airow"); return a? a.innerText : ""})()');
           ok(String(aiRow).indexOf("AI 读图") >= 0, "★「🤖 AI 读图」入口在窗口顶部（一眼看得见 ✓）");
+          const aiState = await ev('(function(){var a=document.querySelector(".vd__aistate"); return a? a.innerText.trim() : ""})()');
+          ok(String(aiState).length > 0, "★AI 行上直接显示缺什么（实测：「" + aiState + "」✓ 不用点就知道 ✓）");
+          const hasSet = await ev('!!([...document.querySelectorAll(".vd__airow button")].find(b=>b.textContent.indexOf("去设置")>=0))');
+          ok(hasSet === true, "★有一键「去设置填视觉模型」✓（点了直接开设置面板 ✓）");
+          const hasTry = await ev('!!([...document.querySelectorAll(".vd__airow button")].find(b=>b.textContent.indexOf("硬试一次")>=0))');
+          ok(hasTry === true, "★有「硬试一次」兜底 ✓（没配视觉模型也能真发一次请求 ✓）");
           const vp = await ev('(function(){var v=document.querySelector(".vd__viewport"); if(!v) return ""; var r=v.getBoundingClientRect(); return Math.round(r.width)+"x"+Math.round(r.height)})()');
           ok(/^\d+x\d+$/.test(String(vp)) && parseInt(String(vp).split("x")[0], 10) > 560, "★画布视口也放大了（实测 " + vp + " ✓ 以前固定 560×450 ✗）");
         }

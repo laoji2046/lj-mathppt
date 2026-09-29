@@ -143,7 +143,7 @@ export function judgeDrag(checks: DragCheck[], before: number[], after: number[]
   })
   const okCount = checks.length - broken.length - alreadyBad.length
   lines.unshift('拖动测试：查了 ' + checks.length + ' 条关系 ✓ 真成立 ' + Math.max(0, okCount) + ' 条'
-    + (broken.length ? ' · **拖坏了 ' + broken.length + ' 条**' : '')
+    + (broken.length ? ' · 拖坏了 ' + broken.length + ' 条' : '')
     + (alreadyBad.length ? ' · 本来就不成立 ' + alreadyBad.length + ' 条' : '')
     + (unchecked.length ? ' · 没查 ' + unchecked.length + ' 个（定义认不出 ✓）' : ''))
   if (alreadyBad.length) lines.push('· 本来就不成立（不是拖动造成的）：' + alreadyBad.join('；'))
