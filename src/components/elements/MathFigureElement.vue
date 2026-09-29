@@ -180,10 +180,12 @@ const innerHtml = computed(() => {
     }
     case 'angle': {
       const ox = w * 0.12, oy = h * 0.9, len = m * 0.8
-      return `<g>` +
-        `<line x1="${ox}" y1="${oy}" x2="${ox + len}" y2="${oy}" ${strokeAttrs}/>` +
-        `<line x1="${ox}" y1="${oy}" x2="${ox}" y2="${oy - len}" ${strokeAttrs}/>` +
-        `<path d="M ${ox + len * 0.25} ${oy} A ${len * 0.25} ${len * 0.25} 0 0 1 ${ox} ${oy - len * 0.25}" ${strokeAttrs} fill="none"/>` + '</g>'
+              const ms = len * 0.18
+        /* 【v1765】画的是直角 ✓ 教材对 90° 用**小方块**记号 ✓（角弧 + 方块一起 ✓ 与 v1763 直角三角形同款 ✓）*/
+        return `<line x1="${ox}" y1="${oy}" x2="${ox + len}" y2="${oy}" ${strokeAttrs}/>` +
+          `<line x1="${ox}" y1="${oy}" x2="${ox}" y2="${oy - len}" ${strokeAttrs}/>` +
+          `<path d="M ${ox + len * 0.25} ${oy} A ${len * 0.25} ${len * 0.25} 0 0 1 ${ox} ${oy - len * 0.25}" ${strokeAttrs} fill="none"/>` +
+          `<path d="M ${ox + ms} ${oy} L ${ox + ms} ${oy - ms} L ${ox} ${oy - ms}" ${strokeAttrs} fill="none"/>`
     }
     case 'semicircle': {
       /* 【v1762】真半圆 ✓：半径 = min(w/2, h) ✓ 圆心在底边中点 ✓（原来 y 半径写成 h ✗ 会成半椭圆 ✗）*/

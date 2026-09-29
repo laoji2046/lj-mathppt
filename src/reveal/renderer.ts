@@ -148,9 +148,12 @@ function figureInner(
       const ox = w * 0.12
       const oy = h * 0.9
       const len = Math.min(w, h) * 0.8
-      return `<line x1="${ox}" y1="${oy}" x2="${ox + len}" y2="${oy}" ${sa}/>` +
-        `<line x1="${ox}" y1="${oy}" x2="${ox}" y2="${oy - len}" ${sa}/>` +
-        `<path d="M ${ox + len * 0.25} ${oy} A ${len * 0.25} ${len * 0.25} 0 0 1 ${ox} ${oy - len * 0.25}" ${sa} fill="none"/>`
+              const ms = len * 0.18
+        /* 【v1765】画的是直角 ✓ 教材对 90° 用**小方块**记号 ✓（角弧 + 方块一起 ✓ 与 v1763 直角三角形同款 ✓）*/
+        return `<line x1="${ox}" y1="${oy}" x2="${ox + len}" y2="${oy}" ${sa}/>` +
+          `<line x1="${ox}" y1="${oy}" x2="${ox}" y2="${oy - len}" ${sa}/>` +
+          `<path d="M ${ox + len * 0.25} ${oy} A ${len * 0.25} ${len * 0.25} 0 0 1 ${ox} ${oy - len * 0.25}" ${sa} fill="none"/>` +
+          `<path d="M ${ox + ms} ${oy} L ${ox + ms} ${oy - ms} L ${ox} ${oy - ms}" ${sa} fill="none"/>`
     }
     case 'semicircle': {
       /* 【v1762】真半圆 ✓：半径取 min(w/2, h) ✓ 圆心在底边中点 ✓（原来 y 半径写成 h ✗ 框不方就成半椭圆 ✗）*/

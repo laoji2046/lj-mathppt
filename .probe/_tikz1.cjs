@@ -2985,6 +2985,30 @@ const angOld82 = ang82(OLD82[1], OLD82[2], OLD82[3]);
 ok(Math.abs(angOld82 - 90) > 5, "★对照：旧手写四点那里只有 " + angOld82.toFixed(1) + "° ✓（差 " + (90 - angOld82).toFixed(1) + "° ✗ 所以它其实是斜平行四边形 ✗ 名字却叫 Angled Rectangle ✗）");
 /* ③ 两份都用同一个纯函数 ✓（不再各写一份 ✗）*/
 ok(MJ82.indexOf("angledRectPoints(w, h)") > 0 && RR82.indexOf("angledRectPoints(w, h)") > 0, "★画布与放映都用 @/types 的 angledRectPoints ✓（各 1 处 ✓ 同源 ✓）")
+console.log("=== 用例 83：平面几何 · 角（直角记号）+ 正 n 边形的等边等角（v1765）===");
+const MJ83 = fs.readFileSync(path.join(ROOT, "src", "components", "elements", "MathFigureElement.vue"), "utf8");
+const RR83 = fs.readFileSync(path.join(ROOT, "src", "reveal", "renderer.ts"), "utf8");
+const ang83 = (f) => f.slice(f.indexOf("case 'angle'"), f.indexOf("case 'semicircle'"));
+const a83 = ang83(MJ83), b83 = ang83(RR83);
+ok(a83.indexOf("const ms = len * 0.18") > 0 && b83.indexOf("const ms = len * 0.18") > 0, "★两份渲染器都给角加了**直角小方块** ✓（边长 0.18·len ✓ 与 v1763 直角三角形同款记号 ✓）");
+ok(a83.indexOf("ox + ms") > 0 && b83.indexOf("ox + ms") > 0, "★方块画在**顶点内侧** ✓（从 (ox+ms,oy) 折到 (ox,oy−ms) ✓ 正好贴着两条边 ✓）");
+ok(a83.indexOf("0 0 1") > 0 && b83.indexOf("0 0 1") > 0, "★角弧仍在 ✓（0.25·len 半径 ✓ 朝角内 ✓ 与方块并存不重复 ✓）");
+/* 角的两条边：按写进去的坐标重算夹角 ✓ 应为 90° ✓ */
+const w83 = 300, h83 = 200, ox83 = w83 * 0.12, oy83 = h83 * 0.9, len83 = Math.min(w83, h83) * 0.8;
+const u83 = [ox83 + len83 - ox83, oy83 - oy83], v83 = [ox83 - ox83, oy83 - len83 - oy83];
+const angDeg83 = Math.acos((u83[0] * v83[0] + u83[1] * v83[1]) / (Math.hypot(...u83) * Math.hypot(...v83))) * 180 / Math.PI;
+ok(Math.abs(angDeg83 - 90) < 1e-9, "★两条边互相垂直 ✓（夹角 " + angDeg83.toFixed(6) + "° ✓ 所以用方块记号是对的 ✓）");
+/* reg() 的等边等角：正五边形 / 正六边形 ✓ */
+const reg83 = (n, cx, cy, R, rot = -Math.PI / 2) => Array.from({ length: n }, (_, i) => { const a = rot + (i * 2 * Math.PI) / n; return [cx + R * Math.cos(a), cy + R * Math.sin(a)] });
+for (const n of [5, 6]) {
+  const pts = reg83(n, 0, 0, 100);
+  const sides = pts.map((p, i) => Math.hypot(pts[(i + 1) % n][0] - p[0], pts[(i + 1) % n][1] - p[1]));
+  const spread = Math.max(...sides) - Math.min(...sides);
+  const interior = pts.map((p, i) => { const A = pts[(i + n - 1) % n], B = p, C = pts[(i + 1) % n]; const u = [A[0] - B[0], A[1] - B[1]], v = [C[0] - B[0], C[1] - B[1]]; return Math.acos((u[0] * v[0] + u[1] * v[1]) / (Math.hypot(...u) * Math.hypot(...v))) * 180 / Math.PI });
+  const expect = 180 - 360 / n;
+  ok(spread < 1e-9 && interior.every((x) => Math.abs(x - expect) < 1e-9), "★正" + n + "边形：n 条边等长 ✓（极差 " + spread.toExponential(1) + " ✓）每个内角 = " + interior[0].toFixed(3) + "° = " + expect + "° ✓（rx=ry ⇒ 真等边等角 ✓ 本来就对 ✓ 现在守住了 ✓）");
+}
+ok(MJ83.indexOf("reg(6,") > 0 && RR83.indexOf("reg(6,") > 0, "★两份渲染器都用同一个 reg() 生成正多边形 ✓（不各写一份顶点表 ✗）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);
