@@ -2747,6 +2747,40 @@ const out74 = [];
 svg74.replace(/([xy]1|y2|x2)="(-?[\d.]+)"/g, (m, t, v) => { out74.push(+v); return m });
 ok(VC74.length === 16 && EC74.length === 12 && segs74 === 12, "★cubeOblique 走进 3D 现算 ✓（8 顶点 12 边 ✓ 渲染出 " + segs74 + " 条线 ✓）");
 ok(out74.length > 0 && out74.every((v) => v >= -6 && v <= 306), "★正方体渲染坐标都在框内 ✓（" + out74.length + " 个坐标 ✓ 越界 0 ✓）");
+console.log("=== 用例 75：四张定理图也改成 3D 现算（v1756）===");
+const S3_75 = loadBundled("solid3d.ts", "_c75s3.cjs");
+const THM75 = ['thmLinePlanePara', 'thmLinePlaneProp', 'thmPlanePlanePerp', 'thmPlanePlaneProp'];
+const EXP_V75 = { thmLinePlanePara: 8, thmLinePlaneProp: 10, thmPlanePlanePerp: 8, thmPlanePlaneProp: 12 };
+const EXP_E75 = { thmLinePlanePara: 6, thmLinePlaneProp: 9, thmPlanePlanePerp: 8, thmPlanePlaneProp: 11 };
+let bad75 = 0;
+for (const k of THM75) {
+  const pts = S3_75.solidVerts(k, 300, 200);
+  const ed = S3_75.solidEdges(k);
+  const n = pts.length / 2;
+  const svg = S3_75.renderSolid(k, pts, 300, 200, '#111827', 2, 'none', '') || '';
+  const segs = (svg.match(/<line\b/g) || []).length;
+  const coords = [];
+  svg.replace(/([xy]1|y2|x2)="(-?[\d.]+)"/g, (m, t, v) => { coords.push(+v); return m });
+  svg.replace(/[ML]\s*(-?[\d.]+)[ ,](-?[\d.]+)/g, (m, a, b) => { coords.push(+a, +b); return m });
+  const outside = coords.filter((v) => v < -6 || v > 306).length;
+  const okAll = n === EXP_V75[k] && ed.length === EXP_E75[k] && segs === ed.length && outside === 0 && svg.length > 80;
+  if (!okAll) bad75++;
+  ok(okAll, "★" + k + " ✓（顶点 " + n + "/" + EXP_V75[k] + " ✓ 边 " + ed.length + "/" + EXP_E75[k] + " ✓ 线段 " + segs + " ✓ 越界 " + outside + " ✓）");
+}
+ok(bad75 === 0, "★四张定理图**全部渲染正常** ✓（顶点数与边数都与改造前一致 ✓ 标签表不用动 ✓）");
+/* 标签表与顶点数对齐 ✓（改坐标不能把标签挤掉 ✓） */
+const TH75 = JSON.stringify(S3_75.THM_LABELS);
+for (const k of THM75) {
+  const arr = S3_75.THM_LABELS[k];
+  ok(Array.isArray(arr) && arr.length === EXP_V75[k], "★" + k + " 的标签表长度 = 顶点数（" + (arr ? arr.length : 0) + " ✓ 角色没变 ✓ 所以一个字都不用改 ✓）");
+}
+/* 关键语义抽查：线面平行判定里 b 在平面上（z=0 ✓）、a 悬在上方（z>0 ✓）✓ */
+const V75 = S3_75.solidVerts('thmLinePlanePara', 300, 200);
+const g75 = S3_75.solidEdges('thmLinePlanePara');
+ok(V75.length === 16 && g75.length === 6, "★线面平行判定：8 顶点 6 边 ✓（4 条平面边 + a + b ✓）");
+const src75 = fs.readFileSync(path.join(ROOT, "src", "composables", "solid3d.ts"), "utf8");
+ok(src75.indexOf("edges3d") > 0 && src75.indexOf("不在任何面的边界上") > 0, "★源码里写明了 edges3d 的用途 ✓（横跨平面的线段收不出来 ✓ 只能显式给 ✓）");
+ok(src75.indexOf("顶点角色（与原来一致 ✓）") > 0 || src75.indexOf("顶点角色：0-3 = α") > 0, "★注释里写明了「顶点角色与原来一致」✓（所以标签表不用改 ✓）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);

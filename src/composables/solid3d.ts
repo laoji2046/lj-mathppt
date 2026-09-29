@@ -202,7 +202,7 @@ import type { V3 } from '@/composables/solidProjection'
  * 出处：高中数学讲义/scripts/plot_ch08_14.py ✓（顶点与面表照抄 ✓，投影/虚实现算 ✓）
  * ⚠ 只放「斜二测」这一族 kind ✓ —— `cube` / `prism` 那些是「正面真形」的另一套约定 ✗ 不要混 ✓
  */
-const SOLID_3D: Record<string, { verts: V3[]; faces: number[][] }> = {
+const SOLID_3D: Record<string, { verts: V3[]; faces: number[][]; /** 【v1756】显式 3D 棱（定理图用 ✓ 不在任何面的边界上 ✓） */ edges3d?: [number, number, 0 | 1][] }> = {
   /* 教材图 8.1-5：六棱柱（正六边形底面 r=1、高 1.55 ✓）*/
   hexPrismOblique: {
     verts: [
@@ -253,6 +253,42 @@ const SOLID_3D: Record<string, { verts: V3[]; faces: number[][] }> = {
     verts: [[0, 0, 0], [1.5, 0, 0], [1.5, 1.5, 0], [0, 1.5, 0],
       [0, 0, 1.5], [1.5, 0, 1.5], [1.5, 1.5, 1.5], [0, 1.5, 1.5]],
     faces: [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [3, 2, 6, 7], [0, 3, 7, 4], [1, 2, 6, 5]],
+  },
+  /* ══ 【v1756】四个定理图：改用 3D 现算 ✓（坐标由我按同一套斜二测写 ✓ 顶点数与虚实保持原样 ✓）══ */
+  /* 线面平行判定 a∥b, b⊂α ⇒ a∥α：α 是 xOy 平面里的平行四边形 ✓ b 在 α 内 ✓ a 与 b 平行、悬在 α 上方 ✓
+     顶点角色（与原来一致 ✓）：0-3 = α 的四角 ✓ 4,5 = a ✓ 6,7 = b ✓（5='a' 7='b' 2='α' ✓）*/
+  thmLinePlanePara: {
+    verts: [[0, 0, 0], [3, 0, 0], [3, 2, 0], [0, 2, 0],
+      [0.35, 0.55, 0.85], [2.4, 0.55, 0.85], [0.35, 1.35, 0], [2.4, 1.35, 0]],
+    faces: [[0, 1, 2, 3]],
+    edges3d: [[4, 5, 0], [6, 7, 0]],
+  },
+  /* 线面平行性质 a∥α, a⊂β, α∩β=b ⇒ a∥b：α 是水平面 ✓ β 是立在交线 b 上的竖直墙面 ✓ a 在 β 内与 b 平行 ✓
+     顶点角色：0-3 = α ✓ 4-7 = β（底边 4-5 就是交线 b ✓ 5='b' ✓ 6='β' ✓）✓ 8,9 = a ✓（9='a' ✓）*/
+  thmLinePlaneProp: {
+    verts: [[0, 0, 0], [3, 0, 0], [3, 2.2, 0], [0, 2.2, 0],
+      [0.4, 1.2, 0], [2.6, 1.2, 0], [2.6, 1.2, 1.7], [0.4, 1.2, 1.7],
+      [0.75, 1.2, 0.55], [2.25, 1.2, 0.55]],
+    faces: [[0, 1, 2, 3], [4, 5, 6, 7]],
+    edges3d: [[8, 9, 0]],
+  },
+  /* 面面垂直判定 l⊥α, l⊂β ⇒ β⊥α：α 水平 ✓ β 是过垂足 O 的竖直墙面 ✓ l 是 β 内那条竖棱 ✓
+     顶点角色：0-3 = α ✓ 4 = 垂足 O ✓ 5 = l 的顶端 ✓ 6,7 = 墙面另一个竖边的上下端 ✓（4='O' 5='l' 7='β' 2='α' ✓）*/
+  thmPlanePlanePerp: {
+    verts: [[0, 0, 0], [3.2, 0, 0], [3.2, 2.0, 0], [0, 2.0, 0],
+      [1.0, 1.05, 0], [1.0, 1.05, 1.9], [2.9, 1.05, 0], [2.9, 1.05, 1.9]],
+    faces: [[0, 1, 2, 3], [4, 6, 7, 5]],
+    edges3d: [[4, 5, 0]],
+  },
+  /* 面面垂直性质 α⊥β, a⊂β, a⊥m ⇒ a⊥α：α 水平 ✓ β 立在交线 m 上 ✓ a 在 β 内竖直、与 m 垂直 ✓
+     顶点角色：0-3 = α ✓ 4-7 = β（底边 4-5 = m ✓ 5='m' ✓ 6='β' ✓）✓ 8,9 = a 在 β 内的可见段 ✓ 10,11 = a 穿过平面往下的那段 ✓
+     （9='a' ✓ 虚实与原来一致：三段都实线 ✓）*/
+  thmPlanePlaneProp: {
+    verts: [[0, 0, 0], [3.2, 0, 0], [3.2, 2.0, 0], [0, 2.0, 0],
+      [0.5, 1.1, 0], [2.6, 1.1, 0], [2.6, 1.1, 1.8], [0.5, 1.1, 1.8],
+      [1.55, 1.1, 0.5], [1.55, 1.1, 1.6], [1.55, 1.1, 0], [1.55, 1.1, -0.55]],
+    faces: [[0, 1, 2, 3], [4, 5, 6, 7]],
+    edges3d: [[8, 9, 0], [8, 10, 0], [10, 11, 0]],
   },
   /* 【v1752】教材图 8.1-8：**四棱台** ABCD-A′B′C′D′
      出处：高中数学讲义/scripts/plot_ch08_14.py fig_pyramid_frustum 右半 ✓
@@ -325,10 +361,24 @@ const FOP: Record<string, number[]> = {
 }
 /** 某立体的边表 [起,止,隐藏(1=图形中被遮挡)] —— 编辑器命中检测与渲染共用 */
 export function solidEdges(kind: string): Edge[] {
-  /* 【v1751】有 3D 真值的（讲义重绘 ✓）→ 边的虚实**现算** ✓；其余仍用原来的表 ✓ */
+  /* 【v1751】有 3D 真值的（讲义/定理图 ✓）→ 边的虚实**现算** ✓；其余仍用原来的表 ✓ */
   const S3 = SOLID_3D[kind]
-  if (S3) return solidTo2d(S3.verts, S3.faces).edges as Edge[]
+  if (S3) return solid3dEdges(S3)
   return EDGES[kind] || []
+}
+
+/** 【v1756】3D kind 的边表 = 面表收出来的棱 ∪ `edges3d` 里显式给的 ✓
+ *  （定理图里有横跨平面的线段 ✓ 它们不在任何面的边界上 ✓ 只能显式给 ✓ 且虚实由作者指定 ✓）*/
+function solid3dEdges(S3: { verts: V3[]; faces: number[][]; edges3d?: [number, number, 0 | 1][] }): Edge[] {
+  const out = solidTo2d(S3.verts, S3.faces).edges as Edge[]
+  const seen = new Set(out.map((e) => (e[0] < e[1] ? e[0] + '-' + e[1] : e[1] + '-' + e[0])))
+  for (const e of S3.edges3d || []) {
+    const k = e[0] < e[1] ? e[0] + '-' + e[1] : e[1] + '-' + e[0]
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push([e[0], e[1], e[2]])
+  }
+  return out
 }
 /** 某立体的面表（顶点索引环）—— 面命中检测与渲染共用 */
 export function solidFaces(kind: string): number[][] { return FACES[kind] || [] }
@@ -357,9 +407,9 @@ export function solidFacesAll(kind: string): number[][] {
 export function meshEdges(kind: string, mesh?: SolidMesh | null): Edge[] {
   if (mesh && Array.isArray(mesh.edges)) return mesh.edges as Edge[]
   /* 【v1753】⚠ 这里以前直接 `EDGES[kind]` ✗ —— 而 renderSolid 正是走这条路 ✓
-     结果「顶点换成现算的、边还是老表」✗ → 图形错乱 ✗（用户截图打叉的就是这 4 个 ✓）*/
+     结果「顶点换成现算的、边还是老表」✗ → 图形错乱 ✗（用户截图打叉的就是那 4 个 ✓）*/
   const S3 = SOLID_3D[kind]
-  if (S3) return solidTo2d(S3.verts, S3.faces).edges as Edge[]
+  if (S3) return solid3dEdges(S3)
   return EDGES[kind] || []
 }
 /** 取面表：有自由建模 mesh 时用 mesh，否则用类型默认 */
