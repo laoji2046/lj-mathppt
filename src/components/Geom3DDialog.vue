@@ -130,31 +130,6 @@ const model = ref<Geom3D | null>(null)
 const order = computed(() => (model.value ? Object.keys(resolveVertices(model.value)) : []))
 const nextName = computed(() => order.value[clicks.value.length] || '')
 
-function parse() {
-  parseErr.value = ''
-  checkMsg.value = ''
-  try {
-    const m = JSON.parse(raw.value) as Geom3D & { view?: { azim?: number; elev?: number; oblique?: number } }
-    // 圆柱 / 圆锥只用 primitive、没有 vertices，别把它们拒了
-    const hasVerts = !!m.vertices && Object.keys(m.vertices).length > 0
-    if (!m || typeof m !== 'object' || (!hasVerts && !m.primitive)) {
-      parseErr.value = '缺少 vertices（或者给 primitive）'; model.value = null; return
-    }
-    model.value = m
-    const chk = geom3dIssues(m)   // 【v1739】结构自检（确定性 ✓ 不依赖任何模型 ✓）
-    checkMsg.value = geom3dLines(chk).join(' ')
-    if (m.view) {
-      if (typeof m.view.azim === 'number') azim.value = m.view.azim
-      if (typeof m.view.elev === 'number') elev.value = m.view.elev
-      oblique.value = m.view.oblique === 1   // 【v1577】斜二测 ✓
-    }
-  } catch (e) {
-    parseErr.value = 'JSON 解析失败：' + (e as Error).message
-    model.value = null
-  }
-}
-parse()
-
 /* ---------------- 【v1739】让 AI 直接把题目还原成结构（不再是"复制提示词"那套人工搬运 ✗） ----------------
  * 通道：设置里的 API Key（只存本机 ✓）→ Rust 侧 `ai_chat` → 只准回 JSON ✓
  * ⚠ 这条通道**只收文字**（不带图 ✗）—— 题图请用下面的「参考图 + 点顶点对齐」✓
@@ -190,6 +165,32 @@ async function askAi() {
     aiMsg.value = '✗ ' + String((e as Error)?.message || e)
   } finally { aiBusy.value = false }
 }
+
+function parse() {
+  parseErr.value = ''
+  checkMsg.value = ''
+  try {
+    const m = JSON.parse(raw.value) as Geom3D & { view?: { azim?: number; elev?: number; oblique?: number } }
+    // 圆柱 / 圆锥只用 primitive、没有 vertices，别把它们拒了
+    const hasVerts = !!m.vertices && Object.keys(m.vertices).length > 0
+    if (!m || typeof m !== 'object' || (!hasVerts && !m.primitive)) {
+      parseErr.value = '缺少 vertices（或者给 primitive）'; model.value = null; return
+    }
+    model.value = m
+    const chk = geom3dIssues(m)   // 【v1739】结构自检（确定性 ✓ 不依赖任何模型 ✓）
+    checkMsg.value = geom3dLines(chk).join(' ')
+    if (m.view) {
+      if (typeof m.view.azim === 'number') azim.value = m.view.azim
+      if (typeof m.view.elev === 'number') elev.value = m.view.elev
+      oblique.value = m.view.oblique === 1   // 【v1577】斜二测 ✓
+    }
+  } catch (e) {
+    parseErr.value = 'JSON 解析失败：' + (e as Error).message
+    model.value = null
+  }
+}
+parse()
+
 /** 顶点小圆点：默认不画（只有字母，与原观感一致）；插入/保存时会写进元素 */
 const showDots = ref(false)
 /** 【v1573】**后加的点**（自由点 / 受约束点）的名字 —— 这些点**始终**画圆点 ✓
@@ -1295,6 +1296,11 @@ function insert() {
             <button :class="{ 'g3__tab--on': tab === 'draw' }" @click="tab = 'draw'">② 作图</button>
             <button :class="{ 'g3__tab--on': tab === 'list' }" @click="tab = 'list'">③ 图元</button>
           </div>
+          <div class="g3__sec g3__sec--model g3__row g3__row--top">
+            <textarea v-model="askText" class="g3__ta" style="min-height:56px" spellcheck="false" placeholder="把题目文字贴在这里（几何描述 + 已知条件 ✓）—— 再点右边让 AI 还原三维结构 ✓ 题图请用下面的参考图对齐 ✓" />
+            <button class="g3__btn" :disabled="aiBusy" title="把左边这段题目交给 AI，它只回 JSON 结构（顶点坐标 + 面表 ✓）；回来后会走一遍结构自检，问题在下面直接显示 ✓" @click="askAi()">{{ aiBusy ? "AI 还原中…" : "🤖 让 AI 还原结构" }}</button>
+          </div>
+          <p v-if="aiMsg" class="g3__sec g3__sec--model g3__tip g3__tip--inline">{{ aiMsg }}</p>
           <div class="g3__sec g3__sec--model g3__row">
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
               <input v-model="showDots" type="checkbox" />
@@ -1608,11 +1614,6 @@ function insert() {
               <label class="g3__num"><input v-model="cutFill" type="checkbox"> 填充</label>
               <button class="g3__btn" @click="addCut()">添加截面</button>
             </div>
-          <div class="g3__sec g3__sec--model g3__row g3__row--top">
-            <textarea v-model="askText" class="g3__ta" style="min-height:56px" spellcheck="false" placeholder="把题目文字贴在这里（几何描述 + 已知条件 ✓）—— 再点右边让 AI 还原三维结构 ✓ 题图请用下面的参考图对齐 ✓" />
-            <button class="g3__btn" :disabled="aiBusy" title="把左边这段题目交给 AI，它只回 JSON 结构（顶点坐标 + 面表 ✓）；回来后会走一遍结构自检，问题在下面直接显示 ✓" @click="askAi()">{{ aiBusy ? "AI 还原中…" : "🤖 让 AI 还原结构" }}</button>
-          </div>
-          <p v-if="aiMsg" class="g3__sec g3__sec--model g3__tip g3__tip--inline">{{ aiMsg }}</p>
           <textarea v-model="raw" class="g3__sec g3__sec--model g3__ta" spellcheck="false" @blur="parse" @input="parseErr = ''" />
           <p v-if="parseErr" class="g3__sec g3__sec--model g3__err">{{ parseErr }}</p>
           <p v-if="checkMsg" class="g3__sec g3__sec--model g3__tip g3__tip--inline">{{ checkMsg }}</p>

@@ -2370,6 +2370,18 @@ const g3vue = fs.readFileSync(path.join(ROOT, "src", "components", "Geom3DDialog
 ok(g3vue.indexOf("aiChat(") > 0 && g3vue.indexOf("parseGeom3dText(") > 0 && g3vue.indexOf("GEOM3D_PROMPT") > 0, "★复刻窗口接上了应用内 AI（不再是复制提示词那套人工搬运 ✓）");
 ok(g3vue.indexOf("geom3dIssues(") > 0 && g3vue.indexOf("checkMsg") > 0, "★复刻窗口会做确定性自检并把结论显示出来 ✓");
 ok(g3vue.indexOf("askAi") > 0 && g3vue.indexOf("让 AI 还原结构") > 0, "★界面上有「让 AI 还原结构」按钮 ✓");
+  /* ⑳【v1740】这类 bug 探针得管：**被顶层立即调用的函数，它引用的 ref 必须声明在调用之前** ✗
+   *    v1739 我把 checkMsg 插在 parse() 之后 → TDZ → 一开三维窗口就 ReferenceError → 用户看到"三维立体图不见了" ✗
+   */
+  const g3src = fs.readFileSync(path.join(ROOT, "src", "components", "Geom3DDialog.vue"), "utf8");
+  const iDecl = g3src.indexOf("const checkMsg = ref(");
+  const mTop = /^parse\(\)$/m.exec(g3src);
+  ok(iDecl >= 0 && !!mTop && iDecl < mTop.index, "★checkMsg 必须声明在**顶层 parse() 调用之前**（v1739 插在后面 → TDZ 崩 ✗ v1740 修 ✓）");
+  const iAIrow = g3src.indexOf("让 AI 还原结构");
+  const iRawBox = g3src.indexOf('v-model="raw"');
+  ok(iAIrow >= 0 && iRawBox >= 0 && iAIrow < iRawBox, "★AI 入口要在 JSON 文本框**之前**（放最下面＝找不到 ✗）");
+  const pal = fs.readFileSync(path.join(ROOT, "src", "components", "MathFigurePalette.vue"), "utf8");
+  ok(pal.indexOf("? 4 : g.list.length") >= 0 && pal.indexOf("AI 还原结构…") >= 0, "★「图形重建」分类里有明确的 AI 卡片（角标 4 ✓ 用户是从这一类找的 ✓）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);

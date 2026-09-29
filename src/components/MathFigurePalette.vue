@@ -209,7 +209,7 @@ function pickCanvasImage(el: ImageElement) {
           :class="{ 'tab--on': current && current.cat === g.cat }"
           @click="cat = g.cat"
         >
-          {{ g.cat }}<em>{{ g.cat === RECAST ? 3 : g.list.length }}</em>
+          {{ g.cat }}<em>{{ g.cat === RECAST ? 4 : g.list.length }}</em>
         </button>
       </div>
 
@@ -225,6 +225,14 @@ function pickCanvasImage(el: ImageElement) {
           <button class="card card--recast card--pick" title="选一张线稿（几何插图 / 函数图），自动识别成可拖顶点的数学图形" @click="pickImage">
             <span class="card__thumb"><span class="recast__plus">＋</span></span>
             <span class="card__name">自图片重建…</span>
+          </button>
+          <button
+            class="card card--recast card--pick"
+            title="贴一段题目文字 → AI 只回 JSON（顶点坐标 + 面表）→ 自动出图；回来还会做结构自检（共面 / 引用 / 退化 ✓ 有问题直接列出来）"
+            @click="openGeom3D(); emit('close')"
+          >
+            <span class="card__thumb"><span class="recast__plus">🤖</span></span>
+            <span class="card__name">AI 还原结构…</span>
           </button>
           <button
             class="card card--recast card--pick"
