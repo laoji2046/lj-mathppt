@@ -8,6 +8,7 @@ import { describeToCommands } from '@/composables/ggbAI'
 import { GGB_QUERY_TMP, ggbAutoQueries, ggbBriefText, ggbCheckResult, ggbCheckSystem, ggbCheckUser, ggbDeleteClosure, ggbDeleteTargets, ggbPlanGraph, ggbQueryCmd, ggbReadBrief, ggbReadPlan, ggbReadSystem, ggbRepairSystem, ggbRepairUser, ggbSolvePlan, ggbSolveSystem, ggbSolveUser, ggbToolOf, ggbValidatePlan, ggbVisionGuard, type GgbReadout, type GgbSolveStep } from '@/composables/ggbSolve'
 import { settingsOpen } from '@/ui/menus'
 import { loadImg, prepImageEl } from '@/composables/imgPrep'
+import { buildTrack, trackLines, type TrackItem } from '@/composables/canvasTrack'
 import { scanFromResult, scanToBrief } from '@/composables/figScan'
 import { vectorizeInWorker } from '@/composables/figScanRun'
 import { licensed } from '@/composables/useLicense'
@@ -190,6 +191,41 @@ const solveShot = ref(false)
 const solveFile = ref<HTMLInputElement | null>(null)
 const MAX_SOLVE_IMG = 3
 
+/* ---------------- 【v1734】CanvasTracker：板上有什么、谁画的、依赖谁、长什么样 ----------------
+ * 依据 Draw2Think 的 L4（Memory）= 画布状态 + 轨迹（对象 / 依赖图 / 样式 ✓）
+ * 回答两个老师一定会问的问题：
+ *   ① 「删掉这个会连带掉什么？」→ 用**板上真实定义**算依赖闭包（比 plan 图更准 ✓）
+ *   ② 「这块是谁画的？」→ 这次 AI / 上次 AI / 你自己 ✓
+ */
+const track = ref<TrackItem[]>([])
+
+/** 【v1734】样式摘要（颜色 / 粗细 / 是否隐藏 ✓ 拿不到就不写 ✗ 绝不因此报错 ✓） */
+function styleOf(a: any, n: string): string | undefined {
+  const bits: string[] = []
+  try {
+    if (typeof a.getColor === "function") { const c = a.getColor(n); if (c) bits.push(String(c)) }
+    if (typeof a.getLineThickness === "function") { const w = Number(a.getLineThickness(n)); if (Number.isFinite(w) && w > 0) bits.push(w + "px") }
+    if (typeof a.getVisible === "function" && a.getVisible(n) === false) bits.push("已隐藏")
+  } catch { /* 拿不到就算了 ✓ */ }
+  return bits.length ? bits.join(" ") : undefined
+}
+
+/** 【v1734】刷新"板上有啥" ✓（beforeDefs = 运行前快照 → 用来分「这次 AI / 上次 AI / 你手画」✓） */
+function refreshTrack(beforeDefs: Record<string, string> = {}, prevAi: string[] = lastCreated.value) {
+  const a = liveApplet()
+  if (!a || typeof a.getAllObjectNames !== "function") { track.value = []; return }
+  try {
+    track.value = buildTrack(liveObjects(a), defSnapshot(), prevAi, beforeDefs, (n) => styleOf(a, n))
+  } catch { track.value = [] }
+}
+
+/** 【v1734】「看板上有啥」：刷新 + 把清单写进日志 ✓（来源 / 依赖 / 样式 一眼看完 ✓） */
+function boardPeekInner() {
+  refreshTrack({}, lastCreated.value)
+  for (const l of trackLines(track.value)) solveLog.value.push(l)
+  toaster("板上有 " + track.value.length + " 个对象 ✓（来源 / 依赖 / 样式见日志）")
+}
+function boardPeek() { quietErrors(boardPeekInner) }
 /* ---------------- 【v1732】删除与回滚：画错了能撤、撤得干净 ----------------
  * ① 删一步：先算出「连带会掉哪些依赖」→ 执行 → 日志里报出来 ✓
  *    优先问绘图板自己的 getDependentObjects ✓（权威 ✓），拿不到就用 plan 依赖图兜底 ✓
@@ -347,11 +383,18 @@ async function runSolveSteps(a: any, steps: GgbSolveStep[], fails: { cmd: string
     // 【v1732】删一步：先算出「连带会掉哪些依赖」→ 执行 → 日志里报出来 ✓
     if (s.tool === "delete") {
       const tg = ggbDeleteTargets(s.cmd)
+      // 【v1734】依赖来源分三档：绘图板自己的 getDependentObjects（权威 ✓）→ **板上真实定义的依赖图**（CanvasTracker ✓）→ plan 图（兜底 ✓）
       const graph = ggbPlanGraph(steps)
       const planDep: string[] = []
       for (const t of tg) for (const n of ggbDeleteClosure(t, graph)) if (n !== t && planDep.indexOf(n) < 0) planDep.push(n)
+      const liveEdges = buildTrack(liveObjects(a), defSnapshot(), lastCreated.value).map((it) => ({ name: it.name, refs: it.refs }))
+      const liveDep: string[] = []
+      for (const t of tg) {
+        if (!liveEdges.some((e) => e.name === t)) continue
+        for (const n of ggbDeleteClosure(t, liveEdges)) if (n !== t && liveDep.indexOf(n) < 0) liveDep.push(n)
+      }
       const apiDep = depsOfApi(a, tg)
-      const extra = (apiDep.length ? apiDep : planDep).filter((n) => tg.indexOf(n) < 0)
+      const extra = (apiDep.length ? apiDep : (liveDep.length ? liveDep : planDep)).filter((n) => tg.indexOf(n) < 0)
       try {
         a.evalCommand(s.cmd)
         ok++
@@ -858,6 +901,7 @@ function settleRun(beforeDefs: Record<string, string>, prev: string[]) {
     if (isNew || changed) { touched[n] = true; mine.push(n) }
   })
   lastCreated.value = mine
+  refreshTrack(beforeDefs, prev)   // 【v1734】刷新"板上有啥"（来源 / 依赖 / 样式 ✓）
   if (!clearBefore.value || !mine.length) return   // 没画东西 → 不动板子 ✓
   const victims = prev.filter((n) => !touched[n] && n in afterDefs)
   if (!victims.length) return
@@ -989,6 +1033,7 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
                 <label class="ggbs__check" title="作图时有命令报错，就把报错的那几步回灌给模型改一轮（只改错的，不动没报错的 ✓）"><input v-model="repairOn" type="checkbox" /> 失败自动修一轮</label>
                 <label class="ggbs__check" title="跑完把画布上的精确读数（点坐标 / 线段长 / 半径 / 面积）交给模型核对：解题过程与图形自不自洽 ✓ 不一致就给出修正步骤 ✓"><input v-model="checkOn" type="checkbox" /> 跑完自动核对</label>
                 <button class="ggbs__btn ggbs__btn--tiny" :disabled="!runSnap" @click="rollbackRun" title="把画布恢复到你点「③ 解题并作图」之前的样子（整块画布 + 视图一起恢复 ✓ 这一步之后手画、手改的也会没 ✗）">↩ 回滚到作图前</button>
+                <button class="ggbs__btn ggbs__btn--tiny" @click="boardPeek" title="列出绘图板上现在有哪些对象：谁画的（这次 AI / 上次 AI / 你手画）、依赖谁、颜色粗细 —— 写在下面的日志里 ✓">🔍 看板上有啥</button>
               </div>
               <div v-if="solution" class="ggbs__solution">
                 <div class="ggbs__solvet">解题过程</div>

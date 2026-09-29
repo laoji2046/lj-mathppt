@@ -278,6 +278,50 @@ ok(dV3.issues.length === 0, "先建后删同一个名字 → 不报警");
 const dSY = G.ggbSolveSystem();
 ok(dSY.indexOf("delete") >= 0 && dSY.indexOf("Delete(A") >= 0, "解题 system 告诉模型可以发删除步");
 ok(dSY.indexOf("连带删掉依赖") >= 0, "★system 说清「删一个会连带删掉依赖它的对象」");
+console.log(NL + "=== 静态：CanvasTracker（对象 / 来源 / 依赖 / 样式 v1734）===");
+const CT = load("canvasTrack.ts", "_ctrack.cjs");
+/* ① 来源判定（纯函数 ✓） */
+ok(CT.trackOrigin("A", {}, [], {}) === "user", "没有快照、不在上次 AI 名单 → 你手画");
+ok(CT.trackOrigin("A", {}, ["A"], {}) === "ai-prev", "没有快照、在上次 AI 名单 → 上次 AI 画的");
+ok(CT.trackOrigin("c", { A: "(0,0)" }, [], { A: "(0,0)", c: "Circle(A,B)" }) === "ai", "★快照里没有 c（新出现）→ 这次 AI 画的");
+ok(CT.trackOrigin("A", { A: "(0,0)" }, [], { A: "(1,1)" }) === "ai", "★定义被改过 → 算这次 AI 动的");
+ok(CT.trackOrigin("A", { A: "(0,0)" }, [], { A: "(0,0)" }) === "user", "定义没动、也不在上次名单 → 你手画");
+ok(CT.trackOrigin("D", { A: "(0,0)", D: "Midpoint(A,B)" }, ["D"], { A: "(0,0)", D: "Midpoint(A,B)" }) === "ai-prev", "★上次 AI 画的、这次没动 → 还是「上次 AI」");
+/* ② 依赖图（refs 正向 + deps 反向 ✓） */
+const ctItems = CT.buildTrack(
+  ["A", "B", "c", "D", "E"],
+  { A: "(0,0)", B: "(4,0)", c: "Circle(A,B)", D: "Midpoint(A,B)", E: "Intersect(c,xAxis)" },
+  [], {},
+);
+ok(ctItems.length === 5, "5 个对象都进了清单");
+const ctC = ctItems.find((x) => x.name === "c");
+ok(ctC && ctC.refs.join(",") === "A,B", "★c 依赖 A、B（从定义字符串抠出来的 ✓）");
+const ctA = ctItems.find((x) => x.name === "A");
+ok(ctA && ctA.deps.indexOf("c") >= 0 && ctA.deps.indexOf("D") >= 0, "★反向补全：A 被 c、D 依赖（依赖图 ✓）");
+ok(ctA && ctA.deps.indexOf("E") < 0, "A 不直接被 E 依赖（E 依赖 c ✓ 不要瞎连 ✗）");
+ok(typeof ctC.style === "undefined", "没给 styleOf → 不写样式（不报错 ✓）");
+const ctStyled = CT.buildTrack(["A"], { A: "(0,0)" }, [], {}, () => "红 3px");
+ok(ctStyled[0].style === "红 3px", "styleOf 给了就写进去 ✓");
+ok(CT.buildTrack(["A", "A", "  "], { A: "(0,0)" }, [], {}).length === 1, "重名 / 空白名会去重 ✓");
+/* ③ 摘要与清单文本 */
+const ctSum = CT.trackSummary(CT.buildTrack(["A", "c"], { A: "(0,0)", c: "Circle(A,1)" }, ["c"], { A: "(0,0)", c: "Circle(A,1)" }));
+ok(ctSum.indexOf("板上 2 个对象") >= 0 && ctSum.indexOf("依赖边 1 条") >= 0, "★摘要报数：对象数 + 依赖边数（" + ctSum.slice(0, 24) + "…）");
+ok(ctSum.indexOf("你手画的 1") >= 0 && ctSum.indexOf("上次 AI 画的 1") >= 0, "★摘要按来源分开报数");
+const ctLines = CT.trackLines(ctItems);
+ok(ctLines[0].indexOf("板上 5 个对象") >= 0, "清单第一行是摘要");
+ok(ctLines.some((l) => l.indexOf("[你手画] A") >= 0), "★每个对象带来源标签（[你手画] A = (0,0)）");
+ok(ctLines.some((l) => l.indexOf("← 依赖 A、B") >= 0), "★清单里写出依赖 ✓");
+ok(CT.trackLines(ctItems, 2).length === 4 && CT.trackLines(ctItems, 2)[3].indexOf("还有 3 个") >= 0, "★有条数上限（摘要 + 2 条 + 一行「还有 3 个」= 4 行 ✓）");
+ok(CT.trackLines([]).length === 1, "空板也给一行摘要（不返回空数组 ✗）");
+/* ④ 与删除闭包打通：用**板上真实定义**算「删它会连带掉什么」✓ */
+const ctEdges = ctItems.map((x) => ({ name: x.name, refs: x.refs }));
+const ctClosure = G.ggbDeleteClosure("A", ctEdges);
+ok(ctClosure.indexOf("c") >= 0 && ctClosure.indexOf("D") >= 0, "★用板上依赖图算闭包：删 A → 连带 c、D");
+ok(ctClosure.indexOf("E") >= 0, "★传递：E → 依赖 c → 也一起掉");
+ok(ctClosure.indexOf("B") < 0, "B 不依赖 A → 不牵连");
+/* ⑤ 谁画的 / 被谁依赖（给别的功能用 ✓） */
+ok(CT.trackWho(ctItems, "c") === "user" && CT.trackWho(ctItems, "没有这个") === "", "「这块是谁画的」查得到 / 查不到有空值 ✓");
+ok(CT.trackDependents(ctItems, "A").length === 2 && CT.trackDependents(ctItems, "没有这个").length === 0, "「谁依赖它」直接子级 ✓");
 function pickKey() {
   const direct = String(process.env.LJ_AI_KEY || process.env.DEEPSEEK_API_KEY || "").trim();
   if (direct) return direct;

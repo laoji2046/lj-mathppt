@@ -535,15 +535,19 @@ export function ggbCheckResult(raw: unknown, objects: string[] = []): GgbCheck {
  */
 export function ggbRefsOf(cmd: unknown): string[] {
   const s = String(cmd == null ? "" : cmd).trim()
+  // 定义目标：行首 `X=…` / `f(x)=…` 里的 X —— 它在**整个表达式里**都不算引用 ✓
+  // （【v1734】修：原来只跳过行首那一次 ✗，`B=Segment(A,B)` 会把参数里的 B 也算成依赖 → 多一条边 ✗）
+  const dm = /^([A-Za-z_][A-Za-z0-9_']*)\s*(?:\([^)]*\))?\s*=/.exec(s)
+  const defName = dm ? dm[1] : ""
   const out: string[] = []
   const re = /[A-Za-z_][A-Za-z0-9_']*/g
   let m: RegExpExecArray | null
   while ((m = re.exec(s))) {
     const id = m[0]
     const rest = s.slice(m.index + id.length)
-    const isCall = /^\s*\(/.test(rest)                     // 函数名
-    const isDef = m.index === 0 && /^\s*(\([^)]*\))?\s*=/.test(rest)   // 定义目标（X=… 或 f(x)=…）
-    if (!isCall && !isDef && out.indexOf(id) < 0) out.push(id)
+    const isCall = /^\s*\(/.test(rest)          // 函数名（Segment / Circle / Distance …）
+    if (isCall || id === defName) continue      // 函数名 / 定义目标本身 ✗ 都不算引用
+    if (out.indexOf(id) < 0) out.push(id)
   }
   return out
 }
