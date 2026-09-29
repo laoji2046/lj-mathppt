@@ -204,6 +204,32 @@ export const FORMULA_LIBRARY: FormulaCategory[] = [
       { label: '基本不等式', note: 'a,b>0', latex: 'a+b\\ge 2\\sqrt{ab}\\ (a,b>0)' },
     ],
   },
+  /* 【v1747】老师实报：想写「联立 + 大括号方程组」这种**中文前缀配公式** ✓
+     写法纪律：中文一律写在 \text{} 里 ✓ —— 由 MathJax 自己排，中文与括号**天然垂直居中** ✓
+       （实测 .probe/_mathalign.cjs：这种写法偏 −3.2px ✓ 而"中文留在公式外面"会偏 +25.7px ✗ 贴底 ✓）
+     ⚠ 不要在 latex 里直接写裸中文 ✗ 也不要写 $ 定界符 ✗（库里统一是不带定界符的显示公式 ✓） */
+  {
+    key: 'deduce',
+    name: '联立与推导',
+    icon: '⟹',
+    accent: '#2f7d6b',
+    formulas: [
+      { label: '联立方程组', note: '中文前缀 + 大括号（两根）', latex: '\\text{联立}\\begin{cases} 2x+3y=1 \\\\ x-y=2 \\end{cases}' },
+      { label: '联立（三式）', note: '三根方程组', latex: '\\text{联立}\\begin{cases} a_1x+b_1y=c_1 \\\\ a_2x+b_2y=c_2 \\\\ a_3x+b_3y=c_3 \\end{cases}' },
+      { label: '由①②得', note: '推导起手', latex: '\\text{由①②得}\\quad 3x=3' },
+      { label: '代入消元', note: '把一式代入另一式', latex: '\\text{代入消元}\\quad 3x+(1-2x)=4' },
+      { label: '加减消元', note: '两式相加/相减', latex: '\\text{加减消元}\\quad (1)+(2)\\Rightarrow 3x=6' },
+      { label: '解得', note: '解出未知数', latex: '\\text{解得}\\quad x=1,\\ y=-1' },
+      { label: '即', note: '等价改写', latex: '\\text{即}\\quad (x-1)^2=0' },
+      { label: '所以', note: '结论起手', latex: '\\text{所以}\\quad x=1' },
+      { label: '因为…所以', note: '因果一行写完', latex: '\\text{因为}\\ a\\parallel b,\\ \\text{所以}\\ \\alpha=\\beta' },
+      { label: '同理可得', note: '对称情形', latex: '\\text{同理可得}\\quad y=-1' },
+      { label: '由题意', note: '从条件出发', latex: '\\text{由题意}\\quad x>0' },
+      { label: '综上所述', note: '收尾', latex: '\\text{综上所述}\\quad x\\in(0,1]' },
+      { label: '当且仅当', note: '充要条件', latex: 'a=b\\ \\text{当且仅当}\\ a-b=0' },
+      { label: '方程组的解集', note: '用集合写答案', latex: '\\text{解集为}\\ \\left\\{(x,y)\\mid x=1,\\ y=-1\\right\\}' },
+    ],
+  },
 ]
 /** 公式标签（跨类别筛选维度） */
 export const FORMULA_TAGS: string[] = ['高考', '重点', '易错', '基础', '常用', '几何', '导数', '数列']

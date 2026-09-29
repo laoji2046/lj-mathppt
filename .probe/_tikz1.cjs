@@ -2471,6 +2471,44 @@ ok(vdc65.indexOf("cons: cons.value.map") > 0 && vdc65.indexOf("cons.value = (s.c
 ok(vdc65.indexOf("cons[i - 1] ? ") > 0, "★受约束的点画成蓝点 ✓（一眼看出哪些是钉在边上的 ✓）");
 ok(vdc65.indexOf("cons.value.push(r.a != null") > 0, "★补点时把约束记下来 ✓");
 ok(vdc65.indexOf("cons.value.splice(i, 1)") > 0 && vdc65.indexOf("解除约束") > 0, "★删点同步删约束、删边解除约束 ✓");
+console.log("=== 用例 66：公式库写法纪律 + 混排大公式居中（v1747）===");
+const FL66 = loadBundled("../templates/formulaLibrary.ts", "_c66fl.cjs");
+const cats66 = FL66.FORMULA_LIBRARY || [];
+ok(Array.isArray(cats66) && cats66.length >= 9, "★公式库分类数 " + cats66.length + " ✓");
+const ded66 = cats66.find((c) => c.key === "deduce");
+ok(!!ded66 && (ded66.formulas || []).length >= 10, "★新分类「联立与推导」在 ✓（" + (ded66 ? ded66.formulas.length : 0) + " 条：中文前缀配公式 ✓）");
+const bad66a = [], bad66b = [], bad66c = [], bad66d = [], bad66e = [];
+const seen66 = new Map();      // label → latex（跨分类比对用 ✓）
+let n66 = 0;
+cats66.forEach((c) => {
+  const inCat66 = new Set();   // ① 同一分类内不许重名 ✓
+  (c.formulas || []).forEach((f) => {
+    n66++;
+    const L = String(f.latex || "");
+    if (L.indexOf("$") >= 0) bad66a.push(f.label);
+    const noEsc = L.replace(/\\[{}]/g, "");                 // \{ \} 是转义，不算配平
+    const op = (noEsc.match(/\{/g) || []).length, cl = (noEsc.match(/\}/g) || []).length;
+    if (op !== cl) bad66b.push(f.label + "(" + op + "/" + cl + ")");
+    const stripped = L.replace(/\\(?:text|mathrm|operatorname)\{[^{}]*\}/g, "");
+    if (/[\u4e00-\u9fff]/.test(stripped)) bad66c.push(f.label);   // 中文必须写在 \text{} 里 ✓
+    if (inCat66.has(f.label)) bad66d.push(c.name + "/" + f.label);
+    inCat66.add(f.label);
+    /* ② 同一个名字出现在**不同分类**里可以 ✓（「常用模板」本来就是跨章节精选 ✓）
+          但内容必须一致 ✓ —— 同名不同公式才是真隐患 ✗ */
+    if (seen66.has(f.label) && seen66.get(f.label) !== L) bad66e.push(f.label);
+    seen66.set(f.label, L);
+  });
+});
+ok(n66 >= 120, "★全库共 " + n66 + " 条 ✓");
+ok(bad66a.length === 0, "★没有 $ 定界符（库里统一不带 ✓ 由元素决定 ✓）" + (bad66a.length ? " ✗ " + bad66a.join("、") : ""));
+ok(bad66b.length === 0, "★每条 latex 的花括号都配平 ✓" + (bad66b.length ? " ✗ " + bad66b.join("、") : ""));
+ok(bad66c.length === 0, "★中文一律写在 \\text{} 里 ✓（这才是与括号垂直居中的写法 ✓ 实测偏 −3.2px ✓）" + (bad66c.length ? " ✗ " + bad66c.join("、") : ""));
+ok(bad66d.length === 0, "★**同一分类内**公式名不重复 ✓" + (bad66d.length ? " ✗ " + bad66d.join("、") : ""));
+ok(bad66e.length === 0, "★跨分类同名的是同一条公式（同名不同内容才是隐患 ✗）" + (bad66e.length ? " ✗ " + bad66e.join("、") : ""));
+ok((ded66.formulas || []).some((f) => String(f.latex).indexOf("\\text{联立}") >= 0), "★「联立」那条确实是 \\text{联立}\\begin{cases}… 写法 ✓");
+const css66 = fs.readFileSync(path.join(ROOT, "src", "styles", "main.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+ok(/\.fx-mixed-host mjx-container\[display="true"\]\s*\{[^}]*vertical-align/.test(css66), "★CSS：混排里的**大公式**垂直居中 ✓（老师实报「联立」贴底 ✗ v1747 修 ✓ 探针 _mathalign.cjs 真引擎量过 ✓）");
+ok(!/\.fx-mixed-host mjx-container\s*\{/.test(css66), "★没有把普通行内公式也改掉（基线对齐对小公式才是对的 ✓）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);

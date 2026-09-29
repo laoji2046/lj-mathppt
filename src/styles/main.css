@@ -186,6 +186,12 @@ body.is-panning {
 .fx-mixed-host mjx-container[display="true"] {
   display: inline-flex !important;
   margin: 0 !important;
+  /* 【v1747】垂直居中 ✓ —— 老师实报「联立{方程组}」里中文贴在括号**底部** ✗
+     MathJax 对行内公式用**基线对齐** ✓（小公式对 ✓）但 cases/大括号的高度远大于一行 ✗，
+     基线一对就把前面的中文压到底部 ✓。实测（.probe/_mathalign.cjs 真引擎量）：
+       基线对齐 中文中心 − 公式中心 = +25.7px ✗ → vertical-align:middle = −3px ✓
+     ⚠ 只加在 display 公式上 ✗ 不加给所有行内公式 ✓ —— 普通 \(^2\) 这种小公式基线对齐才是对的 ✓ */
+  vertical-align: middle !important;
 }
 /*
  * ⚠ 打印时必须解开「一屏高度」的锁 ✗。
