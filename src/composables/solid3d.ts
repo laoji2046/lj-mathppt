@@ -235,6 +235,22 @@ const SOLID_3D: Record<string, { verts: V3[]; faces: number[][] }> = {
     verts: [[0.0, 0.0, 0.0], [1.60, 0.0, 0.0], [2.00, 0.95, 0.0], [0.40, 0.95, 0.0], [1.00, 0.475, 1.80]],
     faces: [[3, 2, 1, 0], [0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]],
   },
+
+  /* 【v1752】教材**例 2 长方体的直观图**：长 3、宽 2（直观图里画成 1 ✓ 斜二测 k=0.5 ✓）、高 1.5 ✓
+     出处：高中数学讲义/scripts/plot_ch08_15.py fig_cuboid ✓（顶点与面表照抄 ✓）*/
+  cuboidOblique: {
+    verts: [[0, 0, 0], [3, 0, 0], [3, 1, 0], [0, 1, 0],
+      [0, 0, 1.5], [3, 0, 1.5], [3, 1, 1.5], [0, 1, 1.5]],
+    faces: [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [3, 2, 6, 7], [0, 3, 7, 4], [1, 2, 6, 5]],
+  },
+  /* 【v1752】教材图 8.1-8：**四棱台** ABCD-A′B′C′D′
+     出处：高中数学讲义/scripts/plot_ch08_14.py fig_pyramid_frustum 右半 ✓
+     ⚠ 顶面不是手抄的 ✗ 是按脚本公式现推的 ✓：zc=0.92、sc=(S.z−zc)/S.z = 0.488889、顶面点 = S + sc·(底面点 − S) ✓ */
+  pyraFrustum: {
+    verts: [[0, 0, 0], [1.6, 0, 0], [2, 0.95, 0], [0.4, 0.95, 0],
+      [0.511111, 0.242778, 0.92], [1.293333, 0.242778, 0.92], [1.488889, 0.707222, 0.92], [0.706667, 0.707222, 0.92]],
+    faces: [[3, 2, 1, 0], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]],
+  },
 }
 
 export const SOLID_KINDS = ['cube', 'cubeOblique', 'cuboid', 'cuboidOblique', 'pyramid', 'pyramidOblique', 'prism', 'prismOblique', 'tetrahedron', 'pyraFrustum', 'octahedron', 'hexPrism', 'obliquePrism', 'triFrustum', 'hexPrismOblique',

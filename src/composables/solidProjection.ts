@@ -43,9 +43,32 @@ export function faceNormal(verts: V3[], f: Face): V3 {
   ]
 }
 
-/** 这个面朝向观察者吗 ✓（讲义：dot(normal, W) > 1e-9 ✓） */
-export function faceVisible(verts: V3[], f: Face): boolean {
+/**
+ * 面的**外法向** ✓（与绕向无关 ✓）
+ * ⚠ 讲义 plot_ch08_14.py 直接用 `cross(b−a, c−a)` 点乘视线 ✗ —— 那只在各面**绕向统一**时才对 ✓；
+ *   它自己另一份 cabinet.py 用的是 `face_normal(verts, f, center)` ✓（拿重心把法向拨向外 ✓）。
+ *   实测：`plot_ch08_15.py` 那张长方体面表绕向不统一 ✗ → 底面会被判成「可见」✗（探针逮到的 ✓）。
+ *   这里统一走**重心法** ✓（更稳 ✓ 也更贴讲义里更细的那份 ✓）。
+ */
+export function faceNormalOut(verts: V3[], f: Face, center?: V3): V3 {
   const n = faceNormal(verts, f)
+  const c = center || centroid(verts)
+  const a = verts[f[0]]
+  const inward = n[0] * (c[0] - a[0]) + n[1] * (c[1] - a[1]) + n[2] * (c[2] - a[2]) > 0
+  return inward ? [-n[0], -n[1], -n[2]] : n
+}
+
+/** 顶点重心（判外法向用 ✓） */
+export function centroid(verts: V3[]): V3 {
+  const n = Math.max(1, verts.length)
+  let x = 0, y = 0, z = 0
+  for (const v of verts) { x += v[0]; y += v[1]; z += v[2] }
+  return [x / n, y / n, z / n]
+}
+
+/** 这个面朝向观察者吗 ✓（外法向 · W > 1e-9 ✓ 与绕向无关 ✓） */
+export function faceVisible(verts: V3[], f: Face): boolean {
+  const n = faceNormalOut(verts, f)
   return n[0] * VIEW_W[0] + n[1] * VIEW_W[1] + n[2] * VIEW_W[2] > 1e-9
 }
 
@@ -81,9 +104,12 @@ export function solidTo2d(verts: V3[], faces: Face[], pad = 0.05): Solid2d {
   const inner = 1 - pad * 2
   const points: number[] = []
   for (const p of raw) {
+    /* ⚠ y 要**翻一次** ✗：讲义是 matplotlib（y 向上 ✓），我们是 SVG（y 向下 ✓）——
+       不翻的话 z（朝上）会被画成朝下 ✗（四棱锥的顶点会跑到下面 ✓ 棱台顶面跑到下面 ✓ 探针逮到的 ✓） */
+    const fy = 1 - (p[1] - y0) / h
     points.push(
       +(pad + ((p[0] - x0) / w) * inner).toFixed(4),
-      +(pad + ((p[1] - y0) / h) * inner).toFixed(4),
+      +(pad + fy * inner).toFixed(4),
     )
   }
   /* 收集边并判虚实 ✓ */

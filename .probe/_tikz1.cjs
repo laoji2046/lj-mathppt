@@ -2606,6 +2606,42 @@ ok(S3_70.solidVerts("cube", 300, 200).length === 16 && S3_70.solidEdges("cube").
   "★cube（正面真形那套）没被动 ✓（仍 8 顶点 12 条边 ✓）");
 ok(S3_70.solidVerts("hexPrism", 300, 200).length === 24 && S3_70.solidEdges("hexPrism").length === 18,
   "★hexPrism（非斜二测那个）也照旧 ✓（18 条边 ✓）");
+console.log("=== 用例 71：继续搬讲义（长方体例2 + 四棱台）（v1752）===");
+const SP71 = loadBundled("solidProjection.ts", "_c71sp.cjs");
+const S3_71 = loadBundled("solid3d.ts", "_c71s3.cjs");
+/* ① 斜二测的"照写"特征：宽方向长度减半 ✓（教材例2：宽 2 cm 画成 1 cm ✓） */
+const dy71 = SP71.oblique([0, 1, 0]);
+const len71 = Math.hypot(dy71[0], dy71[1]);
+ok(Math.abs(len71 - 0.5) < 1e-9, "★斜二测下 y（宽）方向长度正好减半 ✓（实测 " + len71.toFixed(4) + " = 0.5 ✓ 正是教材例 2「宽 2 画成 1」✓）");
+ok(Math.abs(dy71[0] - dy71[1]) < 1e-9 && dy71[0] > 0, "★而且是 45° 斜向 ✓（x、y 分量相等 ✓ 与 x 轴成 45° ✓）");
+/* ② 长方体（教材例2：长3 宽1(直观图) 高1.5 ✓） */
+const VC71 = S3_71.solidVerts("cuboidOblique", 300, 200);
+const EC71 = S3_71.solidEdges("cuboidOblique");
+ok(VC71.length === 16 && EC71.length === 12, "★cuboidOblique = 长方体 ✓（8 顶点 16 个数 ✓ 12 条边 ✓ 实测 " + VC71.length + "/" + EC71.length + "）");
+const dC71 = EC71.filter((e) => e[2] === 1).length;
+ok(dC71 >= 3 && dC71 <= 6, "★长方体虚线边 " + dC71 + " 条 ✓（背面那 3 条可见性为假 ✓ 全实/全虚都不对 ✗）");
+/* ③ 四棱台（教材图 8.1-8 ✓ 顶面比底面小 ✓ 而且在上方 ✓） */
+const VF71 = S3_71.solidVerts("pyraFrustum", 300, 200);
+const EF71 = S3_71.solidEdges("pyraFrustum");
+ok(VF71.length === 16 && EF71.length === 12, "★pyraFrustum = 四棱台 ✓（8 顶点 ✓ 12 条边 ✓ 实测 " + VF71.length + "/" + EF71.length + "）");
+const xs71 = [0, 2, 4, 6].map((i) => VF71[i]);
+const xsTop71 = [8, 10, 12, 14].map((i) => VF71[i]);
+const ysBot71 = [1, 3, 5, 7].map((i) => VF71[i]);
+const ysTop71 = [9, 11, 13, 15].map((i) => VF71[i]);
+const wBot = Math.max(...xs71) - Math.min(...xs71);
+const wTop = Math.max(...xsTop71) - Math.min(...xsTop71);
+ok(wTop > 0 && wTop < wBot * 0.75, "★顶面**比底面小** ✓（顶宽 " + wTop.toFixed(1) + " < 底宽 " + wBot.toFixed(1) + " × 0.75 ✓ 棱台就该这样 ✓）");
+ok(Math.max(...ysTop71) < Math.min(...ysBot71), "★顶面在**上方** ✓（屏幕 y 更小 ✓ 实测顶 " + Math.max(...ysTop71).toFixed(1) + " < 底 " + Math.min(...ysBot71).toFixed(1) + "）");
+const dF71 = EF71.filter((e) => e[2] === 1).length;
+ok(dF71 >= 2 && dF71 <= 6, "★四棱台虚线边 " + dF71 + " 条 ✓（底面背面与看不见的侧棱 ✓）");
+/* ④ 没误伤：非斜二测那套照旧 ✓ */
+ok(S3_71.solidVerts("cuboid", 300, 200).length === 16 && S3_71.solidEdges("cuboid").length === 12, "★cuboid（正面真形那套）没被动 ✓");
+ok(S3_71.solidVerts("pyramid", 300, 200).length === 10 && S3_71.solidEdges("pyramid").length === 8, "★pyramid 也照旧 ✓（5 顶点 8 边 ✓）");
+/* ⑤ SOLID_3D 表里现在有 6 个讲义重绘的立体 ✓ */
+const src71 = fs.readFileSync(path.join(ROOT, "src", "composables", "solid3d.ts"), "utf8");
+const n3d71 = (src71.match(/^\s{2}\w+Oblique: \{|^\s{2}pyraFrustum: \{|^\s{2}obliquePrism: \{/gm) || []).length;
+ok(n3d71 >= 6, "★SOLID_3D 里已有 " + n3d71 + " 个讲义重绘的立体 ✓（六棱柱/斜三棱柱/平行六面体/四棱锥/长方体/四棱台 ✓）");
+ok(src71.indexOf("plot_ch08_15.py fig_cuboid") > 0 && src71.indexOf("plot_ch08_14.py fig_pyramid_frustum 右半") > 0, "★源码注释里写明了出处 ✓（可追溯 ✓）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);
