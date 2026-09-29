@@ -85,13 +85,24 @@ export function ggbSolveSystem(): string {
     "  别都堆在原点附近，也别编与题目矛盾的数；",
     "· 要换颜色/线宽这类只能在 JS 里做的事就**别管**（这里只跑指令）；",
     "· tool 只能从下面这个清单里选（认不出的会被忽略）：" + ggbToolMenu() + "。",
+    "· **卡住或者要核对的时候，插一条「只读」读数步**（【v1731】只量不画 ✓ 不会往画布上添东西 ✓）：",
+    "  tool 写 query，cmd 写一条**只读表达式**：Distance(A,B)、Angle(A,B,C)、Area(p)、Radius(c)、",
+    "  Center(c)、Slope(l)、Midpoint(A,B)、x(A)、y(A) —— 只能用这些只读函数 + 画布上已有的对象 ✗ 别的会被拒掉；",
+    "  量出来的**精确值会回到你手里**，再据此往下画或者核对（这一步不切工具、不画图 ✓）。",
     "输出格式（**只输出 JSON**，别加解释、别包代码块）：",
     "{\"solution\":\"解题过程（可用换行与 $公式$）\",\"steps\":[{\"tool\":\"point\",\"cmd\":\"A=(0,0)\",\"say\":\"建点 A\"},{\"tool\":\"circle\",\"cmd\":\"Circle(A,B)\",\"say\":\"以 A 为心过 B 作圆\"}]}",
     "steps 按作图顺序排；一步只做一件事（先切工具、再一条指令）；题目里用不到的工具别硬凑。",
   ].join(NL2)
 }
 
-export interface GgbSolveStep { tool: string; mode: number; cmd: string; say: string }
+export interface GgbSolveStep {
+  tool: string
+  mode: number
+  cmd: string
+  say: string
+  /** 【v1731】读数步：只量不画（走临时对象，量完立刻删 ✓） */
+  query?: boolean
+}
 export interface GgbSolvePlan { solution: string; steps: GgbSolveStep[]; notes: string[]; raw: string }
 
 /** 从模型回答里抠出 JSON（允许包代码块 / 前后有废话） */
@@ -140,14 +151,9 @@ export function ggbSolvePlan(raw: unknown): GgbSolvePlan {
   const steps: GgbSolveStep[] = []
   for (const it of rawSteps) {
     if (steps.length >= 60) { notes.push("步骤超过 60 步，多的没收"); break }
-    const o = (it && typeof it === "object" ? it : {}) as Record<string, unknown>
-    const cmd = String(o.cmd == null ? "" : o.cmd).trim().slice(0, 300)
-    const say = String(o.say == null ? "" : o.say).trim().slice(0, 60)
-    const toolRaw = String(o.tool == null ? "" : o.tool).trim()
-    const t = ggbToolOf(toolRaw)
-    if (!cmd) { if (toolRaw) notes.push("这一步只有工具没有指令，已跳过：" + toolRaw); continue }
-    if (toolRaw && !t) notes.push("认不出的工具「" + toolRaw + "」→ 这一步不切工具，指令照跑")
-    steps.push({ tool: t ? t.key : "", mode: t ? t.mode : -1, cmd, say })
+    const c = coerceStep(it)   // 【v1731】读一步 / 作图步 统一在这里认 ✓（与核对轮共用 ✓）
+    if (c.note) notes.push(c.note)
+    if (c.step) steps.push(c.step)
   }
   if (!steps.length && !solution) solution = text.slice(0, 4000)
   return { solution: solution.slice(0, 4000), steps, notes, raw: text }
@@ -287,11 +293,11 @@ function balanced(s: string): boolean {
  *     （只认「单个大写字母（可带数字/下标/撇）」这种点名 ✓ —— 免得把 AB、Segment 也当成引用 ✗ 误报 ✗）
  *  只报不改（不拦执行 ✓）—— 真正的修复交给「回灌自愈」✓
  */
-export function ggbValidatePlan(steps: GgbSolveStep[]): GgbPlanCheck {
+export function ggbValidatePlan(steps: GgbSolveStep[], objects: string[] = []): GgbPlanCheck {
   const out: GgbSolveStep[] = []
   const issues: string[] = []
   const fixes: string[] = []
-  const defined = new Set<string>()
+  const defined = new Set<string>(objects || [])   // 【v1731】画布上已存在的对象先算「定义过」✓ 不再误报依赖顺序 ✓
   for (const s of steps) {
     if (out.length >= 60) { issues.push("步骤超过 60 步，多的没收"); break }
     const half = halfWidth(String(s.cmd || "").trim()).replace(/;+$/, "")
@@ -311,7 +317,12 @@ export function ggbValidatePlan(steps: GgbSolveStep[]): GgbPlanCheck {
         if (issues.some((x) => x.indexOf("用到还没定义的 " + id) >= 0)) continue
         issues.push("第 " + (out.length + 1) + " 步用到还没定义的 " + id + "（前面没有 " + id + "=… 的定义）")
       }
-      out.push({ tool: s.tool, mode: s.mode, cmd: one, say: s.say })
+      // 【v1731】读一步：表达式必须是只读、且引用的对象得在画布上 ✓
+      if (s.query) {
+        const q = ggbReadPlan(one, objects || [])
+        if (!q.ok) issues.push("读数表达式不合法（" + (q.why || "认不出") + "）：" + one.slice(0, 40))
+      }
+      out.push({ tool: s.tool, mode: s.mode, cmd: one, say: s.say, query: s.query })
     }
   }
   return { steps: out, issues, fixes }
@@ -341,4 +352,160 @@ export function ggbRepairUser(failed: { cmd: string; err: string }[], objects: s
   return "【题干】" + NL2 + String(briefText || "").trim() + NL2 + NL2 +
     "【绘图板已有对象】" + NL2 + ((objects || []).slice(0, 80).join("、") || "（还没有对象）") + NL2 + NL2 +
     "【出错的步骤】" + NL2 + (fl || "（无）")
+}
+/* ---------------- 【v1731】读数（query）：把画布上的**精确值**交回模型 ----------------
+ * 依据（Draw2Think, arXiv:2605.20743）：模型侧最值钱的一层是 **query 读回** ——
+ *   "readout is part of reasoning"：把引擎的精确状态变成可回答的证据；
+ *   拿掉读回通道，模型就会走"内部推理 / 抄近路 / 无锚定作答"三条逃逸路线。
+ * 这里做两件事：
+ *   ① 模型可以**主动**插只读步骤（tool: query）问「AB 多长 / 这个角多少度 / 交点在哪 ✓」
+ *   ② 跑完**自动量一批**（点坐标 / 线段长 / 半径 / 面积 ✓）交给模型自查「解题与图形是否自洽 ✓」
+ * 实现：临时对象量一下 → 立刻删掉 ✓ 画布不留垃圾 ✓
+ */
+
+/** 【v1731】读数用的临时对象名（量完立刻删 ✓ 真要撞名也无所谓：它是临时值 ✓） */
+export const GGB_QUERY_TMP = "ljqTemp"
+
+/** 只读函数白名单：用它们量的东西**不会往画布上添对象** ✓（别的函数一律拒 ✗ 免得悄悄画东西 ✓） */
+export const GGB_READ_FNS = [
+  "Distance", "Length", "Angle", "Area", "Radius", "Circumference", "Perimeter", "Center",
+  "Slope", "Midpoint", "Intersect", "x", "y", "abs", "sqrt", "sin", "cos", "tan", "atan", "pi", "π", "max", "min",
+]
+
+/** 【v1731】是不是"读一步"（tool 写 query / 读数 / 测量 / query_* 都认 ✓） */
+export function isQueryTool(name: unknown): boolean {
+  const s = String(name == null ? "" : name).trim().toLowerCase()
+  if (!s) return false
+  if (s === "query" || s === "read" || s === "measure" || s === "读数" || s === "测量" || s === "量一下") return true
+  return s.indexOf("query_") === 0 || s.indexOf("read_") === 0 || s.indexOf("measure_") === 0
+}
+
+/** 【v1731】只读表达式 → 临时赋值指令（量完就删 ✓） */
+export function ggbQueryCmd(expr: unknown): string {
+  return GGB_QUERY_TMP + "=" + String(expr == null ? "" : expr).trim()
+}
+
+/**
+ * 【v1731】校验一条读数表达式（纯函数 ✓ 探针盯着）：
+ *  · 不许赋值（`=` 一律不行 ✗ —— 那是画东西，不是读数 ✓）
+ *  · 函数必须在**只读白名单**里 ✓
+ *  · 引用的对象名必须在**画布上已经存在**（objects 传进来 ✓）
+ * 不合法就给出 why，调用方写进日志 ✓（不静默吞 ✗）
+ */
+export function ggbReadPlan(cmd: unknown, objects: string[] = []): { ok: boolean; expr: string; why?: string } {
+  const expr = String(cmd == null ? "" : cmd).trim().slice(0, 200)
+  if (!expr) return { ok: false, expr, why: "空的读数表达式" }
+  if (expr.indexOf("=") >= 0) return { ok: false, expr, why: "读数不能是赋值（把 = 去掉 ✓）" }
+  const ids = expr.match(/[A-Za-z_][A-Za-z0-9_']*/g) || []
+  const known = new Set(objects || [])
+  for (const id of ids) {
+    if (GGB_READ_FNS.indexOf(id) >= 0) continue
+    if (known.has(id)) continue
+    return { ok: false, expr, why: "认不出「" + id + "」（只能用只读函数或画布上已有的对象 ✓）" }
+  }
+  return { ok: true, expr }
+}
+
+/**
+ * 【v1731】一条原始条目 → 一步（ggbSolvePlan 与 ggbCheckResult 共用 ✓）
+ *  · 读一步 → tool 记 query、query=true ✓（不切工具、不 evalCommand 作图 ✓）
+ *  · 认不出工具名 → 不切工具但指令照跑 + note（保持 v1711 的老口径 ✓）
+ */
+function coerceStep(it: unknown): { step: GgbSolveStep | null; note?: string } {
+  const o = (it && typeof it === "object" ? it : {}) as Record<string, unknown>
+  const cmd = String(o.cmd == null ? "" : o.cmd).trim().slice(0, 300)
+  const say = String(o.say == null ? "" : o.say).trim().slice(0, 60)
+  const toolRaw = String(o.tool == null ? "" : o.tool).trim()
+  if (!cmd) return { step: null, note: toolRaw ? "这一步只有工具没有指令，已跳过：" + toolRaw : undefined }
+  if (isQueryTool(toolRaw)) return { step: { tool: "query", mode: -1, cmd, say, query: true } }
+  const t = ggbToolOf(toolRaw)
+  return {
+    step: { tool: t ? t.key : "", mode: t ? t.mode : -1, cmd, say },
+    note: toolRaw && !t ? "认不出的工具「" + toolRaw + "」→ 这一步不切工具，指令照跑" : undefined,
+  }
+}
+
+/** 【v1731】一条读数 */
+export interface GgbReadout { expr: string; value: string; ok: boolean; err?: string }
+
+/** 【v1731】读数表 → 给模型看的一段 ✓ */
+export function ggbReadoutText(rows: GgbReadout[]): string {
+  const NL2 = String.fromCharCode(10)
+  const list = (rows || []).slice(0, 40)
+  if (!list.length) return "（这次没有读数）"
+  return list.map((r) => "- " + r.expr + " = " + (r.ok ? r.value : "取不到" + (r.err ? "（" + r.err + "）" : ""))).join(NL2)
+}
+
+/**
+ * 【v1731】**自动读数**：从作图步骤里推出"该量什么"（纯函数 ✓ 探针盯着）
+ *  —— 模型没主动量也能核对 ✓ 而且量的是它自己刚画的东西 ✓
+ *   · `X=(a,b)`        → x(X)、y(X)
+ *   · `AB=Segment(A,B)`→ Distance(A,B)（Line 同理）
+ *   · `c=Circle(...)`  → Radius(c)
+ *   · `poly=Polygon(…)`→ Area(poly)
+ *  上限 max 条（省 token ✓）
+ */
+export function ggbAutoQueries(steps: GgbSolveStep[], max = 12): string[] {
+  const out: string[] = []
+  const push = (e: string) => { if (out.length < max && out.indexOf(e) < 0) out.push(e) }
+  for (const s of steps || []) {
+    if (s.query) continue
+    const c = String(s.cmd || "").trim()
+    let m = /^([A-Za-z][A-Za-z0-9_']*)\s*=\s*\(/.exec(c)
+    if (m) { push("x(" + m[1] + ")"); push("y(" + m[1] + ")"); continue }
+    m = /^([A-Za-z][A-Za-z0-9_']*)\s*=\s*(?:Segment|Line|Ray)\s*\(\s*([^,()]+?)\s*,\s*([^,()]+?)\s*\)/.exec(c)
+    if (m) { push("Distance(" + m[2] + "," + m[3] + ")"); continue }
+    m = /^([A-Za-z][A-Za-z0-9_']*)\s*=\s*Circle\s*\(/.exec(c)
+    if (m) { push("Radius(" + m[1] + ")"); continue }
+    m = /^([A-Za-z][A-Za-z0-9_']*)\s*=\s*Polygon\s*\(/.exec(c)
+    if (m) { push("Area(" + m[1] + ")"); continue }
+  }
+  return out
+}
+
+/** 【v1731】核对轮的 system：**用读数核对解题与图形是否自洽** ✓ */
+export function ggbCheckSystem(): string {
+  const NL2 = String.fromCharCode(10)
+  return [
+    "你是几何作图的**核对员**：老师刚照你给的步骤在 GeoGebra 上画完图，画布会给出**精确读数**。",
+    "你要做一件事：用这些精确读数核对**解题过程与图形是否自洽**（长度 / 角度 / 坐标 / 面积对得上吗 ✓）。",
+    "铁律：",
+    "· 只依据**读数与题干**判断 ✗ 别凭感觉；读数与题干冲突时以**题干**为准 ✓ 并说清冲突在哪一步；",
+    "· verdict = ok：note 一句话说明依据 ✓；verdict = mismatch：note 要写清**哪里不对、该改成什么** ✓；",
+    "· 信息不够（读数太少 / 题干不清）就 verdict = unsure ✗ 别硬判；",
+    "· 要改图就给 steps（GeoGebra 原生指令 ✓ **只给要改的那几步** ✓ 不用改就给空数组 ✓）。",
+    "输出格式（**只输出 JSON**，别加解释、别包代码块）：",
+    "{\"verdict\":\"ok|mismatch|unsure\",\"note\":\"一句话结论（说清依据）\",\"steps\":[{\"tool\":\"point\",\"cmd\":\"A=(0,0)\",\"say\":\"改点 A\"}]}",
+  ].join(NL2)
+}
+
+/** 【v1731】核对轮的 user 内容：题干 + 解题过程 + 作图步骤 + **精确读数** ✓ */
+export function ggbCheckUser(briefText: string, solutionText: string, cmds: string[], readouts: GgbReadout[]): string {
+  const NL2 = String.fromCharCode(10)
+  return "【题干】" + NL2 + String(briefText || "").trim() + NL2 + NL2 +
+    "【你的解题过程】" + NL2 + String(solutionText || "").trim() + NL2 + NL2 +
+    "【画布上执行的作图步骤】" + NL2 + (((cmds || []).map((c) => "- " + c).join(NL2)) || "（无）") + NL2 + NL2 +
+    "【画布精确读数】" + NL2 + ggbReadoutText(readouts)
+}
+
+/** 【v1731】核对结果 */
+export interface GgbCheck { verdict: "ok" | "mismatch" | "unsure"; note: string; steps: GgbSolveStep[] }
+
+/** 【v1731】核对回答 → 结论（纯函数 ✓ 容错：JSON 抠取 / 认不出的 verdict 归 unsure ✓） */
+export function ggbCheckResult(raw: unknown, objects: string[] = []): GgbCheck {
+  const text = String(raw == null ? "" : raw)
+  const obj = pickJson(text) as { verdict?: unknown; note?: unknown; steps?: unknown } | null
+  if (!obj) return { verdict: "unsure", note: text.trim().slice(0, 600) || "（模型没给出可解析的核对结果）", steps: [] }
+  const v = String(obj.verdict == null ? "" : obj.verdict).trim().toLowerCase()
+  const verdict: GgbCheck["verdict"] = v === "ok" || v === "mismatch" || v === "unsure" ? v : "unsure"
+  const steps: GgbSolveStep[] = []
+  for (const it of (Array.isArray(obj.steps) ? obj.steps : [])) {
+    if (steps.length >= 20) break
+    const c = coerceStep(it)
+    if (!c.step) continue
+    // 修正步里的读数也要合法（不然又是一次白跑 ✗）
+    if (c.step.query && !ggbReadPlan(c.step.cmd, objects).ok) continue
+    steps.push(c.step)
+  }
+  return { verdict, note: String(obj.note == null ? "" : obj.note).trim().slice(0, 800), steps }
 }

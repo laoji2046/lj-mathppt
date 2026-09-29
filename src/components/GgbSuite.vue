@@ -5,7 +5,7 @@ import type { SlideElement } from '@/types'
 import { useDeckStore } from '@/stores/deck'
 import { hasLocalEngine, loadGeoGebra } from '@/composables/useGeoGebra'
 import { describeToCommands } from '@/composables/ggbAI'
-import { ggbBriefText, ggbReadBrief, ggbReadSystem, ggbRepairSystem, ggbRepairUser, ggbSolvePlan, ggbSolveSystem, ggbSolveUser, ggbToolOf, ggbValidatePlan, ggbVisionGuard, type GgbSolveStep } from '@/composables/ggbSolve'
+import { GGB_QUERY_TMP, ggbAutoQueries, ggbBriefText, ggbCheckResult, ggbCheckSystem, ggbCheckUser, ggbQueryCmd, ggbReadBrief, ggbReadPlan, ggbReadSystem, ggbRepairSystem, ggbRepairUser, ggbSolvePlan, ggbSolveSystem, ggbSolveUser, ggbToolOf, ggbValidatePlan, ggbVisionGuard, type GgbReadout, type GgbSolveStep } from '@/composables/ggbSolve'
 import { settingsOpen } from '@/ui/menus'
 import { loadImg, prepImageEl } from '@/composables/imgPrep'
 import { scanFromResult, scanToBrief } from '@/composables/figScan'
@@ -190,6 +190,47 @@ const solveShot = ref(false)
 const solveFile = ref<HTMLInputElement | null>(null)
 const MAX_SOLVE_IMG = 3
 
+/* ---------------- 【v1731】读数（query）：把画布上的**精确值**交回模型 ----------------
+ * 依据（Draw2Think, arXiv:2605.20743）：最值钱的一层是 **query 读回** ——
+ *   "readout is part of reasoning"：把引擎的精确状态变成可回答的证据 ✓
+ *   ① 模型可以主动插只读步骤（tool: query）问「AB 多长 / 这个角多少度」✓
+ *   ② 跑完**自动量一批**（点坐标 / 线段长 / 半径 / 面积）→ 交给模型自查「解题与图形是否自洽」✓
+ * 实现：临时对象量一下 → 立刻删掉 ✓ 画布不留垃圾 ✓
+ */
+const checkNote = ref("")
+const checkOn = ref(true)
+
+/** 画布现在的对象名（读数要拿它自查"这个名字认不认" ✓） */
+function liveObjects(a: any): string[] {
+  try { return typeof a.getAllObjectNames === "function" ? (a.getAllObjectNames() as string[]) : [] } catch { return [] }
+}
+
+/** 【v1731】量一组只读表达式 → 读数表 ✓（临时对象 + 立刻删除 ✓ 单条失败不影响其它 ✓） */
+async function runQueryExprs(a: any, exprs: string[], say: string): Promise<GgbReadout[]> {
+  const out: GgbReadout[] = []
+  for (const raw of exprs) {
+    const q = ggbReadPlan(raw, liveObjects(a))
+    if (!q.ok) {
+      out.push({ expr: String(raw || ""), value: "", ok: false, err: q.why })
+      solveLog.value.push("读数 ✗ " + String(raw || "") + "（" + (q.why || "不合法") + "）")
+      continue
+    }
+    try {
+      a.evalCommand(ggbQueryCmd(q.expr))
+      const v = typeof a.getValue === "function" ? Number(a.getValue(GGB_QUERY_TMP)) : NaN
+      const val = Number.isFinite(v) ? String(Math.round(v * 1e6) / 1e6) : ""
+      out.push({ expr: q.expr, value: val, ok: !!val })
+      solveLog.value.push("读数 " + q.expr + " = " + (val || "（取不到）") + (say ? "　// " + say : ""))
+    } catch (e) {
+      const msg = String((e as Error)?.message || e)
+      out.push({ expr: q.expr, value: "", ok: false, err: msg })
+      solveLog.value.push("读数 ✗ " + q.expr + "：" + msg)
+    } finally {
+      try { if (typeof a.deleteObject === "function") a.deleteObject(GGB_QUERY_TMP) } catch { /* 删不掉也无所谓：下次同名覆盖 ✓ */ }
+    }
+  }
+  return out
+}
 /* ---------------- 【v1729】识图解题三段式：① 读图（只转写）→ ② 校对（可编辑）→ ③ 解题作图（校验 + 自愈）-------
  * 为什么拆：原来一步里让模型同时「读图 + 推理 + 写 GeoGebra 语法」✗ —— 三件事捆一起，
  *   看错了 / 算错了 / 写错了根本分不清 ✓ 现在：读图只转写（不猜、不解题 ✓）→ 老师校对文字（最便宜的纠错点 ✓）
@@ -252,9 +293,15 @@ async function readProblemInner() {
 function readProblem() { quietErrors(readProblemInner) }
 
 /** 【v1729】跑一串步骤：切工具 → evalCommand；失败收进 fails ✓ 返回成功条数 */
-async function runSolveSteps(a: any, steps: GgbSolveStep[], fails: { cmd: string; err: string }[]): Promise<number> {
+async function runSolveSteps(a: any, steps: GgbSolveStep[], fails: { cmd: string; err: string }[], readouts?: GgbReadout[]): Promise<number> {
   let ok = 0
   for (const s of steps) {
+    // 【v1731】读一步：量一下（临时对象 → 立刻删 ✓ 不留垃圾 ✓ 不切工具 ✓）
+    if (s.query) {
+      const rs = await runQueryExprs(a, [s.cmd], s.say)
+      if (readouts) for (const r of rs) readouts.push(r)
+      continue
+    }
     if (s.tool) {
       try { a.setMode(s.mode); solveLog.value.push("切换工具：" + (ggbToolOf(s.tool)?.label || s.tool)) } catch { /* 切不动就跳过 ✓ */ }
       await new Promise((res) => window.setTimeout(res, 140))
@@ -408,30 +455,55 @@ async function solveAndDrawInner() {
     for (const n of plan.notes) solveLog.value.push("· " + n)
     if (!plan.steps.length) { toaster("它没给出作图步骤 —— 解题过程放在下面了 ✓"); return }
     // 【v1729】执行前静态校验：全角标点 / 一行多条 / 括号配平 / 依赖顺序（纯函数 ✓）
-    const chk = ggbValidatePlan(plan.steps)
+    const chk = ggbValidatePlan(plan.steps, liveObjects(a))   // 【v1731】画布上已有的对象一起传进去 ✓ 不再误报依赖顺序 ✓
     if (chk.fixes.length) solveLog.value.push("· 执行前自动修正 " + chk.fixes.length + " 处：" + chk.fixes.slice(0, 4).join("；"))
     for (const it of chk.issues) solveLog.value.push("· ⚠ " + it)
     const beforeDefs = defSnapshot()
     const prev = lastCreated.value.slice()
     const fails: { cmd: string; err: string }[] = []
-    const ok = await runSolveSteps(a, chk.steps, fails)
+    const readouts: GgbReadout[] = []   // 【v1731】读数（模型主动问的 + 跑完自动量的 ✓）
+    const ok = await runSolveSteps(a, chk.steps, fails, readouts)
     // 【v1729】自愈：只把**报错的那几步**回灌给模型改一轮 ✓（默认勾上 ✓）
     let fixed = 0
     if (fails.length && repairOn.value) {
       try {
-        const objs = (typeof a.getAllObjectNames === "function" ? (a.getAllObjectNames() as string[]) : []).slice(0, 80)
+        const objs = liveObjects(a).slice(0, 80)
         const rt = await solveChat({ system: ggbRepairSystem(), content: ggbRepairUser(fails, objs, brief), model: "deepseek-chat", baseUrl: "" })
-        const rp = ggbValidatePlan(ggbSolvePlan(rt).steps)
+        const rp = ggbValidatePlan(ggbSolvePlan(rt).steps, objs)
         if (rp.steps.length) {
           solveLog.value.push("· 自愈：模型给了 " + rp.steps.length + " 步修正，重跑一遍 ✓")
-          fixed = await runSolveSteps(a, rp.steps, [])
+          fixed = await runSolveSteps(a, rp.steps, [], readouts)
         } else solveLog.value.push("· 自愈：模型没给出可用的修正步骤")
       } catch (e) { solveLog.value.push("· 自愈没跑成：" + String((e as Error)?.message || e)) }
     }
     finishRun(beforeDefs, prev)
     const miss = missingObjects(a, chk.steps)
     if (miss.length) solveLog.value.push("· ⚠ 有 " + miss.length + " 个对象没建出来：" + miss.slice(0, 6).join("、"))
-    toaster("🤖 已解题并作图：" + ok + "/" + chk.steps.length + " 条" + (fails.length ? "，失败 " + fails.length + " 步" : "") + (fixed ? "，自愈修好 " + fixed + " 步" : "") + " ✓")
+    // 【v1731】自动读数 + 核对轮：把**画布上的精确值**交回模型自查（读数本身就是证据 ✓）
+    checkNote.value = ""
+    const autoQ = ggbAutoQueries(chk.steps)
+    if (autoQ.length) {
+      const ar = await runQueryExprs(a, autoQ, "自动读数")
+      for (const r of ar) readouts.push(r)
+    }
+    if (readouts.length) solveLog.value.push("· 读数 " + readouts.length + " 条（" + readouts.filter((r) => r.ok).length + " 条取到值）")
+    if (checkOn.value && readouts.length) {
+      try {
+        const ctext = await solveChat({ system: ggbCheckSystem(), content: ggbCheckUser(brief, solution.value, chk.steps.map((x) => x.cmd), readouts), model: "deepseek-chat", baseUrl: "" })
+        const ck = ggbCheckResult(ctext, liveObjects(a))
+        checkNote.value = (ck.verdict === "mismatch" ? "⚠ 不一致：" : ck.verdict === "ok" ? "✓ 自洽：" : "？ 拿不准：") + (ck.note || "（没写说明）")
+        solveLog.value.push("· 核对：" + checkNote.value)
+        if (ck.verdict === "mismatch" && ck.steps.length && repairOn.value) {
+          const b2 = defSnapshot()
+          const p2 = lastCreated.value.slice()
+          const f2: { cmd: string; err: string }[] = []
+          const ok2 = await runSolveSteps(a, ck.steps, f2, [])
+          finishRun(b2, p2)
+          solveLog.value.push("· 核对后改了 " + ok2 + "/" + ck.steps.length + " 步" + (f2.length ? "（失败 " + f2.length + " 步）" : "") + " ✓")
+        }
+      } catch (e) { solveLog.value.push("· 核对没跑成：" + String((e as Error)?.message || e)) }
+    }
+    toaster("🤖 已解题并作图：" + ok + "/" + chk.steps.length + " 条" + (readouts.length ? "，读数 " + readouts.length + " 条" : "") + (fails.length ? "，失败 " + fails.length + " 步" : "") + (fixed ? "，自愈修好 " + fixed + " 步" : "") + (checkNote.value ? "，已核对" : "") + " ✓")
   } finally {
     solving.value = false
   }
@@ -830,7 +902,7 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
               <div class="ggbs__solvehead">
                 <span class="ggbs__aiicon">🧠</span>
                 <span class="ggbs__solvet">贴图解题作图</span>
-                <span class="ggbs__solves">① 读图转文字（可校对）→ ② 认图形（可选）→ ③ 解题并作图（自动切工具 ✓ 报错自动修一轮 ✓）</span>
+                <span class="ggbs__solves">① 读图转文字（可校对）→ ② 认图形（可选）→ ③ 解题并作图（自动切工具 ✓ 读数核对 ✓ 报错自动修一轮 ✓）</span>
               </div>
               <div class="ggbs__solverow">
                 <button class="ggbs__btn ggbs__btn--tiny" title="导入题目图片（也可以 Ctrl+V 粘贴 / 直接拖进来）" @click="solveFile && solveFile.click()">＋ 题目图</button>
@@ -853,10 +925,15 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
                 <button class="ggbs__btn ggbs__btn--tiny" :disabled="scanning" @click="scanFigure" title="把题图里的几何图形认出来（复用「矢量识别」那套：点 / 线段 / 圆 + 字母标注 ✓）→ 结构写进校对框。线稿 / 截图效果最好；照片可能认不出多少 ✓">{{ scanning ? "认图形中…" : "② 认图形（可选）" }}</button>
                 <button class="ggbs__btn ggbs__btn--ai" :disabled="solving" @click="solveAndDraw">{{ solving ? "解题作图中…" : "③ 解题并作图" }}</button>
                 <label class="ggbs__check" title="作图时有命令报错，就把**报错的那几步**回灌给模型改一轮（只改错的，不动没报错的 ✓）"><input v-model="repairOn" type="checkbox" /> 失败自动修一轮</label>
+                <label class="ggbs__check" title="跑完把**画布上的精确读数**（点坐标 / 线段长 / 半径 / 面积）交给模型核对：解题过程与图形自不自洽 ✓ 不一致就给出修正步骤 ✓"><input v-model="checkOn" type="checkbox" /> 跑完自动核对</label>
               </div>
               <div v-if="solution" class="ggbs__solution">
                 <div class="ggbs__solvet">解题过程</div>
                 <div class="ggbs__soltext">{{ solution }}</div>
+              </div>
+              <div v-if="checkNote" class="ggbs__solution">
+                <div class="ggbs__solvet">核对（用画布精确读数自查）</div>
+                <div class="ggbs__soltext">{{ checkNote }}</div>
               </div>
               <div v-if="solveLog.length" class="ggbs__solvelog">
                 <div v-for="(l, i) in solveLog" :key="i">{{ l }}</div>

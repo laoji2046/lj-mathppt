@@ -171,6 +171,70 @@ ok(L2.indexOf("⊥") >= 0, "★正方形：认出垂直");
 ok(L2.indexOf("=") >= 0, "★正方形：认出等长");
 ok(FS.scanToBrief(SF).indexOf("【图形（自动识别") >= 0 && FS.scanToBrief(SF).indexOf("以**题干**为准") >= 0,
   "★写进校对框时标明是自动识别、以题干为准");
+console.log(NL + "=== 静态：读数（query）与核对（v1731）===");
+/* ① 怎么用：system 里必须告诉模型可以插只读读数步 */
+const qSY = G.ggbSolveSystem();
+ok(qSY.indexOf("只读") >= 0 && qSY.indexOf("query") >= 0, "解题 system 告诉模型可以插只读读数步");
+ok(qSY.indexOf("Distance(A,B)") >= 0 && qSY.indexOf("精确值会回到你手里") >= 0, "读数用 GeoGebra 只读表达式，量出来的值会回到模型手里");
+/* ② 认"读一步" */
+ok(G.isQueryTool("query") && G.isQueryTool("读数") && G.isQueryTool("query_length") && G.isQueryTool("measure"), "query / 读数 / query_* / measure 都认");
+ok(!G.isQueryTool("point") && !G.isQueryTool("") && !G.isQueryTool(null), "普通工具 / 空 / null → 不是读数");
+/* ③ 只读表达式校验 */
+const qR1 = G.ggbReadPlan("Distance(A,B)", ["A", "B"]);
+ok(qR1.ok && qR1.expr === "Distance(A,B)", "合法读数：Distance(A,B) ✓");
+const qR2 = G.ggbReadPlan("Distance(A,C)", ["A", "B"]);
+ok(!qR2.ok && String(qR2.why).indexOf("C") >= 0, "★引用了画布上没有的 C → 拒（" + qR2.why + "）");
+const qR3 = G.ggbReadPlan("A=(0,0)", ["A"]);
+ok(!qR3.ok && String(qR3.why).indexOf("赋值") >= 0, "★读数里不许赋值（= 一律拒 ✓）");
+const qR4 = G.ggbReadPlan("Foo(A,B)", ["A", "B"]);
+ok(!qR4.ok && String(qR4.why).indexOf("Foo") >= 0, "★白名单外的函数 → 拒（免得悄悄往画布上画东西 ✗）");
+ok(!G.ggbReadPlan("", []).ok, "空表达式 → 拒");
+ok(G.ggbReadPlan("(x(A)+x(B))/2", ["A", "B"]).ok, "只读函数 + 已有对象 + 四则运算 → 允许（自己算个数也行 ✓）");
+/* ④ 临时对象（量完就删） */
+ok(G.GGB_QUERY_TMP === "ljqTemp" && G.ggbQueryCmd("Distance(A,B)") === "ljqTemp=Distance(A,B)", "读数走临时对象（量完立刻删 ✓）");
+ok(G.GGB_READ_FNS.indexOf("Distance") >= 0 && G.GGB_READ_FNS.indexOf("Area") >= 0 && G.GGB_READ_FNS.indexOf("Radius") >= 0, "白名单含 Distance / Area / Radius");
+/* ⑤ 计划解析：读一步混在作图步里 */
+const qP = G.ggbSolvePlan('{"solution":"解","steps":[{"tool":"point","cmd":"A=(0,0)"},{"tool":"query","cmd":"Distance(A,B)","say":"量 AB"},{"tool":"circle","cmd":"c=Circle(A,B)"}]}');
+ok(qP.steps.length === 3 && qP.steps[1].query === true && qP.steps[1].tool === "query", "★读一步被认出来（query=true，不当作图步 ✓）");
+ok(qP.steps[0].query !== true && qP.steps[2].query !== true, "作图步不会被误标成读数");
+/* ⑥ 校验：读数步表达式要合法；画布上已有的对象不再误报"没定义" */
+const qV1 = G.ggbValidatePlan([{ tool: "query", mode: -1, cmd: "Distance(A,B)", say: "", query: true }], ["A", "B"]);
+ok(qV1.issues.length === 0, "★读数步：A、B 在画布上 → 不报警");
+const qV2 = G.ggbValidatePlan([{ tool: "query", mode: -1, cmd: "Distance(A,C)", say: "", query: true }], ["A", "B"]);
+ok(qV2.issues.join("").indexOf("读数表达式不合法") >= 0, "★读数步引用了不存在的 C → 报出来");
+const qV3 = G.ggbValidatePlan([{ tool: "segment", mode: 3, cmd: "Segment(A,B)", say: "" }], ["A", "B"]);
+ok(qV3.issues.length === 0, "★（顺带修好）引用画布上已有的 A、B → 不再误报依赖顺序");
+/* ⑦ 自动读数：从作图步推出该量什么 */
+const qAQ = G.ggbAutoQueries([
+  { tool: "point", mode: 1, cmd: "A=(0,0)", say: "" },
+  { tool: "point", mode: 1, cmd: "B=(4,0)", say: "" },
+  { tool: "segment", mode: 3, cmd: "AB=Segment(A,B)", say: "" },
+  { tool: "circle", mode: 6, cmd: "c=Circle(A,B)", say: "" },
+  { tool: "polygon", mode: 12, cmd: "p=Polygon(A,B,C)", say: "" },
+]);
+ok(qAQ.indexOf("x(A)") >= 0 && qAQ.indexOf("y(B)") >= 0, "★点 → 自动量 x、y 坐标");
+ok(qAQ.indexOf("Distance(A,B)") >= 0, "★线段 → 自动量两点距离");
+ok(qAQ.indexOf("Radius(c)") >= 0, "★圆 → 自动量半径");
+ok(qAQ.indexOf("Area(p)") >= 0, "★多边形 → 自动量面积");
+ok(G.ggbAutoQueries([{ tool: "point", mode: 1, cmd: "A=(0,0)", say: "" }], 1).length === 1, "自动读数有条数上限（省 token ✓）");
+ok(G.ggbAutoQueries([{ tool: "query", mode: -1, cmd: "x(A)", say: "", query: true }]).length === 0, "读一步不会被自动再量一遍");
+/* ⑧ 读数文本 / 核对提示词 / 核对结果解析 */
+const qRT = G.ggbReadoutText([{ expr: "Distance(A,B)", value: "5", ok: true }, { expr: "Radius(c)", value: "", ok: false, err: "取不到" }]);
+ok(qRT.indexOf("Distance(A,B) = 5") >= 0 && qRT.indexOf("取不到") >= 0, "★读数文本：取到值 / 取不到都写清");
+ok(G.ggbReadoutText([]).indexOf("没有读数") >= 0, "没有读数时也不给空串");
+const qCS = G.ggbCheckSystem();
+ok(qCS.indexOf("精确读数") >= 0 && qCS.indexOf("以**题干**为准") >= 0, "核对 system：用读数核对，冲突时以题干为准");
+ok(qCS.indexOf("mismatch") >= 0 && qCS.indexOf("unsure") >= 0 && qCS.indexOf("只给要改的那几步") >= 0, "★核对 system 定义 ok / mismatch / unsure 三种结论");
+const qCU = G.ggbCheckUser("【题干】椭圆", "解法…", ["A=(0,0)", "c=Circle(A,B)"], [{ expr: "Radius(c)", value: "2", ok: true }]);
+ok(qCU.indexOf("椭圆") >= 0 && qCU.indexOf("A=(0,0)") >= 0 && qCU.indexOf("Radius(c) = 2") >= 0, "★核对 user 带上题干 + 步骤 + 精确读数");
+const qC1 = G.ggbCheckResult('{"verdict":"mismatch","note":"AB 应是 5，画成了 3","steps":[{"tool":"point","cmd":"A=(0,0)"}]}', ["A"]);
+ok(qC1.verdict === "mismatch" && qC1.note.indexOf("AB") >= 0 && qC1.steps.length === 1, "★核对结果：mismatch + 说明 + 修正步");
+const qC2 = G.ggbCheckResult("模型胡写了一段没有 JSON 的话", ["A"]);
+ok(qC2.verdict === "unsure" && qC2.steps.length === 0 && qC2.note.length > 0, "★解析不出来 → unsure + 留下原文（不硬判 ✓）");
+ok(G.ggbCheckResult('{"verdict":"乱写","note":"x"}', []).verdict === "unsure", "认不出的 verdict → unsure");
+const qC4 = G.ggbCheckResult('{"verdict":"ok","note":"自洽","steps":[{"tool":"query","cmd":"Distance(A,Z)"}]}', ["A"]);
+ok(qC4.verdict === "ok" && qC4.steps.length === 0, "★修正步里的非法读数被剔掉（Z 不在画布上 ✓）");
+ok(G.ggbCheckResult(null, []).verdict === "unsure", "null 不炸");
 function pickKey() {
   const direct = String(process.env.LJ_AI_KEY || process.env.DEEPSEEK_API_KEY || "").trim();
   if (direct) return direct;
