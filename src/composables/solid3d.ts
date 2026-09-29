@@ -336,16 +336,27 @@ const MESH_FACES: Record<string, number[][]> = {
 }
 /** 完整面表（自由建模初始化用） */
 export function solidFacesAll(kind: string): number[][] {
+  /* 【v1753】讲义重绘的 4+2 个：面表也用 3D 真值 ✓（不然会和现算的顶点对不上 ✗） */
+  const S3 = SOLID_3D[kind]
+  if (S3) return S3.faces
   return MESH_FACES[kind] || FACES[kind] || []
 }
 
 /** 取边表：有自由建模 mesh 时用 mesh，否则用类型默认 */
 export function meshEdges(kind: string, mesh?: SolidMesh | null): Edge[] {
-  return (mesh && Array.isArray(mesh.edges)) ? (mesh.edges as Edge[]) : (EDGES[kind] || [])
+  if (mesh && Array.isArray(mesh.edges)) return mesh.edges as Edge[]
+  /* 【v1753】⚠ 这里以前直接 `EDGES[kind]` ✗ —— 而 renderSolid 正是走这条路 ✓
+     结果「顶点换成现算的、边还是老表」✗ → 图形错乱 ✗（用户截图打叉的就是这 4 个 ✓）*/
+  const S3 = SOLID_3D[kind]
+  if (S3) return solidTo2d(S3.verts, S3.faces).edges as Edge[]
+  return EDGES[kind] || []
 }
 /** 取面表：有自由建模 mesh 时用 mesh，否则用类型默认 */
 export function meshFaces(kind: string, mesh?: SolidMesh | null): number[][] {
-  return (mesh && Array.isArray(mesh.faces)) ? mesh.faces : (FACES[kind] || [])
+  if (mesh && Array.isArray(mesh.faces)) return mesh.faces
+  const S3 = SOLID_3D[kind]
+  if (S3) return S3.faces
+  return FACES[kind] || []
 }
 
 const EDGES: Record<string, Edge[]> = {
@@ -435,11 +446,12 @@ export const THM_LABELS: Record<string, (string | null)[]> = {
 
 /** 生成某立体在当前 w/h/depth 下的默认归一化顶点（与原几何一致） */
 export function solidVerts(kind: string, w: number, h: number, depth?: number): number[] {
+  /* 返回**归一化 [0,1]** ✓（调用方 renderSolid 负责乘尺寸 ✓ 别在这里乘 ✗）*/
   /* 【v1751】讲义重绘的那 4 个：3D 顶点 → 斜二测投影 → 归一化 → 乘元素尺寸 ✓ */
   const S3 = SOLID_3D[kind]
   if (S3) {
-    const g = solidTo2d(S3.verts, S3.faces)
-    return g.points.map((v, i) => +((i % 2 ? h : w) * v).toFixed(3))
+    /* ⚠ 这里必须返回**归一化 [0,1]** ✓ —— renderSolid 会自己乘元素尺寸 ✓（乘两次就画到框外 ✗ v1753 踩过 ✓）*/
+    return solidTo2d(S3.verts, S3.faces).points
   }
   let c: number[][] = []
   if (kind === 'cubeOblique') {

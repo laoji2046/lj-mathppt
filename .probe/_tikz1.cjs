@@ -2642,6 +2642,42 @@ const src71 = fs.readFileSync(path.join(ROOT, "src", "composables", "solid3d.ts"
 const n3d71 = (src71.match(/^\s{2}\w+Oblique: \{|^\s{2}pyraFrustum: \{|^\s{2}obliquePrism: \{/gm) || []).length;
 ok(n3d71 >= 6, "★SOLID_3D 里已有 " + n3d71 + " 个讲义重绘的立体 ✓（六棱柱/斜三棱柱/平行六面体/四棱锥/长方体/四棱台 ✓）");
 ok(src71.indexOf("plot_ch08_15.py fig_cuboid") > 0 && src71.indexOf("plot_ch08_14.py fig_pyramid_frustum 右半") > 0, "★源码注释里写明了出处 ✓（可追溯 ✓）");
+console.log("=== 用例 72：重绘的立体**真渲染一遍**（v1753 红叉事故的守备 ✓）===");
+const S3_72 = loadBundled("solid3d.ts", "_c72s3.cjs");
+/* ⚠ 这次红叉的根因：renderSolid 画边用的是模块内 EDGES 老表 ✗ 而顶点已换成现算的 ✗
+   → 所以必须**渲染出来数一数**：画出的线段数 == 边表条数 ✓ 坐标还得落在框内 ✓ */
+const KINDS72 = ['hexPrismOblique', 'prismOblique', 'obliquePrism', 'pyramidOblique', 'cuboidOblique', 'pyraFrustum'];
+let badRender72 = 0;
+for (const k of KINDS72) {
+  const pts = S3_72.solidVerts(k, 300, 200);
+  const ed = S3_72.solidEdges(k);
+  const fa = S3_72.solidFacesAll(k);
+  let svg = '';
+  try { svg = S3_72.renderSolid(k, pts, 300, 200, '#111827', 2, 'none', '') || '' } catch (e) { svg = 'THROW:' + e.message }
+  const segs = (svg.match(/<line\b/g) || []).length;
+  const coords = [];
+  svg.replace(/([xy]1|y2|x2)="(-?[\d.]+)"/g, (m, tag, v) => { coords.push(+v); return m });
+  svg.replace(/[ML]\s*(-?[\d.]+)[ ,](-?[\d.]+)/g, (m, a, b) => { coords.push(+a, +b); return m });
+  const outside = coords.filter((v) => v < -6 || v > 306).length;
+  const okAll = svg.length > 80 && segs === ed.length && fa.length >= 4 && outside === 0;
+  if (!okAll) badRender72++;
+  ok(okAll, "★" + k + " 渲染正常 ✓（线段 " + segs + " = 边表 " + ed.length + " ✓ 面 " + fa.length + " ✓ 越界坐标 " + outside + " ✓ 输出 " + svg.length + " 字节 ✓）");
+}
+ok(badRender72 === 0, "★6 个重绘的立体**全部渲染正常** ✓（这次红叉就是这条缺了才溜过去 ✗ 现在补上了 ✓）");
+/* 参照物：没改过的两种也该正常 ✓（证明不是我刚修坏的 ✓） */
+for (const k of ['cube', 'cubeOblique', 'hexPrism', 'pyramid']) {
+  const pts = S3_72.solidVerts(k, 300, 200);
+  const ed = S3_72.solidEdges(k);
+  const svg = S3_72.renderSolid(k, pts, 300, 200, '#111827', 2, 'none', '') || '';
+  const segs = (svg.match(/<line\b/g) || []).length;
+  ok(svg.length > 80 && segs === ed.length, "★" + k + "（未改的那套）也渲染正常 ✓（线段 " + segs + " = " + ed.length + " ✓）");
+}
+/* 顶点/边/面三者必须**同源** ✓（这正是红叉的根因 ✓ 写成断言挡住它 ✗） */
+for (const k of KINDS72) {
+  const n = S3_72.solidVerts(k, 300, 200).length / 2;
+  const maxIdx = Math.max(...S3_72.solidEdges(k).flatMap((e) => [e[0], e[1]]), ...S3_72.solidFacesAll(k).flat());
+  ok(maxIdx < n, "★" + k + "：边表的顶点下标都在范围内 ✓（" + maxIdx + " < " + n + " ✓ 三者同源 ✓）");
+}
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);
