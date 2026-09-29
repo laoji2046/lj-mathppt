@@ -2381,7 +2381,7 @@ ok(g3vue.indexOf("askAi") > 0 && g3vue.indexOf("让 AI 还原结构") > 0, "★�
   const iRawBox = g3src.indexOf('v-model="raw"');
   ok(iAIrow >= 0 && iRawBox >= 0 && iAIrow < iRawBox, "★AI 入口要在 JSON 文本框**之前**（放最下面＝找不到 ✗）");
   const pal = fs.readFileSync(path.join(ROOT, "src", "components", "MathFigurePalette.vue"), "utf8");
-  ok(pal.indexOf("? 4 : g.list.length") >= 0 && pal.indexOf("AI 还原结构…") >= 0, "★「图形重建」分类里有明确的 AI 卡片（角标 4 ✓ 用户是从这一类找的 ✓）");
+  ok(pal.indexOf("? 3 : g.list.length") >= 0 && pal.indexOf("三维立体图…") > 0 && pal.indexOf("AI 还原结构…") < 0, "★「图形重建」3 张卡、没有重复的 AI 卡片（用户实报两张卡看着一样 —— 它们本来就是同一个动作 ✗ v1746 删掉重复 ✓）");
 console.log("=== 用例 62：自图片重建加 AI 读图（v1741）===");
 const VA = loadBundled("vecAi.ts", "_c62v.cjs");
 const va1 = VA.parseVecAi('好的：\n```json\n{"points":[{"name":"A","x":0.1,"y":0.2},{"name":"B","x":0.9,"y":0.2},{"name":"C","x":0.5,"y":0.8}],"lines":[["A","B",0],["B","C",1],["C","A",0]],"circles":[],"note":"三角形 ABC"}\n```');
@@ -2442,9 +2442,9 @@ ok(Math.abs(VE.segDist(0.5, 0.1, 0, 0, 1, 0) - 0.1) < 1e-9 && Math.abs(VE.segDis
 const vdsrc64 = fs.readFileSync(path.join(ROOT, "src", "components", "VectorizeDialog.vue"), "utf8");
 ok(vdsrc64.indexOf("addPointAt(") > 0 && vdsrc64.indexOf("const addPtMode = ref(false)") > 0, "★弹窗接上了补点（模式 + 调用纯函数 ✓）");
 ok(vdsrc64.indexOf("＋ 补一个点") > 0 && vdsrc64.indexOf("结束补点") > 0, "★工具栏有「＋ 补一个点」按钮 ✓（点一下进入/退出 ✓）");
-ok(vdsrc64.indexOf("mergeSelectedVertices") > 0 && vdsrc64.indexOf("straightenSelected") > 0, "★点合并 / 拉成一条边（=线合并）的入口都在 ✓（M / L ✓）");
-ok(vdsrc64.indexOf("合并成一个点") > 0 && vdsrc64.indexOf("拉成一条边") > 0, "★两个按钮的文案在 ✓（选中顶点后出现在选区行 ✓）");
-ok(vdsrc64.indexOf("线合并（拉直）") > 0 && vdsrc64.indexOf("合并选中的点") > 0, "★两个按钮都写明了：「合并选中的点」= 点合并 ✓「线合并（拉直）」= 拉直 ✓（不再混为一谈 ✓）");
+ok(vdsrc64.indexOf("mergeSelectedVertices") > 0 && vdsrc64.indexOf("straightenSelected") > 0, "★点合并 / 线合并的入口都在 ✓（M / L ✓）");
+ok(vdsrc64.indexOf("合并成一个点") < 0 && vdsrc64.indexOf("拉成一条边") < 0, "★旧文案都清掉了（合并成一个点 / 拉成一条边 ✗ 现在统一叫「合并选中的点（点合并）」「线合并（拉直）」✓）");
+ok(vdsrc64.indexOf("线合并（拉直）") > 0 && vdsrc64.indexOf("合并选中的点（点合并）") > 0, "★合并类按钮**只在工具栏一处**、名字不混 ✓（用户实报：选区行那两个跟工具栏「看着是一样的」✗ v1746 去重 ✓）");
 console.log("=== 用例 65：补的点是受约束的点（v1744）===");
 const VE65 = loadBundled("vecEdit.ts", "_c65v3.cjs");
 /* ① 落在**选中的那条线段**上：给出约束 a/b/t ✓ 并按点击位置投影 ✓ */

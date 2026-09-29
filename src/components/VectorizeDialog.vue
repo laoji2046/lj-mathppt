@@ -1701,7 +1701,7 @@ function mergeSelectedVertices() {
  *   （`vectorize.ts` 里有完整实测：边召回 79.4% → 72.2% ✗✗，因为"坐标轴穿过正方体顶点"
  *   与"顶面两条棱夹角仅 2°"在几何上**无法区分** ✗）。**让人看着点才不会误并** ✓。
  *
- * 用法：选中折线上的点（框选最省事）→ 点「拉成一条边」。
+ * 用法：选中折线上的点（框选最省事）→ 点工具栏「线合并（拉直）」（快捷键 L）。
  *   **只选中 1 个中间点时会自动沿"度 = 2"向两侧扩到整条极大链** ✓
  *   —— 最常见的场景点一下就行，不用把一整串点都框进来。
  */
@@ -2335,10 +2335,7 @@ async function aiRead(force = false) {
 
             <div v-if="selVs.length" class="vd__row vd__row--sel">
               <span class="vd__selnum">已选中 {{ selVs.length }} 个顶点</span>
-              <button v-if="selVs.length > 1" class="vd__btn" @click="mergeSelectedVertices"
-                      title="点合并：把选中的多个顶点合成一个。保留连线条数最多的那个的位置，其它点的线都接到它身上（快捷键 M）">合并成一个点（点合并）</button>
-              <button class="vd__btn" @click="straightenSelected"
-                      :title="selVs.length > 1 ? '线合并（拉直）：只留两端、抹掉中间的点，连成一条直边（快捷键 L）—— 这是把折线拉直，不是合并点' : '自动沿这条折线扩到两端，抹掉中间多余的点（快捷键 L）'">线合并（拉直）</button>
+              <!-- 【v1746】合并类按钮**只在工具栏一处** ✓（用户实报：这里跟工具栏那两个"看着是一样的" ✗） -->
               <button v-if="selVs.length > 1" class="vd__btn vd__btn--danger" @click="delSelectedVertices">全部删掉</button>
               <button class="vd__btn" @click="selVs = []">取消选择</button>
             </div>
@@ -2368,7 +2365,9 @@ async function aiRead(force = false) {
             </div>
             <div class="vd__row">
               <button class="vd__btn" :disabled="selVs.length < 2" @click="mergeSelectedVertices"
-                title="点合并：把选中的多个顶点合成一个（在画布上框选，或按住 Ctrl 逐个点选 ✓）。保留连线条数最多的那个、字母继承 ✓（快捷键 M）">合并选中的点</button>
+                title="点合并：把选中的多个顶点合成一个（在画布上框选，或按住 Ctrl 逐个点选 ✓）。保留连线条数最多的那个、字母继承 ✓（快捷键 M）">合并选中的点（点合并）</button>
+              <button class="vd__btn" :disabled="!selVs.length" @click="straightenSelected"
+                :title="selVs.length > 1 ? '线合并（拉直）：只留两端、抹掉中间的点，连成一条直边（快捷键 L）—— 这是把折线拉直，不是合并点 ✗' : '自动沿这条折线扩到两端，抹掉中间多余的点（快捷键 L）'">线合并（拉直）</button>
               <button class="vd__btn" :class="{ 'vd__btn--on': linkMode }" @click="toggleLink">
                 {{ linkMode ? '结束补线' : '＋ 补一条线' }}
               </button>

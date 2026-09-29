@@ -139,7 +139,7 @@ function makePng(w, h) {
       await gotoTab("图形重建");
       const cards = await ev('JSON.stringify([...document.querySelectorAll(".palette__grid button")].map(b=>b.textContent.trim()))');
       ok(String(cards).indexOf("三维立体图") >= 0, "「图形重建」里有「三维立体图」卡片 ✓");
-      ok(String(cards).indexOf("AI 还原结构") >= 0, "「图形重建」里有「AI 还原结构」卡片 ✓");
+      ok(String(cards).split(",").length === 3 && String(cards).indexOf("三维立体图") >= 0 && String(cards).indexOf("AI 还原结构") < 0, "★「图形重建」3 张卡、没有重复的 AI 卡片（实测：" + String(cards) + " ✓）");
       await ev('(function(){var b=[...document.querySelectorAll(".palette__grid button")].find(x=>x.textContent.indexOf("三维立体图")>=0); if(b)b.click(); return !!b})()');
       let hasG3 = false;
       for (let i = 0; i < 24; i++) { if ((await ev('!!document.querySelector(".g3")')) === true) { hasG3 = true; break } await sleep(300) }
