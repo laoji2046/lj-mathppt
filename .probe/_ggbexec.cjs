@@ -284,6 +284,24 @@ console.log(NL + "=== 执行层：作图步骤（真执行器 + 假绘图板 v17
   ok(dlog.join("|").indexOf("拖不动") < 0, "★SetCoords 返回 false 但位置确实变了 → 不误报「拖不动」✓");
   ok(dr.unchecked.indexOf("c") >= 0, "★如实报「没查的」（圆本身没查 ✓ 不假装全查了 ✗）");
 
+  /* ⑱【v1737】动画步 / 教学辅助步：执行层真的把台词本跑出来了 ✓ */
+  const am = makeMock();
+  am.evalCommand("h=Circle((0,0),2)");
+  am.evalCommand("s=Slider(0,10,0.1)");
+  const alog = [];
+  const af = [];
+  const an1 = await X.execSolveSteps(am, [
+    { tool: "aids", mode: -1, cmd: "显示辅助|h", say: "", aids: true },
+    { tool: "animate", mode: -1, cmd: "s|ping_pong|1|0|10", say: "", anim: true },
+  ], af, [], (l) => alog.push(l), { step: 0, driveSteps: 6, driveTickMs: 0, driveBlocking: true });
+  ok(an1 === 2 && af.length === 0, "★动画步与辅助步都跑成功（" + an1 + "/2 ✓）");
+  ok(am.calls.some((c) => c.indexOf("Checkbox(") >= 0), "★辅助步真的发出 Checkbox（一个开关挂全部 ✓）");
+  ok(am.calls.some((c) => c.indexOf("Checkbox(") >= 0) && am.calls.some((c) => c.indexOf("SetValue(aidsShow, false)") >= 0), "★开关默认关着 ✓（与「静态复刻图」一致 ✓）");
+  const setvals = am.calls.filter((c) => c.indexOf("SetValue(s,") === 0).length;
+  ok(setvals >= 6, "★ping_pong 由我们按时间驱动：SetValue 调了 " + setvals + " 次 ✓（引擎没有振荡 API ✗）");
+  const af2 = [];
+  const an2 = await X.execSolveSteps(am, [{ tool: "animate", mode: -1, cmd: "s|loop", say: "", anim: true }], af2, [], () => {}, { step: 0 });
+  ok(an2 === 0 && af2.length === 1 && String(af2[0].err).indexOf("起点与终点") >= 0, "★loop 没给范围 → 记成失败（不静默 ✗）");
   console.log(bad ? NL + "[XX] 执行层有 " + bad + " 处问题" : NL + "[ok] 执行层全过");
   process.exit(bad ? 1 : 0);
 })().catch((e) => { console.log("[XX] 跑挂了：" + (e && e.message)); process.exit(1) });

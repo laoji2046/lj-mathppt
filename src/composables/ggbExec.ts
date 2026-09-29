@@ -23,6 +23,8 @@ import {
 import { buildTrack, type TrackItem } from './canvasTrack'
 import { ggbCmdName } from './ggbNorm'
 import { checkExprs, dragMoveCmd, freeDrivers, judgeDrag, residualChecks, type DragVerdict } from './ggbDrag'
+import { animDescribe, animNextValue, animParseSpec, animPlan, type GgbAnimDrive } from './ggbAnim'
+import { aidsDescribe, aidsPlan } from './ggbTeach'
 
 /** 我们用到的那部分 GeoGebra Apps API（**可选方法都写成可选** ✓ 拿不到就走兜底 ✓） */
 export interface GgbAppletLike {
@@ -43,7 +45,16 @@ export interface GgbAppletLike {
 }
 
 export type ExecLog = (line: string) => void
-export interface ExecWait { mode?: number; step?: number }
+export interface ExecWait {
+  mode?: number
+  step?: number
+  /** 【v1737】自己驱动动画时：每帧毫秒（默认 40 ✓ 探针传 0 秒过 ✓） */
+  driveTickMs?: number
+  /** 【v1737】自己驱动动画时：一共走几帧（默认按时长算 ✓ 探针给固定值 ✓） */
+  driveSteps?: number
+  /** 【v1737】驱动要不要**等它走完**（应用里不等 ✓ 免得挡着老师；探针要等 ✓） */
+  driveBlocking?: boolean
+}
 
 /** 画布现在的对象名 ✓（拿不到就空数组 → 调用方各自兜底 ✓） */
 export function liveObjects(a: GgbAppletLike | null | undefined): string[] {
@@ -159,6 +170,55 @@ export async function execSolveSteps(
     if (s.query) {
       const rs = await execQueryExprs(a, [s.cmd], s.say, log)
       if (readouts) for (const r of rs) readouts.push(r)
+      continue
+    }
+    // 【v1737】动画步：配置（+ 起播）→ 需要的话我们自己按时间驱动 / 定时停 ✓
+    //   ⚠ 真引擎实测：StartAnimation / SetValue **都返回 false 却真的生效** ✗ → 一律"看结果"✓
+    if (s.anim) {
+      const parsed = animParseSpec(s.cmd)
+      if (!parsed.ok || !parsed.spec) {
+        fails.push({ cmd: s.cmd, err: parsed.why || '动画步不合法' })
+        log(s.cmd + ' ✗ ' + (parsed.why || '动画步不合法'))
+        continue
+      }
+      const plan = animPlan(parsed.spec, liveObjects(a))
+      if (!plan.ok) {
+        fails.push({ cmd: s.cmd, err: plan.why || '动画做不了' })
+        log(s.cmd + ' ✗ ' + (plan.why || '动画做不了'))
+        continue
+      }
+      let boom = ''
+      for (const c of plan.cmds) {
+        try { a.evalCommand(c) } catch (e) { boom = String((e as Error)?.message || e) }
+      }
+      if (boom) { fails.push({ cmd: s.cmd, err: boom }); log(s.cmd + ' ✗ ' + boom); continue }
+      ok++
+      for (const l of animDescribe(plan)) log(l)
+      if (plan.drive) {
+        const r = await driveAnim(a, plan.drive, log, wait)
+        if (!r.ok) fails.push({ cmd: s.cmd, err: r.err || '动画驱动失败' })
+      } else if (plan.stopAfterMs) {
+        const target = parsed.spec.target
+        const ms = plan.stopAfterMs
+        setTimeout(() => { try { a.evalCommand('StartAnimation(' + target + ', false)') } catch { /* 忽略 */ } }, ms)
+        log('· ' + Math.round(ms / 1000) + ' 秒后自动停 ✓（不挡着老师继续操作 ✓）')
+      }
+      continue
+    }
+    // 【v1737】教学辅助开关：**一个 Checkbox 把辅助全挂上** ✓（真引擎实测可用 ✓ 默认关着 ✓）
+    if (s.aids) {
+      const parts = String(s.cmd == null ? '' : s.cmd).split('|')
+      const plan = aidsPlan(parts[0], parts[1], liveObjects(a))
+      if (!plan.ok) {
+        fails.push({ cmd: s.cmd, err: plan.why || '认不出辅助对象' })
+        log(s.cmd + ' ✗ ' + (plan.why || '认不出辅助对象'))
+        continue
+      }
+      let boom = ''
+      for (const c of plan.cmds) { try { a.evalCommand(c) } catch (e) { boom = String((e as Error)?.message || e) } }
+      if (boom) { fails.push({ cmd: s.cmd, err: boom }); log(s.cmd + ' ✗ ' + boom); continue }
+      ok++
+      for (const l of aidsDescribe(plan)) log(l)
       continue
     }
     // 删一步：先算出「连带会掉哪些依赖」→ 执行 → 日志里报出来 ✓
@@ -320,4 +380,34 @@ export async function runDragTest(
   for (const l of verdict.lines) log('· ' + l)
   if (restored) log('· 画布已还原（拖动只是测试 ✓ 你的图没动 ✓）')
   return { ...verdict, drivers: moved, checks: checks.length, restored }
+}
+/**
+ * 【v1737】自己驱动动画（引擎**没有**振荡/调速 API ✗ 实测 ✓）：
+ *   · `loop`：定时 SetValue 从起点到终点循环 ✓
+ *   · `ping_pong`：到端回头 ✓
+ * 应用里**不阻塞**（起个头就返回 ✓ 免得挡着老师 ✓）；探针传 `driveBlocking: true` 等它走完再断言 ✓
+ */
+async function driveAnim(a: GgbAppletLike, dr: GgbAnimDrive, log: ExecLog, wait: ExecWait = {}): Promise<{ ok: boolean; err?: string }> {
+  const tick = wait.driveTickMs == null ? 40 : wait.driveTickMs
+  const total = Math.max(1, wait.driveSteps == null ? Math.round((dr.seconds * 1000) / Math.max(1, tick)) : wait.driveSteps)
+  const per = Math.abs(dr.to - dr.from) / Math.max(2, dr.mode === 'ping_pong' ? Math.round(total / 4) : total)
+  let cur = dr.from
+  let dir: 1 | -1 = 1
+  const run = async () => {
+    for (let i = 0; i < total; i++) {
+      const nx = animNextValue(cur, dir, dr.from, dr.to, per, dr.mode)
+      cur = nx.value
+      dir = nx.dir
+      try { a.evalCommand('SetValue(' + dr.target + ', ' + (Math.round(cur * 1e6) / 1e6) + ')') } catch { /* 看结果 ✓ */ }
+      if (tick > 0) await new Promise((res) => setTimeout(res, tick))
+    }
+    log('· 动画驱动结束：' + dr.seconds + ' 秒 / ' + total + ' 帧（' + dr.target + ' 停在 ' + (Math.round(cur * 1e6) / 1e6) + ' ✓）')
+  }
+  try {
+    if (wait.driveBlocking) await run()
+    else { void run(); log('· 动画在后台驱动（' + dr.seconds + ' 秒 ✓ 不挡着你继续操作 ✓）') }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, err: String((e as Error)?.message || e) }
+  }
 }

@@ -330,6 +330,41 @@ ok(ctClosure.indexOf("B") < 0, "B 不依赖 A → 不牵连");
 /* ⑤ 谁画的 / 被谁依赖（给别的功能用 ✓） */
 ok(CT.trackWho(ctItems, "c") === "user" && CT.trackWho(ctItems, "没有这个") === "", "「这块是谁画的」查得到 / 查不到有空值 ✓");
 ok(CT.trackDependents(ctItems, "A").length === 2 && CT.trackDependents(ctItems, "没有这个").length === 0, "「谁依赖它」直接子级 ✓");
+console.log(NL + "=== 静态：v1737 教学图约定 / 动画三件套 / 与题干对账 ===");
+const AN = load("ggbAnim.ts", "_ggbanim.cjs");
+const TE = load("ggbTeach.ts", "_ggbteach.cjs");
+/* ① 问题建模契约 8 条进 system ✓ */
+const SYS7 = G.ggbSolveSystem();
+ok(SYS7.indexOf("问题建模契约") >= 0 && SYS7.indexOf("展示层不得反向影响数学正确性") >= 0, "★问题建模契约进了 system（GeoChat 那八条 ✓）");
+ok(SYS7.indexOf("连续两次") >= 0 && SYS7.indexOf("不许用样式改动掩盖错误") >= 0, "★失败恢复那条也在（连续两次就停手 ✓）");
+ok(SYS7.indexOf("教学图约定") >= 0 && SYS7.indexOf("显示辅助|h1,h2") >= 0 && SYS7.indexOf("Slider(0,10,0.1)") >= 0, "★教学图约定（一个开关 + 滑块动画）✓");
+ok(SYS7.indexOf("animate") >= 0 && SYS7.indexOf("aids") >= 0, "★system 点明了 animate / aids 两种特殊 tool ✓");
+/* ② 动画：解析 / 台词本 / 驱动数学 ✓ */
+ok(AN.animParseSpec("s|once").ok && AN.animParseSpec("s|once").spec.seconds === 12, "默认时长 12 秒（教学口径 ✓）");
+ok(!AN.animParseSpec("s|loop").ok && String(AN.animParseSpec("s|loop").why).indexOf("起点与终点") >= 0, "★loop 没给范围 → 拒（引擎没有振荡 API ✗ 必须我们自己驱动 ✓）");
+ok(!AN.animParseSpec("s|乱写").ok && AN.animParseSpec("s|ping_pong|8|0|10").ok, "认不出的模式拒 ✓；ping_pong 带范围过 ✓");
+const pl1 = AN.animPlan(AN.animParseSpec("s|once|6").spec, ["s"]);
+ok(pl1.ok && pl1.cmds.join("|").indexOf("StartAnimation(s, true)") >= 0 && pl1.stopAfterMs === 6000, "★once：原生起播 + 6 秒后自动停 ✓");
+const pl2 = AN.animPlan(AN.animParseSpec("s|ping_pong|8|0|10").spec, ["s"]);
+ok(pl2.ok && !!pl2.drive && pl2.cmds.join("|").indexOf("SetValue(s, 0)") >= 0, "★ping_pong：先归位 + 交给我们按时间驱动 ✓");
+ok(!AN.animPlan(AN.animParseSpec("zzz|once").spec, ["s"]).ok, "★动画对象不在板上 → 拒 ✓");
+const nv1 = AN.animNextValue(9.9, 1, 0, 10, 0.5, "loop");
+ok(nv1.value >= 0 && nv1.value <= 10, "loop 到顶回到区间内 ✓（" + nv1.value.toFixed(2) + "）");
+const nv2 = AN.animNextValue(9.9, 1, 0, 10, 0.5, "ping_pong");
+ok(nv2.dir === -1 && nv2.value <= 10, "★ping_pong 到顶就回头（dir → -1 ✓）");
+/* ③ 教学辅助一个开关 ✓ */
+const ap1 = TE.aidsPlan("显示辅助", "h1,h2", ["h1", "h2", "A"]);
+ok(ap1.ok && ap1.cmds[0].indexOf("Checkbox(") >= 0 && ap1.cmds[1].indexOf("false") >= 0, "★一个 Checkbox 挂上全部辅助 + 默认关着 ✓");
+ok(!TE.aidsPlan("显示辅助", "h9", ["h1"]).ok && !TE.aidsPlan("显示辅助", "", ["h1"]).ok, "★辅助对象不在板上 / 没说对象 → 都拒 ✓");
+ok(TE.TEACH_CONTRACT.length === 9 && TE.TEACH_CONTRACT[1].indexOf("观察目标") >= 0, "契约 = 标题 + 八条 ✓");
+/* ④ 与题干对账（实测比值 / 角度 vs 题给 ✓） */
+const tri7 = FS.scanFromResult({ points: [0, 0, 0.6, 0, 0, 0.8], edges: [[0, 1, 0], [1, 2, 0], [2, 0, 0]], anchors: [
+  { x: 0, y: 0, text: "A", conf: 1 }, { x: 0.6, y: 0, text: "B", conf: 1 }, { x: 0, y: 0.8, text: "C", conf: 1 }], arcs: [] });
+const st1 = FS.statedMeasureChecks(tri7, "AB=3，BC=5，AC=4").join("|");
+ok(st1.indexOf("对得上") >= 0 && st1.indexOf("对不上") < 0 && st1.indexOf("✗") < 0, "★题给 3:4:5 → 实测对得上 ✓（成功时一个 ✗ 都不该有 ✓）");
+const st2 = FS.statedMeasureChecks(tri7, "AB=3，AC=9").join("|");
+ok(st2.indexOf("对不上") >= 0, "★题给 3:9 与实测 3:4 对不上 → 明确报出来 ✗（两处必有一处错 ✓）");
+ok(FS.statedMeasureChecks(FS.scanFromResult({ points: [0, 0, 1, 0], edges: [[0, 1, 0]], anchors: [], arcs: [] }), "AB=3").length === 0, "点没字母标注 → 对不了账（返回空 ✓ 不瞎报 ✗）");
 function pickKey() {
   const direct = String(process.env.LJ_AI_KEY || process.env.DEEPSEEK_API_KEY || "").trim();
   if (direct) return direct;

@@ -218,6 +218,38 @@ try {
     ok((o8.unchecked || []).indexOf("c") >= 0, "★如实报「没查的」（圆本身没查 ✓ 不假装全查了 ✗）");
     ok((o8.log || []).some((l) => l.indexOf("挪到") >= 0), "★日志写清把谁挪到哪儿 ✓");
 
+    /* ⑨【v1737】动画三件套 + 教学辅助开关（真引擎端到端 ✓） */
+    const o9 = await evj(`(async function(){
+      if (typeof ggbApi.reset === "function") ggbApi.reset();
+      var log = []; var push = function(l){ log.push(String(l)) };
+      ggbApi.evalCommand("h=Circle((0,0),2)");
+      ggbApi.evalCommand("s=Slider(0,10,0.1)");
+      await new Promise(function(r){ setTimeout(r, 300) });
+      var fails = [];
+      var n = await LJEx.execSolveSteps(ggbApi, [
+        { tool:"aids", mode:-1, cmd:"显示辅助|h", say:"", aids:true },
+        { tool:"animate", mode:-1, cmd:"s|ping_pong|1|0|10", say:"", anim:true }
+      ], fails, [], push, { step:0, driveSteps:8, driveTickMs:0, driveBlocking:true });
+      var names = ggbApi.getAllObjectNames();
+      var hasVis = (typeof ggbApi.getVisible === "function");
+      var visOff = hasVis ? ggbApi.getVisible("h") : null;
+      ggbApi.evalCommand("SetValue(aidsShow, true)");
+      await new Promise(function(r){ setTimeout(r, 250) });
+      var visOn = hasVis ? ggbApi.getVisible("h") : null;
+      var sVal = ggbApi.getValue("s");
+      ggbApi.evalCommand("SetValue(aidsShow, false)");
+      await new Promise(function(r){ setTimeout(r, 250) });
+      var visBack = hasVis ? ggbApi.getVisible("h") : null;
+      return JSON.stringify({ n: n, fails: fails, hasCb: names.indexOf("aidsShow") >= 0, hasH: names.indexOf("h") >= 0,
+        visOff: visOff, visOn: visOn, visBack: visBack, sVal: sVal, hasVis: hasVis, log: log.slice(-3) });
+    })()`);
+    ok(o9.n === 2 && (o9.fails || []).length === 0, "★动画步 + 辅助步在真引擎上跑成功（" + o9.n + "/2 ✓）");
+    ok(o9.hasCb === true && o9.hasH === true, "★Checkbox 建出来了 ✓ 辅助对象 h 还在板上 ✓（隐藏 ≠ 删除 ✓）");
+    ok(o9.visOff === false && o9.visOn === true && o9.visBack === false,
+      "★开关真能显示/隐藏辅助（关 → " + o9.visOff + "、开 → " + o9.visOn + "、再关 → " + o9.visBack + " ✓）");
+    ok(typeof o9.sVal === "number" && o9.sVal >= 0 && o9.sVal <= 10,
+      "★我们自己驱动的动画把滑块停在区间内（s = " + o9.sVal + " ✓ 引擎没有振荡 API ✗）");
+
     console.log(bad ? "\n[XX] 真引擎有 " + bad + " 处问题" : "\n[ok] 真引擎全过 ✓（本地 GeoGebra 5.2 + 真执行器 ✓）");
     ws.close();
   } finally { try { child.kill() } catch (e) { /* 忽略 */ } }

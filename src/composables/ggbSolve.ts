@@ -10,6 +10,9 @@
  *   ③ GgbSuite 负责执行（setMode 切工具 → evalCommand 作图）
  */
 
+import { animParseSpec } from './ggbAnim'
+import { aidsPlan, TEACH_CONTRACT } from './ggbTeach'
+
 /** 工具名 → GeoGebra 的 mode 号（官方 setMode 的取值；只放常用且确定的那些，不猜） */
 export const GGB_TOOLS: { key: string; mode: number; label: string; cn: string }[] = [
   { key: "move", mode: 0, label: "移动", cn: "移动/选择" },
@@ -85,10 +88,20 @@ export function ggbSolveSystem(): string {
     "  别都堆在原点附近，也别编与题目矛盾的数；",
     "· 要换颜色/线宽这类只能在 JS 里做的事就**别管**（这里只跑指令）；",
     "· tool 只能从下面这个清单里选（认不出的会被忽略）：" + ggbToolMenu() + "。",
+    "· 另外三种特殊 tool：`query`（只读量一下 ✓）、`animate`（动画 ✓ cmd 见上）、`aids`（教学辅助开关 ✓ cmd 见上）。",
     "· **卡住或者要核对的时候，插一条「只读」读数步**（【v1731】只量不画 ✓ 不会往画布上添东西 ✓）：",
     "  tool 写 query，cmd 写一条**只读表达式**：Distance(A,B)、Angle(A,B,C)、Area(p)、Radius(c)、",
     "  Center(c)、Slope(l)、Midpoint(A,B)、x(A)、y(A) —— 只能用这些只读函数 + 画布上已有的对象 ✗ 别的会被拒掉；",
     "  量出来的**精确值会回到你手里**，再据此往下画或者核对（这一步不切工具、不画图 ✓）。",
+    "【教学图约定】① 所有条件必须用**真依赖**表达（`Point(c)` 点在圆上、`Midpoint(A,B)`、`Intersect(...)`、`Rotate(...)` ✓）；",
+    "  不许用「看着对」的手打坐标凑 ✗ —— 我们有**拖动测试**会验：拖动前残差 0、拖动后也必须 0 ✓。",
+    "② 讲解辅助（辅助线 / 标注 / 读数）**统统挂到一个开关**上：tool 写 aids，cmd 写 `显示辅助|h1,h2` ✓",
+    "  （真引擎可用 ✓ 默认关着 ✓ 勾上才出现 ✓ 取消勾选回到原图 ✓ 这些对象**保留但隐藏**，不是删掉 ✗）。",
+    "③ 要动画就给滑块：`s=Slider(0,10,0.1)` ✓ 然后 tool 写 animate，cmd 写 `s|模式|时长秒|起点|终点` ✓",
+    "  模式只能是 once / continuous / loop / ping_pong ✓ ⚠ 引擎**没有**调速与振荡 API（实测 ✗）→ loop/ping_pong 由我们按时间驱动 ✓。",
+    "④ 验证用的临时读数**量完就删** —— 别把它当教学辅助留下 ✗。",
+    ...TEACH_CONTRACT,
+    "输出格式（**只输出 JSON**，别加解释、别包代码块）：",
     "· **画错了就删掉重画**（【v1732】删一个对象会**连带删掉依赖它的**对象 ✓）：",
     "  tool 写 delete，cmd 写 Delete(A)（GeoGebra 原生写法 ✓ 多个就用 Delete(A,B) ✓）。",
     "输出格式（**只输出 JSON**，别加解释、别包代码块）：",
@@ -104,6 +117,10 @@ export interface GgbSolveStep {
   say: string
   /** 【v1731】读数步：只量不画（走临时对象，量完立刻删 ✓） */
   query?: boolean
+  /** 【v1737】动画步：cmd = `目标|模式|时长秒|起点|终点` ✓ */
+  anim?: boolean
+  /** 【v1737】教学辅助开关步：cmd = `说明|对象1,对象2` ✓ */
+  aids?: boolean
 }
 export interface GgbSolvePlan { solution: string; steps: GgbSolveStep[]; notes: string[]; raw: string }
 
@@ -324,13 +341,24 @@ export function ggbValidatePlan(steps: GgbSolveStep[], objects: string[] = []): 
         const q = ggbReadPlan(one, objects || [])
         if (!q.ok) issues.push("读数表达式不合法（" + (q.why || "认不出") + "）：" + one.slice(0, 40))
       }
+      // 【v1737】动画步 / 辅助开关步：各自的紧凑写法也得合法 ✓
+      if (s.anim) {
+        const a = animParseSpec(one)
+        if (!a.ok) issues.push("动画步不合法（" + (a.why || "认不出") + "）：" + one.slice(0, 40))
+        else if ((objects || []).length && (objects || []).indexOf(String(a.spec && a.spec.target)) < 0) issues.push("动画对象不在板上：" + String(a.spec && a.spec.target))
+      }
+      if (s.aids) {
+        const q = one.split("|")
+        const ap = aidsPlan(q[0], q[1], objects || [])
+        if (!ap.ok) issues.push("辅助开关不合法（" + (ap.why || "认不出") + "）：" + one.slice(0, 40))
+      }
       // 【v1732】删一步：要删的对象得在画布上（或前面刚建过 ✓）
       if (s.tool === "delete") {
         for (const t of ggbDeleteTargets(one)) {
           if (!defined.has(t)) issues.push("要删的 " + t + " 在画布上没有（名字对得上吗 ✓）")
         }
       }
-      out.push({ tool: s.tool, mode: s.mode, cmd: one, say: s.say, query: s.query })
+      out.push({ tool: s.tool, mode: s.mode, cmd: one, say: s.say, query: s.query, anim: s.anim, aids: s.aids })
     }
   }
   return { steps: out, issues, fixes }
@@ -426,6 +454,10 @@ function coerceStep(it: unknown): { step: GgbSolveStep | null; note?: string } {
   const toolRaw = String(o.tool == null ? "" : o.tool).trim()
   if (!cmd) return { step: null, note: toolRaw ? "这一步只有工具没有指令，已跳过：" + toolRaw : undefined }
   if (isQueryTool(toolRaw)) return { step: { tool: "query", mode: -1, cmd, say, query: true } }
+  // 【v1737】动画 / 教学辅助开关（cmd 是各自的紧凑写法 ✓ 解析在 ggbAnim / ggbTeach 里 ✓）
+  const low = toolRaw.toLowerCase()
+  if (low === 'animate' || low === 'anim' || low === '动画') return { step: { tool: 'animate', mode: -1, cmd, say, anim: true } }
+  if (low === 'aids' || low === '辅助' || low === '教学辅助' || low === 'showaids') return { step: { tool: 'aids', mode: -1, cmd, say, aids: true } }
   const t = ggbToolOf(toolRaw)
   return {
     step: { tool: t ? t.key : "", mode: t ? t.mode : -1, cmd, say },

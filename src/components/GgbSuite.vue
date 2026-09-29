@@ -385,9 +385,10 @@ async function scanFigureInner() {
     scanNote.value = "认出 " + fig.points.length + " 个顶点（带字母标注 " + fig.labelled + " 个）、" + fig.edges.length + " 条线段、" + fig.circles.length + " 个圆/弧"
     solveLog.value.push("· ② 认图形：" + scanNote.value)
     // 上一次自动识别的那一段换掉（别越堆越多 ✓）
+    const briefForCheck = solveBrief.value   // 【v1737】对账要用校对口里的题干 → 先留一份 ✓
     const at = solveBrief.value.indexOf("【图形（自动识别")
     if (at >= 0) solveBrief.value = solveBrief.value.slice(0, at).replace(/\s+$/, "")
-    solveBrief.value = (solveBrief.value ? solveBrief.value + String.fromCharCode(10, 10) : "") + scanToBrief(fig)
+    solveBrief.value = (solveBrief.value ? solveBrief.value + String.fromCharCode(10, 10) : "") + scanToBrief(fig, briefForCheck)
     if (fig.points.length < 2) {
       solveLog.value.push("· ⚠ 认出来的顶点太少 —— 这张图可能不是线稿（照片 / 阴影 / 手写），或者图形太小；按题干自己判断就行 ✓")
       toaster("没认出多少图形元素（见日志）—— 不影响照常解题 ✓")

@@ -124,11 +124,13 @@ export function describeScan(f: ScanFig): string[] {
 }
 
 /** 【v1730】结构描述 → 写进校对框的那一段（**先说清是自动识别的、与题干冲突以题干为准** ✓） */
-export function scanToBrief(f: ScanFig): string {
+export function scanToBrief(f: ScanFig, briefText?: string): string {
   const NL2 = String.fromCharCode(10)
   const w = scanWarnings(f)   // 【v1736】识别存疑的地方**如实标出来** ✓ 别让老师以为全对 ✗
+  const st = statedMeasureChecks(f, briefText)   // 【v1737】与题干对账（实测 vs 题给 ✓）
   return "【图形（自动识别，可能有个别偏差 —— 与题干冲突时以题干为准）】" + NL2 +
     describeScan(f).map((x) => "- " + x).join(NL2) +
+    (st.length ? NL2 + st.join(NL2) : "") +
     (w.length ? NL2 + "⚠ 识别存疑（请核对）：" + NL2 + w.map((x) => "- " + x).join(NL2) : "")
 }
 /** 【v1736】把数值**量出来**（Math2GGB 第一条规矩：不许目测 ✗）—— 纯函数 ✓ 探针盯着
@@ -196,4 +198,65 @@ function angleAtVertex(f: ScanFig, v: number, p: number, q: number): number {
   let d = (Math.abs(a1 - a2) * 180) / Math.PI
   if (d > 180) d = 360 - d
   return d
+}
+/**
+ * 【v1737】与题干对账：把**实测尺寸**跟题干给的数**对一遍**（纯函数 ✓ 探针盯着）
+ *  —— Math2GGB 的"量原图不目测"再往前一步：不光量出来，还要**跟题给的数比** ✓
+ *
+ * 能对什么（都只认**写得明确**的 ✓ 不猜 ✗）：
+ *   · `AB=3` 这种绝对长度 → 我们只有归一化坐标，所以比**比值**（AB:CD vs 题给 AB=3、CD=4 ✓）
+ *   · `∠ABC=60°` → 角度是绝对的，直接比 ✓
+ * 对不上时**明确写出来** ✓ —— 要么识别错了、要么题干读错了，两处总有一处要改 ✓
+ */
+export function statedMeasureChecks(f: ScanFig, text: unknown): string[] {
+  const t = String(text == null ? '' : text)
+  const P = (f && f.points) || []
+  if (P.filter((p) => !/^P[0-9]+$/.test(p.name)).length < 2) return []   // 点还没字母名 → 对不了账 ✓
+  const byName: Record<string, number> = {}
+  P.forEach((p, i) => { byName[p.name] = i })
+  const segLen = (a: string, b: string): number => {
+    const i = byName[a]
+    const j = byName[b]
+    if (i === undefined || j === undefined) return NaN
+    return Math.sqrt((P[i].x - P[j].x) * (P[i].x - P[j].x) + (P[i].y - P[j].y) * (P[i].y - P[j].y))
+  }
+  const out: string[] = []
+  /* ① 绝对长度（成对比较比值 ✓） */
+  const lens: { a: string; b: string; v: number }[] = []
+  const re1 = /(?:^|[^A-Za-z0-9_'])([A-Za-z][A-Za-z0-9_']?)([A-Za-z][A-Za-z0-9_']?)\s*=\s*(\d+(?:\.\d+)?)/g
+  let m: RegExpExecArray | null
+  while ((m = re1.exec(t))) {
+    const v = Number(m[3])
+    if (Number.isFinite(v) && v > 0) lens.push({ a: m[1], b: m[2], v })
+  }
+  for (let i = 0; i < lens.length; i++) {
+    for (let j = i + 1; j < lens.length; j++) {
+      const A = lens[i]
+      const B = lens[j]
+      const ma = segLen(A.a, A.b)
+      const mb = segLen(B.a, B.b)
+      if (!Number.isFinite(ma) || !Number.isFinite(mb) || mb <= 0.001) continue
+      const want = A.v / B.v
+      const got = ma / mb
+      const good = Math.abs(got / want - 1) <= 0.06
+      out.push((good ? '✓' : '✗') + ' 题给 ' + A.a + A.b + ':' + B.a + B.b + ' = ' + A.v + ':' + B.v +
+        '（比值 ' + want.toFixed(3) + '）· 实测 ' + got.toFixed(3) + (good ? ' 对得上 ✓' : ' 对不上 ✗（识别或题干有一处不对）'))
+    }
+  }
+  /* ② 角度（绝对量，直接比 ✓） */
+  const re2 = /[∠角]\s*([A-Za-z][A-Za-z0-9_']?)\s*([A-Za-z][A-Za-z0-9_']?)\s*([A-Za-z][A-Za-z0-9_']?)\s*=\s*(\d+(?:\.\d+)?)/g
+  while ((m = re2.exec(t))) {
+    const want = Number(m[4])
+    const v = byName[m[2]]
+    const p = byName[m[1]]
+    const q = byName[m[3]]
+    if (v === undefined || p === undefined || q === undefined) continue
+    const got = angleAtVertex(f, v, p, q)
+    if (!Number.isFinite(got)) continue
+    const good = Math.abs(got - want) <= 3
+    out.push((good ? '✓' : '✗') + ' 题给 ∠' + m[1] + m[2] + m[3] + ' = ' + want + '° · 实测 ' + got.toFixed(1) + '°' +
+      (good ? ' 对得上 ✓' : ' 对不上 ✗'))
+  }
+  if (!out.length) return []
+  return ['【与题干对账】实测 vs 题给（请核对）：'].concat(out.slice(0, 10))
 }
