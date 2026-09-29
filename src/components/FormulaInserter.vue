@@ -8,8 +8,6 @@ import type { SlideElement } from '@/types'
 import ColorSwatches from './ColorSwatches.vue'
 import { FORMULA_LIBRARY, FORMULA_TAGS, formulaTags } from '@/templates/formulaLibrary'
 import type { FormulaItem } from '@/templates/formulaLibrary'
-import { MATH_SYMBOLS } from '@/templates/mathSymbols'
-import type { MathSymbol } from '@/templates/mathSymbols'
 import {
   ensureFormulaLibrary, listFormulaLibrary, addFormulaEntry, removeFormulaEntry,
 } from '@/composables/useFormulaLibrary'
@@ -279,22 +277,6 @@ function insert() {
   emit('close')
 }
 function clearAll() { latex.value = '' }
-/** 【v1749】符号面板：当前分类（借 AxMath 的页签分组 ✓） */
-const symGroup = ref(MATH_SYMBOLS[0].key)
-const symList = computed(() => (MATH_SYMBOLS.find((g) => g.key === symGroup.value) || MATH_SYMBOLS[0]).syms)
-/**
- * 【v1749】点符号 → **插到光标处** ✓（与「硬换行」同一套 ✓）
- * · 普通符号：插完光标在符号**后面** ✓ 接着敲 ✓
- * · 结构模板（分式 / 根式 / 矩阵 / 方程组）：`in` 给了偏移 ✓ 光标直接**落进第一个 {} 里** ✓
- */
-function insertSym(sym: MathSymbol) {
-  const ta = texRef.value
-  const cur = ta ? ta.selectionStart : latex.value.length
-  const end = ta ? ta.selectionEnd : latex.value.length
-  latex.value = latex.value.slice(0, cur) + sym.tex + latex.value.slice(end)
-  const pos = cur + (sym.in == null ? sym.tex.length : sym.in)
-  if (ta) nextTick(() => { ta.focus(); ta.selectionStart = ta.selectionEnd = pos })
-}
 /** 在光标处插入一个硬换行（混排文本里显示为换行；若在 aligned/cases 里需换行用 \\） */
 function insertHardBreak() {
   const ta = texRef.value
@@ -325,16 +307,6 @@ function insertHardBreak() {
               <label class="chk"><input type="checkbox" v-model="multiLine" /> 多行显示</label>
               <label class="chk"><input type="checkbox" v-model="autoWrap" /> 自动换行</label>
             </span>
-          </div>
-          <!-- 【v1749】符号面板（借 AxMath 的分类页签 ✓）：点一下就插到光标处 ✓ -->
-          <div class="sym">
-            <div class="sym__tabs">
-              <button v-for="g in MATH_SYMBOLS" :key="g.key" class="sym__tab" :class="{ 'sym__tab--on': g.key === symGroup }"
-                :title="g.name" @click="symGroup = g.key">{{ g.icon }}<span class="sym__tabname">{{ g.name }}</span></button>
-            </div>
-            <div class="sym__grid">
-              <button v-for="(sy, si) in symList" :key="si" class="sym__btn" :title="sy.tex" @click="insertSym(sy)">{{ sy.show }}</button>
-            </div>
           </div>
           <textarea ref="texRef" class="latex" v-model="latex" rows="4" placeholder="粘贴标准 LaTeX 公式，或点击右侧公式库自动填入（可连点多个，逐行排列）。"></textarea>
 
@@ -522,19 +494,4 @@ function insertHardBreak() {
   .panel__lib { width: 320px; }
   .lcard__pv { height: 46px; }
 }
-  /* 【v1749】符号面板（借 AxMath 的分类页签 ✓）：页签横向可滚 ✓ 网格紧凑 ✓ 结构模板长按看 tip ✓ */
-  .sym { border: 1px solid #dcdce6; border-radius: 8px; background: #fbfbfd; margin: 6px 0 8px; overflow: hidden; }
-  .sym__tabs { display: flex; gap: 2px; overflow-x: auto; padding: 4px 4px 0; background: #f2f2f7; }
-  .sym__tab { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid transparent;
-    border-bottom: none; border-radius: 6px 6px 0 0; background: transparent; color: #5b5b6b; font-size: 13px; cursor: pointer; white-space: nowrap; }
-  .sym__tab:hover { background: #e7e7f0; }
-  .sym__tab--on { background: #fff; border-color: #dcdce6; color: var(--brand-600); font-weight: 600; }
-  .sym__tabname { font-size: 12px; }
-  .sym__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); gap: 2px; padding: 6px;
-    max-height: 170px; overflow-y: auto; background: #fff; }
-  .sym__btn { height: 34px; border: 1px solid #e6e6ef; border-radius: 6px; background: #fff; color: #1f1f2e;
-    font-size: 16px; line-height: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sym__btn:hover { background: var(--brand-50, #eef2ff); border-color: var(--brand-300, #b9c4f5); }
-  .sym__btn:active { transform: translateY(1px); }
-  @media (max-width: 900px) { .sym__tabname { display: none; } }
 </style>
