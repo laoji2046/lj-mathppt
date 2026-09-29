@@ -382,6 +382,22 @@ export interface PenElement extends ElementBase {
  *  （原来两份渲染器都写 0.2/0.46 ≈ 0.435 ✗ 画出来的星臂偏胖 ✗）*/
 export const STAR_INNER_RATIO = 1 / (((1 + Math.sqrt(5)) / 2) ** 2)
 
+/** 【v1764】斜矩形（Angled Rectangle）的四角 ✓ 纯函数 ✓ 两份渲染器共用
+ *  按"半宽/半高 + 旋转角"构造 ✓ ⇒ 四个角**恒为 90°** ✓（原来手写的四点算下来点积 −8864 ≠ 0 ✗ 是个斜平行四边形 ✗）
+ *  旋转角固定 12° ✓ 尺寸取框的 84%×68% ✓ 再按对角线半径收进框内 ✓ */
+export function angledRectPoints(w: number, h: number, deg = 12): [number, number][] {
+  const th = (deg * Math.PI) / 180
+  const rw = w * 0.42, rh = h * 0.34
+  const cs = Math.cos(th), sn = Math.sin(th)
+  const raw: [number, number][] = [[-rw, -rh], [rw, -rh], [rw, rh], [-rw, rh]]
+  const pts = raw.map(([x, y]) => [w / 2 + x * cs - y * sn, h / 2 + x * sn + y * cs] as [number, number])
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1])
+  const sx = (w * 0.96) / Math.max(1e-6, Math.max(...xs) - Math.min(...xs))
+  const sy = (h * 0.96) / Math.max(1e-6, Math.max(...ys) - Math.min(...ys))
+  const k = Math.min(1, sx, sy)
+  return pts.map(([x, y]) => [w / 2 + (x - w / 2) * k, h / 2 + (y - h / 2) * k])
+}
+
 export type SvgItemKind =
   | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'ngon' | 'star'
   /** 【v1510】预置四边形：拖一个框就出来（顶点照样能拖 ✓） */

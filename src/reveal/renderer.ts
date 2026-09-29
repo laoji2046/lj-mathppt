@@ -3,7 +3,7 @@ import { ISO_RATIO, coneTangentSides, frustumGeom } from '@/composables/solidPro
 import { isVectorFigKind, vectorFigureSvg } from '@/composables/vectorFigures'
 import { inlineFiguresInText, renderFigureSvg } from '@/composables/figureRender'
 import { layoutTable } from '@/composables/tableLayout'
-import { animRevealClass, animTimingStyle, bulletMarker, fitCap, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss, STAR_INNER_RATIO } from '@/types'
+import { animRevealClass, animTimingStyle, bulletMarker, fitCap, fontStack, imageEffectCss, imageMaskCss, lineDashCss, normalizeMixed, paragraphLineStyle, shadowCss, slideBgCss, textEffectCss, textShadowCss, STAR_INNER_RATIO, angledRectPoints } from '@/types'
 import { SOLID_VCOUNT, renderSolid, solidVerts, arcsSvg, type EdgeStyle, type FaceStyle, type SolidMesh } from '@/composables/solid3d'
 
 /**
@@ -172,6 +172,16 @@ function figureInner(
       return `<polygon points="${reg(6, w / 2, h / 2, Math.min(w, h) * 0.46, Math.min(w, h) * 0.46)}" ${sa} fill="${fc}"/>`
     case 'rhombus':
       return `<polygon points="${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}" ${sa} fill="${fc}"/>`
+case 'kite': {
+  /* 【v1764】筝形 ✓：画布早就画了 ✓ 放映这份**漏了** ✗（同一份图在放映/导出里画不出来 ✗）*/
+  const kx = w / 2
+  return `<polygon points="${kx},0 ${w},${h * 0.38} ${kx},${h} 0,${h * 0.38}" ${sa} fill="${fc}"/>`
+}
+case 'angledrect': {
+  /* 【v1764】斜矩形 ✓：与画布共用 @/types 的 angledRectPoints ✓（四角恒 90° ✓）*/
+  const ap = angledRectPoints(w, h).map((p) => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ')
+  return `<polygon points="${ap}" ${sa} fill="${fc}"/>`
+}
     case 'parallelogram':
       return `<polygon points="${w * 0.22},0 ${w},0 ${w * 0.78},${h} 0,${h}" ${sa} fill="${fc}"/>`
     case 'trapezoid':

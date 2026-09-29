@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ISO_RATIO, coneTangentSides, frustumGeom } from '@/composables/solidProjection'
 import type { MathFigureElement, SlideElement } from '@/types'
-import { lineDashCss, STAR_INNER_RATIO } from '@/types'
+import { lineDashCss, STAR_INNER_RATIO, angledRectPoints } from '@/types'
 import { shapeEdit } from '@/ui/shapeEditor'
 import { SOLID_KINDS, SOLID_VCOUNT, renderSolid, solidVerts, meshEdges, meshFaces, decodeLabel, arcsSvg, vertexDotsSvg, type PointStyle } from '@/composables/solid3d'
 import { CONIC_KINDS, DEFAULT_PIECEWISE, FUNCTION_KINDS, conicFigure, conicLineDrag, conicLineHandles, conicPointDrag, conicPointHandles, customFigure, freqLineFigure, freqTableFigure, functionFigure, histogramFigure, piecewiseFigure, scatterFigure, setNumberlineFigure, vennFigure } from '@/composables/mathPlot'
@@ -224,7 +224,8 @@ const innerHtml = computed(() => {
       return `<polygon points="${cx},0 ${w},${h * 0.38} ${cx},${h} 0,${h * 0.38}" ${strokeAttrs} fill="${fillColor}"/>`
     // ⭐ 斜矩形：把矩形整体斜一点 ✓（参考图里的 Angled Rectangle ✓）
     case 'angledrect':
-      return `<polygon points="${w * 0.22},0 ${w * 0.98},${h * 0.14} ${w * 0.78},${h} ${w * 0.02},${h * 0.86}" ${strokeAttrs} fill="${fillColor}"/>`
+      const ap = angledRectPoints(w, h).map((p) => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ')
+            return `<polygon points="${ap}" ${strokeAttrs} fill="${fillColor}"/>`
     case 'parallelogram':
       return `<polygon points="${w * 0.22},0 ${w},0 ${w * 0.78},${h} 0,${h}" ${strokeAttrs} fill="${fillColor}"/>`
     case 'trapezoid':

@@ -2959,6 +2959,32 @@ ok(a81.indexOf("h - rs") > 0 && b81.indexOf("h - rs") > 0, "★**直角标记**�
 const rs81 = Math.min(w81, h81) * 0.12;
 ok(Math.abs(rs81 - 24) < 1e-9, "★标记边长 = min(w,h)×0.12 = " + rs81.toFixed(0) + "px ✓（不至于太小看不见 ✓ 也不会盖住图形 ✓）");
 ok(a81.indexOf("0,${h * 0.05}") > 0 && b81.indexOf("0,${h * 0.05}") > 0, "★竖直边从 x=0 起 ✓（旧的是 0.12w ✗ 所以根本不是直角三角形 ✗）");
+console.log("=== 用例 82：平面图形覆盖面 + 斜矩形直角（v1764）===");
+const TY82 = loadBundled("../types/index.ts", "_c82ty.cjs");
+const MJ82 = fs.readFileSync(path.join(ROOT, "src", "components", "elements", "MathFigureElement.vue"), "utf8");
+const RR82 = fs.readFileSync(path.join(ROOT, "src", "reveal", "renderer.ts"), "utf8");
+/* ① 覆盖面对照：这两份是"同一份图的两种形态" ✓ 谁有 case 另一边就必须有 ✓（kite/angledrect 就是这么漏的 ✗）*/
+const KINDS82 = ["coordinate","numberline","venn","righttriangle","angle","semicircle","triangle","rectangle","circle","pentagon","hexagon","rhombus","kite","angledrect","parallelogram","trapezoid","star","bezier","polygon"];
+const hasCase82 = (f, k) => f.indexOf("case '" + k + "'") >= 0;
+const diff82 = KINDS82.filter((k) => hasCase82(MJ82, k) !== hasCase82(RR82, k));
+ok(diff82.length === 0, "★19 个走 case 的平面图形，**两份渲染器覆盖面一致** ✓（不一致：" + (diff82.length ? diff82.join(",") : "无 ✓") + " ✓ 之前 kite/angledrect 就漏在放映那份 ✗）");
+ok(hasCase82(MJ82, "kite") && hasCase82(RR82, "kite") && hasCase82(MJ82, "angledrect") && hasCase82(RR82, "angledrect"), "★kite 与 angledrect **两边都有了** ✓（放映那份原来完全没有 ⇒ 那边画不出来 ✗）");
+/* ② 斜矩形：真直角 ✓ */
+const P82 = TY82.angledRectPoints(300, 200);
+ok(P82.length === 4, "★斜矩形返回 4 个角点 ✓");
+const ang82 = (A, B, C) => { const u = [B[0]-A[0], B[1]-A[1]], v = [C[0]-B[0], C[1]-B[1]]; return Math.acos(Math.max(-1, Math.min(1, (u[0]*v[0]+u[1]*v[1]) / (Math.hypot(u[0],u[1])*Math.hypot(v[0],v[1]))))) * 180 / Math.PI; };
+const angs82 = [0,1,2,3].map((i) => ang82(P82[i], P82[(i+1)%4], P82[(i+2)%4]));
+ok(angs82.every((a) => Math.abs(a - 90) < 1e-9), "★四个角**全是 90.000000°** ✓（实测 " + angs82.map((a) => a.toFixed(3)).join(" / ") + " ✓ 按构造保证 ✓）");
+const side82 = (i) => Math.hypot(P82[(i+1)%4][0]-P82[i][0], P82[(i+1)%4][1]-P82[i][1]);
+ok(Math.abs(side82(0) - side82(2)) < 1e-9 && Math.abs(side82(1) - side82(3)) < 1e-9, "★对边相等 ✓（" + side82(0).toFixed(1) + "=" + side82(2).toFixed(1) + " ✓ " + side82(1).toFixed(1) + "=" + side82(3).toFixed(1) + " ✓ 既是矩形又是平行四边形 ✓）");
+const inb82 = P82.every((p) => p[0] >= -1 && p[0] <= 301 && p[1] >= -1 && p[1] <= 201);
+ok(inb82, "★四角都在框内 ✓（不会画出去 ✓）");
+/* 与"旧手写四点"对照 ✓：那样算出来根本不是直角 ✗ */
+const OLD82 = [[300*0.22,0],[300*0.98,200*0.14],[300*0.78,200],[300*0.02,200*0.86]];
+const angOld82 = ang82(OLD82[1], OLD82[2], OLD82[3]);
+ok(Math.abs(angOld82 - 90) > 5, "★对照：旧手写四点那里只有 " + angOld82.toFixed(1) + "° ✓（差 " + (90 - angOld82).toFixed(1) + "° ✗ 所以它其实是斜平行四边形 ✗ 名字却叫 Angled Rectangle ✗）");
+/* ③ 两份都用同一个纯函数 ✓（不再各写一份 ✗）*/
+ok(MJ82.indexOf("angledRectPoints(w, h)") > 0 && RR82.indexOf("angledRectPoints(w, h)") > 0, "★画布与放映都用 @/types 的 angledRectPoints ✓（各 1 处 ✓ 同源 ✓）")
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);
