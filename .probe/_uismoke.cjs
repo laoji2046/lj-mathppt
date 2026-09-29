@@ -183,6 +183,43 @@ function makePng(w, h) {
           const hitLab = await ev('(function(){ var g=document.querySelector(".vd__lab"); if(!g) return "no-label"; var r=g.getBoundingClientRect(); if(!r.width||!r.height) return "no-box"; var el=document.elementFromPoint(r.left+r.width/2, r.top+r.height/2); if(!el) return "none"; if(el.closest && el.closest(".vd__lab")) return "label-top"; var ov=el.closest && el.closest(".vd__ov"); return (ov? "overlay:" : "other:") + el.tagName; })()');
           ok(String(hitLab) !== "label-top", "★在字母中心做命中测试：最上层不是字母 ✓（实测 " + hitLab + (String(hitLab) === "no-box" ? " —— 测试图没认出字母，这一条退化为\"不适用\" ✓ 上面那条 pointer-events=none 才是硬证据 ✓" : "") + "）");
           const vp = await ev('(function(){var v=document.querySelector(".vd__viewport"); if(!v) return ""; var r=v.getBoundingClientRect(); return Math.round(r.width)+"x"+Math.round(r.height)})()');
+          /* 【v1744】补一个点：按钮在 ✓ → 点一下画布真的多一个顶点（数 .vd__stat 的顶点数 ✓） */
+          const hasAddPt = await ev('!!([...document.querySelectorAll(".vd__row button")].find(b=>b.textContent.indexOf("补一个点")>=0))');
+          ok(hasAddPt === true, "★工具栏有「＋ 补一个点」按钮 ✓");
+          const statBefore = await ev('(function(){var s=document.querySelector(".vd__stat"); return s? s.innerText.trim() : ""})()');
+          await ev('[...document.querySelectorAll(".vd__row button")].find(b=>b.textContent.indexOf("补一个点")>=0).click()');
+          await sleep(250);
+          const tipOn = await ev('(function(){var t=document.querySelector(".vd__tip--on"); return t? t.innerText : ""})()');
+          ok(String(tipOn).indexOf("补点") >= 0, "★进入补点模式后有提示（实测片段：「" + String(tipOn).replace(/\s+/g, " ").slice(0, 40) + "…」✓）");
+          /* 挑一个离所有顶点都远的落点（5×5 网格里选最小距离最大的那个 ✓） */
+                    /* 挑落点并直接派发 pointerdown（测的是**我们的处理逻辑** ✓ 不依赖 Chrome 的命中测试 ✓
+                       之前用 Input.dispatchMouseEvent + elementFromPoint 双重过滤，结果一个候选都没通过 ✗） */
+          const fired = await ev(`(function(){
+            var st=document.querySelector(".vd__stage"), vp=document.querySelector(".vd__viewport");
+            if(!st||!vp) return "no-stage";
+            var sr=st.getBoundingClientRect(), vr=vp.getBoundingClientRect();
+            var x0=Math.max(sr.left,vr.left), x1=Math.min(sr.right,vr.right);
+            var y0=Math.max(sr.top,vr.top), y1=Math.min(sr.bottom,vr.bottom);
+            if(x1-x0<40||y1-y0<40) return "too-small";
+            var cs=[].slice.call(document.querySelectorAll(".vd__ov circle")).map(function(c){var b=c.getBoundingClientRect(); return [b.left+b.width/2,b.top+b.height/2]});
+            var best=null;
+            for(var i=1;i<=5;i++){ for(var j=1;j<=5;j++){
+              var x=x0+(x1-x0)*i/6, y=y0+(y1-y0)*j/6;
+              var d=1e9; cs.forEach(function(c){ d=Math.min(d, Math.hypot(x-c[0], y-c[1])) });
+              if(!best || d>best.d) best={x:Math.round(x), y:Math.round(y), d:Math.round(d)};
+            } }
+            if(!best) return "no-spot";
+            var mk=(t,b)=>new PointerEvent(t,{bubbles:true,clientX:best.x,clientY:best.y,pointerId:1,pointerType:"mouse",isPrimary:true,button:0,buttons:b});
+            st.dispatchEvent(mk("pointerdown",1));
+            st.dispatchEvent(mk("pointerup",0));
+            return JSON.stringify(best);
+          })()`);
+          const sp = JSON.parse(String(fired || "{}"));
+          ok(Number(sp.d) >= 20, "★落点离最近的顶点 " + sp.d + " px（≥20 ✓ 不会走「只选中已有顶点」那条 ✓ 原始返回：" + String(fired).slice(0, 20) + "）");
+          await sleep(400);
+          const statAfter = await ev('(function(){var s=document.querySelector(".vd__stat"); return s? s.innerText.trim() : ""})()');
+          const numOf = (t) => { const m = /顶点\s*(\d+)/.exec(String(t)); return m ? Number(m[1]) : -1 };
+          ok(numOf(statAfter) === numOf(statBefore) + 1, "★点一下画布真的补出了 1 个顶点（" + statBefore + " → " + statAfter + " ✓）");
           ok(/^\d+x\d+$/.test(String(vp)) && parseInt(String(vp).split("x")[0], 10) > 560, "★画布视口也放大了（实测 " + vp + " ✓ 以前固定 560×450 ✗）");
         }
       }
