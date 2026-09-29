@@ -235,6 +235,49 @@ ok(G.ggbCheckResult('{"verdict":"乱写","note":"x"}', []).verdict === "unsure",
 const qC4 = G.ggbCheckResult('{"verdict":"ok","note":"自洽","steps":[{"tool":"query","cmd":"Distance(A,Z)"}]}', ["A"]);
 ok(qC4.verdict === "ok" && qC4.steps.length === 0, "★修正步里的非法读数被剔掉（Z 不在画布上 ✓）");
 ok(G.ggbCheckResult(null, []).verdict === "unsure", "null 不炸");
+console.log(NL + "=== 静态：删除与依赖闭包（v1732）===");
+/* ① 从指令里抠引用（函数名 / 赋值目标都不算 ✓） */
+ok(G.ggbRefsOf("A=(0,0)").length === 0, "A=(0,0)：没有引用（A 是定义 ✓）");
+ok(G.ggbRefsOf("c=Circle(A,B)").join(",") === "A,B", "c=Circle(A,B) → 引用 A、B（Circle 是函数名，不算 ✓）");
+ok(G.ggbRefsOf("l=PerpendicularLine(M,c)").join(",") === "M,c", "l=PerpendicularLine(M,c) → 引用 M、c");
+ok(G.ggbRefsOf("Segment(A,B)").join(",") === "A,B", "没有赋值的作图步也能抠出引用");
+ok(G.ggbRefsOf("Distance(A,B)").join(",") === "A,B", "读数表达式里的函数名也不算引用");
+ok(G.ggbRefsOf("").length === 0, "空指令不炸");
+/* ② plan 级依赖图 + 删除闭包 */
+const dG = G.ggbPlanGraph([
+  { tool: "point", mode: 1, cmd: "A=(0,0)", say: "" },
+  { tool: "point", mode: 1, cmd: "B=(4,0)", say: "" },
+  { tool: "circle", mode: 6, cmd: "c=Circle(A,B)", say: "" },
+  { tool: "midpoint", mode: 14, cmd: "D=Midpoint(A,B)", say: "" },
+  { tool: "intersect", mode: 13, cmd: "E=Intersect(c,xAxis)", say: "" },
+]);
+ok(dG.length === 5 && dG[2].refs.join(",") === "A,B", "依赖图：5 个对象，c 依赖 A、B");
+const dcl = G.ggbDeleteClosure("A", dG);
+ok(dcl.indexOf("A") >= 0 && dcl.indexOf("c") >= 0 && dcl.indexOf("D") >= 0, "★删 A → 连带 c、D（它们依赖 A ✓）");
+ok(dcl.indexOf("E") >= 0, "★传递闭包：E 依赖 c → 也要一起掉");
+ok(dcl.indexOf("B") < 0, "★B 不依赖 A → 不该被牵连");
+ok(G.ggbDeleteClosure("", dG).length === 0, "空目标 → 空");
+ok(G.ggbDeleteClosure("A", []).join(",") === "A", "空依赖图 → 至少把自己算上");
+/* ③ 删一步的目标解析（宽容 ✓） */
+ok(G.ggbDeleteTargets("Delete(A,B)").join(",") === "A,B", "Delete(A,B) → 两个目标");
+ok(G.ggbDeleteTargets("Delete(c)").join(",") === "c", "Delete(c) → c");
+ok(G.ggbDeleteTargets("删除(A)").join(",") === "A", "中文「删除(A)」也认");
+ok(G.ggbDeleteTargets("  A  ").join(",") === "A", "光写名字也认");
+ok(G.ggbDeleteTargets("").length === 0, "空 → 没有目标");
+/* ④ 校验：删不存在的对象要报出来 */
+const dV1 = G.ggbValidatePlan([{ tool: "delete", mode: 23, cmd: "Delete(A)", say: "" }], ["A"]);
+ok(dV1.issues.length === 0, "删画布上有的 A → 不报警");
+const dV2 = G.ggbValidatePlan([{ tool: "delete", mode: 23, cmd: "Delete(Z)", say: "" }], ["A"]);
+ok(dV2.issues.join("").indexOf("要删的 Z") >= 0, "★删画布上没有的 Z → 报出来");
+const dV3 = G.ggbValidatePlan([
+  { tool: "point", mode: 1, cmd: "A=(0,0)", say: "" },
+  { tool: "delete", mode: 23, cmd: "Delete(A)", say: "" },
+]);
+ok(dV3.issues.length === 0, "先建后删同一个名字 → 不报警");
+/* ⑤ system 里告诉模型可以删 */
+const dSY = G.ggbSolveSystem();
+ok(dSY.indexOf("delete") >= 0 && dSY.indexOf("Delete(A") >= 0, "解题 system 告诉模型可以发删除步");
+ok(dSY.indexOf("连带删掉依赖") >= 0, "★system 说清「删一个会连带删掉依赖它的对象」");
 function pickKey() {
   const direct = String(process.env.LJ_AI_KEY || process.env.DEEPSEEK_API_KEY || "").trim();
   if (direct) return direct;

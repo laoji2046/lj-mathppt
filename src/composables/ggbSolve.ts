@@ -89,6 +89,8 @@ export function ggbSolveSystem(): string {
     "  tool 写 query，cmd 写一条**只读表达式**：Distance(A,B)、Angle(A,B,C)、Area(p)、Radius(c)、",
     "  Center(c)、Slope(l)、Midpoint(A,B)、x(A)、y(A) —— 只能用这些只读函数 + 画布上已有的对象 ✗ 别的会被拒掉；",
     "  量出来的**精确值会回到你手里**，再据此往下画或者核对（这一步不切工具、不画图 ✓）。",
+    "· **画错了就删掉重画**（【v1732】删一个对象会**连带删掉依赖它的**对象 ✓）：",
+    "  tool 写 delete，cmd 写 Delete(A)（GeoGebra 原生写法 ✓ 多个就用 Delete(A,B) ✓）。",
     "输出格式（**只输出 JSON**，别加解释、别包代码块）：",
     "{\"solution\":\"解题过程（可用换行与 $公式$）\",\"steps\":[{\"tool\":\"point\",\"cmd\":\"A=(0,0)\",\"say\":\"建点 A\"},{\"tool\":\"circle\",\"cmd\":\"Circle(A,B)\",\"say\":\"以 A 为心过 B 作圆\"}]}",
     "steps 按作图顺序排；一步只做一件事（先切工具、再一条指令）；题目里用不到的工具别硬凑。",
@@ -322,6 +324,12 @@ export function ggbValidatePlan(steps: GgbSolveStep[], objects: string[] = []): 
         const q = ggbReadPlan(one, objects || [])
         if (!q.ok) issues.push("读数表达式不合法（" + (q.why || "认不出") + "）：" + one.slice(0, 40))
       }
+      // 【v1732】删一步：要删的对象得在画布上（或前面刚建过 ✓）
+      if (s.tool === "delete") {
+        for (const t of ggbDeleteTargets(one)) {
+          if (!defined.has(t)) issues.push("要删的 " + t + " 在画布上没有（名字对得上吗 ✓）")
+        }
+      }
       out.push({ tool: s.tool, mode: s.mode, cmd: one, say: s.say, query: s.query })
     }
   }
@@ -508,4 +516,83 @@ export function ggbCheckResult(raw: unknown, objects: string[] = []): GgbCheck {
     steps.push(c.step)
   }
   return { verdict, note: String(obj.note == null ? "" : obj.note).trim().slice(0, 800), steps }
+}
+/* ---------------- 【v1732】删除（delete）与依赖闭包：画错了能撤，撤得干净 ----------------
+ * 依据 Draw2Think 的工具分类学：Deletion 的状态效果是 `S' = S \ {target ∪ dependents}`
+ *   —— 删一个对象要**连依赖它的**一起掉；它的 §5 专门做了 `ablation_wo_delete`（说明这一层不是可有可无 ✓）。
+ *
+ * 这里给的是**纯函数**（探针能盯 ✓）：
+ *   · ggbRefsOf(cmd)        —— 一条指令引用了哪些对象（函数名 / 赋值目标都不算 ✓）
+ *   · ggbPlanGraph(steps)   —— plan 级依赖图（名字 → 它引用了谁 ✓）
+ *   · ggbDeleteClosure(t, g)—— 删 t 时要连带删掉谁（**传递闭包** ✓ 含 t 自己 ✓）
+ *   · ggbDeleteTargets(cmd) —— 从 Delete(A,B) / 删除(A) / 光写名字 里抠出目标 ✓
+ * 运行时优先问绘图板自己的 getDependentObjects ✓，拿不到就用 plan 图兜底 ✓。
+ */
+
+/** 【v1732】一条指令里**引用的对象名**：
+ *  · 后面紧跟 `(` 的标识符是**函数名**（Segment / Circle / Distance / x …）✗ 不算引用
+ *  · 行首 `X=…` / `f(x)=…` 里的 X 是**定义的名字** ✗ 不算引用
+ */
+export function ggbRefsOf(cmd: unknown): string[] {
+  const s = String(cmd == null ? "" : cmd).trim()
+  const out: string[] = []
+  const re = /[A-Za-z_][A-Za-z0-9_']*/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(s))) {
+    const id = m[0]
+    const rest = s.slice(m.index + id.length)
+    const isCall = /^\s*\(/.test(rest)                     // 函数名
+    const isDef = m.index === 0 && /^\s*(\([^)]*\))?\s*=/.test(rest)   // 定义目标（X=… 或 f(x)=…）
+    if (!isCall && !isDef && out.indexOf(id) < 0) out.push(id)
+  }
+  return out
+}
+
+/** 【v1732】plan 级依赖图的一项：这个对象引用了谁 */
+export interface GgbDep { name: string; refs: string[] }
+
+/** 【v1732】从作图步骤推出依赖图（读数步不产对象 ✗ 跳过 ✓）—— 纯函数 ✓ */
+export function ggbPlanGraph(steps: GgbSolveStep[]): GgbDep[] {
+  const out: GgbDep[] = []
+  for (const s of steps || []) {
+    if (s.query) continue
+    const c = String(s.cmd || "").trim()
+    const m = /^([A-Za-z][A-Za-z0-9_']*)\s*(?:\([^)]*\))?\s*=/.exec(c)
+    if (!m) continue
+    out.push({ name: m[1], refs: ggbRefsOf(c) })
+  }
+  return out
+}
+
+/**
+ * 【v1732】删 `target` 时，plan 里还有谁要跟着掉（**传递闭包** ✓ 含 target 自己 ✓）
+ *  —— 这就是 Draw2Think 说的 `target ∪ dependents` ✓
+ */
+export function ggbDeleteClosure(target: unknown, graph: GgbDep[]): string[] {
+  const t = String(target == null ? "" : target).trim()
+  if (!t) return []
+  const out: string[] = [t]
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const d of graph || []) {
+      if (out.indexOf(d.name) >= 0) continue
+      if ((d.refs || []).some((r) => out.indexOf(r) >= 0)) { out.push(d.name); grew = true }
+    }
+  }
+  return out
+}
+
+/** 【v1732】删一步的目标：`Delete(A,B)` / `删除(A)` / 光写 `A` 都认 ✓（宽容，认不出的丢掉 ✓） */
+export function ggbDeleteTargets(cmd: unknown): string[] {
+  const s = String(cmd == null ? "" : cmd).trim()
+  if (!s) return []
+  const m = /^(?:Delete|delete|删除)\s*\(([^)]*)\)\s*$/.exec(s)
+  const body = m ? m[1] : s
+  const out: string[] = []
+  for (const raw of body.split(/[,，\s]+/)) {
+    const t = raw.trim()
+    if (/^[A-Za-z_][A-Za-z0-9_']*$/.test(t) && out.indexOf(t) < 0) out.push(t)
+  }
+  return out
 }

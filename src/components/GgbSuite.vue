@@ -5,7 +5,7 @@ import type { SlideElement } from '@/types'
 import { useDeckStore } from '@/stores/deck'
 import { hasLocalEngine, loadGeoGebra } from '@/composables/useGeoGebra'
 import { describeToCommands } from '@/composables/ggbAI'
-import { GGB_QUERY_TMP, ggbAutoQueries, ggbBriefText, ggbCheckResult, ggbCheckSystem, ggbCheckUser, ggbQueryCmd, ggbReadBrief, ggbReadPlan, ggbReadSystem, ggbRepairSystem, ggbRepairUser, ggbSolvePlan, ggbSolveSystem, ggbSolveUser, ggbToolOf, ggbValidatePlan, ggbVisionGuard, type GgbReadout, type GgbSolveStep } from '@/composables/ggbSolve'
+import { GGB_QUERY_TMP, ggbAutoQueries, ggbBriefText, ggbCheckResult, ggbCheckSystem, ggbCheckUser, ggbDeleteClosure, ggbDeleteTargets, ggbPlanGraph, ggbQueryCmd, ggbReadBrief, ggbReadPlan, ggbReadSystem, ggbRepairSystem, ggbRepairUser, ggbSolvePlan, ggbSolveSystem, ggbSolveUser, ggbToolOf, ggbValidatePlan, ggbVisionGuard, type GgbReadout, type GgbSolveStep } from '@/composables/ggbSolve'
 import { settingsOpen } from '@/ui/menus'
 import { loadImg, prepImageEl } from '@/composables/imgPrep'
 import { scanFromResult, scanToBrief } from '@/composables/figScan'
@@ -190,6 +190,48 @@ const solveShot = ref(false)
 const solveFile = ref<HTMLInputElement | null>(null)
 const MAX_SOLVE_IMG = 3
 
+/* ---------------- 【v1732】删除与回滚：画错了能撤、撤得干净 ----------------
+ * ① 删一步：先算出「连带会掉哪些依赖」→ 执行 → 日志里报出来 ✓
+ *    优先问绘图板自己的 getDependentObjects ✓（权威 ✓），拿不到就用 plan 依赖图兜底 ✓
+ * ② 回滚：跑之前存一份**整块画布**快照（getXML ✓ 含视图），一键 setXML 回到作图前 ✓
+ *    —— 比「清掉上一次画的对象」更彻底：连**被改过定义/样式**的对象也能恢复 ✓
+ */
+const runSnap = ref("")
+
+/** 【v1732】整块画布快照（含视图 ✓）—— 回滚用 ✓ */
+function snapXml(a: any): string {
+  try { return typeof a.getXML === "function" ? String(a.getXML()) : "" } catch { return "" }
+}
+
+/** 【v1732】问绘图板：这些对象各自依赖了谁（拿不到就返回空 → 调用方用 plan 图兜底 ✓） */
+function depsOfApi(a: any, names: string[]): string[] {
+  const out: string[] = []
+  try {
+    if (typeof a.getDependentObjects !== "function") return out
+    for (const n of names) {
+      const ds = a.getDependentObjects(n) as string[] | undefined
+      for (const d of ds || []) if (d && out.indexOf(d) < 0) out.push(d)
+    }
+  } catch { /* 拿不到就算了 ✓ */ }
+  return out
+}
+
+/** 【v1732】一键回滚到「本次作图前」✓（整块画布 + 视图一起恢复 ✗ 这之后手改的也会没 ✓ 提示里写清 ✓） */
+function rollbackRunInner() {
+  const a = liveApplet()
+  if (!a || typeof a.setXML !== "function") { toaster("这个绘图板不支持 setXML，撤不回去 ✗"); return }
+  if (!runSnap.value) { toaster("还没有快照：先跑一次「③ 解题并作图」✓"); return }
+  try {
+    a.setXML(runSnap.value)
+    lastCreated.value = []
+    checkNote.value = ""
+    solveLog.value.push("· ↩ 已回滚到本次作图前（整块画布 + 视图 ✓）")
+    toaster("已回到本次作图前的画布 ✓")
+  } catch (e) {
+    toaster("回滚失败：" + String((e as Error)?.message || e))
+  }
+}
+function rollbackRun() { quietErrors(rollbackRunInner) }
 /* ---------------- 【v1731】读数（query）：把画布上的**精确值**交回模型 ----------------
  * 依据（Draw2Think, arXiv:2605.20743）：最值钱的一层是 **query 读回** ——
  *   "readout is part of reasoning"：把引擎的精确状态变成可回答的证据 ✓
@@ -300,6 +342,25 @@ async function runSolveSteps(a: any, steps: GgbSolveStep[], fails: { cmd: string
     if (s.query) {
       const rs = await runQueryExprs(a, [s.cmd], s.say)
       if (readouts) for (const r of rs) readouts.push(r)
+      continue
+    }
+    // 【v1732】删一步：先算出「连带会掉哪些依赖」→ 执行 → 日志里报出来 ✓
+    if (s.tool === "delete") {
+      const tg = ggbDeleteTargets(s.cmd)
+      const graph = ggbPlanGraph(steps)
+      const planDep: string[] = []
+      for (const t of tg) for (const n of ggbDeleteClosure(t, graph)) if (n !== t && planDep.indexOf(n) < 0) planDep.push(n)
+      const apiDep = depsOfApi(a, tg)
+      const extra = (apiDep.length ? apiDep : planDep).filter((n) => tg.indexOf(n) < 0)
+      try {
+        a.evalCommand(s.cmd)
+        ok++
+        solveLog.value.push("删 " + (tg.join("、") || s.cmd) + (extra.length ? "（连带依赖 " + extra.slice(0, 8).join("、") + (extra.length > 8 ? " …" : "") + "）" : "") + (s.say ? "　// " + s.say : "") + " ✓")
+      } catch (err) {
+        const msg = String((err as Error)?.message || err)
+        fails.push({ cmd: s.cmd, err: msg })
+        solveLog.value.push(s.cmd + " ✗ " + msg)
+      }
       continue
     }
     if (s.tool) {
@@ -444,6 +505,7 @@ async function solveAndDrawInner() {
   if (!brief) { toaster(solveImgs.value.length ? "先点「① 读图」把题图转成文字、核对一遍，再解题 ✓" : "先写一句题干，或点「① 读图」✓"); return }
   if (!licensed("ai-assistant")) { toaster("AI 助手要先激活：工具栏「激活 / 序列号」"); return }
   if (!solveAiKey()) { toaster("还没填 AI Key：设置 → AI 助手 ✓"); return }
+  runSnap.value = snapXml(a)   // 【v1732】跑之前先存整块画布快照 ✓ 跑砸了一键回滚 ✓
   solving.value = true
   solveLog.value = []
   solution.value = ""
@@ -926,6 +988,7 @@ onBeforeUnmount(() => { if (kbdObs) { kbdObs.disconnect(); kbdObs = undefined } 
                 <button class="ggbs__btn ggbs__btn--ai" :disabled="solving" @click="solveAndDraw">{{ solving ? "解题作图中…" : "③ 解题并作图" }}</button>
                 <label class="ggbs__check" title="作图时有命令报错，就把**报错的那几步**回灌给模型改一轮（只改错的，不动没报错的 ✓）"><input v-model="repairOn" type="checkbox" /> 失败自动修一轮</label>
                 <label class="ggbs__check" title="跑完把**画布上的精确读数**（点坐标 / 线段长 / 半径 / 面积）交给模型核对：解题过程与图形自不自洽 ✓ 不一致就给出修正步骤 ✓"><input v-model="checkOn" type="checkbox" /> 跑完自动核对</label>
+                <button class="ggbs__btn ggbs__btn--tiny" :disabled="!runSnap" @click="rollbackRun" title="把画布恢复到你点「③ 解题并作图」**之前**的样子（整块画布 + 视图一起恢复 ✓ 这一步之后手画、手改的也会没 ✗）">↩ 回滚到作图前</button>
               </div>
               <div v-if="solution" class="ggbs__solution">
                 <div class="ggbs__solvet">解题过程</div>
