@@ -167,6 +167,40 @@ function makePng(w, h) {
       ok(!!E0 && Math.abs(E0.dy) <= 6, "★编号与公式**垂直居中**（中心差 " + (E0 && E0.dy) + "px ✓ 教材里 (1) 就这么排 ✓）");
       ok(!!E0 && E0.fs >= 10 && E0.fs <= 40, "★编号字号随公式缩放（实测 " + (E0 && E0.fs) + "px ✓ 公式基准 40px ✓）");
     }
+    /* ============ A1. 符号面板（v1749，借 AxMath 的分类页签 ✓） ============ */
+    console.log("--- A1. 插入公式 → 混排公式 → 点符号面板 → 看插入与光标 ---");
+    let up1 = await openApp();
+    ok(up1, "应用起来了（准备测符号面板 ✓）");
+    if (up1) {
+      await ev('document.querySelector(\'button[title="插入公式"]\').click()');
+      await sleep(300);
+      await ev('(function(){var b=[...document.querySelectorAll(".dropdown__item")].find(x=>x.textContent.indexOf("混排公式")>=0); if(b)b.click(); return !!b})()');
+      let hasSym = false;
+      for (let i = 0; i < 12; i++) { if ((await ev('!!document.querySelector(".sym__grid")')) === true) { hasSym = true; break } await sleep(300) }
+      ok(hasSym === true, "★符号面板出现了 ✓（分类页签 + 符号网格 ✓）");
+      const tabs1 = await ev('JSON.stringify([...document.querySelectorAll(".sym__tab")].map(b=>b.getAttribute("title")))');
+      ok(String(tabs1).indexOf("希腊字母") >= 0 && String(tabs1).indexOf("矩阵与阵列") >= 0, "★页签里有「希腊字母」「矩阵与阵列」等分类 ✓（实测：" + String(tabs1).slice(0, 80) + "）");
+      /* ① 希腊字母：点第一个（α）→ 文本框应出现 \alpha，光标在末尾 ✓ */
+      await ev('document.querySelectorAll(".sym__tab")[0].click()');
+      await sleep(200);
+      const a1 = await ev('(function(){var b=document.querySelectorAll(".sym__btn")[0]; var t=(b&&b.getAttribute("title"))||""; if(b)b.click(); return t})()');
+      await sleep(300);
+      const v1 = await ev('(function(){var t=document.querySelector(".latex"); return t? JSON.stringify({v:t.value, caret:t.selectionStart}) : "no-textarea"})()');
+      let V1 = null; try { V1 = JSON.parse(String(v1)) } catch { /* 见断言 */ }
+      ok(!!V1 && V1.v === String(a1), "★点希腊字母 → 文本框里正好是它（按钮 tip " + a1 + " → 值「" + (V1 && V1.v) + "」✓）");
+      ok(!!V1 && V1.caret === String(a1).length, "★插完光标在符号**后面**（caret=" + (V1 && V1.caret) + " ✓ 接着敲就行 ✓）");
+      /* ② 结构模板：切到「分式与根式」→ 点 \frac{a}{b} → 光标应落进第一个 {} 里（偏移 6 ✓） */
+      await ev('(function(){var b=[...document.querySelectorAll(".sym__tab")].find(x=>x.getAttribute("title")==="分式与根式"); if(b)b.click(); return !!b})()');
+      await sleep(250);
+      const a2 = await ev('(function(){var b=[...document.querySelectorAll(".sym__btn")].find(x=>x.getAttribute("title")==="\\\\frac{a}{b}"); var t=(b&&b.getAttribute("title"))||""; if(b)b.click(); return t})()');
+      await sleep(300);
+      const v2 = await ev('(function(){var t=document.querySelector(".latex"); return t? JSON.stringify({v:t.value, caret:t.selectionStart}) : "no-textarea"})()');
+      let V2 = null; try { V2 = JSON.parse(String(v2)) } catch { /* 见断言 */ }
+      ok(!!V2 && String(V2.v).indexOf("\\frac{a}{b}") >= 0, "★点结构模板 → 插进去了（值含 \\frac{a}{b} ✓ 原始：" + String(v2).slice(0, 50) + "）");
+      ok(!!V2 && V2.caret === String(V2.v).indexOf("\\frac{a}{b}") + 6, "★**光标落进第一个 {} 里**（caret=" + (V2 && V2.caret) + " ✓ 直接敲分子 ✓ 这是 AxMath 那种手感 ✓）");
+      await ev('document.querySelector(".panel__close") && document.querySelector(".panel__close").click()');
+      await sleep(300);
+    }
     /* ============ A. 三维立体图（v1739 就是在这里崩的 ✗） ============ */
     console.log("--- A. 图形库 → 图形重建 → 三维立体图 ---");
     let up = await openApp();
