@@ -15,7 +15,7 @@
 const fs = require("fs");
 const path = require("path");
 const ROOT = process.env.LJ_ROOT || "D:/vue-app";
-const OUT = process.env.LJ_OUT || "C:/Users/老冀/Desktop/vue-app/.probe/shots";
+const OUT = process.env.LJ_OUT || path.join(ROOT, ".probe", "shots");   // 【v1747】产物放项目里 ✓ 别写 C: ✗
 fs.mkdirSync(OUT, { recursive: true });
 const esbuild = require("D:/vue-app/node_modules/esbuild");
 function load(entry, outfile) {

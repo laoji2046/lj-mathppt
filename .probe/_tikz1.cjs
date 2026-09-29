@@ -16,7 +16,7 @@
 const fs = require("fs");
 const path = require("path");
 const ROOT = process.env.LJ_ROOT || "D:/vue-app";
-const OUT = process.env.LJ_OUT || "C:/Users/老冀/Desktop/vue-app/.probe/shots";
+const OUT = process.env.LJ_OUT || path.join(ROOT, ".probe", "shots");   // 【v1747】产物放项目里 ✓ 别写 C: ✗
 fs.mkdirSync(OUT, { recursive: true });
 /** 默认走 esbuild 打包（与 _thmshot / _vennshot 同一套）；
  *  LJ_TS=1 时直接用 node 自己的类型剥离 require 源文件（开发时省一次子进程，产物完全一样） */
