@@ -2343,6 +2343,33 @@ for (const R of results) {
   }
 }
 
+console.log("=== 用例 61：立体几何复刻的确定性校验 + AI 还原接线（v1739）===");
+const G3 = loadBundled("geom3dCheck.ts", "_c61g.cjs");
+const CUBE = { vertices: { A: [-1, -1, -1], B: [1, -1, -1], C: [1, -1, 1], D: [-1, -1, 1], A1: [-1, 1, -1], B1: [1, 1, -1], C1: [1, 1, 1], D1: [-1, 1, 1] },
+  faces: [["A", "B", "C", "D"], ["A1", "B1", "C1", "D1"], ["A", "B", "B1", "A1"], ["B", "C", "C1", "B1"], ["C", "D", "D1", "C1"], ["D", "A", "A1", "D1"]],
+  auxiliary: [{ from: "A", to: "C1" }] };
+const c1 = G3.geom3dIssues(CUBE);
+ok(c1.errs.length === 0 && c1.verts === 8 && c1.faces === 6, "★正方体结构自检通过（顶点 8 / 面 6 / 无错 ✓）");
+const c2 = G3.geom3dIssues({ vertices: { A: [0, 0, 0], B: [1, 0, 0], C: [1, 1, 0], D: [0, 1, 0.5] }, faces: [["A", "B", "C", "D"]] });
+ok(c2.errs.join("|").indexOf("不共面") >= 0, "★四点不共面 → 报出来 ✗（面表写错会让虚实线判错 ✓）");
+const c3 = G3.geom3dIssues({ vertices: { A: [0, 0, 0], B: [1, 0, 0], C: [0, 1, 0] }, faces: [["A", "B", "Z"]] });
+ok(c3.errs.join("|").indexOf("不存在的顶点") >= 0, "★面里引用了不存在的顶点 → 报出来 ✗");
+const c4 = G3.geom3dIssues({ vertices: { A: [0, 0, 0], A2: [0, 0, 0], B: [1, 0, 0] }, faces: [["A", "A2", "B"]] });
+ok(c4.errs.join("|").indexOf("重合") >= 0, "★两个顶点重合（退化）→ 报出来 ✗");
+const c5 = G3.geom3dIssues({ vertices: { A: [0, 0, 0], B: [1, 0, 0], C: [0, 1, 0] }, faces: [["A", "B", "C"]], auxiliary: [{ from: "A", to: "Z9" }] });
+ok(c5.errs.join("|").indexOf("auxiliary") >= 0, "★辅助线指向不存在的点 → 报出来 ✗");
+const c6 = G3.geom3dIssues({ vertices: { A: [0, 0, 0], B: [1, 0, 0], C: [0, 1, 0], P: [9, 9, 9] }, faces: [["A", "B", "C"]] });
+ok(c6.warns.join("|").indexOf("没被任何面") >= 0, "★孤立顶点（谁都不引用）→ 提示而不是报错 ✓");
+const c7 = G3.geom3dIssues({ primitive: { type: "cylinder", r: -1, h: 2 } });
+ok(c7.errs.join("|").indexOf("半径") >= 0, "★primitive 半径是负数 → 报出来 ✗");
+const p1 = G3.parseGeom3dText("好的，这是结构：\n```json\n{\"vertices\":{\"A\":[0,0,0],\"B\":[1,0,0],\"C\":[0,1,0]}}\n```\n希望能帮到你");
+ok(!!p1.model && !p1.error && Object.keys(p1.model.vertices).length === 3, "★模型文本 → 结构：剥掉围栏与前后废话，抠出 JSON ✓");
+ok(!!G3.parseGeom3dText("抱歉我不能").error, "★模型没回 JSON → 如实报错（不抛异常 ✓）");
+ok(G3.geom3dLines(c1).join("|").indexOf("自检通过") >= 0 && G3.geom3dLines(c2).join("|").indexOf("问题") >= 0, "★结论写成给老师看的一段话 ✓");
+const g3vue = fs.readFileSync(path.join(ROOT, "src", "components", "Geom3DDialog.vue"), "utf8");
+ok(g3vue.indexOf("aiChat(") > 0 && g3vue.indexOf("parseGeom3dText(") > 0 && g3vue.indexOf("GEOM3D_PROMPT") > 0, "★复刻窗口接上了应用内 AI（不再是复制提示词那套人工搬运 ✓）");
+ok(g3vue.indexOf("geom3dIssues(") > 0 && g3vue.indexOf("checkMsg") > 0, "★复刻窗口会做确定性自检并把结论显示出来 ✓");
+ok(g3vue.indexOf("askAi") > 0 && g3vue.indexOf("让 AI 还原结构") > 0, "★界面上有「让 AI 还原结构」按钮 ✓");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);

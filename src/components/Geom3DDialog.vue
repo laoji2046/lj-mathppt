@@ -17,6 +17,8 @@ import { buildSolid, centerDotNames, faceUV, labelOffsetsFrom, LABEL_DIR_VEC, pr
 import { GEOM3D_PRESETS, GEOM3D_PROMPT } from '@/composables/geom3dPrompt'
 import { renderSolid, arcsSvg, vertexDotsSvg } from '@/composables/solid3d'
 import { closeGeom3D, geom3dSink } from '@/ui/geom3d'
+import { geom3dIssues, geom3dLines, parseGeom3dText } from '@/composables/geom3dCheck'
+import { aiChat, isTauri } from '@/composables/useTauri'
 import type { MathFigureElement } from '@/types'
 import ColorSwatches from './ColorSwatches.vue'
 
@@ -130,6 +132,7 @@ const nextName = computed(() => order.value[clicks.value.length] || '')
 
 function parse() {
   parseErr.value = ''
+  checkMsg.value = ''
   try {
     const m = JSON.parse(raw.value) as Geom3D & { view?: { azim?: number; elev?: number; oblique?: number } }
     // 圆柱 / 圆锥只用 primitive、没有 vertices，别把它们拒了
@@ -138,6 +141,8 @@ function parse() {
       parseErr.value = '缺少 vertices（或者给 primitive）'; model.value = null; return
     }
     model.value = m
+    const chk = geom3dIssues(m)   // 【v1739】结构自检（确定性 ✓ 不依赖任何模型 ✓）
+    checkMsg.value = geom3dLines(chk).join(' ')
     if (m.view) {
       if (typeof m.view.azim === 'number') azim.value = m.view.azim
       if (typeof m.view.elev === 'number') elev.value = m.view.elev
@@ -150,6 +155,41 @@ function parse() {
 }
 parse()
 
+/* ---------------- 【v1739】让 AI 直接把题目还原成结构（不再是"复制提示词"那套人工搬运 ✗） ----------------
+ * 通道：设置里的 API Key（只存本机 ✓）→ Rust 侧 `ai_chat` → 只准回 JSON ✓
+ * ⚠ 这条通道**只收文字**（不带图 ✗）—— 题图请用下面的「参考图 + 点顶点对齐」✓
+ * 回来之后：解析 → 填进文本框 → 走原有 parse ✓（**JSON 中间层保留** ✓ 一眼可核对 ✓）
+ */
+const AI_KEY = 'lj-mathslides:ai-key'
+const askText = ref('')
+const aiBusy = ref(false)
+const aiMsg = ref('')
+const checkMsg = ref('')
+async function askAi() {
+  if (aiBusy.value) return
+  if (!isTauri()) { aiMsg.value = 'AI 还原只在桌面端可用（离线时用「常用几何体」或「搭一个」✓）'; return }
+  let key = ''
+  try { key = (localStorage.getItem(AI_KEY) || '').trim() } catch { /* 隐私模式忽略 */ }
+  if (!key) { aiMsg.value = '先在「设置」里填一次 AI API Key（只存本机、不写进源码 ✓）'; return }
+  const ask = askText.value.trim()
+  if (!ask) { aiMsg.value = '先把题目文字贴进来（几何描述 + 已知条件 ✓）—— 题图请用下面的参考图对齐 ✓'; return }
+  aiBusy.value = true
+  aiMsg.value = 'AI 正在还原三维结构…（约 10~20 秒）'
+  try {
+    const r = await aiChat({ apiKey: key, system: GEOM3D_PROMPT, userText: ask })
+    if (!r || !r.ok) throw new Error(r && r.error ? String(r.error) : '未知错误')
+    const ps = parseGeom3dText(String(r.content || ''))
+    if (ps.error || !ps.model) throw new Error(ps.error || '没解析出几何结构')
+    raw.value = JSON.stringify(ps.model, null, 2)
+    parse()
+    const chk = geom3dIssues(ps.model)
+    const n = Object.keys((ps.model.vertices as Record<string, unknown>) || {}).length
+    aiMsg.value = '✓ 已还原结构（顶点 ' + n + ' 个、面 ' + chk.faces + ' 个）' +
+      (chk.errs.length ? ' ⚠ 但自检报了 ' + chk.errs.length + ' 个问题（见下方 ✗ 可以自己改坐标再试 ✓）' : ' 且自检通过 ✓')
+  } catch (e) {
+    aiMsg.value = '✗ ' + String((e as Error)?.message || e)
+  } finally { aiBusy.value = false }
+}
 /** 顶点小圆点：默认不画（只有字母，与原观感一致）；插入/保存时会写进元素 */
 const showDots = ref(false)
 /** 【v1573】**后加的点**（自由点 / 受约束点）的名字 —— 这些点**始终**画圆点 ✓
@@ -1568,8 +1608,14 @@ function insert() {
               <label class="g3__num"><input v-model="cutFill" type="checkbox"> 填充</label>
               <button class="g3__btn" @click="addCut()">添加截面</button>
             </div>
+          <div class="g3__sec g3__sec--model g3__row g3__row--top">
+            <textarea v-model="askText" class="g3__ta" style="min-height:56px" spellcheck="false" placeholder="把题目文字贴在这里（几何描述 + 已知条件 ✓）—— 再点右边让 AI 还原三维结构 ✓ 题图请用下面的参考图对齐 ✓" />
+            <button class="g3__btn" :disabled="aiBusy" title="把左边这段题目交给 AI，它只回 JSON 结构（顶点坐标 + 面表 ✓）；回来后会走一遍结构自检，问题在下面直接显示 ✓" @click="askAi()">{{ aiBusy ? "AI 还原中…" : "🤖 让 AI 还原结构" }}</button>
+          </div>
+          <p v-if="aiMsg" class="g3__sec g3__sec--model g3__tip g3__tip--inline">{{ aiMsg }}</p>
           <textarea v-model="raw" class="g3__sec g3__sec--model g3__ta" spellcheck="false" @blur="parse" @input="parseErr = ''" />
           <p v-if="parseErr" class="g3__sec g3__sec--model g3__err">{{ parseErr }}</p>
+          <p v-if="checkMsg" class="g3__sec g3__sec--model g3__tip g3__tip--inline">{{ checkMsg }}</p>
           <div class="g3__sec g3__sec--model g3__row">
             <label class="g3__f">方位角 azim <b>{{ azim }}°</b>
               <input v-model.number="azim" type="range" min="-180" max="180" step="1" :disabled="oblique">
