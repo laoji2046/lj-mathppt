@@ -239,6 +239,29 @@ function makePng(w, h) {
       await ev('document.querySelector(".panel__close") && document.querySelector(".panel__close").click()');
       await sleep(250);
     }
+    /* ============ A3. 预制公式库里的符号面板（v1757） ============ */
+    console.log("--- A3. 插入公式 → 预制公式库 → 符号面板：真点一下看画布有没有多一个公式 ---");
+    let up3 = await openApp();
+    ok(up3, "应用起来了（准备测预制公式库里的符号面板 ✓）");
+    if (up3) {
+      const before3 = await ev('document.querySelectorAll(".math-el").length');
+      await ev('document.querySelector(\'button[title="插入公式"]\').click()');
+      await sleep(300);
+      const opened3 = await ev('(function(){var b=[...document.querySelectorAll(".dropdown__item")].find(x=>x.textContent.indexOf("预制公式库")>=0); if(b)b.click(); return !!b})()');
+      let hasSym3 = false;
+      for (let i = 0; i < 20; i++) { if ((await ev('!!document.querySelector(".sym__grid")')) === true) { hasSym3 = true; break } await sleep(300) }
+      ok(opened3 === true && hasSym3 === true, "★预制公式库里**出现了符号面板** ✓（点了菜单「预制公式库」✓）");
+      const tabs3 = await ev('JSON.stringify([...document.querySelectorAll(".sym__tab")].map(b=>b.getAttribute("title")))');
+      ok(String(tabs3).indexOf("希腊字母") >= 0 && String(tabs3).indexOf("分式与根式") >= 0, "★页签与「组合公式」窗口一致 ✓（实测：" + String(tabs3).slice(0, 60) + "…）");
+      const nbtn3 = await ev('document.querySelectorAll(".sym__btn").length');
+      ok(typeof nbtn3 === "number" && nbtn3 >= 10, "★符号按钮渲染出来了 ✓（" + nbtn3 + " 个 ✓）");
+      await ev('document.querySelector(".sym__btn").click()');
+      await sleep(700);
+      const after3 = await ev('document.querySelectorAll(".math-el").length');
+      ok(typeof after3 === "number" && after3 === Number(before3) + 1, "★点一个符号 → 画布上真多了一个公式元素 ✓（" + before3 + " → " + after3 + " ✓）");
+      await ev('document.querySelector(".palette__close") && document.querySelector(".palette__close").click()');
+      await sleep(300);
+    }
     /* ============ A. 三维立体图（v1739 就是在这里崩的 ✗） ============ */
     console.log("--- A. 图形库 → 图形重建 → 三维立体图 ---");
     let up = await openApp();

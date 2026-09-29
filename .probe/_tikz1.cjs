@@ -2781,6 +2781,17 @@ ok(V75.length === 16 && g75.length === 6, "★线面平行判定：8 顶点 6 �
 const src75 = fs.readFileSync(path.join(ROOT, "src", "composables", "solid3d.ts"), "utf8");
 ok(src75.indexOf("edges3d") > 0 && src75.indexOf("不在任何面的边界上") > 0, "★源码里写明了 edges3d 的用途 ✓（横跨平面的线段收不出来 ✓ 只能显式给 ✓）");
 ok(src75.indexOf("顶点角色（与原来一致 ✓）") > 0 || src75.indexOf("顶点角色：0-3 = α") > 0, "★注释里写明了「顶点角色与原来一致」✓（所以标签表不用改 ✓）");
+console.log("=== 用例 76：符号面板进「预制公式库」（v1757）===");
+const FL76 = fs.readFileSync(path.join(ROOT, "src", "components", "FormulaLibrary.vue"), "utf8");
+ok(FL76.indexOf("MATH_SYMBOLS") > 0 && FL76.indexOf("insertSym") > 0, "★预制公式库接上了符号面板 ✓");
+ok(FL76.indexOf('class="sym__btn"') > 0 && FL76.indexOf('class="sym__tab"') > 0, "★面板有分类页签与符号按钮 ✓");
+ok(FL76.indexOf("(sel.latex || '') + sym.tex") > 0, "★**选中公式时是「追加」**✓（不是替换 ✗ 拼公式才顺手 ✓）");
+ok(FL76.indexOf("store.addElement('math', { latex: sym.tex") > 0, "★没选中时新建一个公式元素 ✓（与卡片行为一致 ✓）");
+ok(FL76.indexOf("symOpen") > 0, "★面板可折叠 ✓（库窗口本来就东西多 ✓ 让它能收起来 ✓）");
+ok(FL76.indexOf("符号面板点着拼") > 0, "★副标题也说明了 ✓（符号面板点着拼 · 章节公式一点即插 ✓）");
+ok(FL76.indexOf("点符号会「追加」") > 0, "★没有把 ** 写进用户可见文案 ✓（写成「追加」✓ 这条老毛病守住了 ✓）");
+const SYM76 = loadBundled("../templates/mathSymbols.ts", "_c76sym.cjs");
+ok(Array.isArray(SYM76.MATH_SYMBOLS) && SYM76.MATH_SYMBOLS.length === 11, "★符号分类仍是 11 组 ✓（与「组合公式」窗口同一个数据源 ✓ 不各写一份 ✓）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);

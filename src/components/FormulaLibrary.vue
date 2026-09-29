@@ -5,6 +5,8 @@ import { useDeckStore } from '@/stores/deck'
 import { FORMULA_LIBRARY, FORMULA_TAGS, formulaTags } from '@/templates/formulaLibrary'
 import { renderLatex } from '@/composables/useMathJax'
 import type { FormulaItem } from '@/templates/formulaLibrary'
+import { MATH_SYMBOLS } from '@/templates/mathSymbols'
+import type { MathSymbol } from '@/templates/mathSymbols'
 import type { SlideElement } from '@/types'
 
 const store = useDeckStore()
@@ -50,6 +52,24 @@ async function renderAll() {
 watch([activeKey, query, activeTag], renderAll)
 onMounted(renderAll)
 
+/** 【v1757】符号面板的当前分类 ✓ */
+const symGroup = ref(MATH_SYMBOLS[0].key)
+const symList = computed(() => (MATH_SYMBOLS.find((g) => g.key === symGroup.value) || MATH_SYMBOLS[0]).syms)
+const symOpen = ref(true)
+/**
+ * 【v1757】点符号：**选中公式元素时追加**到它后面 ✓（一个窗口里就能把一条公式拼出来 ✓）
+ * 没选中时新建一个小公式元素 ✓（与下面卡片的行为保持一致 ✓）
+ */
+function insertSym(sym: MathSymbol) {
+  store.clearDrawTool()
+  const sel = store.selectedElement
+  if (sel && sel.type === 'math') {
+    store.updateElement(sel.id, { latex: (sel.latex || '') + sym.tex } as Partial<SlideElement>)
+  } else {
+    store.addElement('math', { latex: sym.tex, w: 320, h: 140, autoBox: true } as Partial<SlideElement>)
+  }
+}
+
 /** 插入：若当前选中了单个公式元素则替换其 LaTeX，否则新建一个公式元素（保位置/尺寸） */
 function insert(item: FormulaItem) {
   store.clearDrawTool()
@@ -71,11 +91,29 @@ function insert(item: FormulaItem) {
           <span class="palette__badge">∑</span>
           <div>
             <strong>预制公式库</strong>
-            <small>按高中数学章节分类 · 点击插入当前页</small>
+            <small>符号面板点着拼 · 章节公式一点即插</small>
           </div>
         </div>
         <button class="palette__close" @click="emit('close')"><AppIcon name="close" :size="13" /></button>
       </header>
+
+      <!-- 【v1757】符号面板（借 AxMath 的页签 ✓）：选中公式时**往后追加** ✓ 拼公式用 ✓ -->
+      <div class="symbox">
+        <button class="symbox__head" @click="symOpen = !symOpen">
+          <span class="symbox__caret">{{ symOpen ? '▾' : '▸' }}</span>
+          <strong>符号面板</strong>
+          <small>{{ store.selectedElement && store.selectedElement.type === 'math' ? '点符号会「追加」到选中的公式后面' : '点符号插入为一个公式元素' }}</small>
+        </button>
+        <div v-if="symOpen" class="sym">
+          <div class="sym__tabs">
+            <button v-for="g in MATH_SYMBOLS" :key="g.key" class="sym__tab" :class="{ 'sym__tab--on': g.key === symGroup }"
+              :title="g.name" @click="symGroup = g.key">{{ g.icon }}<span class="sym__tabname">{{ g.name }}</span></button>
+          </div>
+          <div class="sym__grid">
+            <button v-for="(sy, si) in symList" :key="si" class="sym__btn" :title="sy.tex" @click="insertSym(sy)">{{ sy.show }}</button>
+          </div>
+        </div>
+      </div>
 
       <div class="cats">
         <button
@@ -273,4 +311,24 @@ function insert(item: FormulaItem) {
 .empty { grid-column: 1 / -1; text-align: center; color: #9a9aa4; font-size: 13px; padding: 28px 0; }
 .palette__foot { padding: 8px 18px 14px; border-top: 1px solid #f0f0f4; }
 .palette__hint { font-size: 12px; color: #9a9aa4; }
+  /* 【v1757】符号面板（照 FormulaInserter 那份抄 ✓ scoped 样式不跨组件 ✗） */
+  .symbox { margin: 6px 14px 0; }
+  .symbox__head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 2px; border: 0; background: none; cursor: pointer; text-align: left; }
+  .symbox__caret { color: var(--muted); font-size: 12px; }
+  .symbox__head strong { font-size: 13px; }
+  .symbox__head small { color: var(--muted); font-size: 11.5px; }
+  .sym { border: 1px solid #dcdce6; border-radius: 8px; background: #fbfbfd; overflow: hidden; }
+  .sym__tabs { display: flex; gap: 2px; overflow-x: auto; padding: 4px 4px 0; background: #f2f2f7; }
+  .sym__tab { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid transparent;
+    border-bottom: none; border-radius: 6px 6px 0 0; background: transparent; color: #5b5b6b; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .sym__tab:hover { background: #e7e7f0; }
+  .sym__tab--on { background: #fff; border-color: #dcdce6; color: var(--brand-600); font-weight: 600; }
+  .sym__tabname { font-size: 12px; }
+  .sym__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); gap: 2px; padding: 6px;
+    max-height: 150px; overflow-y: auto; background: #fff; }
+  .sym__btn { height: 34px; border: 1px solid #e6e6ef; border-radius: 6px; background: #fff; color: #1f1f2e;
+    font-size: 16px; line-height: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sym__btn:hover { background: var(--brand-50, #eef2ff); border-color: var(--brand-300, #b9c4f5); }
+  .sym__btn:active { transform: translateY(1px); }
+  @media (max-width: 900px) { .sym__tabname { display: none; } }
 </style>
