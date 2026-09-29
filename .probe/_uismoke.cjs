@@ -201,6 +201,44 @@ function makePng(w, h) {
       await ev('document.querySelector(".panel__close") && document.querySelector(".panel__close").click()');
       await sleep(300);
     }
+    /* ============ A2. 公式库卡片：公式大小是否齐（v1750） ============ */
+    console.log("--- A2. 预制公式库卡片：量 14 条公式的渲染高度 ---");
+    let up2 = await openApp();
+    ok(up2, "应用起来了（准备量卡片大小 ✓）");
+    if (up2) {
+      await ev('document.querySelector(\'button[title="插入公式"]\').click()');
+      await sleep(300);
+      await ev('(function(){var b=[...document.querySelectorAll(".dropdown__item")].find(x=>x.textContent.indexOf("混排公式")>=0); if(b)b.click(); return !!b})()');
+      /* 等库卡片里的公式都排完（MathJax 首次要加载 2MB ✗ 轮询 ✓） */
+      let libReady = false;
+      for (let i = 0; i < 40; i++) {
+        const n = await ev('document.querySelectorAll(".lcard__pv svg").length');
+        if (typeof n === "number" && n >= 5) { libReady = true; break }
+        await sleep(500);
+      }
+      ok(libReady === true, "★公式库卡片排出来了 ✓");
+      const spread = await ev(`(function(){
+        var hs = [].slice.call(document.querySelectorAll(".lcard__pv svg")).map(function(s){
+          var r = s.getBoundingClientRect();
+          return { h: +r.height.toFixed(1), w: +r.width.toFixed(1) };
+        }).filter(function(x){ return x.h > 0 && x.w > 0 });
+        if (hs.length < 4) return JSON.stringify({ n: hs.length });
+        var H = hs.map(function(x){ return x.h }), W = hs.map(function(x){ return x.w });
+        var boxW = (document.querySelector(".lcard__pv") || {}).clientWidth || 0;
+        return JSON.stringify({
+          n: hs.length,
+          hMin: Math.min.apply(null, H), hMax: Math.max.apply(null, H),
+          wMax: Math.max.apply(null, W), boxW: boxW,
+          ratio: +(Math.max.apply(null, H) / Math.max(0.1, Math.min.apply(null, H))).toFixed(2)
+        });
+      })()`);
+      let SP = null; try { SP = JSON.parse(String(spread)) } catch { /* 见断言 */ }
+      console.log("     卡片实测：" + String(spread));
+      ok(!!SP && SP.n >= 5 && SP.hMin >= 12, "★卡片里的公式不再被缩到看不清（最小高度 " + (SP && SP.hMin) + "px ≥ 12 ✓ 改前只有 7.1px ✗ 那一版预览框只有 168px 宽 ✗）");
+      ok(!!SP && SP.ratio <= 4.0, "★卡片公式大小不失控（高度比 " + (SP && SP.ratio) + " ≤ 4.0 ✓ 改前 6.51 倍 ✗；剩下这点差是嵌套分式天然更高 ✓ 不该硬压平 ✗）");
+      await ev('document.querySelector(".panel__close") && document.querySelector(".panel__close").click()');
+      await sleep(250);
+    }
     /* ============ A. 三维立体图（v1739 就是在这里崩的 ✗） ============ */
     console.log("--- A. 图形库 → 图形重建 → 三维立体图 ---");
     let up = await openApp();

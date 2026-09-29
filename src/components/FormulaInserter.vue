@@ -491,21 +491,23 @@ function insertHardBreak() {
 .libtag--on { background: var(--brand-600); border-color: var(--brand-600); color: #fff; }
 
 .lib__list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 12px 8px; display: flex; flex-direction: column; gap: 5px; }
+/* 【v1750】卡片改**两行**：公式占整行宽 ✓ 标签移到下面 ✓
+   —— 原来是一行（预览 168px 宽 + 标签占余下 ✓），长公式被缩到 7px 看不清 ✗（实测高度比 6.51 倍 ✗） */
 .lcard {
-  display: flex; align-items: center; gap: 9px; width: 100%;
-  padding: 5px 8px 5px 6px; border: 1px solid #eeeef5; border-radius: 9px; background: #fff;
+  display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 100%;
+  padding: 6px 8px; border: 1px solid #eeeef5; border-radius: 9px; background: #fff;
   cursor: pointer; text-align: left;
   transition: border-color .12s, box-shadow .12s, background .12s, transform .12s;
 }
 .lcard:hover { border-color: var(--brand-300); background: #fbfaff; box-shadow: 0 4px 12px rgba(124, 58, 237, 0.09); transform: translateX(-1px); }
 .lcard:active { transform: scale(0.995); }
 .lcard__pv {
-  flex: none; width: 168px; height: 46px; overflow: hidden;
+  flex: none; width: 100%; height: 54px; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
   border-radius: 7px; background: #fbfbfd; font-size: 20px;
 }
 .lcard__pv :deep(mjx-container) { display: inline-flex !important; }
-.lcard__label { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lcard__label { flex: none; font-size: 11.5px; color: var(--muted); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lib__empty { padding: 24px 8px; text-align: center; font-size: 12px; color: #a6a6b0; }
 .lib__hint { padding: 8px 14px; border-top: 1px solid #f0f0f4; font-size: 11.5px; color: var(--muted); }
 
@@ -518,7 +520,7 @@ function insertHardBreak() {
 /* 窄屏：先保证左栏可用 */
 @media (max-width: 900px) {
   .panel__lib { width: 320px; }
-  .lcard__pv { width: 120px; }
+  .lcard__pv { height: 46px; }
 }
   /* 【v1749】符号面板（借 AxMath 的分类页签 ✓）：页签横向可滚 ✓ 网格紧凑 ✓ 结构模板长按看 tip ✓ */
   .sym { border: 1px solid #dcdce6; border-radius: 8px; background: #fbfbfd; margin: 6px 0 8px; overflow: hidden; }

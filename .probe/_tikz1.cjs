@@ -2558,6 +2558,12 @@ const fi68 = fs.readFileSync(path.join(ROOT, "src", "components", "FormulaInsert
 ok(fi68.indexOf("MATH_SYMBOLS") > 0 && fi68.indexOf("insertSym") > 0, "★「组合公式」窗口接上了符号面板 ✓");
 ok(fi68.indexOf('class="sym__btn"') > 0 && fi68.indexOf('class="sym__tab"') > 0, "★面板有页签与按钮 ✓（点一下就插 ✓）");
 ok(fi68.indexOf("ta.selectionStart") > 0 && fi68.indexOf("sym.in == null ? sym.tex.length : sym.in") > 0, "★插到**光标处**、结构类插完光标进括号 ✓");
+console.log("=== 用例 69：公式库卡片的两行布局（v1750）===");
+const fi69 = fs.readFileSync(path.join(ROOT, "src", "components", "FormulaInserter.vue"), "utf8");
+ok(/\.lcard\s*\{[^}]*flex-direction:\s*column/.test(fi69), "★卡片是**两行**布局 ✓（公式一行占满宽 ✓ 标签一行 ✓ 改前一行 168px 挤长公式 ✗）");
+ok(/\.lcard__pv\s*\{[^}]*width:\s*100%/.test(fi69), "★预览框占**整行宽** ✓（实测 168px → 343px ✓）");
+ok(/\.lcard__pv\s*\{[^}]*height:\s*54px/.test(fi69), "★预览框加高到 54px ✓（嵌套分式少缩一点 ✓）");
+ok(fi69.indexOf("width: 168px") < 0 && fi69.indexOf(".lcard__pv { width: 120px; }") < 0, "★旧的窄预览宽度没留残留 ✓（168px / 120px 都清掉了 ✓）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);
