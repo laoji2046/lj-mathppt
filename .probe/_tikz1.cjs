@@ -2943,6 +2943,22 @@ ok((MJ80.match(/Math\.min\(w \/ 2, h\)/g) || []).length === 1 && (RR80.match(/Ma
 ok(MJ80.indexOf("A ${w / 2} ${h} 0 0 1") < 0 && RR80.indexOf("A ${w / 2} ${h} 0 0 1") < 0, "★旧的「x 半径 w/2 + y 半径 h」写法没了 ✓（那会画成半椭圆 ✗）");
 const tri80 = (f) => f.slice(f.indexOf("case 'triangle'"), f.indexOf("case 'rectangle'"));
 ok(tri80(MJ80).indexOf("${w / 2},0") > 0 && tri80(RR80).indexOf("${w / 2},0") > 0 && tri80(MJ80).indexOf("0.42") < 0 && tri80(RR80).indexOf("0.42") < 0, "★**三角形块里**顶点居中 w/2 ✓（旧 0.42w 已无 ✓ 菱形里的 ${w/2},0 不算 ✓）");
+console.log("=== 用例 81：平面几何 · 直角三角形（v1763）===");
+const MJ81 = fs.readFileSync(path.join(ROOT, "src", "components", "elements", "MathFigureElement.vue"), "utf8");
+const RR81 = fs.readFileSync(path.join(ROOT, "src", "reveal", "renderer.ts"), "utf8");
+const rtri81 = (f) => f.slice(f.indexOf("case 'righttriangle'"), f.indexOf("case 'rectangle'") > 0 ? f.indexOf("case 'rectangle'") : f.indexOf("case 'circle'"));
+const a81 = rtri81(MJ81), b81 = rtri81(RR81);
+ok(a81.length > 60 && b81.length > 60, "★两份渲染器都能取到直角三角形那段 ✓（" + a81.length + " / " + b81.length + " 字符 ✓）");
+/* 几何：按写进去的公式重算三个顶点 ✓ 验"真有直角" ✓ */
+const w81 = 300, h81 = 200;
+const V81 = [[0, h81], [w81, h81], [0, h81 * 0.05]];
+const ang81 = (P0, A, B) => { const u = [A[0] - P0[0], A[1] - P0[1]], v = [B[0] - P0[0], B[1] - P0[1]]; return Math.acos((u[0] * v[0] + u[1] * v[1]) / (Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]))) * 180 / Math.PI; };
+const a0 = ang81(V81[0], V81[1], V81[2]);
+ok(Math.abs(a0 - 90) < 1e-9, "★顶点 (0,h) 处的角 = " + a0.toFixed(6) + "° = **直角** ✓（旧写法顶点在 0.12w ✗ 那里只有 " + ang81(V81[0], V81[1], [w81 * 0.12, h81 * 0.05]).toFixed(1) + "° ✗）");
+ok(a81.indexOf("h - rs") > 0 && b81.indexOf("h - rs") > 0, "★**直角标记**（小方块）两份都画了 ✓（教材画法必备 ✓ 讲义 common.py 的 right_angle 同款记号 ✓）");
+const rs81 = Math.min(w81, h81) * 0.12;
+ok(Math.abs(rs81 - 24) < 1e-9, "★标记边长 = min(w,h)×0.12 = " + rs81.toFixed(0) + "px ✓（不至于太小看不见 ✓ 也不会盖住图形 ✓）");
+ok(a81.indexOf("0,${h * 0.05}") > 0 && b81.indexOf("0,${h * 0.05}") > 0, "★竖直边从 x=0 起 ✓（旧的是 0.12w ✗ 所以根本不是直角三角形 ✗）");
 console.log("\n结果：" + pass + " 通过 / " + fail + " 失败");
 console.log("HTML（用来截图）：" + path.join(OUT, "_tikz1.html"));
 process.exit(fail ? 1 : 0);

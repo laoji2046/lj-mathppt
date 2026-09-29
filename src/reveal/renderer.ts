@@ -136,8 +136,14 @@ function figureInner(
       return `<circle cx="${w * 0.36}" cy="${h * 0.5}" r="${r}" ${sa} fill="${fc}"/>` +
         `<circle cx="${w * 0.64}" cy="${h * 0.5}" r="${r}" ${sa} fill="${fc}"/>`
     }
-    case 'righttriangle':
-      return `<polygon points="0,${h} ${w},${h} ${w * 0.12},${h * 0.05}" ${sa} fill="${fc}"/>`
+    case 'righttriangle': {
+      /* 【v1763】真直角三角形 ✓：直角在**左下角** ✓（原来顶点在 0.12w ✗ 两边都不垂直 ✗ 角≈76°/14° ✗）
+         + **直角小方块** ✓（教材画法必备 ✓ 记号与讲义 common.py 的 right_angle 一致 ✓）*/
+      const rs = Math.min(w, h) * 0.12
+      const rtri = `<polygon points="0,${h} ${w},${h} 0,${h * 0.05}" ${sa} fill="${fc}"/>`
+      const rmark = `<path d="M 0 ${h - rs} L ${rs} ${h - rs} L ${rs} ${h}" fill="none" ${sa}/>`
+      return rtri + rmark
+    }
     case 'angle': {
       const ox = w * 0.12
       const oy = h * 0.9
